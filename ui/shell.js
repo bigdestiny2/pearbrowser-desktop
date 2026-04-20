@@ -8,15 +8,32 @@ function copyText (text) {
   } catch {}
 }
 
+// Vetted against https://github.com/holepunchto/pear-aliases — these
+// are the canonical pear:// keys for Holepunch-ecosystem apps.
 const FEATURED_APPS = [
   {
     id: 'keet',
     name: 'Keet',
-    tagline: 'End-to-end encrypted P2P chat and video calls by Holepunch.',
+    tagline: 'End-to-end encrypted P2P chat, voice, and video calls by Holepunch.',
     link: 'pear://oeeoz3w6fjjt7bym3ndpa6hhicm8f8naxyk11z4iypeoupn6jzpo',
     initial: 'K',
-    gradient: 'linear-gradient(135deg, #fbbf24, #f97316)',
-    url: 'https://keet.io'
+    gradient: 'linear-gradient(135deg, #fbbf24, #f97316)'
+  },
+  {
+    id: 'pearpass',
+    name: 'PearPass',
+    tagline: 'Peer-to-peer password manager from Tether — synced across devices without a cloud.',
+    link: 'pear://tywsat7gz8m65ejx4zjn3773pbdc4j8m66tukis8dgzekraymtzo',
+    initial: 'P',
+    gradient: 'linear-gradient(135deg, #3fb950, #58a6ff)'
+  },
+  {
+    id: 'doctor',
+    name: 'Pear Doctor',
+    tagline: 'Diagnose your Pear runtime — networking, DHT reachability, NAT traversal.',
+    link: 'pear://fs1xuyzx6c9mu6zu6t5ubhkcbzz913h814te9ay9zzbc9hzf15fo',
+    initial: 'D',
+    gradient: 'linear-gradient(135deg, #a371f7, #d946ef)'
   }
 ]
 
