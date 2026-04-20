@@ -233,7 +233,7 @@ function Apps ({ rpc, C, onLaunch }) {
       <div class="app-grid">
         ${FEATURED_APPS.map((app) => html`
           <div class="app-card" key=${app.id}>
-            <div class="app-icon app-icon-fallback" style=${`background: ${app.gradient}; color: #0b0e14;`}>${app.initial}</div>
+            <div class="app-icon app-icon-fallback" style=${{ background: app.gradient, color: '#0b0e14' }}>${app.initial}</div>
             <div class="app-info">
               <div class="app-name">${app.name}</div>
               <div class="app-desc">${app.tagline}</div>
