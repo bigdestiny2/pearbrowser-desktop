@@ -856,6 +856,18 @@ async function boot () {
   // regeneration / partial writes never cause primaryKey mismatches
   // that require a destructive recovery. Identity exists independently
   // for publisher signing (HiveRelay) and BIP-39 backup.
+  // Clear stale rocksdb LOCK from a previous process that didn't shut
+  // down cleanly (e.g. SIGKILL, power loss, mid-boot crash). If the
+  // lock is truly live, opening it below will still fail and we re-
+  // throw. This avoids the common "instant crash on second run after
+  // a crash" trap users hit.
+  try {
+    const lockPath = storagePath + '/db/LOCK'
+    if (fs.existsSync(lockPath)) {
+      try { fs.unlinkSync(lockPath); console.log('[boot] cleared stale db/LOCK') } catch {}
+    }
+  } catch {}
+
   store = new Corestore(storagePath)
   console.log('Corestore created, waiting for ready...')
   rpc.event(C.EVT_BOOT_PROGRESS, { stage: 'corestore-ready', message: 'Storage ready' })
