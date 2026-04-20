@@ -105,6 +105,12 @@ function Browse ({ rpc, C, navUrl, onNavigated }) {
     }
   }, [navUrl])
 
+  // Auto-navigate to the landing page on first mount.
+  useEffect(() => {
+    if (!src && !navUrl && DEFAULT_URL) go(DEFAULT_URL)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const back = () => {
     if (histIdx <= 0) return
     const i = histIdx - 1
