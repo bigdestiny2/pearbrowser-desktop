@@ -40,6 +40,11 @@ const onSocket = (socket) => {
   socket.on('close', () => {
     console.log('[rpc] renderer disconnected')
     if (client === socket) client = null
+    // The WS socket closing is the most reliable signal that the
+    // user closed the window. Pipe events from runtime.start and
+    // Pear.teardown proved unreliable in practice. Tear down the
+    // main process here so the next launch doesn't see a zombie.
+    teardown('renderer-ws-close')
   })
   socket.on('error', (err) => {
     console.error('[rpc] socket error:', err.message)
