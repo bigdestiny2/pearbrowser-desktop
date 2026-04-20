@@ -10,7 +10,11 @@
 
 import { RpcClient } from './rpc-client.js'
 
-const RPC_URL = 'ws://127.0.0.1:9876/'
+// Backend tries this range in index.js main. Renderer scans it in
+// order until one accepts. Handles zombie pear-runtime processes
+// holding 9876.
+const RPC_PORT_BASE = 9876
+const RPC_PORT_COUNT = 5
 
 // Must match backend/constants.js exactly (numeric wire codes).
 const C = {
@@ -97,8 +101,34 @@ class WsPipe {
   }
 }
 
+function tryConnect (url, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const pipe = new WsPipe(url)
+    let settled = false
+    const t = setTimeout(() => { if (!settled) { settled = true; reject(new Error('timeout')) } }, timeoutMs)
+    pipe.on('open', () => { if (!settled) { settled = true; clearTimeout(t); resolve(pipe) } })
+    pipe.on('error', () => { if (!settled) { settled = true; clearTimeout(t); reject(new Error('ws error')) } })
+    pipe.on('close', () => { if (!settled) { settled = true; clearTimeout(t); reject(new Error('ws closed')) } })
+  })
+}
+
 export async function startBackend () {
-  const pipe = new WsPipe(RPC_URL)
+  let pipe = null
+  let connectedPort = null
+  const errors = []
+  for (let p = RPC_PORT_BASE; p < RPC_PORT_BASE + RPC_PORT_COUNT; p++) {
+    try {
+      pipe = await tryConnect(`ws://127.0.0.1:${p}/`, 1500)
+      connectedPort = p
+      console.log('[rpc] connected on :' + p)
+      break
+    } catch (err) {
+      errors.push(`:${p} ${err.message}`)
+    }
+  }
+  if (!pipe) {
+    throw new Error(`Could not reach backend on any port ${RPC_PORT_BASE}-${RPC_PORT_BASE + RPC_PORT_COUNT - 1} (${errors.join('; ')})`)
+  }
   const rpc = new RpcClient(pipe)
-  return { rpc, C, pipe, storagePath: '(backend in main Bare process)' }
+  return { rpc, C, pipe, storagePath: `(backend in main Bare process, WS :${connectedPort})` }
 }

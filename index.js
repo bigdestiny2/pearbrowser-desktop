@@ -3,14 +3,14 @@ import Bridge from 'pear-bridge'
 import ws from 'bare-ws'
 import { bootBackend } from './backend/pear-adapter.cjs'
 
-const RPC_PORT = 9876
+// Renderer scans 9876-9880 in order. Backend binds the first one
+// that's free. Handles the common case where a zombie pear-runtime
+// from a crashed earlier session still holds 9876 — new launch
+// grabs the next port instead of failing with EADDRINUSE.
+const RPC_PORT_BASE = 9876
+const RPC_PORT_COUNT = 5
 
 // --- 1. Boot the backend in this Bare main process. ---
-// Native P2P addons (rabin-native, sodium-native, udx-native)
-// load cleanly here because Bare's ABI matches their `.bare`
-// prebuilds. Electron renderer cannot host them — that's why
-// the renderer talks to us over WebSocket instead of calling
-// into hyperdrive directly.
 const storagePath = (Pear.config?.storage || '.') + '/pearbrowser-storage'
 const backendPipe = bootBackend({ storagePath })
 
@@ -26,7 +26,7 @@ backendPipe.on('data', (chunk) => {
   else eventBuffer.push(chunk)
 })
 
-const rpcServer = new ws.Server({ port: RPC_PORT, host: '127.0.0.1' }, (socket) => {
+const onSocket = (socket) => {
   if (client) {
     console.log('[rpc] rejecting extra WS connection')
     return socket.end()
@@ -45,9 +45,31 @@ const rpcServer = new ws.Server({ port: RPC_PORT, host: '127.0.0.1' }, (socket) 
     console.error('[rpc] socket error:', err.message)
     if (client === socket) client = null
   })
-})
+}
 
-rpcServer.on('listening', () => console.log(`[rpc] WS listening on :${RPC_PORT}`))
+let rpcServer = null
+let rpcPort = null
+for (let p = RPC_PORT_BASE; p < RPC_PORT_BASE + RPC_PORT_COUNT; p++) {
+  try {
+    rpcServer = await new Promise((resolve, reject) => {
+      const s = new ws.Server({ port: p, host: '127.0.0.1' }, onSocket)
+      s.once('listening', () => resolve(s))
+      s.once('error', (err) => reject(err))
+    })
+    rpcPort = p
+    console.log(`[rpc] WS listening on :${rpcPort}`)
+    break
+  } catch (err) {
+    if (err?.code === 'EADDRINUSE') {
+      console.log(`[rpc] :${p} in use, trying next`)
+      continue
+    }
+    throw err
+  }
+}
+if (!rpcServer) {
+  throw new Error(`No free WS RPC port in ${RPC_PORT_BASE}-${RPC_PORT_BASE + RPC_PORT_COUNT - 1}`)
+}
 
 // --- 3. Open the UI window via pear-electron. ---
 const runtime = new Runtime()
