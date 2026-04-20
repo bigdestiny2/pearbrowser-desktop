@@ -34,6 +34,15 @@ const FEATURED_APPS = [
     link: 'pear://fs1xuyzx6c9mu6zu6t5ubhkcbzz913h814te9ay9zzbc9hzf15fo',
     initial: 'D',
     gradient: 'linear-gradient(135deg, #a371f7, #d946ef)'
+  },
+  {
+    id: 'p2pbuilders',
+    name: 'P2P Builders',
+    tagline: 'Community chat for peer-to-peer app builders. Terminal-only — run the command in your shell.',
+    link: 'pear://gopfpwat99tcuaakasfnftrds3j6t7srdmi3qidbhm9xeizt1a5y',
+    initial: 'B',
+    gradient: 'linear-gradient(135deg, #06b6d4, #0ea5e9)',
+    terminal: true
   }
 ]
 
@@ -265,12 +274,17 @@ function Apps ({ rpc, C, onLaunch }) {
           <div class="app-card" key=${app.id}>
             <div class="app-icon app-icon-fallback" style=${{ background: app.gradient, color: '#0b0e14' }}>${app.initial}</div>
             <div class="app-info">
-              <div class="app-name">${app.name}</div>
+              <div class="app-name">
+                ${app.name}
+                ${app.terminal && html`<span class="app-badge">TERMINAL</span>`}
+              </div>
               <div class="app-desc">${app.tagline}</div>
               <div class="app-meta" title=${app.link}>${app.link.slice(0, 20)}…${app.link.slice(-6)}</div>
             </div>
             <div class="app-actions">
-              <button class="btn primary" onClick=${() => launchPearLink(app.link)} disabled=${busy === 'pear-link'}>Launch</button>
+              ${app.terminal
+                ? html`<button class="btn" onClick=${() => copyText('pear run ' + app.link)} title="Copy shell command to clipboard">📋 Copy command</button>`
+                : html`<button class="btn primary" onClick=${() => launchPearLink(app.link)} disabled=${busy === 'pear-link'}>Launch</button>`}
             </div>
           </div>
         `)}
