@@ -77,7 +77,24 @@ const bridge = new Bridge()
 await bridge.ready()
 const pipe = runtime.start({ bridge })
 
-Pear.teardown(() => {
-  pipe.end()
-  rpcServer.close()
-})
+// Clean shutdown when the user closes the window: tear down the
+// WS server, end the renderer pipe, end the backend pipe (which
+// triggers shutdown() in backend/index.js via IPC close), then
+// force-exit after a 2s grace period in case a hypercore flush
+// hangs. Fixes the "processes linger and the next launch fails"
+// trap users were hitting.
+let tornDown = false
+async function teardown () {
+  if (tornDown) return
+  tornDown = true
+  try { pipe.end() } catch {}
+  try { rpcServer.close() } catch {}
+  try { client?.end?.() } catch {}
+  try { backendPipe.end?.() } catch {}
+  setTimeout(() => {
+    try { Pear.exit?.() } catch {}
+    try { Bare.exit?.() } catch {}
+  }, 2000)
+}
+Pear.teardown(teardown)
+try { Bare.on?.('beforeExit', teardown) } catch {}

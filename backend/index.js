@@ -1120,6 +1120,21 @@ async function cleanupOldData () {
 Bare.on('suspend', () => IPC.unref())
 Bare.on('resume', () => IPC.ref())
 
+// When main closes the IPC pipe (window closed, Pear.teardown), run
+// a clean shutdown so Corestore flushes, Hyperswarm closes, and
+// rocksdb releases its LOCK. Without this the next launch trips on
+// EADDRINUSE or a stale LOCK.
+let shuttingDown = false
+async function gracefulExit () {
+  if (shuttingDown) return
+  shuttingDown = true
+  try { await shutdown() } catch (err) { console.error('[shutdown]', err && err.message) }
+  try { Bare.exit?.() } catch {}
+}
+try { IPC.on('close', gracefulExit) } catch {}
+try { IPC.on('end', gracefulExit) } catch {}
+try { Bare.on?.('beforeExit', gracefulExit) } catch {}
+
 // --- Start ---
 
 console.log('Starting boot...')
