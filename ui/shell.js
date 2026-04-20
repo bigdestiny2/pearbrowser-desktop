@@ -8,6 +8,18 @@ function copyText (text) {
   } catch {}
 }
 
+const FEATURED_APPS = [
+  {
+    id: 'keet',
+    name: 'Keet',
+    tagline: 'End-to-end encrypted P2P chat and video calls by Holepunch.',
+    link: 'pear://oeeoz3w6fjjt7bym3ndpa6hhicm8f8naxyk11z4iypeoupn6jzpo',
+    initial: 'K',
+    gradient: 'linear-gradient(135deg, #fbbf24, #f97316)',
+    url: 'https://keet.io'
+  }
+]
+
 const TAB_META = {
   browse: { label: 'Browse', icon: '🌐' },
   apps: { label: 'Apps', icon: '📦' },
@@ -133,8 +145,8 @@ function Apps ({ rpc, C, onLaunch }) {
   const [pearLink, setPearLink] = useState('')
   const [launched, setLaunched] = useState('')
 
-  const launchPearLink = async () => {
-    const link = pearLink.trim()
+  const launchPearLink = async (overrideLink) => {
+    const link = (typeof overrideLink === 'string' ? overrideLink : pearLink).trim()
     if (!link) return
     setErr(''); setBusy('pear-link'); setLaunched('')
     try {
@@ -216,6 +228,23 @@ function Apps ({ rpc, C, onLaunch }) {
     <div class="apps">
       <h1>Apps</h1>
       <p class="subtitle">Launch any Pear app by link, or browse a HiveRelay catalog.</p>
+
+      <h2>Featured</h2>
+      <div class="app-grid">
+        ${FEATURED_APPS.map((app) => html`
+          <div class="app-card" key=${app.id}>
+            <div class="app-icon app-icon-fallback" style=${`background: ${app.gradient}; color: #0b0e14;`}>${app.initial}</div>
+            <div class="app-info">
+              <div class="app-name">${app.name}</div>
+              <div class="app-desc">${app.tagline}</div>
+              <div class="app-meta">${app.link}</div>
+            </div>
+            <div class="app-actions">
+              <button class="btn primary" onClick=${() => launchPearLink(app.link)} disabled=${busy === 'pear-link'}>Launch</button>
+            </div>
+          </div>
+        `)}
+      </div>
 
       <h2>Launch a Pear app</h2>
       <div class="catalog-loader">

@@ -11,6 +11,15 @@
     "name": "pearbrowser-desktop",
     "type": "desktop",
     "pre": "pear-electron/pre",
+    "stage": {
+      "ignore": [
+        "/.git",
+        "/.gitignore",
+        "/appling",
+        "/README.md",
+        "/pearbrowser-storage"
+      ]
+    },
     "links": [
       "http://127.0.0.1",
       "http://localhost",
