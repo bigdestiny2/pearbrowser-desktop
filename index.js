@@ -77,25 +77,35 @@ const bridge = new Bridge()
 await bridge.ready()
 const pipe = runtime.start({ bridge })
 
-// When the user closes the Pear window, the `runtime.start` pipe
-// emits 'close'. That's our *reliable* shutdown trigger — more so
-// than Pear.teardown, which didn't fire consistently in practice
-// and left zombie processes holding port 9876 and the rocksdb
-// LOCK. On close, we tear down and hard-exit inside 500ms. The
-// user never has to worry about ghost state.
+// Real shutdown: when the renderer pipe ends, close + force-exit.
+// Pear.teardown alone didn't fire consistently; hooking every
+// exit signal so lingering processes stop blocking subsequent
+// launches with EADDRINUSE / rocksdb LOCK conflicts.
 let tornDown = false
-function teardown () {
+function teardown (reason) {
   if (tornDown) return
   tornDown = true
+  console.log('[teardown] triggered by', reason)
   try { rpcServer?.close() } catch {}
   try { client?.end?.() } catch {}
   try { backendPipe.end?.() } catch {}
   try { pipe.end() } catch {}
+  // Hard-exit fast: hypercore/corestore can hold the event loop
+  // open for tens of seconds on graceful close, and that's what
+  // was letting zombies survive. 300ms is plenty for our WS
+  // client to flush.
   setTimeout(() => {
-    try { Pear.exit?.() } catch {}
+    console.log('[teardown] hard-exit')
+    try { Pear.exit?.(0) } catch {}
     try { Bare.exit?.(0) } catch {}
-  }, 500)
+    try { process?.exit?.(0) } catch {}
+  }, 300)
 }
-pipe.on('close', teardown)
-Pear.teardown(teardown)
-try { Bare.on?.('beforeExit', teardown) } catch {}
+pipe.on('close', () => teardown('pipe close'))
+pipe.on('end', () => teardown('pipe end'))
+pipe.on('error', (err) => teardown('pipe error: ' + (err && err.message)))
+Pear.teardown(() => teardown('Pear.teardown'))
+try { Bare.on?.('beforeExit', () => teardown('beforeExit')) } catch {}
+try { Bare.on?.('exit', () => teardown('exit')) } catch {}
+try { process?.on?.('SIGTERM', () => teardown('SIGTERM')) } catch {}
+try { process?.on?.('SIGINT', () => teardown('SIGINT')) } catch {}
