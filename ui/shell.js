@@ -16,7 +16,7 @@ const TAB_META = {
   settings: { label: 'Settings', icon: '⚙' }
 }
 
-const DEFAULT_URL = 'hyper://4fd242fd4c90b77b354d6bcbd30654b732905cebf4b94bfefc0adbf97c171e04/index.html'
+const DEFAULT_URL = 'hyper://14a1f4c00c2f98047b89a86b5521f980a6213523f75a7e9d6e49a1b17fd4c694/'
 
 function normalizeUrl (raw) {
   const s = raw.trim()
@@ -75,6 +75,12 @@ function Browse ({ rpc, C, navUrl, onNavigated }) {
       onNavigated?.()
     }
   }, [navUrl])
+
+  // Auto-navigate to the landing site on first mount.
+  useEffect(() => {
+    if (!src && !navUrl && DEFAULT_URL) go(DEFAULT_URL)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const back = () => {
     if (histIdx <= 0) return
