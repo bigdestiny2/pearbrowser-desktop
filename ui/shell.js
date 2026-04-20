@@ -261,7 +261,7 @@ function Apps ({ rpc, C, onLaunch }) {
             <div class="app-info">
               <div class="app-name">${app.name}</div>
               <div class="app-desc">${app.tagline}</div>
-              <div class="app-meta">${app.link}</div>
+              <div class="app-meta" title=${app.link}>${app.link.slice(0, 20)}…${app.link.slice(-6)}</div>
             </div>
             <div class="app-actions">
               <button class="btn primary" onClick=${() => launchPearLink(app.link)} disabled=${busy === 'pear-link'}>Launch</button>
@@ -274,7 +274,7 @@ function Apps ({ rpc, C, onLaunch }) {
       <div class="catalog-loader">
         <input
           type="text"
-          placeholder="pear://&lt;key&gt; — opens in a new window"
+          placeholder=${'pear://<key> — opens in a new window'}
           value=${pearLink}
           onInput=${(e) => setPearLink(e.target.value)}
           onKeyDown=${(e) => e.key === 'Enter' && launchPearLink()}
