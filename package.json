@@ -1,0 +1,50 @@
+{
+  "name": "pearbrowser-desktop",
+  "version": "0.1.0",
+  "description": "P2P browser + decentralized app store + site builder, desktop Pear fork of PearBrowser (jj10133/Vinjari family)",
+  "type": "module",
+  "scripts": {
+    "start": "pear run --dev .",
+    "run": "pear run ."
+  },
+  "pear": {
+    "name": "pearbrowser-desktop",
+    "type": "desktop",
+    "pre": "pear-electron/pre",
+    "links": [
+      "http://127.0.0.1",
+      "http://localhost",
+      "ws://127.0.0.1",
+      "ws://localhost"
+    ],
+    "gui": {
+      "backgroundColor": "#0b0e14",
+      "height": 800,
+      "width": 1280
+    }
+  },
+  "dependencies": {
+    "autobase": "^7.27.3",
+    "b4a": "^1.8.0",
+    "bare-crypto": "^1.13.4",
+    "bare-events": "^2.0.0",
+    "bare-fs": "^4.0.0",
+    "bare-http1": "^4.5.5",
+    "bare-path": "^3.0.0",
+    "bare-ws": "^2.1.0",
+    "corestore": "^7.9.2",
+    "framed-stream": "^1.0.0",
+    "htm": "^3.1.1",
+    "hyperbee": "^2.27.3",
+    "hypercore": "^11.28.1",
+    "hypercore-crypto": "^3.5.0",
+    "hyperdrive": "^13.3.2",
+    "hyperswarm": "^4.17.0",
+    "p2p-hiverelay": "latest",
+    "pear-bridge": "latest",
+    "pear-run": "latest",
+    "pear-electron": "latest",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
+}

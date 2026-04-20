@@ -1,0 +1,16 @@
+node_modules/
+.DS_Store
+*.log
+
+# Appling native build artifacts — regenerate with `bare-make generate && bare-make build`
+appling/build/
+appling/node_modules/
+
+# Pear dev storage artifacts (if run from project dir)
+pearbrowser-storage/
+*.CORESTORE
+
+# Editor
+.vscode/
+.idea/
+*.swp
