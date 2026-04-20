@@ -45,7 +45,7 @@ const TAB_META = {
   settings: { label: 'Settings', icon: '⚙' }
 }
 
-const DEFAULT_URL = 'hyper://14a1f4c00c2f98047b89a86b5521f980a6213523f75a7e9d6e49a1b17fd4c694/'
+const DEFAULT_URL = 'hyper://f1e72b4bec5abd134aa3fde1ed58aa4a9ab97ff1a90ca29a258de0dacdce65fb/'
 
 function normalizeUrl (raw) {
   const s = raw.trim()
