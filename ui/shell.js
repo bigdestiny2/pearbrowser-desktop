@@ -105,12 +105,6 @@ function Browse ({ rpc, C, navUrl, onNavigated }) {
     }
   }, [navUrl])
 
-  // Auto-navigate to the landing site on first mount.
-  useEffect(() => {
-    if (!src && !navUrl && DEFAULT_URL) go(DEFAULT_URL)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
   const back = () => {
     if (histIdx <= 0) return
     const i = histIdx - 1
@@ -148,7 +142,20 @@ function Browse ({ rpc, C, navUrl, onNavigated }) {
       ${status && html`<div class="browse-status">${status}</div>`}
       ${src
         ? html`<iframe ref=${iframeRef} class="webview" src=${src} sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-pointer-lock"></iframe>`
-        : html`<div class="browse-empty">Enter a <code>hyper://</code> URL (or drive key) above.</div>`}
+        : html`
+          <div class="browse-welcome">
+            <div class="browse-welcome-inner">
+              <div class="browse-welcome-logo">🍐</div>
+              <h2>The peer-to-peer web starts here</h2>
+              <p>Paste any <code>hyper://</code> URL in the address bar above — hex or z-base-32 — and PearBrowser will fetch it directly from its peers. No DNS, no servers, no CDN.</p>
+              <div class="browse-welcome-actions">
+                <button class="btn primary" onClick=${() => go(DEFAULT_URL)}>Try the PearBrowser site</button>
+                <button class="btn subtle" onClick=${() => { if (iframeRef.current) iframeRef.current.focus?.(); document.querySelector('.urlbar input')?.focus() }}>Focus the URL bar</button>
+              </div>
+              <div class="browse-welcome-tip">Tip: visit <strong>Apps</strong> to launch Keet, PearPass, and other Pear apps.</div>
+            </div>
+          </div>
+        `}
     </div>
   `
 }

@@ -251,9 +251,24 @@ rpc.handle(C.CMD_PUBLISH_SITE, async (data) => {
       const acceptCount = Array.isArray(acceptances) ? acceptances.length : 0
       pin = { ok: acceptCount > 0, acceptances: acceptCount, connectedRelays, replicatedPeers: 0, replicationTimedOut: false }
 
-      // Wait for at least one remote peer to connect and pull blocks.
-      // Acceptance = relay said yes; replication = relay has the data.
-      if (site?.drive?.core && acceptCount > 0) {
+      // Prefer the canonical waitForDurable() API from p2p-hiverelay
+      // 0.4.3+ if present. Falls back to our core.peers polling on
+      // 0.4.2 and earlier. Zero-friction upgrade once npm publishes.
+      if (acceptCount > 0 && typeof hiveRelay.waitForDurable === 'function') {
+        try {
+          console.log(`[publish] waitForDurable() available — using canonical API`)
+          const status = await hiveRelay.waitForDurable(keyHex, { timeoutMs: 30000, minPeers: 1 })
+          pin.replicatedPeers = status?.activePeers ?? 0
+          pin.durable = !!status?.durable
+          if (!status?.durable) pin.replicationTimedOut = true
+          console.log(`[publish] durable=${status?.durable} peers=${pin.replicatedPeers}`)
+        } catch (err) {
+          console.error('[publish] waitForDurable failed:', err && err.message)
+          pin.replicationTimedOut = true
+        }
+      } else if (site?.drive?.core && acceptCount > 0) {
+        // Fallback: poll drive.core.peers for remote peers that reach
+        // remoteLength >= localLength. Retired once 0.4.3 lands.
         const core = site.drive.core
         const startLen = core.length
         const REPL_TIMEOUT = 30000

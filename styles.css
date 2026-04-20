@@ -239,6 +239,23 @@ p { color: #8b949e; margin-bottom: 12px; }
   line-height: 1.8;
   padding: 40px;
 }
+.browse-welcome {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.browse-welcome-inner {
+  max-width: 520px;
+  text-align: center;
+}
+.browse-welcome-logo { font-size: 44px; margin-bottom: 14px; }
+.browse-welcome-inner h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.4px; margin-bottom: 12px; color: #e6edf3; }
+.browse-welcome-inner p { color: #8b949e; font-size: 14px; line-height: 1.7; margin-bottom: 20px; }
+.browse-welcome-actions { display: flex; gap: 8px; justify-content: center; margin-bottom: 18px; flex-wrap: wrap; }
+.browse-welcome-tip { color: #6e7681; font-size: 12px; padding-top: 16px; border-top: 1px solid #21262d; }
+.browse-welcome-tip strong { color: #e6edf3; }
 .browse-empty code {
   background: #161b22;
   padding: 1px 6px;
