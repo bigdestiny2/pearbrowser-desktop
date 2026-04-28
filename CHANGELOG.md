@@ -1,5 +1,82 @@
 # Changelog
 
+## v0.3.0 — 2026-04-28
+
+`swarm.v1` — direct Hyperswarm access for `hyper://` pages. Same URL,
+same drive — pages that know how to ask for direct P2P get it; pages
+that don't keep working unchanged. See `docs/SWARM-V1.md` for the full
+spec.
+
+### New
+
+- **`window.pear.swarm.v1`** injected on every `text/html` response.
+  Pages call `await window.pear.swarm.v1.join(topicHex, { ... })` and
+  get back a Channel with `peer` / `message` / `peer-leave` / `error` /
+  `closed` events plus `peers[]` and `destroy()`. Wire is base64; the
+  shim hands you `Uint8Array` on inbound, accepts `Uint8Array` /
+  `ArrayBuffer` on outbound.
+- **Three trust tiers** for topic-join policy:
+  - **A — drive-derived**: `sha256("pear.swarm.v1:" + driveKey + subtopic)`
+    — no consent prompt, ~90% of in-app realtime use cases.
+  - **B — autobase / mint-then-rejoin**: persisted grant, no prompt.
+  - **C — arbitrary 32-byte topic**: requires a consent sheet
+    (`EVT_SWARM_REQUEST` → modal → `CMD_SWARM_RESOLVE`). Persisted in
+    `swarm-grants.bee`, replicates cross-device. Revocable in
+    Settings → Connected Apps.
+- **Rate limits** enforced server-side: 8 channels per app, 10 joins
+  per minute, 1 MB/s per peer outbound, 64 peers per channel
+  (newest-wins), 1 pending consent at a time.
+- **`SwarmConsent`** modal mirroring `LoginConsent`: shows the app
+  name, requested topic, and what approving means (DHT discovery
+  reveals your IP; messages travel direct, no logging).
+- **Connected Apps** in Settings now lists swarm-grants alongside
+  login-grants, grouped by app, with per-grant Revoke buttons.
+- **`examples/echo-peer/`** — 100-line `hyper://` page that exercises
+  the full Channel API end-to-end. Doubles as a smoke test.
+
+### Internals
+
+- New: `backend/swarm-bridge.js` (Channel manager + multiplexer +
+  rate-limit enforcement + topic-policy dispatch)
+- New: `backend/swarm-grants.js` (Hyperbee-backed Tier C grants)
+- Extended: `backend/http-bridge.js` (`POST /api/swarm/{join,send,leave}`,
+  `GET /api/swarm/events` SSE, token-on-URL fallback for EventSource)
+- Extended: `backend/hyper-proxy.js` (per-page api-token meta + shim
+  injection in HTML `<head>`)
+- Extended: `backend/index.js` (`openSwarmConsent` ceremony mirroring
+  the login one, four new RPC handlers for grant management)
+- New constants: `CMD_SWARM_RESOLVE=120`,
+  `CMD_SWARM_LIST_GRANTS=121`, `CMD_SWARM_REVOKE_GRANT=122`,
+  `CMD_SWARM_REVOKE_ALL_FOR_APP=123`, `EVT_SWARM_REQUEST=107`
+
+### Why SSE instead of WebSocket
+
+Originally specced as WS. Switched to **Server-Sent Events**:
+- plain HTTP — no upgrade handler needed in `bare-http1`
+- `EventSource` is universally supported in iframes
+- the `swarm-bridge.js` `Channel._attachStream` interface is
+  transport-agnostic so a WS path can drop in later if we want it
+
+Page-side API is identical regardless of transport.
+
+### Same-URL upgrade property
+
+Pages feature-detect:
+
+```js
+if (window.pear?.swarm?.v1) {
+  // v0.3.0+ — direct P2P
+} else {
+  // older PearBrowser — fall back to /api/sync/* over the proxy
+}
+```
+
+Old PearBrowser desktops keep working unchanged. New ones light up
+direct paths the page already knew how to ask for. **No flag day.
+No redistribution.** v0.3 is a wire-protocol upgrade, not a fork.
+
+---
+
 ## v0.2.0 — 2026-04-28
 
 A focused "ship hard" release that closes major UX gaps and lights up backend

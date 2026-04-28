@@ -78,6 +78,17 @@ const CMD_CONTACTS_ADD = 92
 const CMD_CONTACTS_UPDATE = 93
 const CMD_CONTACTS_REMOVE = 94
 
+// swarm.v1 — direct swarm access for hyper:// pages.
+// See docs/SWARM-V1.md.
+//   CMD_SWARM_RESOLVE — UI replies to a Tier C consent ceremony
+//   CMD_SWARM_LIST_GRANTS — list all (driveKey, topic) grants
+//   CMD_SWARM_REVOKE_GRANT — drop a single (driveKey, topic) grant
+//   CMD_SWARM_REVOKE_ALL_FOR_APP — drop every grant for one app
+const CMD_SWARM_RESOLVE = 120
+const CMD_SWARM_LIST_GRANTS = 121
+const CMD_SWARM_REVOKE_GRANT = 122
+const CMD_SWARM_REVOKE_ALL_FOR_APP = 123
+
 // Pear Bridge (WebView → worklet via RN relay)
 const CMD_BRIDGE = 200
 
@@ -94,6 +105,11 @@ const EVT_BOOT_PROGRESS = 105
 /** A WebView called window.pear.login() — show the consent sheet.
  *  Payload: { requestId, driveKey, appName, reason, scopes, currentGrant } */
 const EVT_LOGIN_REQUEST = 106
+
+/** A WebView called window.pear.swarm.v1.join() with an arbitrary
+ *  (Tier C) topic and the worklet wants user consent before joining.
+ *  Payload: { requestId, driveKey, appName, reason, topicHex, protocol } */
+const EVT_SWARM_REQUEST = 107
 
 module.exports = {
   CMD_NAVIGATE, CMD_GET_STATUS,
@@ -112,8 +128,9 @@ module.exports = {
   CMD_PROFILE_GET, CMD_PROFILE_UPDATE, CMD_PROFILE_CLEAR,
   CMD_LOGIN_LIST_GRANTS, CMD_LOGIN_REVOKE_GRANT, CMD_LOGIN_REVOKE_ALL, CMD_LOGIN_RESOLVE,
   CMD_CONTACTS_LIST, CMD_CONTACTS_LOOKUP, CMD_CONTACTS_ADD, CMD_CONTACTS_UPDATE, CMD_CONTACTS_REMOVE,
+  CMD_SWARM_RESOLVE, CMD_SWARM_LIST_GRANTS, CMD_SWARM_REVOKE_GRANT, CMD_SWARM_REVOKE_ALL_FOR_APP,
   CMD_BRIDGE,
   CMD_STOP,
   EVT_READY, EVT_PEER_COUNT, EVT_ERROR, EVT_INSTALL_PROGRESS, EVT_SITE_PUBLISHED, EVT_BOOT_PROGRESS,
-  EVT_LOGIN_REQUEST,
+  EVT_LOGIN_REQUEST, EVT_SWARM_REQUEST,
 }

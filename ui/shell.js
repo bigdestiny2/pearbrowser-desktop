@@ -458,6 +458,98 @@ function LoginConsent ({ rpc, C, request, identity, onClose }) {
   `
 }
 
+// --- Swarm consent dialog (window.pear.swarm.v1.join — Tier C) ----------
+//
+// When a hyper:// page calls window.pear.swarm.v1.join(arbitraryTopicHex),
+// the worklet checks if the (driveKey, topic) pair has a stored grant.
+// If not, it parks the join() promise and fires EVT_SWARM_REQUEST. The UI
+// shows this modal; user approves or cancels; we POST CMD_SWARM_RESOLVE
+// back. On approve the worklet persists a grant in swarm-grants.bee so
+// future joins of the same topic skip the prompt.
+//
+// Tier A (drive-derived subtopic) and Tier B (already-granted) joins
+// never trigger this — they resolve in the worklet without UI involvement.
+
+function SwarmConsent ({ rpc, C, request, identity, onClose }) {
+  const [busy, setBusy] = useState(null)
+  const [err, setErr] = useState('')
+
+  const decide = async (approved) => {
+    setErr(''); setBusy(approved ? 'approve' : 'deny')
+    try {
+      await rpc.request(C.CMD_SWARM_RESOLVE, {
+        requestId: request.requestId,
+        approved
+      })
+      onClose()
+    } catch (e) {
+      setErr(`could not resolve: ${e.message}`)
+      setBusy(null)
+    }
+  }
+
+  const appLabel = request.appName || 'A Pear app'
+  const driveLabel = shortKey(request.driveKey)
+  const topicLabel = shortKey(request.topicHex)
+
+  return html`
+    <div class="modal-overlay" role="dialog" aria-modal="true" onClick=${(e) => e.target.classList.contains('modal-overlay') && decide(false)}>
+      <div class="modal-card login-consent">
+        <div class="login-header">
+          <div class="login-app-icon" style=${{ background: 'linear-gradient(135deg, #58a6ff, #a371f7)' }}>📡</div>
+          <div class="login-header-text">
+            <div class="login-app-name">${appLabel}</div>
+            <div class="login-app-sub">wants to connect to peers on a swarm topic</div>
+            <div class="login-app-key" title=${request.driveKey}>${driveLabel}</div>
+          </div>
+        </div>
+
+        ${request.reason && html`<div class="login-reason">"${request.reason}"</div>`}
+
+        <div class="login-section-label">SWARM TOPIC</div>
+        <div class="login-identity">
+          <div class="login-identity-avatar">🔑</div>
+          <div class="login-identity-meta">
+            <div class="login-identity-label">${request.protocol || 'pear.swarm.v1'}</div>
+            <code class="login-identity-key">${topicLabel}</code>
+          </div>
+        </div>
+
+        <div class="login-section-label">WHAT THIS MEANS</div>
+        <div class="login-scopes">
+          <div class="login-scope on">
+            <div class="login-scope-meta">
+              <div class="login-scope-label">Discover peers via DHT</div>
+              <div class="login-scope-detail">Other devices on this topic will see your IP address.</div>
+            </div>
+          </div>
+          <div class="login-scope on">
+            <div class="login-scope-meta">
+              <div class="login-scope-label">Send and receive messages directly</div>
+              <div class="login-scope-detail">No relay between your peers and you. Messages aren't logged by PearBrowser.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="login-existing">
+          Approving stores a grant for this app + this topic. You can revoke it any time in <strong>Settings → Connected Apps</strong>.
+        </div>
+
+        ${err && html`<div class="apps-error">${err}</div>`}
+
+        <div class="login-actions">
+          <button class="btn subtle" onClick=${() => decide(false)} disabled=${busy !== null}>
+            ${busy === 'deny' ? 'Cancelling…' : 'Cancel'}
+          </button>
+          <button class="btn primary" onClick=${() => decide(true)} disabled=${busy !== null}>
+            ${busy === 'approve' ? 'Connecting…' : 'Approve & Connect'}
+          </button>
+        </div>
+      </div>
+    </div>
+  `
+}
+
 function Apps ({ rpc, C, onLaunch }) {
   const [catalogKey, setCatalogKey] = useState('')
   const [catalog, setCatalog] = useState(null)
@@ -901,7 +993,10 @@ function ProfileSection ({ rpc, C }) {
 }
 
 function ConnectedAppsSection ({ rpc, C }) {
+  // Login grants — apps the user has signed into.
   const [grants, setGrants] = useState([])
+  // Swarm grants — apps that hold persisted Tier C topic-join consents.
+  const [swarmGrants, setSwarmGrants] = useState([])
   const [busy, setBusy] = useState(null)
   const [err, setErr] = useState('')
   const [loaded, setLoaded] = useState(false)
@@ -909,8 +1004,12 @@ function ConnectedAppsSection ({ rpc, C }) {
   const load = async () => {
     setErr('')
     try {
-      const res = await rpc.request(C.CMD_LOGIN_LIST_GRANTS)
-      setGrants(Array.isArray(res?.grants) ? res.grants : [])
+      const [loginRes, swarmRes] = await Promise.all([
+        rpc.request(C.CMD_LOGIN_LIST_GRANTS),
+        rpc.request(C.CMD_SWARM_LIST_GRANTS).catch(() => ({ grants: [] }))
+      ])
+      setGrants(Array.isArray(loginRes?.grants) ? loginRes.grants : [])
+      setSwarmGrants(Array.isArray(swarmRes?.grants) ? swarmRes.grants : [])
     } catch (e) { setErr(`grants: ${e.message}`) }
     finally { setLoaded(true) }
   }
@@ -938,9 +1037,30 @@ function ConnectedAppsSection ({ rpc, C }) {
     finally { setBusy(null) }
   }
 
+  const revokeSwarmGrant = async (g) => {
+    const label = g.appName || shortKey(g.driveKey)
+    if (!confirm(`Revoke ${label}'s access to topic ${shortKey(g.topicHex)}? It will need to ask again on next join.`)) return
+    setErr(''); setBusy(`swarm-revoke:${g.driveKey}:${g.topicHex}`)
+    try {
+      await rpc.request(C.CMD_SWARM_REVOKE_GRANT, { driveKey: g.driveKey, topicHex: g.topicHex })
+      await load()
+    } catch (e) { setErr(`swarm-revoke: ${e.message}`) }
+    finally { setBusy(null) }
+  }
+
+  // Group swarm grants by app for a tighter visual.
+  const swarmByApp = new Map()
+  for (const g of swarmGrants) {
+    const key = g.driveKey
+    if (!swarmByApp.has(key)) swarmByApp.set(key, [])
+    swarmByApp.get(key).push(g)
+  }
+
   return html`
     <div class="settings-card">
       ${err && html`<div class="apps-error">${err}</div>`}
+
+      <div class="settings-subsection-label">Sign-in grants</div>
       ${!loaded
         ? html`<div class="settings-subtle">Loading…</div>`
         : grants.length === 0
@@ -967,6 +1087,35 @@ function ConnectedAppsSection ({ rpc, C }) {
                 ${busy === 'revoke-all' ? 'Revoking all…' : 'Revoke all'}
               </button>
             </div>
+          `}
+
+      <div class="settings-subsection-label">Swarm topic grants</div>
+      ${!loaded
+        ? html`<div class="settings-subtle">Loading…</div>`
+        : swarmGrants.length === 0
+          ? html`<div class="settings-subtle">No swarm topic grants. Apps using only drive-derived (Tier A) topics never appear here.</div>`
+          : html`
+            ${[...swarmByApp.entries()].map(([driveKey, list]) => html`
+              <div class="swarm-grant-app" key=${driveKey}>
+                <div class="settings-label">${list[0].appName || shortKey(driveKey)}</div>
+                <div class="settings-subtle"><code class="settings-code">${shortKey(driveKey)}</code> — ${list.length} topic${list.length === 1 ? '' : 's'}</div>
+                ${list.map((g) => html`
+                  <div class="settings-row swarm-grant-row" key=${g.topicHex}>
+                    <div>
+                      <code class="settings-code">${g.protocol || 'pear.swarm.v1'} · ${shortKey(g.topicHex)}</code>
+                      <div class="settings-subtle">
+                        Granted ${new Date(g.grantedAt).toLocaleDateString()}
+                        ${g.lastUsedAt && g.lastUsedAt !== g.grantedAt ? html` · last used ${new Date(g.lastUsedAt).toLocaleDateString()}` : ''}
+                      </div>
+                    </div>
+                    <button class="btn subtle danger" onClick=${() => revokeSwarmGrant(g)}
+                            disabled=${busy === `swarm-revoke:${g.driveKey}:${g.topicHex}`}>
+                      ${busy === `swarm-revoke:${g.driveKey}:${g.topicHex}` ? 'Revoking…' : 'Revoke'}
+                    </button>
+                  </div>
+                `)}
+              </div>
+            `)}
           `}
     </div>
   `
@@ -1573,6 +1722,9 @@ export function App ({ rpc, C, storagePath }) {
   const [log, setLog] = useState([])
   // Login consent ceremony — populated when EVT_LOGIN_REQUEST fires.
   const [pendingLogin, setPendingLogin] = useState(null)
+  // Swarm consent ceremony — populated when EVT_SWARM_REQUEST fires
+  // (Tier C topic-join, see docs/SWARM-V1.md §4.3).
+  const [pendingSwarm, setPendingSwarm] = useState(null)
   // Light-weight identity blob for showing "you" in the consent sheet.
   const [identity, setIdentity] = useState(null)
 
@@ -1597,12 +1749,18 @@ export function App ({ rpc, C, storagePath }) {
       appendLog(`[login] ${e.detail?.appName || shortKey(e.detail?.driveKey)} requested ${(e.detail?.scopes || []).join(',') || 'sign-in'}`)
       setPendingLogin(e.detail)
     }
+    const onSwarm = (e) => {
+      // Tier C swarm-join consent (docs/SWARM-V1.md §4.3).
+      appendLog(`[swarm] ${e.detail?.appName || shortKey(e.detail?.driveKey)} wants topic ${shortKey(e.detail?.topicHex || '')}`)
+      setPendingSwarm(e.detail)
+    }
 
     rpc.addEventListener(`event:${C.EVT_BOOT_PROGRESS}`, onBoot)
     rpc.addEventListener(`event:${C.EVT_READY}`, onReady)
     rpc.addEventListener(`event:${C.EVT_PEER_COUNT}`, onPeer)
     rpc.addEventListener(`event:${C.EVT_ERROR}`, onErr)
     rpc.addEventListener(`event:${C.EVT_LOGIN_REQUEST}`, onLogin)
+    rpc.addEventListener(`event:${C.EVT_SWARM_REQUEST}`, onSwarm)
 
     const poll = setInterval(async () => {
       try {
@@ -1618,6 +1776,7 @@ export function App ({ rpc, C, storagePath }) {
       rpc.removeEventListener(`event:${C.EVT_PEER_COUNT}`, onPeer)
       rpc.removeEventListener(`event:${C.EVT_ERROR}`, onErr)
       rpc.removeEventListener(`event:${C.EVT_LOGIN_REQUEST}`, onLogin)
+      rpc.removeEventListener(`event:${C.EVT_SWARM_REQUEST}`, onSwarm)
     }
   }, [rpc, C])
 
@@ -1668,6 +1827,14 @@ export function App ({ rpc, C, storagePath }) {
         request=${pendingLogin}
         identity=${identity}
         onClose=${() => setPendingLogin(null)}
+      />`}
+
+      ${pendingSwarm && html`<${SwarmConsent}
+        rpc=${rpc}
+        C=${C}
+        request=${pendingSwarm}
+        identity=${identity}
+        onClose=${() => setPendingSwarm(null)}
       />`}
     </div>
   `

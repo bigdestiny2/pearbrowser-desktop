@@ -31,12 +31,14 @@ const { RelayClient } = require('./relay-client.js')
 const { CatalogManager } = require('./catalog-manager.js')
 const { AppManager } = require('./app-manager.js')
 const { SiteManager } = require('./site-manager.js')
-const { PearBridge } = require('./pear-bridge.js')
+const { PearBridge, PEAR_SWARM_V1_SHIM } = require('./pear-bridge.js')
 const { HttpBridge } = require('./http-bridge.js')
 const { UserData } = require('./user-data.js')
 const { Identity, validateMnemonic } = require('./identity.js')
 const { Profile } = require('./profile.js')
 const { Contacts } = require('./contacts.js')
+const { SwarmBridge } = require('./swarm-bridge.js')
+const { SwarmGrants } = require('./swarm-grants.js')
 const C = require('./constants.js')
 
 const { IPC } = BareKit
@@ -79,8 +81,13 @@ let userData = null
 let identity = null
 let profile = null
 let contacts = null
+let swarmBridge = null
+let swarmGrants = null
 /** Map<requestId, { resolve, reject, timer }> for login() ceremonies. */
 const pendingLogins = new Map()
+/** Map<requestId, { resolve, reject, timer }> for swarm.join() consent ceremonies. */
+const pendingSwarmConsents = new Map()
+const SWARM_CONSENT_TIMEOUT_MS = 2 * 60 * 1000  // 2 minutes
 let peerCount = 0
 let browseDrives = new Map() // keyHex → Hyperdrive (for ad-hoc browsing)
 
@@ -752,6 +759,64 @@ rpc.handle(C.CMD_CONTACTS_UPDATE, async ({ pubkey, updates } = {}) => {
   return { contact: await requireContacts().update(pubkey, updates || {}) }
 })
 
+// --- swarm.v1 — swarm consent ceremony + grants management ---
+//
+// When http-bridge → swarm-bridge sees a Tier C topic-join request,
+// it calls requestConsent(args) which routes through openSwarmConsent
+// below. Mirrors the login ceremony shape: park a pending promise,
+// fire EVT_SWARM_REQUEST to the UI, the UI calls CMD_SWARM_RESOLVE
+// once the user decides.
+
+async function openSwarmConsent ({ driveKeyHex, appName, reason, topicHex, protocol }) {
+  return await new Promise((resolve, reject) => {
+    const requestId = require('crypto').randomBytes(16).toString('hex')
+    const timer = setTimeout(() => {
+      if (pendingSwarmConsents.has(requestId)) {
+        pendingSwarmConsents.delete(requestId)
+        reject(new Error('Swarm consent timed out (no response within 2 minutes)'))
+      }
+    }, SWARM_CONSENT_TIMEOUT_MS)
+    pendingSwarmConsents.set(requestId, { resolve, reject, timer })
+    rpc.event(C.EVT_SWARM_REQUEST, {
+      requestId,
+      driveKey: driveKeyHex,
+      topicHex,
+      protocol,
+      appName,
+      reason,
+    })
+  })
+}
+
+rpc.handle(C.CMD_SWARM_RESOLVE, async ({ requestId, approved } = {}) => {
+  const pending = pendingSwarmConsents.get(requestId)
+  if (!pending) throw new Error('No pending swarm consent with that id (timed out?)')
+  pendingSwarmConsents.delete(requestId)
+  clearTimeout(pending.timer)
+  pending.resolve(!!approved)
+  return { ok: true, approved: !!approved }
+})
+
+rpc.handle(C.CMD_SWARM_LIST_GRANTS, async ({ driveKey } = {}) => {
+  if (!swarmGrants) return { grants: [] }
+  const grants = driveKey
+    ? await swarmGrants.listForApp(driveKey)
+    : await swarmGrants.list()
+  return { grants }
+})
+
+rpc.handle(C.CMD_SWARM_REVOKE_GRANT, async ({ driveKey, topicHex } = {}) => {
+  if (!swarmGrants) throw new Error('SwarmGrants not available')
+  const result = await swarmGrants.remove(driveKey, topicHex)
+  return { ok: true, ...result }
+})
+
+rpc.handle(C.CMD_SWARM_REVOKE_ALL_FOR_APP, async ({ driveKey } = {}) => {
+  if (!swarmGrants) throw new Error('SwarmGrants not available')
+  const n = await swarmGrants.removeAllForApp(driveKey)
+  return { ok: true, revoked: n }
+})
+
 rpc.handle(C.CMD_CONTACTS_REMOVE, async ({ pubkey } = {}) => {
   await requireContacts().remove(pubkey)
   return { ok: true }
@@ -964,6 +1029,19 @@ async function boot () {
   try { await contacts.ready(); console.log('Contacts ready') }
   catch (err) { console.error('Contacts init failed:', err && err.message); contacts = null }
 
+  // swarm.v1 — direct Hyperswarm access for hyper:// pages.
+  // SwarmGrants persists Tier C topic-join grants across launches.
+  // SwarmBridge multiplexes peer events into per-channel SSE streams.
+  swarmGrants = new SwarmGrants(store, swarm)
+  try { await swarmGrants.ready(); console.log('SwarmGrants ready') }
+  catch (err) { console.error('SwarmGrants init failed:', err && err.message); swarmGrants = null }
+
+  swarmBridge = new SwarmBridge(swarm, {
+    identity,
+    swarmGrants,
+    requestConsent: (args) => openSwarmConsent(args),
+  })
+
   rpc.event(C.EVT_BOOT_PROGRESS, { stage: 'managers-ready', message: 'Managers loaded' })
 
   // Restore persisted app/site state from disk
@@ -1003,12 +1081,18 @@ async function boot () {
     rpc.event(C.EVT_ERROR, { type: 'proxy-error', path, message: err })
   }, relayClient)
 
+  // swarm.v1 — page-side shim that exposes window.pear.swarm.v1 to every
+  // text/html response served by the proxy. Pages get it for free; no
+  // <script src> required from the page author. See docs/SWARM-V1.md.
+  proxy.setPearSwarmShim(PEAR_SWARM_V1_SHIM)
+
   // Mount direct HTTP bridge (WebView → localhost → Bare, bypasses RN relay)
   const httpBridge = new HttpBridge(pearBridge, swarm, getDriveForProxy, {
     validateToken: (token) => proxy ? proxy.validateApiToken(token) : null,
     identity,
     profile,
     contacts,
+    swarmBridge,
     // Login ceremony plumbing — http-bridge calls requestLogin() when a
     // page invokes pear.login(). We fire EVT_LOGIN_REQUEST up to the
     // UI, which calls CMD_LOGIN_RESOLVE after the user decides. See
@@ -1033,6 +1117,7 @@ async function boot () {
 }
 
 async function shutdown () {
+  if (swarmBridge) { try { await swarmBridge.destroy() } catch {} swarmBridge = null }
   if (proxy) { try { await proxy.stop() } catch {} proxy = null }
   if (pearBridge) { try { await pearBridge.close() } catch {} pearBridge = null }
   if (siteManager) { try { await siteManager.close() } catch {} siteManager = null }

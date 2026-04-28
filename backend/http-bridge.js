@@ -23,6 +23,7 @@ class HttpBridge {
     this._profile = opts.profile || null
     this._contacts = opts.contacts || null
     this._requestLogin = opts.requestLogin || null  // async (args) => attestation
+    this._swarmBridge = opts.swarmBridge || null   // SwarmBridge instance — see backend/swarm-bridge.js
     this._rateLimiter = new Map() // Simple rate limiting per IP
   }
 
@@ -66,9 +67,16 @@ class HttpBridge {
     return `${driveKeyHex}:${appId}`
   }
 
-  _requireToken (req, res) {
+  _requireToken (req, res, urlObj) {
+    // Token is normally in the X-Pear-Token header. EventSource cannot
+    // set custom headers, so the SSE endpoint also accepts the token on
+    // the URL as ?token=…. Same security boundary either way — the
+    // worklet validates against its in-memory issuance map.
     const rawToken = req.headers['x-pear-token']
-    const token = Array.isArray(rawToken) ? rawToken[0] : rawToken
+    let token = Array.isArray(rawToken) ? rawToken[0] : rawToken
+    if (!token && urlObj && urlObj.searchParams) {
+      token = urlObj.searchParams.get('token') || null
+    }
     const driveKeyHex = this._validateToken(token)
     if (!driveKeyHex) {
       this._jsonError(res, 'Unauthorized', 401)
@@ -416,6 +424,105 @@ class HttpBridge {
           }
         } catch {}
         return this._json(res, { key, path: dirPath, entries })
+      }
+
+      // --- swarm.v1 (direct Hyperswarm access for hyper:// pages — see docs/SWARM-V1.md) ---
+      //
+      //   POST /api/swarm/join       — open a channel; returns channelId
+      //   GET  /api/swarm/events     — SSE stream of peer/message events
+      //   POST /api/swarm/send       — send to a peer
+      //   POST /api/swarm/leave      — close the channel
+      //
+      // All four are gated by the per-app token + Origin check above.
+      // Tier C topic joins additionally fire EVT_SWARM_REQUEST and wait
+      // on the user's consent reply before resolving.
+
+      if (path.startsWith('/api/swarm/')) {
+        if (!this._swarmBridge) {
+          return this._jsonError(res, 'swarm bridge not available', 503)
+        }
+        // Pass `url` so /api/swarm/events (SSE) can fall back to ?token=…
+        // when EventSource can't set the X-Pear-Token header.
+        const auth = this._requireToken(req, res, url)
+        if (!auth) return true
+
+        if (req.method === 'POST' && path === '/api/swarm/join') {
+          try {
+            const result = await this._swarmBridge.join({
+              driveKeyHex: auth.driveKeyHex,
+              appName: body?.appName || null,
+              reason: body?.reason || null,
+              topicHex: body?.topicHex || null,
+              subtopic: body?.subtopic === undefined ? null : body.subtopic,
+              protocol: body?.protocol || 'pear.swarm.v1',
+              version: body?.version || 1,
+              server: !!body?.server,
+              client: body?.client !== false
+            })
+            return this._json(res, result)
+          } catch (err) {
+            return this._jsonError(res, err.message, 400)
+          }
+        }
+
+        if (req.method === 'POST' && path === '/api/swarm/send') {
+          try {
+            this._swarmBridge.send(body?.channelId, body?.peerId, body?.data)
+            return this._json(res, { ok: true })
+          } catch (err) {
+            return this._jsonError(res, err.message, 400)
+          }
+        }
+
+        if (req.method === 'POST' && path === '/api/swarm/leave') {
+          try {
+            await this._swarmBridge.leave(body?.channelId)
+            return this._json(res, { ok: true })
+          } catch (err) {
+            return this._jsonError(res, err.message, 400)
+          }
+        }
+
+        if (req.method === 'GET' && path === '/api/swarm/events') {
+          const channelId = url.searchParams.get('channelId')
+          if (!channelId) return this._jsonError(res, 'channelId required', 400)
+          // SSE response — long-lived, no JSON Content-Type.
+          res.statusCode = 200
+          res.setHeader('Content-Type', 'text/event-stream; charset=utf-8')
+          res.setHeader('Cache-Control', 'no-cache, no-transform')
+          res.setHeader('Connection', 'keep-alive')
+          res.setHeader('X-Accel-Buffering', 'no')
+          // Initial comment to flush headers immediately.
+          res.write(': pear.swarm.v1 stream\n\n')
+
+          const closeHandlers = []
+          const stream = {
+            send (eventObj) {
+              try {
+                res.write('data: ' + JSON.stringify(eventObj) + '\n\n')
+              } catch {}
+            },
+            close () {
+              try { res.end() } catch {}
+            },
+            onClose (fn) {
+              closeHandlers.push(fn)
+            }
+          }
+          const cleanup = () => closeHandlers.forEach((fn) => { try { fn() } catch {} })
+          req.on('close', cleanup)
+          req.on('error', cleanup)
+          res.on('close', cleanup)
+
+          const ok = this._swarmBridge.attachStream(channelId, stream)
+          // attachStream sends the 'unknown channelId' error + closes itself
+          // when the channel doesn't exist, so we don't need to do anything
+          // else here. If it succeeded, the response stays open until the
+          // page closes the EventSource (or the channel is leave()'d).
+          return true
+        }
+
+        return this._jsonError(res, 'Unknown swarm endpoint', 404)
       }
 
       // --- Status ---
