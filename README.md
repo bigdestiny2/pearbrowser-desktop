@@ -9,18 +9,22 @@ No servers. No accounts. No CDN. Sites are Hyperdrives, addressed by public key,
 ```sh
 npm i -g pear
 pear
-pear run pear://1gkr4ak5c4itbuhzz43zaapjgpkxat9n55hqzq3wzzp3dn4fgrpo
+pear run pear://tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty
 ```
 
-One install, one key, works on all three desktop platforms — Pear downloads the matching native runtime on first launch.
+One install, one key, works on all three desktop platforms — Pear downloads the matching native runtime on first launch. The key above is the **production channel**: every `pear release production` updates what it serves, so you always get the latest cut without re-copying a link.
 
 ## What's inside
 
-- **Browse** — `hyper://` URL bar, hex and z-base-32 drive keys, localhost HTTP proxy, streaming peer discovery
-- **Apps** — paste any `pear://` link to launch a Pear app in its own window, or load a decentralized catalog (Hyperdrive) to install / launch / uninstall
+- **Multi-tab Browse** — `⌘T` / `⌘W` / `⌘L` / `⌘1`–`⌘9`. `hyper://` URL bar, hex and z-base-32 drive keys, localhost HTTP proxy, per-tab back/forward history, devtools button (`⌘⇧I`)
+- **Apps** — paste any `pear://` link to launch a Pear app in its own window, or load a decentralized catalog (Hyperdrive) to install / launch / uninstall. Recent catalogs are remembered across launches.
 - **P2P Sites** — block editor (headings, paragraphs, images, lists, quotes, code, raw HTML, divider), publish creates a Hyperdrive + broadcasts Ed25519-signed HiveRelay seed request + waits for replication, delete sends signed unseed
 - **Library** — bookmarks and history in a local Hyperbee
-- **Settings** — BIP-39 identity backup, connected relay count, storage usage, danger-zone reset-with-unseed
+- **Identity** — BIP-39 backup phrase + restore-from-phrase. Per-app sub-keys derived from your root identity.
+- **Profile** — display name, bio, avatar, website, email — opt-in fields apps see when you grant a sign-in
+- **Connected Apps** — view and revoke per-app login grants
+- **Login consent** — `window.pear.login()` from any `hyper://` page shows a modal where you pick which scopes to grant
+- **Relays** — add / remove / mark-primary; toggle hybrid-fetch vs pure-P2P
 
 ## Architecture
 
