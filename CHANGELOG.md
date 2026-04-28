@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.3.2 — 2026-04-28
+
+Tiny patch — point `DEFAULT_URL` at the **third and final** homepage
+drive, this one published via the desktop's own block editor (so
+future edits work in-place via the Sites tab).
+
+### Changed
+
+- `DEFAULT_URL` → `hyper://2d6c2be92f07e10ed5a4b07b5c1286a56f0c1220c79ad3c3293b069f8c946763/`
+  Pinned on 4 HiveRelays. Block source lives at `/.blocks.json` inside
+  the drive — open the site in Sites → Edit to update.
+- Catalog (`0c35d12fd9b1…`) `homepage` field updated to match.
+
+### Cleanup
+
+- Previous `fec1568a…` and `efd7b0c6c38d…` homepage drives unseeded
+  via `scripts/unseed-drive.js`. Their content stays alive only as
+  long as ad-hoc peers replicate it — no relay backstop.
+
+---
+
 ## v0.3.1 — 2026-04-28
 
 Patch release fixing the empty-directory race + wiring up a fresh,

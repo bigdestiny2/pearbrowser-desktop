@@ -45,11 +45,12 @@ const TAB_META = {
   settings: { label: 'Settings', icon: '⚙' }
 }
 
-// Homepage drive — pearbrowser landing page, re-published 2026-04-28.
-// Pinned on 5 HiveRelays, 365-day TTL. Publisher storage at
-// ~/Desktop/pearbrowser-publishers/pearbrowser-home/ for future updates.
-// (Previous fec1568a… key was unseeded; this one replaces it.)
-const DEFAULT_URL = 'hyper://efd7b0c6c38de88359c01d1211c963d08f49064ab964a5c2a5c34e09fb857a52/'
+// Homepage drive — published from PearBrowser's own block editor
+// (Sites tab), 2026-04-28. Pinned on HiveRelay. Earlier `fec1568a…`
+// and `efd7b0c6c38d…` keys have been unseeded; this is the live one.
+// To update: open the same site in the desktop's Sites editor and
+// republish — block-source lives at /.blocks.json inside the drive.
+const DEFAULT_URL = 'hyper://2d6c2be92f07e10ed5a4b07b5c1286a56f0c1220c79ad3c3293b069f8c946763/'
 
 // Default catalog drive — auto-loads on first Apps-tab visit when the
 // user has not yet pinned a catalog of their own. Curated entry point
