@@ -28,11 +28,11 @@ const FEATURED_APPS = [
     gradient: 'linear-gradient(135deg, #3fb950, #58a6ff)'
   },
   {
-    id: 'pear-game',
-    name: 'Pear Game',
-    tagline: 'A peer-to-peer game running natively on the Pear runtime.',
+    id: 'hiveworm',
+    name: 'HiveWorm',
+    tagline: 'Perpetual P2P life-sim — runs as a Pear app via swarm.v1.',
     link: 'pear://d1xbkcpcbi1xa8dexp49rsendra5r67w3qh5a9k8t44oemm4k16y',
-    initial: 'G',
+    initial: 'W',
     gradient: 'linear-gradient(135deg, #a371f7, #d946ef)'
   }
 ]
