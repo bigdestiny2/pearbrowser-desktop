@@ -94,7 +94,7 @@ function teardown (reason) {
   try { rpcServer?.close() } catch {}
   try { client?.end?.() } catch {}
   try { backendPipe.end?.() } catch {}
-  try { pipe.end() } catch {}
+  try { pipe?.end?.() } catch {}
   // Hard-exit fast: hypercore/corestore can hold the event loop
   // open for tens of seconds on graceful close, and that's what
   // was letting zombies survive. 300ms is plenty for our WS
@@ -106,10 +106,21 @@ function teardown (reason) {
     try { process?.exit?.(0) } catch {}
   }, 300)
 }
-pipe.on('close', () => teardown('pipe close'))
-pipe.on('end', () => teardown('pipe end'))
-pipe.on('error', (err) => teardown('pipe error: ' + (err && err.message)))
-Pear.teardown(() => teardown('Pear.teardown'))
+// pear-electron's runtime.start() return shape varies across versions:
+// older builds returned a duplex pipe (.on/.end), newer ones return a
+// plain object. Detect what we got and only attach listeners that exist.
+// The WS-renderer-close path is our reliable shutdown trigger; these
+// pipe listeners are belt-and-braces so any other exit signal still
+// teardowns. Wrap each in try/catch so an unsupported runtime never
+// throws an [uncaughtException] at boot.
+if (pipe && typeof pipe.on === 'function') {
+  try { pipe.on('close', () => teardown('pipe close')) } catch {}
+  try { pipe.on('end', () => teardown('pipe end')) } catch {}
+  try { pipe.on('error', (err) => teardown('pipe error: ' + (err && err.message))) } catch {}
+} else {
+  console.log('[boot] runtime.start() returned non-emitter pipe; using WS-close + Pear.teardown only')
+}
+try { Pear.teardown(() => teardown('Pear.teardown')) } catch {}
 try { Bare.on?.('beforeExit', () => teardown('beforeExit')) } catch {}
 try { Bare.on?.('exit', () => teardown('exit')) } catch {}
 try { process?.on?.('SIGTERM', () => teardown('SIGTERM')) } catch {}

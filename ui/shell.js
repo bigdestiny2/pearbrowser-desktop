@@ -166,12 +166,135 @@ function Browse ({ rpc, C, navUrl, onNavigated }) {
   `
 }
 
+// --- Login consent dialog ---------------------------------------------------
+//
+// When a hyper:// page calls window.pear.login(), the worklet fires
+// EVT_LOGIN_REQUEST with { requestId, driveKey, scopes, appName, reason,
+// currentGrant }. This component renders a modal sheet, lets the user
+// narrow the granted scopes, and resolves the pending promise via
+// CMD_LOGIN_RESOLVE.
+//
+// Scope catalogue is intentionally short — keep it human-readable.
+const SCOPE_LABELS = {
+  'profile:name': { label: 'Display name', detail: 'Your chosen public name' },
+  'profile:avatar': { label: 'Avatar', detail: 'Your profile picture URL' },
+  'profile:email': { label: 'Email', detail: 'Email you put in your profile' },
+  'profile:website': { label: 'Website', detail: 'Personal site URL on your profile' }
+}
+
+function shortKey (k) {
+  if (!k || typeof k !== 'string') return ''
+  if (k.length <= 16) return k
+  return k.slice(0, 8) + '…' + k.slice(-6)
+}
+
+function LoginConsent ({ rpc, C, request, identity, onClose }) {
+  const initial = new Set(request.scopes || [])
+  const [granted, setGranted] = useState(initial)
+  const [busy, setBusy] = useState(null)
+  const [err, setErr] = useState('')
+
+  const toggle = (s) => {
+    setGranted((prev) => {
+      const next = new Set(prev)
+      next.has(s) ? next.delete(s) : next.add(s)
+      return next
+    })
+  }
+
+  const decide = async (approved) => {
+    setErr(''); setBusy(approved ? 'approve' : 'deny')
+    try {
+      const scopes = approved ? Array.from(granted) : []
+      await rpc.request(C.CMD_LOGIN_RESOLVE, {
+        requestId: request.requestId,
+        approved,
+        scopes
+      })
+      onClose()
+    } catch (e) {
+      setErr(`could not resolve: ${e.message}`)
+      setBusy(null)
+    }
+  }
+
+  const appLabel = request.appName || 'A Pear app'
+  const driveLabel = shortKey(request.driveKey)
+
+  return html`
+    <div class="modal-overlay" role="dialog" aria-modal="true" onClick=${(e) => e.target.classList.contains('modal-overlay') && decide(false)}>
+      <div class="modal-card login-consent">
+        <div class="login-header">
+          <div class="login-app-icon">🍐</div>
+          <div class="login-header-text">
+            <div class="login-app-name">${appLabel}</div>
+            <div class="login-app-sub">wants to sign you in</div>
+            <div class="login-app-key" title=${request.driveKey}>${driveLabel}</div>
+          </div>
+        </div>
+
+        ${request.reason && html`<div class="login-reason">"${request.reason}"</div>`}
+
+        <div class="login-section-label">SIGNING IN AS</div>
+        <div class="login-identity">
+          <div class="login-identity-avatar">🍐</div>
+          <div class="login-identity-meta">
+            <div class="login-identity-label">You</div>
+            <code class="login-identity-key">${shortKey(identity?.publicKey || '')}</code>
+          </div>
+        </div>
+
+        <div class="login-section-label">${appLabel} WILL SEE</div>
+        <div class="login-scopes">
+          ${(request.scopes || []).length === 0
+            ? html`<div class="login-scope-empty">Nothing — sign-in only confirms it's you.</div>`
+            : (request.scopes || []).map((s) => {
+                const meta = SCOPE_LABELS[s] || { label: s, detail: '' }
+                const on = granted.has(s)
+                return html`
+                  <label class=${'login-scope' + (on ? ' on' : '')} key=${s}>
+                    <input type="checkbox" checked=${on} onChange=${() => toggle(s)} />
+                    <div class="login-scope-meta">
+                      <div class="login-scope-label">${meta.label}</div>
+                      <div class="login-scope-detail">${meta.detail || s}</div>
+                    </div>
+                  </label>
+                `
+              })}
+        </div>
+
+        ${request.currentGrant && html`
+          <div class="login-existing">
+            You previously granted this app on
+            ${' ' + new Date(request.currentGrant.grantedAt).toLocaleDateString()}.
+          </div>
+        `}
+
+        ${err && html`<div class="apps-error">${err}</div>`}
+
+        <div class="login-actions">
+          <button class="btn subtle" onClick=${() => decide(false)} disabled=${busy !== null}>
+            ${busy === 'deny' ? 'Cancelling…' : 'Cancel'}
+          </button>
+          <button class="btn primary" onClick=${() => decide(true)} disabled=${busy !== null}>
+            ${busy === 'approve' ? 'Signing in…' : 'Sign in'}
+          </button>
+        </div>
+      </div>
+    </div>
+  `
+}
+
 function Apps ({ rpc, C, onLaunch }) {
   const [catalogKey, setCatalogKey] = useState('')
   const [catalog, setCatalog] = useState(null)
+  // Recent catalog keys (loaded successfully at least once) — persisted
+  // via user-data settings so they survive across launches.
+  const [recentCatalogs, setRecentCatalogs] = useState([])
   const [installed, setInstalled] = useState([])
   const [busy, setBusy] = useState(null)
   const [err, setErr] = useState('')
+  const [autoLoadAttempted, setAutoLoadAttempted] = useState(false)
   const [pearLink, setPearLink] = useState('')
   const [launched, setLaunched] = useState('')
 
@@ -200,21 +323,49 @@ function Apps ({ rpc, C, onLaunch }) {
     }
   }
 
-  useEffect(() => { refreshInstalled() }, [])
-
-  const loadCatalog = async () => {
-    const key = catalogKey.trim()
+  const loadCatalog = async (overrideKey) => {
+    const key = (typeof overrideKey === 'string' ? overrideKey : catalogKey).trim()
     if (!key) return
     setErr(''); setBusy('catalog'); setCatalog(null)
     try {
-      const data = await rpc.request(C.CMD_LOAD_CATALOG, { keyHex: key })
+      const data = await rpc.request(C.CMD_LOAD_CATALOG, { keyHex: key }, 60000)
       setCatalog(data)
+      setCatalogKey(key)
+      // Pin as recent + persist for next launch.
+      setRecentCatalogs((prev) => {
+        const next = [key, ...prev.filter((k) => k !== key)].slice(0, 5)
+        rpc.request(C.CMD_USERDATA_SET_SETTINGS, {
+          updates: { lastCatalogKey: key, recentCatalogs: next }
+        }).catch(() => {})
+        return next
+      })
     } catch (e) {
       setErr(`catalog: ${e.message}`)
     } finally {
       setBusy(null)
     }
   }
+
+  // First mount: fetch installed list + recent catalogs, then auto-load
+  // the most recent catalog so the Apps tab isn't empty on every launch.
+  useEffect(() => {
+    refreshInstalled()
+    ;(async () => {
+      try {
+        const settings = await rpc.request(C.CMD_USERDATA_GET_SETTINGS)
+        const recent = Array.isArray(settings?.recentCatalogs) ? settings.recentCatalogs : []
+        const last = settings?.lastCatalogKey
+        if (recent.length) setRecentCatalogs(recent)
+        if (last) await loadCatalog(last)
+      } catch {
+        // user-data not ready yet — first-launch / boot races. The user
+        // can still paste a key by hand below.
+      } finally {
+        setAutoLoadAttempted(true)
+      }
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const installApp = async (app) => {
     setErr(''); setBusy(`install:${app.id}`)
@@ -302,11 +453,41 @@ function Apps ({ rpc, C, onLaunch }) {
           onKeyDown=${(e) => e.key === 'Enter' && loadCatalog()}
           spellcheck="false"
         />
-        <button class="btn primary" onClick=${loadCatalog} disabled=${!catalogKey || busy === 'catalog'}>
+        <button class="btn primary" onClick=${() => loadCatalog()} disabled=${!catalogKey || busy === 'catalog'}>
           ${busy === 'catalog' ? 'Loading…' : 'Load catalog'}
         </button>
       </div>
+
+      ${recentCatalogs.length > 0 && html`
+        <div class="catalog-recent">
+          ${recentCatalogs.map((k) => html`
+            <button
+              class=${'catalog-chip' + (k === catalogKey ? ' active' : '')}
+              key=${k}
+              title=${k}
+              onClick=${() => loadCatalog(k)}
+              disabled=${busy === 'catalog'}
+            >${k.slice(0, 8)}…${k.slice(-4)}</button>
+          `)}
+        </div>
+      `}
+
       ${err && html`<div class="apps-error">${err}</div>`}
+
+      ${busy === 'catalog' && !catalog && html`
+        <div class="catalog-loading">
+          <span class="spinner"></span>
+          <span>Loading catalog from peers…</span>
+        </div>
+      `}
+
+      ${autoLoadAttempted && !catalog && !busy && !err && html`
+        <div class="catalog-empty">
+          <strong>No catalog loaded.</strong>
+          Paste a catalog drive key above, or use one of the featured Pear apps to launch directly.
+          The browser also remembers catalogs you've loaded before — they'll appear here next time.
+        </div>
+      `}
 
       ${catalog && html`
         <h2>${catalog.name || 'Catalog'} · ${catalog.apps?.length ?? 0} apps</h2>
@@ -445,10 +626,15 @@ function Settings ({ rpc, C, status, storagePath, log }) {
   const [seedPhrase, setSeedPhrase] = useState(null)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(null)
+  // Restore-from-phrase UX state.
+  const [showRestore, setShowRestore] = useState(false)
+  const [restoreInput, setRestoreInput] = useState('')
+  const [restoreNotice, setRestoreNotice] = useState('')
 
-  useEffect(() => {
+  const refreshIdentity = () =>
     rpc.request(C.CMD_GET_IDENTITY).then(setIdentity).catch((e) => setErr(e.message))
-  }, [])
+
+  useEffect(() => { refreshIdentity() }, [])
 
   const revealPhrase = async () => {
     if (seedPhrase) { setSeedPhrase(null); return }
@@ -458,6 +644,40 @@ function Settings ({ rpc, C, status, storagePath, log }) {
       setSeedPhrase(res.mnemonic)
     } catch (e) { setErr(e.message) }
     finally { setBusy(null) }
+  }
+
+  const validateAndRestore = async () => {
+    const phrase = restoreInput.trim().split(/\s+/).join(' ')
+    if (!phrase) return
+    setErr(''); setRestoreNotice('')
+    // Validate first so the user gets a clean error before we destroy anything.
+    setBusy('restore-validate')
+    try {
+      const v = await rpc.request(C.CMD_IDENTITY_VALIDATE_PHRASE, { mnemonic: phrase })
+      if (!v?.valid) {
+        setErr('That phrase is not a valid 12 or 24-word BIP-39 mnemonic.')
+        setBusy(null)
+        return
+      }
+    } catch (e) {
+      setErr(`validate: ${e.message}`); setBusy(null); return
+    }
+    if (!confirm('Restoring will REPLACE this device\'s identity.\n\nAll Hyperbees (bookmarks, history, profile, contacts) on this device stay in place but get re-keyed under the restored identity. This cannot be undone unless you also kept the previous backup phrase.\n\nProceed?')) {
+      setBusy(null); return
+    }
+    setBusy('restore-apply')
+    try {
+      await rpc.request(C.CMD_IDENTITY_IMPORT_PHRASE, { mnemonic: phrase }, 30000)
+      setRestoreInput('')
+      setShowRestore(false)
+      setSeedPhrase(null)
+      setRestoreNotice('Identity restored. Your peer key has rotated — running apps may need to re-pair.')
+      await refreshIdentity()
+    } catch (e) {
+      setErr(`restore: ${e.message}`)
+    } finally {
+      setBusy(null)
+    }
   }
 
   const clearCache = async () => {
@@ -511,6 +731,37 @@ function Settings ({ rpc, C, status, storagePath, log }) {
           <pre class="seed-phrase">${seedPhrase}</pre>
           <div class="settings-warning">Write this down. Anyone with these words controls your identity.</div>
         `}
+        <div class="settings-row">
+          <div>
+            <div class="settings-label">Restore from phrase</div>
+            <div class="settings-subtle">Replace this device's identity with one recovered from a saved 12 or 24-word BIP-39 mnemonic.</div>
+          </div>
+          <button class="btn subtle" onClick=${() => { setShowRestore((v) => !v); setRestoreNotice(''); setErr('') }}
+                  disabled=${busy?.startsWith?.('restore')}>
+            ${showRestore ? 'Cancel' : 'Restore…'}
+          </button>
+        </div>
+        ${showRestore && html`
+          <div class="restore-form">
+            <textarea
+              class="restore-textarea"
+              placeholder="Paste your 12 or 24-word backup phrase here, separated by spaces"
+              value=${restoreInput}
+              rows="3"
+              spellcheck="false"
+              autocapitalize="none"
+              onInput=${(e) => setRestoreInput(e.target.value)}
+            ></textarea>
+            <div class="restore-actions">
+              <button class="btn primary" onClick=${validateAndRestore}
+                      disabled=${!restoreInput.trim() || busy?.startsWith?.('restore')}>
+                ${busy === 'restore-validate' ? 'Checking…' : busy === 'restore-apply' ? 'Restoring…' : 'Restore identity'}
+              </button>
+            </div>
+            <div class="settings-warning">This destroys the current identity on disk. Make sure you've saved its phrase first.</div>
+          </div>
+        `}
+        ${restoreNotice && html`<div class="apps-ok">${restoreNotice}</div>`}
       </div>
 
       <h2>HiveRelay Network</h2>
@@ -851,19 +1102,38 @@ export function App ({ rpc, C, storagePath }) {
   const [navUrl, setNavUrl] = useState(null)
   const [status, setStatus] = useState({ stage: 'booting', peerCount: 0, dhtConnected: false, ready: false, proxyPort: null })
   const [log, setLog] = useState([])
+  // Login consent ceremony — populated when EVT_LOGIN_REQUEST fires.
+  const [pendingLogin, setPendingLogin] = useState(null)
+  // Light-weight identity blob for showing "you" in the consent sheet.
+  const [identity, setIdentity] = useState(null)
 
   useEffect(() => {
     const appendLog = (line) => setLog((l) => [...l.slice(-200), line])
 
     const onBoot = (e) => { appendLog(`[${e.detail.stage}] ${e.detail.message || ''}`); setStatus((s) => ({ ...s, stage: e.detail.stage })) }
-    const onReady = (e) => { appendLog(`[ready] HTTP proxy on port ${e.detail.port}`); setStatus((s) => ({ ...s, ready: true, proxyPort: e.detail.port, stage: 'ready' })) }
+    const onReady = (e) => {
+      appendLog(`[ready] HTTP proxy on port ${e.detail.port}`)
+      setStatus((s) => ({ ...s, ready: true, proxyPort: e.detail.port, stage: 'ready' }))
+      // Identity is ready by the time READY fires — fetch it once for
+      // the login-consent sheet to show "Signing in as <pubkey>".
+      rpc.request(C.CMD_GET_IDENTITY).then(setIdentity).catch(() => {})
+    }
     const onPeer = (e) => setStatus((s) => ({ ...s, peerCount: e.detail.peerCount }))
     const onErr = (e) => appendLog(`[error] ${e.detail?.message || JSON.stringify(e.detail)}`)
+    const onLogin = (e) => {
+      // Backend buffers events that arrive before the renderer connects,
+      // so it's possible to see EVT_LOGIN_REQUEST during boot. Stash the
+      // newest one — multiple concurrent consents are rare and we want
+      // a single modal at a time.
+      appendLog(`[login] ${e.detail?.appName || shortKey(e.detail?.driveKey)} requested ${(e.detail?.scopes || []).join(',') || 'sign-in'}`)
+      setPendingLogin(e.detail)
+    }
 
     rpc.addEventListener(`event:${C.EVT_BOOT_PROGRESS}`, onBoot)
     rpc.addEventListener(`event:${C.EVT_READY}`, onReady)
     rpc.addEventListener(`event:${C.EVT_PEER_COUNT}`, onPeer)
     rpc.addEventListener(`event:${C.EVT_ERROR}`, onErr)
+    rpc.addEventListener(`event:${C.EVT_LOGIN_REQUEST}`, onLogin)
 
     const poll = setInterval(async () => {
       try {
@@ -878,6 +1148,7 @@ export function App ({ rpc, C, storagePath }) {
       rpc.removeEventListener(`event:${C.EVT_READY}`, onReady)
       rpc.removeEventListener(`event:${C.EVT_PEER_COUNT}`, onPeer)
       rpc.removeEventListener(`event:${C.EVT_ERROR}`, onErr)
+      rpc.removeEventListener(`event:${C.EVT_LOGIN_REQUEST}`, onLogin)
     }
   }, [rpc, C])
 
@@ -921,6 +1192,14 @@ export function App ({ rpc, C, storagePath }) {
       <div class=${'status ' + statusClass}>
         <span class="dot"></span>${statusText}
       </div>
+
+      ${pendingLogin && html`<${LoginConsent}
+        rpc=${rpc}
+        C=${C}
+        request=${pendingLogin}
+        identity=${identity}
+        onClose=${() => setPendingLogin(null)}
+      />`}
     </div>
   `
 }
