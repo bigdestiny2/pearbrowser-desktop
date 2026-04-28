@@ -1,8 +1,8 @@
-# Hiveworm v2 — wire-protocol upgrade for `hyper://` pages
+# `swarm.v1` — direct Hyperswarm access for `hyper://` pages
 
 > Status: design spec, targeting **PearBrowser Desktop v0.3.0**. Mobile parity tracked separately.
 >
-> Goal: same URL, same drive — pages that know how to ask for direct P2P get it; pages that don't keep working unchanged.
+> Goal: same URL, same drive — pages that know how to ask for direct P2P get it; pages that don't keep working unchanged. The page-side API is `window.pear.swarm.v1`.
 
 ---
 
@@ -20,7 +20,7 @@ page ← http://127.0.0.1:PORT/...
 
 That model is fine for static page loads. It is the wrong shape for any application that needs **bidirectional realtime** — chat, multiplayer games, collaborative editors, mesh signaling, cursor sharing, voice/video discovery. Every message round-trips localhost HTTP, which destroys streaming, blows up latency, and forces request/response semantics on protocols that want to be push-driven.
 
-Hiveworm v2 fixes this by exposing — to opt-in pages — the four primitives that Pear desktop apps already use directly: **keypair**, **autobase**, **swarm join**, **signed ops**. Pages get a real channel into Hyperswarm, scoped and consent-gated, without ever holding raw private keys or socket FDs.
+`swarm.v1` fixes this by exposing — to opt-in pages — the four primitives that Pear desktop apps already use directly: **keypair**, **autobase**, **swarm join**, **signed ops**. Pages get a real channel into Hyperswarm, scoped and consent-gated, without ever holding raw private keys or socket FDs.
 
 ---
 
@@ -189,7 +189,7 @@ if (direct) {
 }
 ```
 
-Old PearBrowser desktops keep working unchanged. New ones light up direct paths the page already knew how to ask for. There is no flag day, no breaking change, no "Hiveworm v2 fork" of any drive.
+Old PearBrowser desktops keep working unchanged. New ones light up direct paths the page already knew how to ask for. There is no flag day, no breaking change, no `swarm.v1`-only fork of any drive.
 
 ---
 

@@ -31,7 +31,7 @@ const { RelayClient } = require('./relay-client.js')
 const { CatalogManager } = require('./catalog-manager.js')
 const { AppManager } = require('./app-manager.js')
 const { SiteManager } = require('./site-manager.js')
-const { PearBridge } = require('./pear-bridge.js')
+const { PearBridge, PEAR_SWARM_V1_SHIM } = require('./pear-bridge.js')
 const { HttpBridge } = require('./http-bridge.js')
 const { UserData } = require('./user-data.js')
 const { Identity, validateMnemonic } = require('./identity.js')
@@ -759,7 +759,7 @@ rpc.handle(C.CMD_CONTACTS_UPDATE, async ({ pubkey, updates } = {}) => {
   return { contact: await requireContacts().update(pubkey, updates || {}) }
 })
 
-// --- Hiveworm v2 — swarm consent ceremony + grants management ---
+// --- swarm.v1 — swarm consent ceremony + grants management ---
 //
 // When http-bridge → swarm-bridge sees a Tier C topic-join request,
 // it calls requestConsent(args) which routes through openSwarmConsent
@@ -1029,7 +1029,7 @@ async function boot () {
   try { await contacts.ready(); console.log('Contacts ready') }
   catch (err) { console.error('Contacts init failed:', err && err.message); contacts = null }
 
-  // Hiveworm v2 — direct Hyperswarm access for hyper:// pages.
+  // swarm.v1 — direct Hyperswarm access for hyper:// pages.
   // SwarmGrants persists Tier C topic-join grants across launches.
   // SwarmBridge multiplexes peer events into per-channel SSE streams.
   swarmGrants = new SwarmGrants(store, swarm)
@@ -1080,6 +1080,11 @@ async function boot () {
   proxy = new HyperProxy(getDriveForProxy, (path, err) => {
     rpc.event(C.EVT_ERROR, { type: 'proxy-error', path, message: err })
   }, relayClient)
+
+  // swarm.v1 — page-side shim that exposes window.pear.swarm.v1 to every
+  // text/html response served by the proxy. Pages get it for free; no
+  // <script src> required from the page author. See docs/SWARM-V1.md.
+  proxy.setPearSwarmShim(PEAR_SWARM_V1_SHIM)
 
   // Mount direct HTTP bridge (WebView → localhost → Bare, bypasses RN relay)
   const httpBridge = new HttpBridge(pearBridge, swarm, getDriveForProxy, {

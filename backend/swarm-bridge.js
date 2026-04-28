@@ -1,7 +1,7 @@
 /**
  * SwarmBridge — page-scoped Hyperswarm channels for `window.pear.swarm.v1`.
  *
- * See docs/HIVEWORM-V2-WIRE-UPGRADE.md for the full design. Short version:
+ * See docs/SWARM-V1.md for the full design. Short version:
  *
  *   Pages call:        page → POST /api/swarm/join { topicHex, protocol, ... }
  *                      page → ws://127.0.0.1:PORT/ws/swarm?token=…&channelId=…

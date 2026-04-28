@@ -67,9 +67,16 @@ class HttpBridge {
     return `${driveKeyHex}:${appId}`
   }
 
-  _requireToken (req, res) {
+  _requireToken (req, res, urlObj) {
+    // Token is normally in the X-Pear-Token header. EventSource cannot
+    // set custom headers, so the SSE endpoint also accepts the token on
+    // the URL as ?token=…. Same security boundary either way — the
+    // worklet validates against its in-memory issuance map.
     const rawToken = req.headers['x-pear-token']
-    const token = Array.isArray(rawToken) ? rawToken[0] : rawToken
+    let token = Array.isArray(rawToken) ? rawToken[0] : rawToken
+    if (!token && urlObj && urlObj.searchParams) {
+      token = urlObj.searchParams.get('token') || null
+    }
     const driveKeyHex = this._validateToken(token)
     if (!driveKeyHex) {
       this._jsonError(res, 'Unauthorized', 401)
@@ -419,7 +426,7 @@ class HttpBridge {
         return this._json(res, { key, path: dirPath, entries })
       }
 
-      // --- Swarm v1 (Hiveworm wire upgrade — see docs/HIVEWORM-V2-WIRE-UPGRADE.md) ---
+      // --- swarm.v1 (direct Hyperswarm access for hyper:// pages — see docs/SWARM-V1.md) ---
       //
       //   POST /api/swarm/join       — open a channel; returns channelId
       //   GET  /api/swarm/events     — SSE stream of peer/message events
@@ -434,7 +441,9 @@ class HttpBridge {
         if (!this._swarmBridge) {
           return this._jsonError(res, 'swarm bridge not available', 503)
         }
-        const auth = this._requireToken(req, res)
+        // Pass `url` so /api/swarm/events (SSE) can fall back to ?token=…
+        // when EventSource can't set the X-Pear-Token header.
+        const auth = this._requireToken(req, res, url)
         if (!auth) return true
 
         if (req.method === 'POST' && path === '/api/swarm/join') {

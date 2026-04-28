@@ -78,8 +78,8 @@ const CMD_CONTACTS_ADD = 92
 const CMD_CONTACTS_UPDATE = 93
 const CMD_CONTACTS_REMOVE = 94
 
-// Hiveworm v2 — direct swarm access for hyper:// pages.
-// See docs/HIVEWORM-V2-WIRE-UPGRADE.md.
+// swarm.v1 — direct swarm access for hyper:// pages.
+// See docs/SWARM-V1.md.
 //   CMD_SWARM_RESOLVE — UI replies to a Tier C consent ceremony
 //   CMD_SWARM_LIST_GRANTS — list all (driveKey, topic) grants
 //   CMD_SWARM_REVOKE_GRANT — drop a single (driveKey, topic) grant

@@ -3,7 +3,7 @@
  * pairs. Lets a page rejoin a Tier C swarm topic without prompting on
  * every page load.
  *
- * See docs/HIVEWORM-V2-WIRE-UPGRADE.md §4.3 for the consent model.
+ * See docs/SWARM-V1.md §4.3 for the consent model.
  *
  * Storage layout (single Hyperbee under user's Corestore):
  *   g!<driveKeyHex>!<topicHex>  → { topicHex, driveKey, protocol, appName,
