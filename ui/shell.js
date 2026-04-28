@@ -28,11 +28,11 @@ const FEATURED_APPS = [
     gradient: 'linear-gradient(135deg, #3fb950, #58a6ff)'
   },
   {
-    id: 'doctor',
-    name: 'Pear Doctor',
-    tagline: 'Diagnose your Pear runtime — networking, DHT reachability, NAT traversal.',
-    link: 'pear://fs1xuyzx6c9mu6zu6t5ubhkcbzz913h814te9ay9zzbc9hzf15fo',
-    initial: 'D',
+    id: 'pear-game',
+    name: 'Pear Game',
+    tagline: 'A peer-to-peer game running natively on the Pear runtime.',
+    link: 'pear://d1xbkcpcbi1xa8dexp49rsendra5r67w3qh5a9k8t44oemm4k16y',
+    initial: 'G',
     gradient: 'linear-gradient(135deg, #a371f7, #d946ef)'
   }
 ]
