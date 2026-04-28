@@ -621,6 +621,290 @@ function Library ({ rpc, C, onBrowse }) {
   `
 }
 
+// --- Settings sub-sections -----------------------------------------------
+//
+// Three additions that surface backend power that's been there for a while:
+//
+//   - ProfileSection      Edit display name / bio / avatar URL / website /
+//                         email — what apps see when you grant a login.
+//   - ConnectedAppsSection View per-app login grants and revoke them
+//                         individually or all at once.
+//   - RelaysSection       Add/remove/reorder relay URLs, toggle hybrid fetch.
+//
+// All three call CMD_* handlers that already live in backend/index.js.
+
+const PROFILE_FIELDS = [
+  { key: 'name', label: 'Display name', placeholder: 'How apps will refer to you' },
+  { key: 'bio', label: 'Bio', placeholder: 'A short bio (optional)', textarea: true },
+  { key: 'avatar', label: 'Avatar URL', placeholder: 'https://… or hyper://… (optional)' },
+  { key: 'website', label: 'Website', placeholder: 'https://your.site (optional)' },
+  { key: 'email', label: 'Email', placeholder: 'name@example.com (optional)' }
+]
+
+function ProfileSection ({ rpc, C }) {
+  const [profile, setProfile] = useState({})
+  const [draft, setDraft] = useState({})
+  const [busy, setBusy] = useState(null)
+  const [err, setErr] = useState('')
+  const [notice, setNotice] = useState('')
+
+  const load = async () => {
+    setErr('')
+    try {
+      const res = await rpc.request(C.CMD_PROFILE_GET)
+      const p = res?.profile || {}
+      setProfile(p); setDraft(p)
+    } catch (e) { setErr(`profile: ${e.message}`) }
+  }
+  useEffect(() => { load() }, [])
+
+  const dirty = PROFILE_FIELDS.some(({ key }) => (draft[key] || '') !== (profile[key] || ''))
+
+  const save = async () => {
+    setErr(''); setNotice(''); setBusy('save')
+    try {
+      const updates = {}
+      for (const { key } of PROFILE_FIELDS) {
+        const v = (draft[key] || '').trim()
+        if (v !== (profile[key] || '')) updates[key] = v
+      }
+      const res = await rpc.request(C.CMD_PROFILE_UPDATE, { updates })
+      const p = res?.profile || updates
+      setProfile(p); setDraft(p)
+      setNotice('Saved.')
+      setTimeout(() => setNotice(''), 1500)
+    } catch (e) { setErr(`save: ${e.message}`) }
+    finally { setBusy(null) }
+  }
+
+  const clearAll = async () => {
+    if (!confirm('Clear ALL profile fields? Apps that already have grants will see empty values from now on.')) return
+    setErr(''); setBusy('clear')
+    try {
+      await rpc.request(C.CMD_PROFILE_CLEAR)
+      setProfile({}); setDraft({})
+      setNotice('Profile cleared.')
+      setTimeout(() => setNotice(''), 1500)
+    } catch (e) { setErr(`clear: ${e.message}`) }
+    finally { setBusy(null) }
+  }
+
+  return html`
+    <div class="settings-card">
+      ${err && html`<div class="apps-error">${err}</div>`}
+      ${notice && html`<div class="apps-ok">${notice}</div>`}
+      ${PROFILE_FIELDS.map(({ key, label, placeholder, textarea }) => html`
+        <div class="settings-row" key=${key}>
+          <div class="profile-field">
+            <div class="settings-label">${label}</div>
+            ${textarea
+              ? html`<textarea
+                  class="profile-input"
+                  rows="2"
+                  placeholder=${placeholder}
+                  value=${draft[key] || ''}
+                  onInput=${(e) => setDraft({ ...draft, [key]: e.target.value })}
+                ></textarea>`
+              : html`<input
+                  type="text"
+                  class="profile-input"
+                  placeholder=${placeholder}
+                  value=${draft[key] || ''}
+                  onInput=${(e) => setDraft({ ...draft, [key]: e.target.value })}
+                />`}
+          </div>
+        </div>
+      `)}
+      <div class="settings-row settings-row-actions">
+        <button class="btn subtle" onClick=${clearAll} disabled=${busy !== null}>
+          ${busy === 'clear' ? 'Clearing…' : 'Clear all'}
+        </button>
+        <button class="btn primary" onClick=${save} disabled=${!dirty || busy !== null}>
+          ${busy === 'save' ? 'Saving…' : 'Save profile'}
+        </button>
+      </div>
+    </div>
+  `
+}
+
+function ConnectedAppsSection ({ rpc, C }) {
+  const [grants, setGrants] = useState([])
+  const [busy, setBusy] = useState(null)
+  const [err, setErr] = useState('')
+  const [loaded, setLoaded] = useState(false)
+
+  const load = async () => {
+    setErr('')
+    try {
+      const res = await rpc.request(C.CMD_LOGIN_LIST_GRANTS)
+      setGrants(Array.isArray(res?.grants) ? res.grants : [])
+    } catch (e) { setErr(`grants: ${e.message}`) }
+    finally { setLoaded(true) }
+  }
+  useEffect(() => { load() }, [])
+
+  const revoke = async (grant) => {
+    const label = grant.appName || shortKey(grant.driveKey)
+    if (!confirm(`Revoke ${label}? Next time it tries to sign in you'll be asked again.`)) return
+    setErr(''); setBusy(`revoke:${grant.driveKey}`)
+    try {
+      await rpc.request(C.CMD_LOGIN_REVOKE_GRANT, { driveKeyHex: grant.driveKey })
+      await load()
+    } catch (e) { setErr(`revoke: ${e.message}`) }
+    finally { setBusy(null) }
+  }
+
+  const revokeAll = async () => {
+    if (grants.length === 0) return
+    if (!confirm(`Revoke ALL ${grants.length} grant(s)? Every connected app will need to ask for sign-in again.`)) return
+    setErr(''); setBusy('revoke-all')
+    try {
+      await rpc.request(C.CMD_LOGIN_REVOKE_ALL)
+      await load()
+    } catch (e) { setErr(`revoke-all: ${e.message}`) }
+    finally { setBusy(null) }
+  }
+
+  return html`
+    <div class="settings-card">
+      ${err && html`<div class="apps-error">${err}</div>`}
+      ${!loaded
+        ? html`<div class="settings-subtle">Loading…</div>`
+        : grants.length === 0
+          ? html`<div class="settings-subtle">No apps have asked you to sign in yet.</div>`
+          : html`
+            ${grants.map((g) => html`
+              <div class="settings-row" key=${g.driveKey}>
+                <div>
+                  <div class="settings-label">${g.appName || shortKey(g.driveKey)}</div>
+                  <div class="settings-subtle">
+                    <code class="settings-code">${shortKey(g.driveKey)}</code>
+                    · ${(g.scopes || []).join(', ') || 'sign-in only'}
+                    ${g.expiresAt ? html` · expires ${new Date(g.expiresAt).toLocaleDateString()}` : ''}
+                  </div>
+                </div>
+                <button class="btn subtle danger" onClick=${() => revoke(g)}
+                        disabled=${busy === `revoke:${g.driveKey}`}>
+                  ${busy === `revoke:${g.driveKey}` ? 'Revoking…' : 'Revoke'}
+                </button>
+              </div>
+            `)}
+            <div class="settings-row settings-row-actions">
+              <button class="btn subtle danger" onClick=${revokeAll} disabled=${busy === 'revoke-all'}>
+                ${busy === 'revoke-all' ? 'Revoking all…' : 'Revoke all'}
+              </button>
+            </div>
+          `}
+    </div>
+  `
+}
+
+function RelaysSection ({ rpc, C }) {
+  const [config, setConfig] = useState({ relays: [], enabled: true })
+  const [input, setInput] = useState('')
+  const [busy, setBusy] = useState(null)
+  const [err, setErr] = useState('')
+  const [loaded, setLoaded] = useState(false)
+
+  const load = async () => {
+    setErr('')
+    try {
+      const res = await rpc.request(C.CMD_GET_RELAYS)
+      setConfig({
+        relays: Array.isArray(res?.relays) ? res.relays : [],
+        enabled: res?.enabled !== false
+      })
+    } catch (e) { setErr(`relays: ${e.message}`) }
+    finally { setLoaded(true) }
+  }
+  useEffect(() => { load() }, [])
+
+  const setRelays = async (next) => {
+    setErr(''); setBusy('save')
+    try {
+      const res = await rpc.request(C.CMD_SET_RELAYS, { relays: next })
+      setConfig({
+        relays: Array.isArray(res?.relays) ? res.relays : next,
+        enabled: res?.enabled !== false
+      })
+    } catch (e) { setErr(`set: ${e.message}`) }
+    finally { setBusy(null) }
+  }
+
+  const toggleEnabled = async (enabled) => {
+    setErr(''); setBusy('toggle')
+    try {
+      await rpc.request(C.CMD_SET_RELAY_ENABLED, { enabled })
+      setConfig((c) => ({ ...c, enabled }))
+    } catch (e) { setErr(`toggle: ${e.message}`) }
+    finally { setBusy(null) }
+  }
+
+  const addRelay = async () => {
+    const url = input.trim().replace(/\/$/, '')
+    if (!url) return
+    if (!/^https?:\/\//.test(url)) { setErr('Relay URLs must start with http:// or https://'); return }
+    if (config.relays.includes(url)) { setErr('Already in the list.'); return }
+    setInput('')
+    await setRelays([...config.relays, url])
+  }
+
+  const removeRelay = async (url) => {
+    if (config.relays.length <= 1) {
+      if (!confirm('Removing your last relay will switch to pure-P2P mode (slower first paint). Continue?')) return
+    }
+    await setRelays(config.relays.filter((r) => r !== url))
+  }
+
+  return html`
+    <div class="settings-card">
+      ${err && html`<div class="apps-error">${err}</div>`}
+      <div class="settings-row">
+        <div>
+          <div class="settings-label">${config.enabled ? 'Hybrid fetch' : 'Pure P2P mode'}</div>
+          <div class="settings-subtle">${config.enabled
+            ? 'Try a relay first (1-2s first paint), fall back to P2P. Recommended for most users.'
+            : 'P2P only — slower first paint, no relay dependency. Toggle this on to use relays.'
+          }</div>
+        </div>
+        <button class="btn subtle" onClick=${() => toggleEnabled(!config.enabled)} disabled=${busy === 'toggle'}>
+          ${config.enabled ? 'Disable' : 'Enable'}
+        </button>
+      </div>
+      ${loaded && config.relays.length === 0 && html`
+        <div class="settings-subtle">No relays configured.</div>
+      `}
+      ${config.relays.map((url, idx) => html`
+        <div class="settings-row" key=${url}>
+          <div>
+            <code class="settings-code">${url}</code>
+            ${idx === 0 ? html`<span class="settings-pill">primary</span>` : ''}
+          </div>
+          ${config.relays.length > 1 ? html`
+            <button class="btn subtle" onClick=${() => removeRelay(url)} disabled=${busy === 'save'}>
+              Remove
+            </button>
+          ` : ''}
+        </div>
+      `)}
+      <div class="settings-row">
+        <input
+          type="text"
+          class="profile-input"
+          placeholder="https://relay.example.com"
+          value=${input}
+          onInput=${(e) => setInput(e.target.value)}
+          onKeyDown=${(e) => e.key === 'Enter' && addRelay()}
+          spellcheck="false"
+        />
+        <button class="btn primary" onClick=${addRelay} disabled=${!input.trim() || busy === 'save'}>
+          Add
+        </button>
+      </div>
+    </div>
+  `
+}
+
 function Settings ({ rpc, C, status, storagePath, log }) {
   const [identity, setIdentity] = useState(null)
   const [seedPhrase, setSeedPhrase] = useState(null)
@@ -763,6 +1047,18 @@ function Settings ({ rpc, C, status, storagePath, log }) {
         `}
         ${restoreNotice && html`<div class="apps-ok">${restoreNotice}</div>`}
       </div>
+
+      <h2>Profile</h2>
+      <p class="subtitle">What apps see when you grant a sign-in. Each field is opt-in — leave blank to share nothing.</p>
+      <${ProfileSection} rpc=${rpc} C=${C} />
+
+      <h2>Connected Apps</h2>
+      <p class="subtitle">Pear apps that have been granted access to your identity. Revoke any time.</p>
+      <${ConnectedAppsSection} rpc=${rpc} C=${C} />
+
+      <h2>Relays</h2>
+      <p class="subtitle">HiveRelay endpoints used for fast first-paint and persistence. Hybrid mode falls back to pure P2P if a relay is down.</p>
+      <${RelaysSection} rpc=${rpc} C=${C} />
 
       <h2>HiveRelay Network</h2>
       <div class="settings-card">
