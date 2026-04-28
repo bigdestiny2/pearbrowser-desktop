@@ -1,5 +1,47 @@
 # Changelog
 
+## v0.3.1 — 2026-04-28
+
+Patch release fixing the empty-directory race + wiring up a fresh,
+alive homepage drive + a default app catalog.
+
+### Fixed
+
+- **Proxy `drive.entry()` no-wait race** in `backend/hyper-proxy.js`.
+  Freshly opened drives (just joined the swarm seconds ago) returned
+  `null` from `drive.entry()` before any blocks had arrived, so the
+  proxy wrongly fell back to the empty directory listing. Now waits up
+  to 8s for `drive.update({ wait: true })` before deciding whether
+  `index.html` exists. Hyper:// pages render correctly on first paint
+  even when the local cache is cold.
+
+### New
+
+- **`DEFAULT_URL`** now points at the live, freshly-published
+  pearbrowser-home drive:
+  `hyper://efd7b0c6c38de88359c01d1211c963d08f49064ab964a5c2a5c34e09fb857a52/`
+  Pinned on 5 HiveRelays for 365 days; publisher storage retained so
+  future updates can re-publish to the same key.
+- **`DEFAULT_CATALOG_KEY`** auto-loads on first Apps-tab visit when no
+  catalog has been pinned yet. Curated entry-point listing
+  pearbrowser-desktop, hiverelay, p2pbuilders. Drive key:
+  `0c35d12fd9b1115dd2d1fb1cd1751817c9173d3196ac7c62ae37d023340dcb75`
+- **Companion drives** also live + pinned (linked from the catalog,
+  not the desktop default):
+  - `hyper://ea607230f7b9a5f854c664901b2c34faf1c6f5b7cee6fc3bca02ac682fd02754/` — **p2phiverelay**
+  - `hyper://f0cd01e3565a9eb5d811f3f46f0595ad6b2e87652304789bef3fe4501b3db42a/` — **p2pbuilders**
+
+### Operator scripts
+
+Three new helpers under `scripts/` for managing pinned drives:
+- `pin-self-on-hiverelay.js` — pin the desktop's own production bundle
+- `publish-and-pin.js` — publish a directory + pin in one shot
+- `extract-drive.js` — recover content from a still-seeded drive
+- `unseed-drive.js` — send signed unseed for a drive
+- `list-drive.js` — diagnose what a drive's manifest contains
+
+---
+
 ## v0.3.0 — 2026-04-28
 
 `swarm.v1` — direct Hyperswarm access for `hyper://` pages. Same URL,

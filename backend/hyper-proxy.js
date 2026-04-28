@@ -237,7 +237,22 @@ class HyperProxy {
       if (filePath.endsWith('/') || filePath === '') {
         const drive = await this._getDrive(driveKeyHex)
         if (drive) {
-          // Check if there's an index.html
+          // Brief wait for the drive's manifest to sync from the swarm
+          // before checking whether index.html exists. Without this,
+          // freshly-opened drives (just joined the swarm seconds ago)
+          // returned null from drive.entry() before any blocks had
+          // arrived — and we fell back to the empty directory listing.
+          // 8s is plenty for a hot relay; first-time peer discovery
+          // sometimes needs longer, but the directory-listing fallback
+          // still kicks in if it does.
+          try {
+            await Promise.race([
+              drive.update({ wait: true }),
+              new Promise((_, reject) => setTimeout(() => reject(new Error('update-timeout')), 8000))
+            ])
+          } catch {
+            // Timeout is acceptable — drive.entry will still try below.
+          }
           const indexExists = await drive.entry(filePath + 'index.html').catch(() => null)
           if (!indexExists) {
             // No index, show directory listing

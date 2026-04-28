@@ -45,7 +45,19 @@ const TAB_META = {
   settings: { label: 'Settings', icon: '⚙' }
 }
 
-const DEFAULT_URL = 'hyper://f1e72b4bec5abd134aa3fde1ed58aa4a9ab97ff1a90ca29a258de0dacdce65fb/'
+// Homepage drive — pearbrowser landing page, re-published 2026-04-28.
+// Pinned on 5 HiveRelays, 365-day TTL. Publisher storage at
+// ~/Desktop/pearbrowser-publishers/pearbrowser-home/ for future updates.
+// (Previous fec1568a… key was unseeded; this one replaces it.)
+const DEFAULT_URL = 'hyper://efd7b0c6c38de88359c01d1211c963d08f49064ab964a5c2a5c34e09fb857a52/'
+
+// Default catalog drive — auto-loads on first Apps-tab visit when the
+// user has not yet pinned a catalog of their own. Curated entry point
+// for the Pear ecosystem; lists pearbrowser-desktop, hiverelay,
+// p2pbuilders. Source under
+// ~/Desktop/pearbrowser-publishers/catalog-source/, signing key under
+// ~/Desktop/pearbrowser-publishers/catalog/. Pinned on 5 HiveRelays.
+const DEFAULT_CATALOG_KEY = '0c35d12fd9b1115dd2d1fb1cd1751817c9173d3196ac7c62ae37d023340dcb75'
 
 function normalizeUrl (raw) {
   const s = raw.trim()
