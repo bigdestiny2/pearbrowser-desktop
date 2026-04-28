@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>echo-peer — swarm.v1 smoke test</title>
+  <style>
+    body { background: #0d1117; color: #e6edf3; font: 14px ui-monospace, Menlo, monospace; padding: 20px; }
+    h1   { font-size: 18px; color: #ff9500; margin-top: 0; }
+    .row { margin: 6px 0; }
+    .ok  { color: #3fb950; }
+    .err { color: #f85149; }
+    .dim { color: #8b949e; }
+    code { background: #21262d; padding: 1px 5px; border-radius: 3px; }
+    button { background: #21262d; color: #e6edf3; border: 1px solid #30363d; padding: 4px 10px; border-radius: 4px; font: inherit; cursor: pointer; }
+    button:hover { background: #30363d; }
+    #log { white-space: pre-wrap; max-height: 50vh; overflow: auto; background: #161b22; padding: 10px; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <h1>echo-peer · <code>window.pear.swarm.v1</code> smoke test</h1>
+  <p class="dim">Joins a drive-scoped (Tier A) topic, says "hello" on every peer it sees, echoes any inbound message back. Open this page on two devices that share the drive — they'll discover each other via the DHT and round-trip messages without going through the localhost HTTP proxy.</p>
+
+  <div class="row">
+    <button id="join">Join topic</button>
+    <button id="leave" disabled>Leave</button>
+    <button id="ping" disabled>Broadcast "ping"</button>
+  </div>
+
+  <div class="row dim">Subtopic: <code>echo-peer/v1</code></div>
+  <div class="row dim">Status: <span id="status">idle</span></div>
+
+  <pre id="log"></pre>
+
+<script>
+const log = document.getElementById('log')
+const status = document.getElementById('status')
+const joinBtn = document.getElementById('join')
+const leaveBtn = document.getElementById('leave')
+const pingBtn = document.getElementById('ping')
+
+function line (msg, cls) {
+  const t = new Date().toLocaleTimeString()
+  log.innerHTML += `<span class="${cls || 'dim'}">[${t}] ${msg}\n</span>`
+  log.scrollTop = log.scrollHeight
+}
+
+if (!window.pear || !window.pear.swarm || !window.pear.swarm.v1) {
+  line('window.pear.swarm.v1 not available — open this page in PearBrowser Desktop v0.3+ to run it.', 'err')
+  joinBtn.disabled = true
+} else {
+  line('window.pear.swarm.v1 detected — ready to join.', 'ok')
+}
+
+let channel = null
+
+joinBtn.onclick = async () => {
+  joinBtn.disabled = true
+  status.textContent = 'joining…'
+  try {
+    channel = await window.pear.swarm.v1.join(null, {
+      subtopic: 'echo-peer/v1',
+      protocol: 'echo-peer',
+      version: 1,
+      appName: 'echo-peer'
+    })
+    line(`joined channel ${channel.channelId} (tier ${channel.tier}) on topic ${channel.topicHex.slice(0, 12)}…`, 'ok')
+    status.textContent = 'connected'
+    leaveBtn.disabled = false
+    pingBtn.disabled = false
+
+    channel.on('peer', (peer) => {
+      line(`+ peer ${peer.id}`, 'ok')
+      const hi = new TextEncoder().encode('hello from echo-peer (' + Math.random().toString(36).slice(2, 7) + ')')
+      peer.send(hi)
+    })
+    channel.on('peer-leave', (peer) => {
+      line(`- peer ${peer.id}`, 'dim')
+    })
+    channel.on('message', (peer, data) => {
+      const text = new TextDecoder().decode(data)
+      line(`← ${peer.id}: ${text}`)
+      // Echo back, prepend "re: "
+      peer.send(new TextEncoder().encode('re: ' + text))
+    })
+    channel.on('error', (err) => {
+      line(`error: ${err.message || err}`, 'err')
+    })
+    channel.on('closed', () => {
+      line('channel closed', 'dim')
+      status.textContent = 'idle'
+      leaveBtn.disabled = true
+      pingBtn.disabled = true
+      joinBtn.disabled = false
+      channel = null
+    })
+  } catch (err) {
+    line(`join failed: ${err.message}`, 'err')
+    status.textContent = 'idle'
+    joinBtn.disabled = false
+  }
+}
+
+leaveBtn.onclick = () => { channel && channel.destroy() }
+
+pingBtn.onclick = () => {
+  if (!channel) return
+  const peers = channel.peers
+  if (peers.length === 0) { line('(no peers connected)', 'dim'); return }
+  const buf = new TextEncoder().encode('ping ' + Date.now())
+  for (const p of peers) p.send(buf)
+  line(`→ broadcast "ping" to ${peers.length} peer(s)`)
+}
+</script>
+</body>
+</html>

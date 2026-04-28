@@ -1002,3 +1002,27 @@ p { color: #8b949e; margin-bottom: 12px; }
   font-family: ui-monospace, Menlo, monospace;
   font-size: 12px;
 }
+
+/* --- Connected Apps swarm-grant subsection ------------------------- */
+.settings-subsection-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.8px;
+  color: #6e7681;
+  margin: 14px 0 8px;
+  text-transform: uppercase;
+}
+.settings-subsection-label:first-child { margin-top: 0; }
+.swarm-grant-app {
+  margin-top: 6px;
+  padding: 10px 12px;
+  border: 1px solid #21262d;
+  border-radius: 8px;
+}
+.swarm-grant-app + .swarm-grant-app { margin-top: 8px; }
+.swarm-grant-row {
+  margin: 6px 0 0;
+  padding: 6px 0;
+  border-top: 1px dashed #21262d;
+}
+.swarm-grant-row:first-of-type { border-top: 1px dashed #21262d; }
