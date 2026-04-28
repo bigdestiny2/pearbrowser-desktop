@@ -1,31 +1,33 @@
 /**
- * Pin the pearbrowser-desktop bundle itself onto HiveRelay.
+ * Pin a drive (the pearbrowser-desktop bundle itself, the welcome
+ * landing-page drive, or any other 64-hex Hyperdrive / Pear project
+ * key) onto the HiveRelay backbone.
  *
- * Why: the production `pear://` channel currently relies on the
- * developer's machine being online (and any other peers running the
- * app) to serve the bundle. Pinning it on HiveRelay means a multi-region
- * always-on backbone keeps the bundle reachable even when no developer
- * machine is online. Standard always-on infra story.
+ * Why: drives normally rely on whoever published them being online to
+ * serve. Pinning on HiveRelay means a multi-region always-on backbone
+ * keeps the drive reachable even when the publisher is offline.
  *
  * What this does:
  *   1. Boot a tiny HiveRelayClient (separate storage so it doesn't
  *      collide with a running PearBrowser instance)
  *   2. Wait for at least one relay connection
- *   3. Send a signed seed-request for the production project key
+ *   3. Send a signed seed-request for the given project key
  *   4. Print which relays accepted
  *   5. Exit
  *
  * The relays accept the request, join the swarm topic, and start
- * replicating the drive. From that point on, anyone running
- * `pear run pear://tco5k7h38uo…` can pull bytes from the relays
- * even when the publisher is offline.
+ * replicating the drive.
  *
  * Idempotent. Re-running just refreshes the seed window.
  *
  * Usage:
+ *   # Pin the pearbrowser-desktop production channel (default)
  *   node scripts/pin-self-on-hiverelay.js
  *
- * Optionally override the project key (e.g. for staging channels):
+ *   # Pin any other drive — pass the 64-hex project/drive key:
+ *   node scripts/pin-self-on-hiverelay.js <64-hex-key> [friendly-name]
+ *
+ *   # Or via env var (legacy):
  *   PEAR_PROJECT_KEY=<64-hex> node scripts/pin-self-on-hiverelay.js
  */
 
