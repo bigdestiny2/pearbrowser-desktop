@@ -57,111 +57,284 @@ function normalizeUrl (raw) {
   return `hyper://${s}`
 }
 
-function Browse ({ rpc, C, navUrl, onNavigated }) {
-  const [input, setInput] = useState(navUrl || DEFAULT_URL)
-  const [src, setSrc] = useState(null)
-  const [status, setStatus] = useState('')
-  const [history, setHistory] = useState([])
-  const [histIdx, setHistIdx] = useState(-1)
-  const iframeRef = useRef(null)
+// --- Multi-tab Browse ---------------------------------------------------
+//
+// Each tab keeps its own iframe (hidden via display:none when inactive
+// so state persists across switches), its own back/forward history, its
+// own URL input value, and its own status string. A keyboard listener
+// on document handles Cmd-T / Cmd-W / Cmd-L / Cmd-1..9 globally while
+// the Browse component is mounted.
+//
+// Devtools:
+//   Cmd-Shift-I or Cmd-Alt-I opens the per-iframe devtools via Pear's
+//   Window.openDevTools API when available. Falls back gracefully if
+//   the runtime doesn't expose it.
 
-  const go = async (url) => {
+let _tabIdSeq = 0
+function makeTabId () { _tabIdSeq += 1; return 'tab-' + _tabIdSeq + '-' + Date.now().toString(36) }
+
+function makeTab (initialUrl = '') {
+  return {
+    id: makeTabId(),
+    url: initialUrl,
+    displayUrl: initialUrl,
+    src: null,
+    history: [],
+    histIdx: -1,
+    status: '',
+    title: 'New tab'
+  }
+}
+
+function Browse ({ rpc, C, navUrl, onNavigated }) {
+  const [tabs, setTabs] = useState(() => [makeTab(DEFAULT_URL)])
+  const [activeId, setActiveId] = useState(() => 'placeholder')
+  const inputRef = useRef(null)
+  const iframeRefs = useRef({})
+  const [editingUrl, setEditingUrl] = useState('')
+
+  const active = tabs.find((t) => t.id === activeId) || tabs[0]
+
+  // Sync active id once tabs are stable.
+  useEffect(() => {
+    if (activeId === 'placeholder' && tabs.length > 0) setActiveId(tabs[0].id)
+  }, [activeId, tabs])
+
+  const updateTab = (id, patch) =>
+    setTabs((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)))
+
+  const setActive = (id) => {
+    setActiveId(id)
+    const t = tabs.find((x) => x.id === id)
+    if (t) setEditingUrl(t.displayUrl || '')
+  }
+
+  // When the active tab changes, sync the URL input.
+  useEffect(() => {
+    if (active) setEditingUrl(active.displayUrl || '')
+  }, [active?.id, active?.displayUrl])
+
+  const go = async (url, tabIdOverride) => {
     const target = normalizeUrl(url)
     if (!target) return
-    setStatus(`resolving ${target}…`)
+    const id = tabIdOverride || activeId
+    updateTab(id, { status: `resolving ${target}…`, displayUrl: target })
     try {
       const res = await rpc.request(C.CMD_NAVIGATE, { url: target })
-      setSrc(res.localUrl)
-      setStatus('')
-      setHistory((h) => {
-        const trimmed = h.slice(0, histIdx + 1)
-        const next = [...trimmed, target]
-        setHistIdx(next.length - 1)
-        return next
-      })
-      setInput(target)
-      rpc.request(C.CMD_USERDATA_ADD_HISTORY, { url: target }).catch(() => {})
+      setTabs((prev) => prev.map((t) => {
+        if (t.id !== id) return t
+        const trimmed = t.history.slice(0, t.histIdx + 1)
+        const newHistory = [...trimmed, target]
+        return {
+          ...t,
+          src: res.localUrl,
+          status: '',
+          history: newHistory,
+          histIdx: newHistory.length - 1,
+          url: target,
+          displayUrl: target,
+          title: target
+        }
+      }))
+      rpc.request(C.CMD_USERDATA_ADD_HISTORY, { url: target, title: target }).catch(() => {})
     } catch (err) {
-      setStatus(`error: ${err.message}`)
+      updateTab(id, { status: `error: ${err.message}` })
     }
   }
 
   const bookmark = async () => {
-    const target = normalizeUrl(input)
+    const target = normalizeUrl(editingUrl)
     if (!target) return
     try {
       await rpc.request(C.CMD_USERDATA_ADD_BOOKMARK, { url: target, title: target })
-      setStatus(`bookmarked ${target}`)
-      setTimeout(() => setStatus(''), 1500)
+      updateTab(activeId, { status: `bookmarked ${target}` })
+      setTimeout(() => updateTab(activeId, { status: '' }), 1500)
     } catch (err) {
-      setStatus(`bookmark failed: ${err.message}`)
+      updateTab(activeId, { status: `bookmark failed: ${err.message}` })
     }
   }
 
-  useEffect(() => {
-    if (navUrl) {
-      go(navUrl)
-      onNavigated?.()
-    }
-  }, [navUrl])
+  const back = () => {
+    if (!active || active.histIdx <= 0) return
+    const i = active.histIdx - 1
+    const url = active.history[i]
+    updateTab(active.id, { histIdx: i, displayUrl: url })
+    go(url, active.id)
+  }
+  const forward = () => {
+    if (!active || active.histIdx >= active.history.length - 1) return
+    const i = active.histIdx + 1
+    const url = active.history[i]
+    updateTab(active.id, { histIdx: i, displayUrl: url })
+    go(url, active.id)
+  }
+  const reload = () => {
+    const el = iframeRefs.current[activeId]
+    if (el && el.src) el.src = el.src
+  }
 
-  // Auto-navigate to the landing page on first mount.
+  const newTab = (url = '') => {
+    const t = makeTab(url)
+    setTabs((prev) => [...prev, t])
+    setActiveId(t.id)
+    setEditingUrl(url || '')
+    if (url) {
+      // Defer go() until next tick so setActiveId has applied.
+      setTimeout(() => go(url, t.id), 0)
+    }
+  }
+
+  const closeTab = (id) => {
+    setTabs((prev) => {
+      const idx = prev.findIndex((t) => t.id === id)
+      const remaining = prev.filter((t) => t.id !== id)
+      if (remaining.length === 0) {
+        const fresh = makeTab('')
+        setActiveId(fresh.id)
+        setEditingUrl('')
+        return [fresh]
+      }
+      if (id === activeId) {
+        const next = remaining[Math.min(idx, remaining.length - 1)]
+        setActiveId(next.id)
+        setEditingUrl(next.displayUrl || '')
+      }
+      // Drop the iframe ref so it can GC.
+      delete iframeRefs.current[id]
+      return remaining
+    })
+  }
+
+  // Try to open devtools for the active tab's iframe. pear-electron
+  // exposes Pear.Window.devtools(...) on some channels; fall back to
+  // a console log if unavailable.
+  const openDevtools = () => {
+    try {
+      const el = iframeRefs.current[activeId]
+      const cw = el?.contentWindow
+      if (!cw) return
+      // Path 1: pear-electron exposes Pear.Window.openDevTools()
+      if (typeof Pear !== 'undefined' && Pear.Window?.openDevTools) {
+        Pear.Window.openDevTools({ mode: 'detach' })
+        return
+      }
+      // Path 2: chrome devtools protocol via remote debugging is not
+      // exposed by default; surface a hint instead.
+      console.log('[devtools] runtime does not expose openDevTools — relaunch with --devtools')
+      updateTab(activeId, { status: 'devtools: relaunch with `pear run --dev --devtools .`' })
+      setTimeout(() => updateTab(activeId, { status: '' }), 3000)
+    } catch (err) {
+      console.error('[devtools] failed:', err)
+    }
+  }
+
+  // Keyboard shortcuts. Active only while Browse is mounted.
   useEffect(() => {
-    if (!src && !navUrl && DEFAULT_URL) go(DEFAULT_URL)
+    const onKey = (e) => {
+      const meta = e.metaKey || e.ctrlKey
+      if (!meta) return
+      if (e.key === 't' || e.key === 'T') {
+        if (e.shiftKey) return // Cmd-Shift-T (reopen) — not implemented
+        e.preventDefault(); newTab()
+      } else if (e.key === 'w' || e.key === 'W') {
+        e.preventDefault(); closeTab(activeId)
+      } else if (e.key === 'l' || e.key === 'L') {
+        e.preventDefault()
+        inputRef.current?.focus(); inputRef.current?.select?.()
+      } else if (e.key === 'r' || e.key === 'R') {
+        e.preventDefault(); reload()
+      } else if ((e.key === 'i' || e.key === 'I') && (e.shiftKey || e.altKey)) {
+        e.preventDefault(); openDevtools()
+      } else if (e.key >= '1' && e.key <= '9') {
+        const n = parseInt(e.key, 10) - 1
+        if (tabs[n]) { e.preventDefault(); setActive(tabs[n].id) }
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [activeId, tabs])
+
+  // Auto-navigate to the landing page once on mount.
+  useEffect(() => {
+    if (active && !active.src && active.url) go(active.url, active.id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const back = () => {
-    if (histIdx <= 0) return
-    const i = histIdx - 1
-    setHistIdx(i)
-    go(history[i])
+  // External navUrl prop (Apps tab → "open in Browse"). Open in a new
+  // tab if the active tab already has content; otherwise navigate the
+  // current empty tab.
+  useEffect(() => {
+    if (!navUrl) return
+    if (active && active.src) newTab(navUrl)
+    else go(navUrl, active?.id)
+    onNavigated?.()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navUrl])
+
+  const onUrlKeyDown = (e) => {
+    if (e.key === 'Enter') go(editingUrl)
   }
-  const forward = () => {
-    if (histIdx >= history.length - 1) return
-    const i = histIdx + 1
-    setHistIdx(i)
-    go(history[i])
-  }
-  const reload = () => {
-    if (iframeRef.current) iframeRef.current.src = iframeRef.current.src
-  }
-  const onKey = (e) => { if (e.key === 'Enter') go(input) }
 
   return html`
     <div class="browse">
+      <div class="tabstrip">
+        ${tabs.map((t, i) => html`
+          <button
+            key=${t.id}
+            class=${'tabchip' + (t.id === activeId ? ' active' : '')}
+            onClick=${() => setActive(t.id)}
+            title=${t.displayUrl || 'New tab'}
+          >
+            <span class="tabchip-favicon">${t.src ? '🌐' : '🆕'}</span>
+            <span class="tabchip-title">${t.title || (t.displayUrl ? t.displayUrl.replace(/^hyper:\/\//, '').slice(0, 28) : 'New tab')}</span>
+            <span class="tabchip-close" onClick=${(e) => { e.stopPropagation(); closeTab(t.id) }}>×</span>
+          </button>
+        `)}
+        <button class="tabchip-new" onClick=${() => newTab()} title="New tab (⌘T)">+</button>
+      </div>
       <div class="urlbar">
-        <button class="nav" onClick=${back} disabled=${histIdx <= 0}>◀</button>
-        <button class="nav" onClick=${forward} disabled=${histIdx >= history.length - 1}>▶</button>
-        <button class="nav" onClick=${reload} disabled=${!src}>⟳</button>
+        <button class="nav" onClick=${back} disabled=${!active || active.histIdx <= 0} title="Back">◀</button>
+        <button class="nav" onClick=${forward} disabled=${!active || active.histIdx >= active.history.length - 1} title="Forward">▶</button>
+        <button class="nav" onClick=${reload} disabled=${!active?.src} title="Reload (⌘R)">⟳</button>
         <input
+          ref=${inputRef}
           type="text"
-          value=${input}
-          onInput=${(e) => setInput(e.target.value)}
-          onKeyDown=${onKey}
+          value=${editingUrl}
+          onInput=${(e) => setEditingUrl(e.target.value)}
+          onKeyDown=${onUrlKeyDown}
           placeholder="hyper://<key>/path"
           spellcheck="false"
         />
-        <button class="nav" onClick=${bookmark} disabled=${!input.trim()} title="Bookmark this URL">☆</button>
-        <button class="nav go" onClick=${() => go(input)}>Go</button>
+        <button class="nav" onClick=${bookmark} disabled=${!editingUrl?.trim?.()} title="Bookmark this URL">☆</button>
+        <button class="nav" onClick=${openDevtools} disabled=${!active?.src} title="Devtools (⌘⇧I)">⚙</button>
+        <button class="nav go" onClick=${() => go(editingUrl)}>Go</button>
       </div>
-      ${status && html`<div class="browse-status">${status}</div>`}
-      ${src
-        ? html`<iframe ref=${iframeRef} class="webview" src=${src} sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-pointer-lock"></iframe>`
-        : html`
-          <div class="browse-welcome">
-            <div class="browse-welcome-inner">
-              <div class="browse-welcome-logo">🍐</div>
-              <h2>The peer-to-peer web starts here</h2>
-              <p>Paste any <code>hyper://</code> URL in the address bar above — hex or z-base-32 — and PearBrowser will fetch it directly from its peers. No DNS, no servers, no CDN.</p>
-              <div class="browse-welcome-actions">
-                <button class="btn primary" onClick=${() => go(DEFAULT_URL)}>Try the PearBrowser site</button>
-                <button class="btn subtle" onClick=${() => { if (iframeRef.current) iframeRef.current.focus?.(); document.querySelector('.urlbar input')?.focus() }}>Focus the URL bar</button>
-              </div>
-              <div class="browse-welcome-tip">Tip: visit <strong>Apps</strong> to launch Keet, PearPass, and other Pear apps.</div>
-            </div>
-          </div>
-        `}
+      ${active?.status && html`<div class="browse-status">${active.status}</div>`}
+      <div class="browse-stage">
+        ${tabs.map((t) => t.src
+          ? html`<iframe
+              key=${t.id}
+              ref=${(el) => { if (el) iframeRefs.current[t.id] = el }}
+              class=${'webview' + (t.id === activeId ? '' : ' hidden')}
+              src=${t.src}
+              sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-pointer-lock"
+            ></iframe>`
+          : t.id === activeId
+            ? html`<div class="browse-welcome" key=${t.id}>
+                <div class="browse-welcome-inner">
+                  <div class="browse-welcome-logo">🍐</div>
+                  <h2>The peer-to-peer web starts here</h2>
+                  <p>Paste any <code>hyper://</code> URL above — hex or z-base-32 — and PearBrowser fetches it directly from its peers. No DNS, no servers, no CDN.</p>
+                  <div class="browse-welcome-actions">
+                    <button class="btn primary" onClick=${() => go(DEFAULT_URL)}>Try the PearBrowser site</button>
+                    <button class="btn subtle" onClick=${() => { inputRef.current?.focus(); inputRef.current?.select?.() }}>Focus the URL bar</button>
+                  </div>
+                  <div class="browse-welcome-tip">Tip: <code>⌘T</code> opens a new tab, <code>⌘W</code> closes one, <code>⌘L</code> jumps to the URL bar, <code>⌘1</code>–<code>⌘9</code> switches between tabs.</div>
+                </div>
+              </div>`
+            : null
+        )}
+      </div>
     </div>
   `
 }
