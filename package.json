@@ -1,6 +1,6 @@
 {
   "name": "pearbrowser-desktop",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "P2P browser + decentralized app store + site builder, desktop Pear fork of PearBrowser (jj10133/Vinjari family)",
   "type": "module",
   "scripts": {

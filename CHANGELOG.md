@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.3.3 — 2026-04-29
+
+### Changed
+
+- **Apps tab Featured slot:** Pear Doctor → **HiveWorm**
+  (`pear://d1xbkcpcbi1xa8dexp49rsendra5r67w3qh5a9k8t44oemm4k16y`).
+  HiveWorm is a perpetual P2P life-sim using `window.pear.swarm.v1`
+  for direct peer gossip. Pinned on 5 HiveRelays for 365 days.
+  Source: <https://github.com/bigdestiny2/hiveworm>
+
+---
+
 ## v0.3.2 — 2026-04-28
 
 Tiny patch — point `DEFAULT_URL` at the **third and final** homepage
