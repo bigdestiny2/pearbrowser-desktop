@@ -1,5 +1,61 @@
 # Changelog
 
+## v0.4.0 — 2026-05-04 — "First-run delight"
+
+Consumer polish wave, focused on what a brand-new user sees in their
+first 60 seconds + giving the browser the basic stickiness that
+makes it feel like a real browser.
+
+### New
+
+- **First-launch onboarding overlay.** Three slides — welcome, a
+  short three-thing pitch, and a 2×2 grid of curated first sites
+  (homepage, HiveWorm, HiveRelay site, P2P Builders) to land in.
+  Skippable. Persisted via `pearbrowser.onboardingDone` in user-data
+  settings — never shown again. Deliberately does NOT force a
+  backup-phrase reveal: that's framed as a Settings → Identity
+  feature for the "moving to a new device" use case.
+- **Tab persistence + restore across launches.** Tab state is now
+  serialized to `pearbrowser.browseTabs` in user-data settings on
+  every change (debounced 800ms), and restored on next boot. You'll
+  pick up exactly where you left off — same tabs, same active tab.
+- **Tabs no longer destroyed on main-tab switch.** Lifted browse
+  tabs[] state up to App level — switching to Apps or Settings and
+  back no longer wipes your open tabs. (This was a long-standing
+  bug; the lift fixes it as a side effect of the persistence work.)
+- **"About this site" panel** (ⓘ button in the URL bar). Shows the
+  current URL, drive key in both hex and z-base-32 forms (copy
+  buttons for each), scheme + path, and a one-click bookmark toggle.
+  Live drive metadata (length, peer count, replicas) lands in a
+  near-future patch.
+- **URL bar autocomplete** drawing from your bookmarks + history
+  Hyperbees. Bookmarks rank above history; prefix matches above
+  substring matches; cap of 8 results. ↑ ↓ arrows to navigate, Enter
+  to pick, Esc to dismiss. Refreshes the source on focus, debounced
+  to once per 30s so it never blocks typing.
+
+### Changed
+
+- **Settings → Identity** restructured. The backup-phrase section is
+  now framed as **"Moving to a new device?"** with explanation of
+  what the phrase actually does and the security tradeoffs, instead
+  of presenting it as a generic "make sure you back up your
+  identity" tax. Reveal-phrase + restore-from-phrase flows
+  unchanged.
+
+### Internal
+
+- New components: `Onboarding`, `AboutSite` in `ui/shell.js`.
+- New helpers: `parseDriveAddress` (URL → {hex, z32, path, scheme}).
+- App-level state lifted from Browse: `tabs`, `browseActiveId`,
+  `tabsRestored`, `onboardingState`.
+- Browse component takes `tabs/setTabs/activeId/setActiveId` as
+  props instead of owning the state.
+- New CSS sections: onboarding overlay/slides/dots, about-card,
+  copy-btn-small, urlbar-suggestions.
+
+---
+
 ## v0.3.3 — 2026-04-29
 
 ### Changed

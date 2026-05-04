@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { html } from 'htm/react'
 import { Logo, Wordmark } from './logo.js'
 
@@ -99,12 +99,172 @@ function makeTab (initialUrl = '') {
   }
 }
 
-function Browse ({ rpc, C, navUrl, onNavigated }) {
-  const [tabs, setTabs] = useState(() => [makeTab(DEFAULT_URL)])
-  const [activeId, setActiveId] = useState(() => 'placeholder')
+// --- About-this-site panel -----------------------------------------------
+//
+// Modal showing technical details about whatever drive is loaded in the
+// active tab — drive key (hex + z-base-32), bookmark state, scheme, path.
+// Live metadata (length, peer count, replicas) lands in a follow-up
+// commit once we wire CMD_DRIVE_INFO; for now we surface what's
+// derivable locally without a new RPC call.
+//
+// Triggered from the (i) button in the URL bar.
+
+function parseDriveAddress (urlStr) {
+  if (!urlStr || typeof urlStr !== 'string') return null
+  let u
+  try { u = new URL(urlStr) } catch { return null }
+  const proto = u.protocol.replace(':', '')
+  if (proto !== 'hyper' && proto !== 'pear') return null
+  // Drive key is the host (or first segment for hyper://<key>/path)
+  const raw = u.hostname || u.pathname.split('/')[0] || ''
+  if (!raw) return null
+  // Hex (64 chars) or z-base-32 (52 chars)
+  let hex = null, z32Form = null
+  if (/^[0-9a-f]{64}$/i.test(raw)) {
+    hex = raw.toLowerCase()
+    try { z32Form = require('z32').encode(Buffer.from(hex, 'hex')) } catch {}
+  } else if (/^[13-9a-km-uw-z]{52}$/i.test(raw)) {
+    z32Form = raw.toLowerCase()
+    try { hex = Buffer.from(require('z32').decode(z32Form)).toString('hex') } catch {}
+  }
+  return { proto, raw, hex, z32: z32Form, path: u.pathname || '/', urlStr }
+}
+
+function AboutSite ({ rpc, C, url, onClose, onBookmarkToggle }) {
+  const drive = parseDriveAddress(url)
+  const [bookmarked, setBookmarked] = useState(null)
+  const [busy, setBusy] = useState(null)
+  const [copyState, setCopyState] = useState({})
+
+  // Check whether this URL is in the local bookmarks Hyperbee.
+  useEffect(() => {
+    if (!url) return
+    rpc.request(C.CMD_USERDATA_LIST_BOOKMARKS).then((res) => {
+      const list = (res?.bookmarks) || []
+      setBookmarked(list.some((b) => b && b.url === url))
+    }).catch(() => setBookmarked(false))
+  }, [url, rpc, C])
+
+  const copy = (key, text) => {
+    try {
+      navigator.clipboard?.writeText(text)
+      setCopyState({ ...copyState, [key]: true })
+      setTimeout(() => setCopyState((p) => ({ ...p, [key]: false })), 1500)
+    } catch {}
+  }
+
+  const toggleBookmark = async () => {
+    if (busy) return
+    setBusy('bookmark')
+    try {
+      if (bookmarked) {
+        await rpc.request(C.CMD_USERDATA_REMOVE_BOOKMARK, { url })
+        setBookmarked(false)
+      } else {
+        await rpc.request(C.CMD_USERDATA_ADD_BOOKMARK, { url, title: url })
+        setBookmarked(true)
+      }
+      onBookmarkToggle?.()
+    } catch {}
+    finally { setBusy(null) }
+  }
+
+  return html`
+    <div class="modal-overlay" role="dialog" aria-modal="true"
+         onClick=${(e) => e.target.classList.contains('modal-overlay') && onClose()}>
+      <div class="modal-card about-card">
+        <div class="about-head">
+          <div class="about-title">About this site</div>
+          <button class="about-close" onClick=${onClose} title="Close">×</button>
+        </div>
+
+        <div class="about-section-label">FULL URL</div>
+        <div class="about-row">
+          <code class="about-mono">${url || '(no URL loaded)'}</code>
+          <button class="copy-btn-small ${copyState.url ? 'copied' : ''}"
+                  onClick=${() => copy('url', url)} disabled=${!url}>
+            ${copyState.url ? '✓' : 'Copy'}
+          </button>
+        </div>
+
+        ${drive && drive.hex && html`
+          <div class="about-section-label">DRIVE KEY (hex)</div>
+          <div class="about-row">
+            <code class="about-mono">${drive.hex}</code>
+            <button class="copy-btn-small ${copyState.hex ? 'copied' : ''}"
+                    onClick=${() => copy('hex', drive.hex)}>
+              ${copyState.hex ? '✓' : 'Copy'}
+            </button>
+          </div>
+        `}
+
+        ${drive && drive.z32 && html`
+          <div class="about-section-label">DRIVE KEY (z-base-32)</div>
+          <div class="about-row">
+            <code class="about-mono">${drive.z32}</code>
+            <button class="copy-btn-small ${copyState.z32 ? 'copied' : ''}"
+                    onClick=${() => copy('z32', drive.z32)}>
+              ${copyState.z32 ? '✓' : 'Copy'}
+            </button>
+          </div>
+        `}
+
+        ${drive && html`
+          <div class="about-meta-grid">
+            <div>
+              <div class="about-meta-label">Scheme</div>
+              <div class="about-meta-value">${drive.proto}://</div>
+            </div>
+            <div>
+              <div class="about-meta-label">Path</div>
+              <div class="about-meta-value">${drive.path}</div>
+            </div>
+          </div>
+        `}
+
+        <div class="about-section-label">YOUR LIBRARY</div>
+        <div class="about-row about-bookmark-row">
+          <div>
+            ${bookmarked === null
+              ? html`<span class="settings-subtle">Checking…</span>`
+              : bookmarked
+                ? html`<span style="color:#ff9500">★ Bookmarked</span>`
+                : html`<span class="settings-subtle">Not in your bookmarks</span>`}
+          </div>
+          <button class="btn ${bookmarked ? 'subtle' : 'primary'}"
+                  onClick=${toggleBookmark}
+                  disabled=${busy === 'bookmark' || bookmarked === null || !url}>
+            ${busy === 'bookmark' ? '…' : (bookmarked ? 'Remove bookmark' : 'Bookmark this site')}
+          </button>
+        </div>
+
+        <div class="about-foot">
+          Live metadata (drive version, peer count, pinning relays)
+          coming in a near-future update.
+        </div>
+      </div>
+    </div>
+  `
+}
+
+function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActiveId }) {
+  // tabs[] + activeId are now lifted to App-level state and passed in
+  // as props. This survives main-tab switches (Browse→Apps→Browse no
+  // longer destroys your open tabs) and lets App persist them to
+  // user-data settings for cross-launch session restore.
   const inputRef = useRef(null)
   const iframeRefs = useRef({})
   const [editingUrl, setEditingUrl] = useState('')
+  // About-this-site modal — true when user clicked the (i) button.
+  const [aboutOpen, setAboutOpen] = useState(false)
+  // URL bar autocomplete state (suggestions, dropdown visibility,
+  // keyboard-selection index). Suggestions come from a single fetch
+  // of bookmarks + history at focus time, then filtered locally as
+  // the user types — fast and avoids hammering the user-data Hyperbee.
+  const [autocompleteSource, setAutocompleteSource] = useState([])
+  const [autocompleteOpen, setAutocompleteOpen] = useState(false)
+  const [autocompleteIdx, setAutocompleteIdx] = useState(-1)
+  const autocompleteFetchedAt = useRef(0)
 
   const active = tabs.find((t) => t.id === activeId) || tabs[0]
 
@@ -284,7 +444,86 @@ function Browse ({ rpc, C, navUrl, onNavigated }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navUrl])
 
+  // Compute filtered suggestions from the autocompleteSource for the
+  // current editingUrl. Bookmarks rank above history, exact-prefix
+  // above substring; cap at 8 to keep the dropdown digestible.
+  const suggestions = useMemo(() => {
+    const q = (editingUrl || '').trim().toLowerCase()
+    if (!q) return autocompleteSource.slice(0, 8)
+    const seen = new Set()
+    const out = []
+    const score = (entry) => {
+      const url = (entry.url || '').toLowerCase()
+      const title = (entry.title || '').toLowerCase()
+      if (url.startsWith(q)) return 0
+      if (title.startsWith(q)) return 1
+      if (url.includes(q)) return 2
+      if (title.includes(q)) return 3
+      return 99
+    }
+    const ranked = autocompleteSource
+      .map((e) => ({ e, s: score(e) }))
+      .filter(({ s }) => s < 99)
+      .sort((a, b) => a.s - b.s || (a.e.kind === 'bookmark' ? -1 : 1))
+    for (const { e } of ranked) {
+      if (seen.has(e.url)) continue
+      seen.add(e.url)
+      out.push(e)
+      if (out.length >= 8) break
+    }
+    return out
+  }, [editingUrl, autocompleteSource])
+
+  // Refresh the suggestion source from user-data Hyperbee, debounced
+  // by 30s — bookmarks/history rarely change in mid-typing.
+  const refreshAutocompleteSource = async () => {
+    if (Date.now() - autocompleteFetchedAt.current < 30_000 && autocompleteSource.length > 0) return
+    try {
+      const [bRes, hRes] = await Promise.all([
+        rpc.request(C.CMD_USERDATA_LIST_BOOKMARKS).catch(() => ({})),
+        rpc.request(C.CMD_USERDATA_LIST_HISTORY, { limit: 100 }).catch(() => ({})),
+      ])
+      const bookmarks = ((bRes && bRes.bookmarks) || []).map((b) => ({
+        kind: 'bookmark', url: b.url, title: b.title || b.url
+      }))
+      const history = ((hRes && hRes.history) || []).map((h) => ({
+        kind: 'history', url: h.url, title: h.title || h.url
+      }))
+      // Bookmarks first so they out-rank history with the same URL.
+      setAutocompleteSource([...bookmarks, ...history])
+      autocompleteFetchedAt.current = Date.now()
+    } catch {}
+  }
+
   const onUrlKeyDown = (e) => {
+    if (autocompleteOpen && suggestions.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setAutocompleteIdx((i) => (i + 1) % suggestions.length)
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setAutocompleteIdx((i) => (i <= 0 ? suggestions.length - 1 : i - 1))
+        return
+      }
+      if (e.key === 'Escape') {
+        setAutocompleteOpen(false)
+        setAutocompleteIdx(-1)
+        return
+      }
+      if (e.key === 'Enter') {
+        if (autocompleteIdx >= 0 && suggestions[autocompleteIdx]) {
+          e.preventDefault()
+          const picked = suggestions[autocompleteIdx]
+          setEditingUrl(picked.url)
+          setAutocompleteOpen(false)
+          setAutocompleteIdx(-1)
+          go(picked.url)
+          return
+        }
+      }
+    }
     if (e.key === 'Enter') go(editingUrl)
   }
 
@@ -313,14 +552,44 @@ function Browse ({ rpc, C, navUrl, onNavigated }) {
           ref=${inputRef}
           type="text"
           value=${editingUrl}
-          onInput=${(e) => setEditingUrl(e.target.value)}
+          onInput=${(e) => { setEditingUrl(e.target.value); setAutocompleteOpen(true); setAutocompleteIdx(-1) }}
+          onFocus=${() => { refreshAutocompleteSource(); setAutocompleteOpen(true); setAutocompleteIdx(-1) }}
+          onBlur=${() => { setTimeout(() => setAutocompleteOpen(false), 120) }}
           onKeyDown=${onUrlKeyDown}
           placeholder="hyper://<key>/path"
           spellcheck="false"
         />
         <button class="nav" onClick=${bookmark} disabled=${!editingUrl?.trim?.()} title="Bookmark this URL">☆</button>
+        <button class="nav" onClick=${() => setAboutOpen(true)} disabled=${!active?.url} title="About this site">ⓘ</button>
         <button class="nav" onClick=${openDevtools} disabled=${!active?.src} title="Devtools (⌘⇧I)">⚙</button>
         <button class="nav go" onClick=${() => go(editingUrl)}>Go</button>
+        ${autocompleteOpen && suggestions.length > 0 && html`
+          <div class="urlbar-suggestions">
+            ${suggestions.map((s, idx) => html`
+              <div
+                key=${s.url}
+                class=${'urlbar-suggestion' + (idx === autocompleteIdx ? ' active' : '')}
+                onMouseDown=${(e) => {
+                  // mousedown fires before blur (which closes the dropdown)
+                  e.preventDefault()
+                  setEditingUrl(s.url)
+                  setAutocompleteOpen(false)
+                  setAutocompleteIdx(-1)
+                  go(s.url)
+                }}
+                onMouseEnter=${() => setAutocompleteIdx(idx)}
+              >
+                <span class="urlbar-suggestion-icon">${s.kind === 'bookmark' ? '★' : '🕘'}</span>
+                <div class="urlbar-suggestion-text">
+                  ${s.title && s.title !== s.url
+                    ? html`<div class="urlbar-suggestion-title">${s.title}</div>`
+                    : null}
+                  <div class="urlbar-suggestion-url">${s.url}</div>
+                </div>
+              </div>
+            `)}
+          </div>
+        `}
       </div>
       ${active?.status && html`<div class="browse-status">${active.status}</div>`}
       <div class="browse-stage">
@@ -348,6 +617,12 @@ function Browse ({ rpc, C, navUrl, onNavigated }) {
             : null
         )}
       </div>
+      ${aboutOpen && html`<${AboutSite}
+        rpc=${rpc}
+        C=${C}
+        url=${active?.url || ''}
+        onClose=${() => setAboutOpen(false)}
+      />`}
     </div>
   `
 }
@@ -557,6 +832,155 @@ function SwarmConsent ({ rpc, C, request, identity, onClose }) {
           <button class="btn primary" onClick=${() => decide(true)} disabled=${busy !== null}>
             ${busy === 'approve' ? 'Connecting…' : 'Approve & Connect'}
           </button>
+        </div>
+      </div>
+    </div>
+  `
+}
+
+// --- First-launch onboarding ----------------------------------------------
+//
+// Three slides, no friction:
+//   1. Welcome   — what PearBrowser is in one sentence
+//   2. The pitch — three-thing summary of what you can do
+//   3. Pick a site — 4 cards, click one to land in Browse + close onboarding
+//
+// We deliberately do NOT force a backup-phrase reveal here. Backup is
+// surfaced contextually in Settings → Identity ("Moving to a new device?")
+// and on natural moments later (first publish, first subscribe). See
+// the v0.4 design conversation: forcing a 12-word seed in step 2
+// scares non-technical users without actually improving security
+// (most just tick "I saved it" without saving anything).
+
+const ONBOARDING_FIRST_SITES = [
+  {
+    id: 'home',
+    title: 'PearBrowser homepage',
+    subtitle: 'The landing page — what this app is, who built it',
+    url: 'hyper://2d6c2be92f07e10ed5a4b07b5c1286a56f0c1220c79ad3c3293b069f8c946763/',
+    initial: '🍐',
+    gradient: 'linear-gradient(135deg, #7ee787, #58a6ff)'
+  },
+  {
+    id: 'hiveworm',
+    title: 'HiveWorm',
+    subtitle: 'Multiplayer worm life-sim, fully P2P',
+    url: 'pear://d1xbkcpcbi1xa8dexp49rsendra5r67w3qh5a9k8t44oemm4k16y',
+    initial: '🐛',
+    gradient: 'linear-gradient(135deg, #a371f7, #d946ef)'
+  },
+  {
+    id: 'hiverelay',
+    title: 'HiveRelay',
+    subtitle: 'The relay backbone keeping it all online',
+    url: 'hyper://ea607230f7b9a5f854c664901b2c34faf1c6f5b7cee6fc3bca02ac682fd02754/',
+    initial: '🟢',
+    gradient: 'linear-gradient(135deg, #00ff41, #3eaf55)'
+  },
+  {
+    id: 'p2pbuilders',
+    title: 'P2P Builders',
+    subtitle: 'Permissionless P2P hacker news',
+    url: 'hyper://f0cd01e3565a9eb5d811f3f46f0595ad6b2e87652304789bef3fe4501b3db42a/',
+    initial: '🔧',
+    gradient: 'linear-gradient(135deg, #ff6600, #fbbf24)'
+  }
+]
+
+function Onboarding ({ rpc, C, onPickSite, onClose }) {
+  const [slide, setSlide] = useState(0)
+
+  const finish = async (pickedUrl) => {
+    // Persist the flag so we never ask again — fire-and-forget so we
+    // don't block the close on a slow user-data write.
+    rpc.request(C.CMD_USERDATA_SET_SETTINGS, {
+      updates: { onboardingDone: true, onboardingDoneAt: Date.now() }
+    }).catch(() => {})
+    if (pickedUrl) onPickSite(pickedUrl)
+    onClose()
+  }
+
+  return html`
+    <div class="modal-overlay onboarding-overlay" role="dialog" aria-modal="true">
+      <div class="modal-card onboarding-card">
+        ${slide === 0 && html`
+          <div class="onb-slide onb-slide-welcome">
+            <div class="onb-hero">
+              <${Logo} size=${72} />
+            </div>
+            <h1 class="onb-title">Welcome to <strong>PearBrowser</strong></h1>
+            <p class="onb-subtitle">The web that doesn't go down.</p>
+            <p class="onb-blurb">
+              A peer-to-peer browser, app store, and site publisher. Pages
+              live as Hyperdrives, identified by 32-byte keys, replicated
+              by their readers. No DNS. No servers. No accounts.
+            </p>
+            <div class="onb-actions">
+              <button class="btn primary" onClick=${() => setSlide(1)}>Get started →</button>
+            </div>
+          </div>
+        `}
+        ${slide === 1 && html`
+          <div class="onb-slide">
+            <h2 class="onb-stepname">Three things at once</h2>
+            <div class="onb-pitch-grid">
+              <div class="onb-pitch">
+                <div class="onb-pitch-icon">🌐</div>
+                <div class="onb-pitch-title">Browse hyper://</div>
+                <div class="onb-pitch-body">Paste a drive key, fetch from peers, render in-app.</div>
+              </div>
+              <div class="onb-pitch">
+                <div class="onb-pitch-icon">📦</div>
+                <div class="onb-pitch-title">Run Pear apps</div>
+                <div class="onb-pitch-body">Click a pear:// link, the app opens in its own window.</div>
+              </div>
+              <div class="onb-pitch">
+                <div class="onb-pitch-icon">✒️</div>
+                <div class="onb-pitch-title">Publish your own</div>
+                <div class="onb-pitch-body">Block editor → publish → pinned 24/7 on HiveRelay.</div>
+              </div>
+            </div>
+            <p class="onb-blurb onb-foot">
+              Your identity is generated automatically and stored on this
+              machine. You can back it up later in <em>Settings → Identity</em>
+              if you want to use it on another device.
+            </p>
+            <div class="onb-actions">
+              <button class="btn subtle" onClick=${() => setSlide(0)}>← Back</button>
+              <button class="btn primary" onClick=${() => setSlide(2)}>Continue →</button>
+            </div>
+          </div>
+        `}
+        ${slide === 2 && html`
+          <div class="onb-slide">
+            <h2 class="onb-stepname">Try a site</h2>
+            <p class="onb-blurb">Pick one to start with — you can always come back here.</p>
+            <div class="onb-sites">
+              ${ONBOARDING_FIRST_SITES.map((s) => html`
+                <button
+                  class="onb-site-card"
+                  key=${s.id}
+                  onClick=${() => finish(s.url)}
+                  title=${s.url}
+                >
+                  <div class="onb-site-icon" style=${{ background: s.gradient }}>${s.initial}</div>
+                  <div class="onb-site-text">
+                    <div class="onb-site-title">${s.title}</div>
+                    <div class="onb-site-subtitle">${s.subtitle}</div>
+                  </div>
+                </button>
+              `)}
+            </div>
+            <div class="onb-actions">
+              <button class="btn subtle" onClick=${() => setSlide(1)}>← Back</button>
+              <button class="onb-skip" onClick=${() => finish(null)}>Skip — I'll explore</button>
+            </div>
+          </div>
+        `}
+        <div class="onb-dots">
+          ${[0, 1, 2].map((i) => html`
+            <span class=${'onb-dot' + (i === slide ? ' on' : '')} key=${i}></span>
+          `)}
         </div>
       </div>
     </div>
@@ -1337,10 +1761,15 @@ function Settings ({ rpc, C, status, storagePath, log }) {
             <code class="settings-code">${identity?.publicKey || '(loading…)'}</code>
           </div>
         </div>
+      </div>
+
+      <h2>Moving to a new device?</h2>
+      <p class="subtitle">Your identity lives on this machine. To use the same identity on another computer or after a wipe, write down your 12-word backup phrase. Anyone with the phrase can sign in as you — store it like a password.</p>
+      <div class="settings-card">
         <div class="settings-row">
           <div>
             <div class="settings-label">Backup phrase</div>
-            <div class="settings-subtle">${identity?.hasBackupPhrase ? `${identity.mnemonicWordCount}-word BIP39 mnemonic` : 'not available'}</div>
+            <div class="settings-subtle">${identity?.hasBackupPhrase ? `${identity.mnemonicWordCount}-word BIP-39 mnemonic. Reveal once to write down — never display on a shared screen.` : 'not available'}</div>
           </div>
           <button class="btn" onClick=${revealPhrase} disabled=${busy === 'reveal' || !identity?.hasBackupPhrase}>
             ${seedPhrase ? 'Hide' : 'Reveal phrase'}
@@ -1348,12 +1777,12 @@ function Settings ({ rpc, C, status, storagePath, log }) {
         </div>
         ${seedPhrase && html`
           <pre class="seed-phrase">${seedPhrase}</pre>
-          <div class="settings-warning">Write this down. Anyone with these words controls your identity.</div>
+          <div class="settings-warning">Write this down somewhere offline. Anyone with these words controls your identity — and we can't reset it for you.</div>
         `}
         <div class="settings-row">
           <div>
             <div class="settings-label">Restore from phrase</div>
-            <div class="settings-subtle">Replace this device's identity with one recovered from a saved 12 or 24-word BIP-39 mnemonic.</div>
+            <div class="settings-subtle">Replace this device's identity with one recovered from a saved 12 or 24-word phrase. Use this on a fresh PearBrowser install to bring your existing identity over.</div>
           </div>
           <button class="btn subtle" onClick=${() => { setShowRestore((v) => !v); setRestoreNotice(''); setErr('') }}
                   disabled=${busy?.startsWith?.('restore')}>
@@ -1740,6 +2169,24 @@ export function App ({ rpc, C, storagePath }) {
   const [pendingSwarm, setPendingSwarm] = useState(null)
   // Light-weight identity blob for showing "you" in the consent sheet.
   const [identity, setIdentity] = useState(null)
+  // First-launch onboarding gate. Default 'pending' until we read the
+  // user-data setting; only show the modal once we know definitively
+  // it hasn't been completed (avoids a flash of onboarding after
+  // user-data settings replicate).
+  const [onboardingState, setOnboardingState] = useState('pending')
+
+  // Browse tabs lifted to App level so:
+  //   1. Switching to Apps/Settings/etc and back doesn't destroy them
+  //      (Browse used to remount with a fresh tabs[] every time)
+  //   2. We can persist them to user-data and restore across launches
+  // Default initial state is one welcome tab; the restore-from-settings
+  // step below replaces it once user-data is ready.
+  const [tabs, setTabs] = useState(() => [makeTab(DEFAULT_URL)])
+  const [browseActiveId, setBrowseActiveId] = useState(() => 'placeholder')
+  // Tracks whether we've completed the one-time tabs-restore from
+  // user-data so the persistence effect doesn't overwrite saved state
+  // with the placeholder during boot.
+  const [tabsRestored, setTabsRestored] = useState(false)
 
   useEffect(() => {
     const appendLog = (line) => setLog((l) => [...l.slice(-200), line])
@@ -1751,6 +2198,42 @@ export function App ({ rpc, C, storagePath }) {
       // Identity is ready by the time READY fires — fetch it once for
       // the login-consent sheet to show "Signing in as <pubkey>".
       rpc.request(C.CMD_GET_IDENTITY).then(setIdentity).catch(() => {})
+      // Decide whether to show the first-launch onboarding overlay.
+      // Settings live in the user-data Hyperbee — once it's ready we
+      // either show the onboarding (first launch) or skip it.
+      rpc.request(C.CMD_USERDATA_GET_SETTINGS).then((s) => {
+        setOnboardingState(s?.onboardingDone ? 'done' : 'show')
+        // Session restore: rehydrate browse tabs from previous session.
+        // We only restore the URL list — history/scroll/iframe-src are
+        // recreated on first navigation. Skip if no saved tabs (first
+        // run) or if the saved list is empty.
+        const savedTabs = Array.isArray(s?.browseTabs) ? s.browseTabs : null
+        if (savedTabs && savedTabs.length > 0) {
+          const restored = savedTabs
+            .filter((t) => t && typeof t.url === 'string')
+            .map((t) => {
+              const fresh = makeTab(t.url || '')
+              fresh.displayUrl = t.displayUrl || t.url || ''
+              fresh.title = t.title || fresh.title
+              return fresh
+            })
+          if (restored.length > 0) {
+            setTabs(restored)
+            // Resume on whichever tab was active last time, fall back to first.
+            const targetIdx = Math.max(0, Math.min(
+              savedTabs.findIndex((t) => t && t.active === true),
+              restored.length - 1
+            ))
+            setBrowseActiveId(restored[targetIdx].id)
+          }
+        }
+      }).catch(() => {
+        // Couldn't read settings — be conservative and skip onboarding
+        // rather than show it on every launch when the bee is broken.
+        setOnboardingState('done')
+      }).finally(() => {
+        setTabsRestored(true)
+      })
     }
     const onPeer = (e) => setStatus((s) => ({ ...s, peerCount: e.detail.peerCount }))
     const onErr = (e) => appendLog(`[error] ${e.detail?.message || JSON.stringify(e.detail)}`)
@@ -1793,6 +2276,25 @@ export function App ({ rpc, C, storagePath }) {
     }
   }, [rpc, C])
 
+  // Persist tabs to user-data settings on change — debounced, only after
+  // the initial restore has completed so we don't overwrite saved state
+  // with the placeholder during boot.
+  useEffect(() => {
+    if (!tabsRestored) return
+    const t = setTimeout(() => {
+      const serialized = tabs.map((tab) => ({
+        url: tab.url || '',
+        displayUrl: tab.displayUrl || '',
+        title: tab.title || 'New tab',
+        active: tab.id === browseActiveId
+      }))
+      rpc.request(C.CMD_USERDATA_SET_SETTINGS, {
+        updates: { browseTabs: serialized }
+      }).catch(() => {})
+    }, 800)
+    return () => clearTimeout(t)
+  }, [tabs, browseActiveId, tabsRestored, rpc, C])
+
   const launchInBrowse = (url) => {
     setNavUrl(url)
     setTab('browse')
@@ -1823,7 +2325,7 @@ export function App ({ rpc, C, storagePath }) {
       </div>
 
       <div class=${'panel' + (tab === 'browse' ? ' panel-browse' : '')}>
-        ${tab === 'browse' && html`<${Browse} rpc=${rpc} C=${C} navUrl=${navUrl} onNavigated=${() => setNavUrl(null)} />`}
+        ${tab === 'browse' && html`<${Browse} rpc=${rpc} C=${C} navUrl=${navUrl} onNavigated=${() => setNavUrl(null)} tabs=${tabs} setTabs=${setTabs} activeId=${browseActiveId} setActiveId=${setBrowseActiveId} />`}
         ${tab === 'apps' && html`<${Apps} rpc=${rpc} C=${C} onLaunch=${launchInBrowse} />`}
         ${tab === 'sites' && html`<${Sites} rpc=${rpc} C=${C} onBrowse=${launchInBrowse} />`}
         ${tab === 'library' && html`<${Library} rpc=${rpc} C=${C} onBrowse=${launchInBrowse} />`}
@@ -1848,6 +2350,13 @@ export function App ({ rpc, C, storagePath }) {
         request=${pendingSwarm}
         identity=${identity}
         onClose=${() => setPendingSwarm(null)}
+      />`}
+
+      ${onboardingState === 'show' && html`<${Onboarding}
+        rpc=${rpc}
+        C=${C}
+        onPickSite=${(url) => launchInBrowse(url)}
+        onClose=${() => setOnboardingState('done')}
       />`}
     </div>
   `
