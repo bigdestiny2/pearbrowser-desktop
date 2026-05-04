@@ -1318,3 +1318,37 @@ p { color: #8b949e; margin-bottom: 12px; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* --- Relay capability badges (v0.4.1) ----------------------------------- */
+.relay-row { align-items: flex-start; }
+.relay-info { flex: 1; min-width: 0; }
+.relay-url-line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.relay-caps {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 11px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  color: #6e7681;
+  align-items: center;
+}
+.relay-caps-loading { color: #6e7681; font-style: italic; }
+.relay-caps-err { color: #f85149; }
+.relay-cap-label { color: #adbac7; }
+.relay-cap-pill {
+  display: inline-block;
+  padding: 1px 7px;
+  background: rgba(63, 185, 80, 0.10);
+  color: #3fb950;
+  border: 1px solid rgba(63, 185, 80, 0.3);
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+.relay-cap-pill-new {
+  background: rgba(255, 149, 0, 0.12);
+  color: #ff9500;
+  border-color: rgba(255, 149, 0, 0.4);
+}

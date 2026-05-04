@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.4.1 — 2026-05-04
+
+Tiny patch — surface relay capability advertisements in Settings.
+
+### New
+
+- **Settings → Relays** now probes each configured relay's
+  `/.well-known/hiverelay.json` on mount and shows version, region,
+  and supported transport pills below each relay URL. The new
+  `dht-relay-ws` transport (which unlocks `hyper://` reading from
+  any browser via [hyper-fetch](https://github.com/bigdestiny2/hyper-fetch))
+  gets a distinct accent-orange pill so users can see at a glance
+  which relays are fully featured.
+- Capability check is renderer-side `fetch()` with a 6 s per-relay
+  timeout — no new RPC handler needed. Failed checks degrade
+  gracefully ("capability check failed: timeout").
+
+---
+
 ## v0.4.0 — 2026-05-04 — "First-run delight"
 
 Consumer polish wave, focused on what a brand-new user sees in their

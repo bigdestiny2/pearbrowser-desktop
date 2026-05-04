@@ -1564,6 +1564,12 @@ function RelaysSection ({ rpc, C }) {
   const [busy, setBusy] = useState(null)
   const [err, setErr] = useState('')
   const [loaded, setLoaded] = useState(false)
+  // Capability advertisement per-relay — populated lazily once we
+  // know the relay list. Keyed by relay URL. Each value is either
+  // null (still fetching), { ok: true, doc } on success, or
+  // { ok: false, error } on failure. This is a renderer-side fetch
+  // (no new RPC) so it works on any HTTPS-reachable relay.
+  const [capabilities, setCapabilities] = useState({})
 
   const load = async () => {
     setErr('')
@@ -1577,6 +1583,40 @@ function RelaysSection ({ rpc, C }) {
     finally { setLoaded(true) }
   }
   useEffect(() => { load() }, [])
+
+  // Probe each configured relay's /.well-known/hiverelay.json so we
+  // can show what version it's running + which transports it supports
+  // (`hyperswarm`, `dht-relay-ws`, etc). 6s timeout per relay; fail
+  // gracefully — a missing capability doc isn't a real error.
+  useEffect(() => {
+    if (!config.relays.length) return
+    let cancelled = false
+    const next = {}
+    for (const url of config.relays) {
+      next[url] = capabilities[url] || null   // preserve while refreshing
+    }
+    setCapabilities(next)
+
+    config.relays.forEach(async (url) => {
+      try {
+        const ctrl = new AbortController()
+        const timer = setTimeout(() => ctrl.abort(), 6000)
+        const res = await fetch(url.replace(/\/+$/, '') + '/.well-known/hiverelay.json', { signal: ctrl.signal })
+        clearTimeout(timer)
+        if (cancelled) return
+        if (!res.ok) {
+          setCapabilities((p) => ({ ...p, [url]: { ok: false, error: 'HTTP ' + res.status } }))
+          return
+        }
+        const doc = await res.json()
+        setCapabilities((p) => ({ ...p, [url]: { ok: true, doc } }))
+      } catch (e) {
+        if (cancelled) return
+        setCapabilities((p) => ({ ...p, [url]: { ok: false, error: e.name === 'AbortError' ? 'timeout' : (e.message || 'unreachable') } }))
+      }
+    })
+    return () => { cancelled = true }
+  }, [config.relays.join('|')])
 
   const setRelays = async (next) => {
     setErr(''); setBusy('save')
@@ -1633,11 +1673,26 @@ function RelaysSection ({ rpc, C }) {
       ${loaded && config.relays.length === 0 && html`
         <div class="settings-subtle">No relays configured.</div>
       `}
-      ${config.relays.map((url, idx) => html`
-        <div class="settings-row" key=${url}>
-          <div>
-            <code class="settings-code">${url}</code>
-            ${idx === 0 ? html`<span class="settings-pill">primary</span>` : ''}
+      ${config.relays.map((url, idx) => {
+        const cap = capabilities[url]
+        return html`
+        <div class="settings-row relay-row" key=${url}>
+          <div class="relay-info">
+            <div class="relay-url-line">
+              <code class="settings-code">${url}</code>
+              ${idx === 0 ? html`<span class="settings-pill">primary</span>` : ''}
+            </div>
+            ${cap === undefined || cap === null
+              ? html`<div class="relay-caps relay-caps-loading">probing capability advertisement…</div>`
+              : !cap.ok
+                ? html`<div class="relay-caps relay-caps-err">capability check failed: ${cap.error}</div>`
+                : html`<div class="relay-caps">
+                    <span class="relay-cap-label">v${cap.doc?.version || '?'}</span>
+                    ${cap.doc?.region ? html`<span class="relay-cap-label">${cap.doc.region}</span>` : ''}
+                    ${(cap.doc?.supported_transports || []).map((t) => html`
+                      <span class=${'relay-cap-pill' + (t === 'dht-relay-ws' ? ' relay-cap-pill-new' : '')} key=${t}>${t}</span>
+                    `)}
+                  </div>`}
           </div>
           ${config.relays.length > 1 ? html`
             <button class="btn subtle" onClick=${() => removeRelay(url)} disabled=${busy === 'save'}>
@@ -1645,7 +1700,7 @@ function RelaysSection ({ rpc, C }) {
             </button>
           ` : ''}
         </div>
-      `)}
+      `})}
       <div class="settings-row">
         <input
           type="text"
