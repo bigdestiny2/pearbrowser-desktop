@@ -18,7 +18,7 @@ One install, one key, works on all three desktop platforms — Pear downloads th
 
 - **Multi-tab Browse** — `⌘T` / `⌘W` / `⌘L` / `⌘1`–`⌘9`. `hyper://` URL bar, hex and z-base-32 drive keys, localhost HTTP proxy, per-tab back/forward history, devtools button (`⌘⇧I`)
 - **Apps** — paste any `pear://` link to launch a Pear app in its own window, or load a decentralized catalog (Hyperdrive) to install / launch / uninstall. Recent catalogs are remembered across launches.
-- **P2P Sites** — block editor (headings, paragraphs, images, lists, quotes, code, raw HTML, divider), publish creates a Hyperdrive + broadcasts Ed25519-signed HiveRelay seed request + waits for replication, delete sends signed unseed
+- **P2P Sites** — block editor (headings, paragraphs, images, lists, quotes, code, raw HTML, divider). Publish creates a Hyperdrive, broadcasts an Ed25519-signed HiveRelay seed request with the drive's keyed-BLAKE2b discoveryKey, and uses the SDK's `waitForDurable()` to confirm at least one relay has actually replicated the content before reporting success. Delete sends a signed unseed.
 - **Library** — bookmarks and history in a local Hyperbee
 - **Identity** — BIP-39 backup phrase + restore-from-phrase. Per-app sub-keys derived from your root identity.
 - **Profile** — display name, bio, avatar, website, email — opt-in fields apps see when you grant a sign-in

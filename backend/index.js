@@ -254,13 +254,25 @@ rpc.handle(C.CMD_PUBLISH_SITE, async (data) => {
     if (keyHex && hiveRelay && typeof hiveRelay.seed === 'function') {
       const connectedRelays = hiveRelay.getRelays ? hiveRelay.getRelays().length : 0
       console.log(`[publish] pinning ${keyHex.slice(0, 8)} to ${connectedRelays} HiveRelay(s)`)
-      const acceptances = await hiveRelay.seed(keyHex, { replicas: 3, timeout: 10000 })
+      // 0.8.5 fix (defence-in-depth): pass `discoveryKey` explicitly so
+      // relays look in the right place on the DHT. The 0.8.5 default
+      // derivation now uses keyed BLAKE2b (matching Hypercore) instead
+      // of the plain BLAKE2b that 0.4.x advertised on the wrong topic.
+      // We pass the actual `drive.discoveryKey` so we don't depend on
+      // the SDK's default — accidental wire-format drift would be silent.
+      const acceptances = await hiveRelay.seed(keyHex, {
+        replicas: 3,
+        timeout: 10000,
+        discoveryKey: site?.drive?.discoveryKey
+      })
       const acceptCount = Array.isArray(acceptances) ? acceptances.length : 0
       pin = { ok: acceptCount > 0, acceptances: acceptCount, connectedRelays, replicatedPeers: 0, replicationTimedOut: false }
 
-      // Prefer the canonical waitForDurable() API from p2p-hiverelay
-      // 0.4.3+ if present. Falls back to our core.peers polling on
-      // 0.4.2 and earlier. Zero-friction upgrade once npm publishes.
+      // Canonical waitForDurable() API from p2p-hiverelay 0.8.5+.
+      // Returns once at least `minPeers` relays have caught up, or
+      // throws on timeout. Replaces the drive.core.peers polling
+      // fallback below (kept only as a safety net for older SDK
+      // versions encountered in the wild).
       if (acceptCount > 0 && typeof hiveRelay.waitForDurable === 'function') {
         try {
           console.log(`[publish] waitForDurable() available — using canonical API`)
@@ -274,8 +286,9 @@ rpc.handle(C.CMD_PUBLISH_SITE, async (data) => {
           pin.replicationTimedOut = true
         }
       } else if (site?.drive?.core && acceptCount > 0) {
-        // Fallback: poll drive.core.peers for remote peers that reach
-        // remoteLength >= localLength. Retired once 0.4.3 lands.
+        // Legacy fallback: poll drive.core.peers for remote peers that
+        // reach remoteLength >= localLength. Only fires against pre-0.8.5
+        // SDKs that don't expose waitForDurable().
         const core = site.drive.core
         const startLen = core.length
         const REPL_TIMEOUT = 30000
@@ -990,8 +1003,13 @@ async function boot () {
   // HiveRelay client — shares our swarm + store. Handles auto-discovery
   // of relay nodes (5 live across 2 regions), signed seed requests, and
   // circuit-relay fallbacks for NAT-blocked peers. Non-fatal if init fails.
+  //
+  // 0.8.5 note: client SDK split out into its own ESM package
+  // (`p2p-hiverelay-client`) since 0.5.x. Old `p2p-hiverelay/client`
+  // subpath no longer exists. Use dynamic import() because we're in a
+  // CommonJS module and the new package is `"type": "module"`.
   try {
-    const { HiveRelayClient } = require('p2p-hiverelay/client')
+    const { HiveRelayClient } = await import('p2p-hiverelay-client')
     hiveRelay = new HiveRelayClient({ swarm, store })
     hiveRelay.on('relay-connected', ({ pubkey }) => {
       console.log('[hiverelay] connected:', pubkey.slice(0, 12) + '…')

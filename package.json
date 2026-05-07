@@ -49,10 +49,12 @@
     "hypercore-crypto": "^3.5.0",
     "hyperdrive": "^13.3.2",
     "hyperswarm": "^4.17.0",
-    "p2p-hiverelay": "latest",
+    "p2p-hiverelay": "^0.8.5",
+    "p2p-hiverelay-client": "^0.8.5",
+    "p2p-hiverelay-verifier": "^0.8.5",
     "pear-bridge": "latest",
-    "pear-run": "latest",
     "pear-electron": "latest",
+    "pear-run": "latest",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   }
