@@ -6,9 +6,9 @@ project(pear_appling C CXX ASM)
 
 add_pear_appling(
   pearbrowser_desktop
-  ID "1gkr4ak5c4itbuhzz43zaapjgpkxat9n55hqzq3wzzp3dn4fgrpo"
+  ID "tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty"
   NAME "PearBrowser"
-  VERSION 0.1.0
+  VERSION 0.4.3
   AUTHOR "pearbrowser-desktop contributors"
   DESCRIPTION "P2P browser, app store, and publishing platform — no servers required."
 
