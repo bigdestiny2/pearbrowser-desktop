@@ -1,5 +1,41 @@
 # Changelog
 
+## v0.4.3 — 2026-05-12
+
+Docs + release-pipeline cleanup. No user-facing app changes.
+
+### Changed
+
+- **README rewrite** to reflect v0.4.x reality — multi-tab, tab
+  persistence, URL autocomplete, about-site panel, `window.pear.swarm.v1`,
+  capability badges, "Moving to a new device?" identity framing.
+  Adds a companion-projects table (hyper-fetch / hiveworm / HiveRelay /
+  mobile PearBrowser) and an honest note about `pear run` being
+  deprecated in Pear runtime v2.4.0 (still works, distribution path to
+  signed installers is future work).
+- **Release pipeline simplified** — `scripts/release-prod.sh` now does
+  the two-step `pear stage` + (deprecated) `pear release` flow. The
+  earlier attempt at full multisig (`pear provision` + `pear multisig`
+  quorum-cosigning) was rolled back: that's a multi-publisher feature,
+  ceremony with no security gain for a solo 1-of-1 quorum. `pear.json`
+  retains the link config + a comment explaining how/when to migrate
+  to multisig.
+- **`pear.stage.ignore` updated** for Pear runtime v2.4.0 (which
+  dropped the default auto-ignores). Now explicitly ignores `.git`,
+  `.github`, `.DS_Store` (top-level + nested), `.claude`, `docs`,
+  `examples`, `scripts`, `CHANGELOG.md`, `README.md`, `appling`,
+  `pearbrowser-storage`. Prevents future stages from polluting the
+  staged drive with VCS/Mac noise + publisher tooling.
+
+### First release using the new pipeline
+
+This is the first release published via `scripts/release-prod.sh`
+instead of the manual `pear stage production .` + `pear release
+production .` we used through v0.4.2. End-to-end test of the new
+two-step flow.
+
+---
+
 ## v0.4.2 — 2026-05-12
 
 Production reliability — picks up the **p2p-hiverelay 0.8.5** SDK

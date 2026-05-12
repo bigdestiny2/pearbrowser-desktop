@@ -1,12 +1,5 @@
 {
-  "_comment": "Multisig config — quorum-cosigning for production releases. Solo publisher uses 1-of-1. The publicKey gets filled in via `pear multisig keys get` (we have to run it interactively in a TTY). The namespace identifies this app's signing scope so a leaked key from one project can't sign another.",
-  "multisig": {
-    "publicKeys": [
-      "REPLACE_WITH_YOUR_PUBKEY_FROM_pear_multisig_keys_get"
-    ],
-    "namespace": "bigdestiny2/pearbrowser-desktop",
-    "quorum": 1
-  },
+  "_comment": "Pear project links + (future) multisig config. Multisig is intentionally NOT set up: we're a solo publisher, the deprecated `pear release` still works, and a 1-of-1 quorum adds ceremony without security. When we get a co-signer (or Pear actually removes `pear release`), add the publicKeys + namespace + quorum block here and switch scripts/release-prod.sh to the provision+multisig path.",
   "links": {
     "production": "pear://tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty",
     "provisionTarget": "pear://pdsd1p3m1xsz8aofyndbwux5hqs19h8uswnsrfee5cz8sj9pmj4o"

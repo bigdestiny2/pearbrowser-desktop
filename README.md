@@ -106,26 +106,16 @@ UI files use htm + React (no build step). Backend in `backend/` is CommonJS. See
 
 ## Release pipeline
 
-`pear release` was deprecated in Pear `v2.4.0` in favor of `pear stage` → `pear provision` → `pear multisig`. We ship a wrapper that runs the whole flow:
+Solo publisher, two steps:
 
 ```sh
-./scripts/release-prod.sh
+./scripts/release-prod.sh         # pear stage + pear release (deprecated path)
+node scripts/pin-self-on-hiverelay.js   # re-pin the new length on relays
 ```
 
-It:
-1. Reads `pear.json` for the production link, provision target, multisig config
-2. `pear stage <production-link> .` — bundles local changes into the staged drive
-3. `pear provision <staged-verlink> <target-link> <prev-released-verlink>` — block-syncs into a pre-prod target
-4. `pear multisig request` + `sign` + `verify` — quorum-cosigns the target
-5. `pear multisig commit` — promotes to production live
+`pear release` is deprecated in Pear runtime `v2.4.0` but still works and we use it deliberately — the replacement (`pear provision` + `pear multisig` quorum-cosigning) is designed for multi-publisher releases. A solo 1-of-1 multisig is pure ceremony with no security gain.
 
-For solo publishers the quorum is 1-of-1 (configured in `pear.json`); for multi-publisher releases you add co-signers' pubkeys and bump quorum. The signing key + password are stored at `~/.pear/default` and `.pear-sign-password` (both gitignored, password chmod 600).
-
-After release, re-pin the desktop bundle on HiveRelay:
-
-```sh
-node scripts/pin-self-on-hiverelay.js
-```
+**When to migrate to multisig:** when we add a co-signer (genuine quorum security), or when Pear actually removes `pear release` (not just deprecates it). The link config + provision target are pre-staged in `pear.json` so the migration is just plumbing — see the `_comment` field there.
 
 ## Operator scripts
 
@@ -137,8 +127,7 @@ node scripts/pin-self-on-hiverelay.js
 | `scripts/extract-drive.js <key>` | Pull a drive's full content out to a local directory. |
 | `scripts/list-drive.js <key>` | Diagnose what's inside a drive's manifest. |
 | `scripts/check-relays.js` | Discovery probe — print all HiveRelays reachable via DHT. |
-| `scripts/release-prod.sh` | The five-step pear release pipeline above. |
-| `scripts/pear-multisig-keys-get.exp` | Expect helper for the one TTY-only step. |
+| `scripts/release-prod.sh` | The two-step release pipeline above. |
 
 ## Distribution
 
