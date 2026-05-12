@@ -14,3 +14,4 @@ pearbrowser-storage/
 .vscode/
 .idea/
 *.swp
+.pear-sign-password

@@ -1,0 +1,26 @@
+#!/usr/bin/env expect
+# Drive `pear multisig keys get` past its TTY password prompt.
+# Usage:  scripts/pear-multisig-keys-get.exp <password>
+# Run from the project root.
+
+set timeout 30
+set password [lindex $argv 0]
+log_user 1
+
+spawn -noecho pear multisig keys get
+
+expect {
+    -re {(?i)password[^:]*:} {
+        send -- "$password\r"
+        exp_continue
+    }
+    -re {(?i)verify[^:]*:} {
+        send -- "$password\r"
+        exp_continue
+    }
+    -re {(?i)confirm[^:]*:} {
+        send -- "$password\r"
+        exp_continue
+    }
+    eof
+}

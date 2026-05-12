@@ -14,9 +14,18 @@
     "stage": {
       "ignore": [
         "/.git",
+        "/.github",
         "/.gitignore",
-        "/appling",
+        "/.DS_Store",
+        "**/.DS_Store",
+        "/.claude",
+        "/.pear-sign-password",
+        "/CHANGELOG.md",
         "/README.md",
+        "/appling",
+        "/docs",
+        "/examples",
+        "/scripts",
         "/pearbrowser-storage"
       ]
     },
