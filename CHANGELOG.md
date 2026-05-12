@@ -1,5 +1,49 @@
 # Changelog
 
+## v0.4.2 — 2026-05-12
+
+Production reliability — picks up the **p2p-hiverelay 0.8.5** SDK
+which fixes a discoveryKey-derivation bug that was causing 0-peer
+seed-requests in earlier releases.
+
+### Fixed (via dependency upgrade, see commit `997be16`)
+
+- **Seed-requests now reach the right DHT topic.** The 0.4.x
+  hiverelay client SDK derived the seed-request `discoveryKey` via
+  plain BLAKE2b — but Hypercore/Hyperdrive use a *keyed* BLAKE2b
+  (key = ASCII `"hypercore"`). Relays accepted the signed seed, then
+  looked for the publisher on a DHT topic the publisher wasn't
+  announcing — explaining the intermittent "0 acceptances" we saw
+  during the v0.3.x → v0.4.x dev cycle. Fixed upstream in 0.8.0;
+  default derivation is now correct and `opts.discoveryKey` is
+  honoured.
+- Explicitly passes `discoveryKey: site.drive.discoveryKey` to
+  `seed()` as defence-in-depth — guarantees relays look on the
+  right DHT topic regardless of any future SDK derivation drift.
+
+### Internal
+
+- `package.json`: `p2p-hiverelay 0.4.2 → 0.8.5`, plus added
+  `p2p-hiverelay-client 0.8.5` and `p2p-hiverelay-verifier 0.8.5`
+  (the client SDK was split into its own ESM package in 0.5.x;
+  verifier is new in 0.6.0).
+- `backend/index.js`: swapped CommonJS `require('p2p-hiverelay/client')`
+  for `await import('p2p-hiverelay-client')` — old subpath no longer
+  exists; new package is `"type": "module"`.
+- README: updated Publish section to mention the new SDK's
+  `waitForDurable()` confirms at least one relay has actually
+  replicated before reporting success.
+
+### Operator scripts
+
+- `scripts/check-relays.js` — standalone HiveRelay discovery
+  diagnostic. Boots a throwaway HiveRelayClient and prints each
+  relay that appears in the DHT. Companion to the existing
+  `pin-self-on-hiverelay`, `publish-and-pin`, `extract-drive`,
+  `unseed-drive`, `list-drive` scripts.
+
+---
+
 ## v0.4.1 — 2026-05-04
 
 Tiny patch — surface relay capability advertisements in Settings.
