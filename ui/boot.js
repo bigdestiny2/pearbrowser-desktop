@@ -127,7 +127,24 @@ export async function startBackend () {
     }
   }
   if (!pipe) {
-    throw new Error(`Could not reach backend on any port ${RPC_PORT_BASE}-${RPC_PORT_BASE + RPC_PORT_COUNT - 1} (${errors.join('; ')})`)
+    // None of the ports accepted. The Bare main process is either not
+    // running or crashed before binding the WS server. Since v0.4.4
+    // the main process catches synchronous boot failures and still
+    // binds the WS — emitting a `backend-boot-failed` event — so a
+    // pure port-scan failure means the main process itself didn't
+    // start (pear-electron handoff issue, NOT a backend crash).
+    //
+    // Most common cause: stale partial download from a prior release.
+    // Pear's cache may have a half-written app bundle. Clear and retry:
+    //   rm -rf "$HOME/Library/Application Support/pear/by-dkey/00f61fc1473b9d01a199833fc96e76d5e99000c603ec697bc842f8d978538f4d"
+    //   pear run pear://tco5...
+    throw new Error(
+      `Could not reach backend on any port ${RPC_PORT_BASE}-${RPC_PORT_BASE + RPC_PORT_COUNT - 1} ` +
+      `(${errors.join('; ')}). The Bare main process appears not to be running. ` +
+      `Most likely cause: stale partial download. Clear the cache at ` +
+      `~/Library/Application Support/pear/by-dkey/00f61fc1473b… and relaunch ` +
+      `pear run pear://tco5...`
+    )
   }
   const rpc = new RpcClient(pipe)
   return { rpc, C, pipe, storagePath: `(backend in main Bare process, WS :${connectedPort})` }
