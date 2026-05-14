@@ -1,13 +1,23 @@
 # Changelog
 
-## [Unreleased]
+## v0.4.4 — 2026-05-14
 
-Release-pipeline hardening — catches the silent partial-pin failure
-mode that was making `pear run pear://tco5...` hang on fresh
-machines.
+Closes the silent partial-pin failure mode that was making
+`pear run pear://tco5...` hang on fresh machines, picks up the
+HiveRelay 0.8.12 SDK, and fixes the broken in-app HiveRelay client
+in the v0.4.3 release.
 
 ### Fixed
 
+- **In-app HiveRelay client now actually initializes.** v0.4.3
+  shipped with `backend/index.js` importing `p2p-hiverelay-client`
+  (the v0.8.11+ package name) but bundled `^0.8.5` deps — which
+  predated the monorepo split, so `p2p-hiverelay-client` didn't exist
+  as a standalone package at stage time. The deployed app logged
+  `[hiverelay] init failed: MODULE_NOT_FOUND` and the
+  Settings → Publish path was non-functional. v0.4.4 ships with
+  `^0.8.12` deps which include `p2p-hiverelay-client` as a real
+  package; init succeeds end-to-end.
 - **`scripts/pin-self-on-hiverelay.js`** — `maxStorage` raised from
   256 MB to 1 GB. The 256 MB cap was set when the drive was ~9 MB;
   with `pear-electron` now bundling the Chromium runtime *into* the
