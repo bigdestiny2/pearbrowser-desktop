@@ -4,7 +4,7 @@ A peer-to-peer browser, app store, and site publisher for macOS, Windows, and Li
 
 **No accounts. No DNS. No servers.** Sites are Hyperdrives, addressed by public key, pinned 24/7 on the [HiveRelay](https://github.com/bigdestiny2/P2P-Hiverelay) backbone. The publisher's laptop being offline doesn't matter — the relays carry the bytes.
 
-**Current release:** `v0.4.2` · production length `4909` · pinned on 5 relays · 365-day TTL.
+**Current release:** `v0.4.3` · production length `4914` · pinned on 4 relays · 365-day TTL · HiveRelay backbone `v0.8.12`.
 
 ## Run it
 
@@ -38,7 +38,7 @@ One install, one key, works on all three desktop platforms — Pear downloads th
 - Block editor: heading, paragraph, image, link, list, quote, code, raw HTML/CSS/JS, divider
 - One-click publish + auto-pin to HiveRelay
 - Replication confirmation — the editor only reports "published" after `waitForDurable()` confirms at least one relay has actually replicated the drive
-- Drive identified by keyed-BLAKE2b discoveryKey (fixed in HiveRelay 0.8.0; we ship `0.8.5`)
+- Drive identified by keyed-BLAKE2b discoveryKey (fixed in HiveRelay 0.8.0; we ship `0.8.12`)
 - Ed25519-signed unseed for revocation
 
 ### Library
@@ -80,7 +80,7 @@ One install, one key, works on all three desktop platforms — Pear downloads th
                              ▼
 ┌──────────────────────────────────────────────────────────┐
 │  Bare main process                                       │
-│  ├── HiveRelayClient        (Protomux, signed seed/unseed, 0.8.5)
+│  ├── HiveRelayClient        (Protomux, signed seed/unseed, 0.8.12)
 │  ├── Hyperswarm             (HyperDHT + UDX)
 │  ├── Corestore              (auto-managed primaryKey, decoupled from identity)
 │  ├── Hyperdrive             (per-site namespace)
@@ -151,7 +151,7 @@ Code signing is per-platform:
 |---|---|
 | [`bigdestiny2/hyper-fetch`](https://github.com/bigdestiny2/hyper-fetch) | ~5 KB JS library — read `hyper://` drives from any browser via the HiveRelay HTTP gateway. Pair with PearBrowser to embed hyper:// content in regular web pages. |
 | [`bigdestiny2/hiveworm`](https://github.com/bigdestiny2/hiveworm) | Featured multiplayer life-sim. Uses `window.pear.swarm.v1` for direct peer gossip. Live at `pear://d1xbkcpc…`. |
-| [`bigdestiny2/P2P-Hiverelay`](https://github.com/bigdestiny2/P2P-Hiverelay) | The always-on relay backbone keeping the whole network alive (`v0.8.6`). |
+| [`bigdestiny2/P2P-Hiverelay`](https://github.com/bigdestiny2/P2P-Hiverelay) | The always-on relay backbone keeping the whole network alive (`v0.8.12`). |
 | [`bigdestiny2/PearBrowser`](https://github.com/bigdestiny2/PearBrowser) | Mobile-focused sibling — iOS / Android port. Bare-kit-based. |
 
 ## Credits
