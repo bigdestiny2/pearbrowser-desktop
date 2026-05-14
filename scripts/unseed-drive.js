@@ -15,7 +15,7 @@
  * before dropping the pin.
  */
 
-import { HiveRelayClient } from 'p2p-hiverelay/client'
+import { HiveRelayClient } from 'p2p-hiverelay-client'
 import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 

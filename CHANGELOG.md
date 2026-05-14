@@ -32,15 +32,31 @@ machines.
   hasn't propagated to the network can no longer silently ship as
   "succeeded".
 
-### Upstream
+### Upstream — HiveRelay 0.8.11 picked up
 
 Filed [`FEEDBACK-PEARBROWSER-PIN-CAP-FAILURE.md`](https://github.com/bigdestiny2/P2P-Hiverelay/blob/main/docs/FEEDBACK-PEARBROWSER-PIN-CAP-FAILURE.md)
-with the HiveRelay maintainers, asking for: (1) relays reject seed
-requests where `maxStorage < drive.byteLength` instead of accepting
-silently, (2) `seed-progress` / `seed-stalled` events, (3) a content
-availability query RPC, (4) a sane SDK default for `maxStorage`,
-(5) docs covering the failure mode. Fix (1) is already landing in
-hiverelay 0.8.11+.
+with the HiveRelay maintainers. Same-day turnaround:
+
+- ✅ Fix (1) — relay rejects seed when `drive.byteLength > maxStorage`,
+  emits `seed-aborted` event after metadata sync and unseeds locally
+- ✅ Fix (4) — SDK computes a sane `maxStorage` default (`observed × 4`,
+  falls back to 1 GB), emits `seed-cap-warning` when declared cap is
+  too small
+- ✅ Fix (5) — HiveRelay shipped `docs/PUBLISHING.md`
+- ⏳ Fixes (2) `seed-progress` and (3) `client.queryContent()` queued for
+  v0.8.12 (need protocol design)
+
+Picked up on our end:
+- Bumped `p2p-hiverelay{,-client,-verifier}` `^0.8.5` → `^0.8.11`
+- Migrated the SDK import path across `scripts/pin-self-on-hiverelay.js`,
+  `scripts/publish-and-pin.js`, `scripts/check-relays.js`,
+  `scripts/unseed-drive.js`. The 0.8.11 monorepo split moved the client
+  SDK from `p2p-hiverelay/client` (a sub-export) to the dedicated
+  `p2p-hiverelay-client` package
+- Wired `seed-cap-warning` + `seed-aborted` listeners into the pin
+  script so the loud-failure surface prints clearly. With our 1 GB cap
+  vs. the 478 MB recommended by the SDK, neither event fires — clean
+  pin handshake
 
 ---
 

@@ -26,7 +26,7 @@
  * itself broadcasts the signed seed-request to all connected relays.
  */
 
-import { HiveRelayClient } from 'p2p-hiverelay/client'
+import { HiveRelayClient } from 'p2p-hiverelay-client'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'

@@ -31,7 +31,9 @@
  *   PEAR_PROJECT_KEY=<64-hex> node scripts/pin-self-on-hiverelay.js
  */
 
-import { HiveRelayClient } from 'p2p-hiverelay/client'
+// v0.8.11 split the monorepo — client SDK moved from `p2p-hiverelay/client`
+// to the dedicated `p2p-hiverelay-client` package. Older imports break.
+import { HiveRelayClient } from 'p2p-hiverelay-client'
 import { randomBytes } from 'node:crypto'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -85,6 +87,34 @@ async function main () {
   })
   client.on('seed-error', ({ key, error }) => {
     console.error('  ✗ seed error for', key.slice(0, 12) + '…', '—', error && error.message)
+  })
+
+  // New in p2p-hiverelay-client 0.8.11+:
+  //
+  // seed-cap-warning: SDK-side check, fires at seed() time if our
+  //   declared maxStorage is smaller than the drive bytes the SDK can
+  //   observe locally. Catches a too-small cap BEFORE it goes over
+  //   the wire.
+  // seed-aborted:    relay-side check, fires after the relay syncs
+  //   metadata and discovers the drive is bigger than maxStorage.
+  //   Relay unseeds locally and emits this so the publisher knows.
+  //
+  // These events are the loud version of the silent partial-pin bug
+  // documented at hiverelay/docs/FEEDBACK-PEARBROWSER-PIN-CAP-FAILURE.md
+  client.on('seed-cap-warning', (info) => {
+    console.warn('  ⚠ seed-cap-warning (SDK):')
+    console.warn('     observed drive bytes : ' + (info.observedBytes ?? '?'))
+    console.warn('     declared maxStorage  : ' + (info.declaredCap ?? '?'))
+    console.warn('     recommended          : ' + (info.recommendedCap ?? '?'))
+    if (info.hint) console.warn('     hint: ' + info.hint)
+  })
+  client.on('seed-aborted', (info) => {
+    console.error('  ✗ seed-aborted (relay):', info.reason || 'unknown')
+    if (info.driveBytes) console.error('     drive bytes : ' + info.driveBytes)
+    if (info.cap) console.error('     our cap     : ' + info.cap)
+    if (info.recommendedCap) console.error('     recommended : ' + info.recommendedCap)
+    if (info.hint) console.error('     hint: ' + info.hint)
+    process.exitCode = 2
   })
 
   await client.start()

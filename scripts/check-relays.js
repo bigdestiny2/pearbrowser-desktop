@@ -7,7 +7,7 @@
  *   node scripts/check-relays.js [--storage <dir>]
  */
 
-import { HiveRelayClient } from 'p2p-hiverelay/client'
+import { HiveRelayClient } from 'p2p-hiverelay-client'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
