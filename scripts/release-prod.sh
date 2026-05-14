@@ -10,10 +10,24 @@
 #   2. We add co-signers (genuine quorum security)
 # Until then, simpler is better.
 #
-# Usage:  ./scripts/release-prod.sh
+# Usage:
+#   ./scripts/release-prod.sh           # full release: stage → release → pin → verify
+#   ./scripts/release-prod.sh --no-pin  # skip pin + verify (for dry-run / hotfix tests)
+#
+# After publishing, the script automatically pins the new length on
+# HiveRelay AND verifies (via verify-pin.js) that a fresh peer can
+# actually fetch blob content from the network. If verification fails
+# the script exits non-zero — that means the release is published but
+# *not yet propagated*, and end users running `pear run pear://...`
+# will hang on first launch. Re-run pin and wait, or investigate.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
+
+SKIP_PIN=0
+for arg in "$@"; do
+  if [[ "$arg" == "--no-pin" ]]; then SKIP_PIN=1; fi
+done
 
 PROD_LINK=$(node -p "require('./pear.json').links.production")
 
@@ -50,5 +64,45 @@ echo
 echo "✅ Released $PROD_LINK"
 echo "   length $PREV_LEN → $NEW_LEN"
 echo
-echo "Next: re-pin the bundle on HiveRelay so the new length is replicated:"
-echo "  node scripts/pin-self-on-hiverelay.js"
+
+if [[ "$SKIP_PIN" == "1" ]]; then
+  echo "▸ --no-pin given, skipping pin + verification"
+  echo "  manually: node scripts/pin-self-on-hiverelay.js"
+  echo "           node scripts/verify-pin.js --expect $NEW_LEN"
+  exit 0
+fi
+
+# ── 3. pin on HiveRelay backbone ──────────────────────────
+echo "============================================================"
+echo "  3/4  pin on HiveRelay  (refresh 365-day TTL)"
+echo "============================================================"
+node scripts/pin-self-on-hiverelay.js
+echo
+
+# ── 4. verify the pin actually serves the new length ──────
+echo "============================================================"
+echo "  4/4  verify content is reachable from the network"
+echo "============================================================"
+echo "  (relays may still be downloading ${NEW_LEN}'s blobs —"
+echo "   waiting up to 10 min, retrying every 90s)"
+echo
+
+ATTEMPT=0
+MAX_ATTEMPTS=7   # 7 * 90s ≈ 10 min
+until node scripts/verify-pin.js --expect "$NEW_LEN"; do
+  ATTEMPT=$((ATTEMPT + 1))
+  if [[ $ATTEMPT -ge $MAX_ATTEMPTS ]]; then
+    echo
+    echo "✗ Release succeeded but blobs not yet reachable from a fresh peer."
+    echo "  The drive IS published — re-run \`node scripts/verify-pin.js --expect $NEW_LEN\`"
+    echo "  in 10–20 min. If it keeps failing, relays may need a higher maxStorage"
+    echo "  cap (see scripts/pin-self-on-hiverelay.js SEED_OPTS)."
+    exit 2
+  fi
+  echo "  ↻ retry $ATTEMPT/$MAX_ATTEMPTS in 90s..."
+  sleep 90
+done
+
+echo
+echo "🎉 Release complete and verified end-to-end."
+echo "   Anyone running 'pear run $PROD_LINK' will get length $NEW_LEN."

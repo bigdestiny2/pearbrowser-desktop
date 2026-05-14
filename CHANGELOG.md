@@ -1,5 +1,49 @@
 # Changelog
 
+## [Unreleased]
+
+Release-pipeline hardening — catches the silent partial-pin failure
+mode that was making `pear run pear://tco5...` hang on fresh
+machines.
+
+### Fixed
+
+- **`scripts/pin-self-on-hiverelay.js`** — `maxStorage` raised from
+  256 MB to 1 GB. The 256 MB cap was set when the drive was ~9 MB;
+  with `pear-electron` now bundling the Chromium runtime *into* the
+  staged drive, the v0.4.3 drive is ~365 MB. Relays were accepting
+  the seed request, replicating metadata fully, then stalling
+  mid-blob-download at the cap. End-user symptom: `pear info` works,
+  `pear run` hangs forever on first launch. Now sized at 2× the
+  drive with headroom for future growth, and the SEED_OPTS comment
+  block explains how to re-size if it grows past ~700 MB.
+
+### Added
+
+- **`scripts/verify-pin.js`** — boots a fresh corestore in a temp
+  dir, joins the production drive's swarm, reads the drive length,
+  and round-trips an actual blob block (not just metadata). Exits
+  non-zero if the blob fetch times out. This is the diagnostic that
+  catches a partial pin — `pear info` is not enough, because it only
+  proves metadata is reachable.
+- **`scripts/release-prod.sh`** — now does `stage → release → pin →
+  verify` as one pipeline. The verify step retries every 90s for up
+  to 10 minutes. If it never passes, exit code 2 — a release that
+  hasn't propagated to the network can no longer silently ship as
+  "succeeded".
+
+### Upstream
+
+Filed [`FEEDBACK-PEARBROWSER-PIN-CAP-FAILURE.md`](https://github.com/bigdestiny2/P2P-Hiverelay/blob/main/docs/FEEDBACK-PEARBROWSER-PIN-CAP-FAILURE.md)
+with the HiveRelay maintainers, asking for: (1) relays reject seed
+requests where `maxStorage < drive.byteLength` instead of accepting
+silently, (2) `seed-progress` / `seed-stalled` events, (3) a content
+availability query RPC, (4) a sane SDK default for `maxStorage`,
+(5) docs covering the failure mode. Fix (1) is already landing in
+hiverelay 0.8.11+.
+
+---
+
 ## v0.4.3 — 2026-05-12
 
 Docs + release-pipeline cleanup. No user-facing app changes.

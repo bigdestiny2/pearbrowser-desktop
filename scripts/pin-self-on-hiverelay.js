@@ -44,10 +44,22 @@ const projectKey = process.env.PEAR_PROJECT_KEY || DEFAULT_PROJECT_KEY
 
 // Seed parameters. Generous defaults — this is critical infra, not
 // throwaway content.
+//
+// IMPORTANT: maxStorage must exceed the drive's full size (metadata +
+// blobs). pear-electron's `pre` step bundles the Chromium runtime into
+// the staged drive, so even a small app produces a ~400 MB drive.
+// `pear info pear://<key>` shows `byteLength` + `blobs.byteLength` —
+// keep maxStorage at least 2× that with headroom for future growth.
+// Today (v0.4.3): metadata 1.2 MB + blobs 364 MB ≈ 365 MB. We cap at
+// 1 GB to absorb the next few releases without revisiting this.
+//
+// If maxStorage is too low, relays accept the seed request, replicate
+// metadata fully, and then stall mid-blob-download — producing exactly
+// the symptom of `pear run pear://...` hanging silently for end users.
 const SEED_OPTS = {
   replicas: 5,                       // ask 5 relays to pin
   ttlDays: 365,                      // pin for a year
-  maxStorage: 256 * 1024 * 1024,     // 256 MB cap per relay (the bundle is ~9 MB today)
+  maxStorage: 1024 * 1024 * 1024,    // 1 GB cap per relay (drive ~365 MB today)
   region: null                       // any region
 }
 
