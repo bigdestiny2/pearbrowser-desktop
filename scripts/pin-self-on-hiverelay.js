@@ -117,6 +117,17 @@ async function main () {
     process.exitCode = 2
   })
 
+  // New in p2p-hiverelay-client 0.8.12+: seed-cap-raised fires when a
+  // re-pin successfully bumps an existing entry's maxStorage. Confirms
+  // the structural fix to the alreadySeeded early-return is working —
+  // the new opts actually took effect and eagerReplicate restarted.
+  client.on('seed-cap-raised', (info) => {
+    console.log('  ↑ seed-cap-raised (relay):')
+    if (info.previousCap) console.log('     previous cap : ' + info.previousCap)
+    if (info.newCap)      console.log('     new cap      : ' + info.newCap)
+    if (info.source)      console.log('     source       : ' + info.source)
+  })
+
   await client.start()
   console.log('  · client started, discovering relays...')
 

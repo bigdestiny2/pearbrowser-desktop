@@ -47,16 +47,38 @@ with the HiveRelay maintainers. Same-day turnaround:
   v0.8.12 (need protocol design)
 
 Picked up on our end:
-- Bumped `p2p-hiverelay{,-client,-verifier}` `^0.8.5` → `^0.8.11`
+- Bumped `p2p-hiverelay{,-client,-verifier}` `^0.8.5` → `^0.8.12`
 - Migrated the SDK import path across `scripts/pin-self-on-hiverelay.js`,
   `scripts/publish-and-pin.js`, `scripts/check-relays.js`,
   `scripts/unseed-drive.js`. The 0.8.11 monorepo split moved the client
   SDK from `p2p-hiverelay/client` (a sub-export) to the dedicated
   `p2p-hiverelay-client` package
-- Wired `seed-cap-warning` + `seed-aborted` listeners into the pin
-  script so the loud-failure surface prints clearly. With our 1 GB cap
-  vs. the 478 MB recommended by the SDK, neither event fires — clean
-  pin handshake
+- Wired `seed-cap-warning`, `seed-aborted`, and (0.8.12+) `seed-cap-raised`
+  listeners into the pin script so every relevant relay-side decision
+  prints clearly. With our 1 GB cap vs. the 478 MB recommended by the SDK,
+  no warning/abort fires — clean pin handshake
+
+### v0.8.12 follow-up — re-seed gap fixed
+
+After v0.8.11 deploy we observed that re-pins on already-pinned drives
+returned `alreadySeeded: true` immediately, never re-applying new opts
+or re-triggering `drive.download('/')`. Filed as ask (6) in the same
+feedback doc. HiveRelay shipped v0.8.12 the same session:
+
+- `seedApp` on `alreadySeeded` now reconciles new opts against the
+  stored entry. Raised cap → updates entry + emits `seed-cap-raised` +
+  restarts `eagerReplicate`. Lowered cap → emits `seed-cap-warning`,
+  keeps prior cap. Same opts → no-op
+- `_eagerReplicate` extracted from inline closure to class method,
+  callable from fresh-seed *and* re-pin paths, with a `source` field
+  on emitted events for traceability
+- Production relays bounced to clear pre-v0.8.11 partial-pin state.
+  Our re-pin against the fresh registries went through the full code
+  path under the 1 GB cap; backfill is in progress
+
+Remaining v0.8.12 items still queued: (2) `seed-progress` / (3)
+`client.queryContent()` — both publisher-facing availability signals,
+both need protocol-shape discussion.
 
 ---
 
