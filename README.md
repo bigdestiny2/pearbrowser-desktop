@@ -4,7 +4,7 @@ A peer-to-peer browser, app store, and site publisher for macOS, Windows, and Li
 
 **No accounts. No DNS. No servers.** Sites are Hyperdrives, addressed by public key, pinned 24/7 on the [HiveRelay](https://github.com/bigdestiny2/P2P-Hiverelay) backbone. The publisher's laptop being offline doesn't matter — the relays carry the bytes.
 
-**Current release:** `v0.4.4` · production length `5433` · pinned on 5 relays · 365-day TTL · HiveRelay backbone `v0.8.12`.
+**Current release:** `v0.4.5` · production length `5440` · pinned on 5+ relays · 365-day TTL · HiveRelay backbone `v0.8.12`.
 
 ## Run it
 

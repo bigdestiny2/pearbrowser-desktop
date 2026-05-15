@@ -1,5 +1,49 @@
 # Changelog
 
+## v0.4.5 — 2026-05-15
+
+Defensive error path for backend boot failures. v0.4.4 introduced the
+release pipeline that catches partial-pin regressions on our side
+before they ship — but a community user (clarky) hit a different
+failure mode where the renderer port-scanned all 5 RPC ports and got
+a cryptic `Could not reach backend on any port 9876-9880 (ws error)`
+message with zero diagnostic info. The Bare main process was missing
+or crashed before binding `ws.Server`, but the renderer had no way to
+know which.
+
+### Fixed
+
+- **`index.js` (Bare main process)** — `bootBackend()` is now wrapped
+  in `try/catch`. On failure, prints a banner-style multi-line
+  diagnostic to `pear run --dev` output with the error, code, stack,
+  and the three most common causes + their fixes. Then STILL binds
+  the WS server so the renderer has something to talk to — emits a
+  structured `backend-boot-failed` event over the same wire format the
+  renderer already speaks. Brief delay then closes the socket.
+- **`ui/main.js` (renderer)** — listens for `event:backend-boot-failed`
+  on the RPC client. When fired, renders the boot-failed message + code
+  + full stack directly in the splash screen along with the recommended
+  fix (clear cache + relaunch). Screenshot the splash → paste into a
+  bug report; helpers don't need to walk anyone through `--dev`.
+- **`ui/boot.js`** — when ALL port scans fail (different mode: main
+  process itself didn't start at all), the error message now tells
+  the user the likely cause (stale partial download from a prior
+  release) and exactly how to clear the cache + relaunch.
+
+### Why this matters
+
+The boot-failure surface is now self-diagnosing. If a future user
+hits a wedge state — stale cache, missing native addon, runtime
+mismatch — they see the actual error message in the app window
+instead of an opaque port-scan loop. Field-debuggability moves from
+"DM the maintainer your `--dev` log" to "screenshot the splash."
+
+Smoke-tested: normal happy path is unchanged — `[rpc] WS listening on
+:9876`, renderer connects, all 5 hiverelay relay connections come up.
+Behavior change is failure-path only.
+
+---
+
 ## v0.4.4 — 2026-05-14
 
 Closes the silent partial-pin failure mode that was making
