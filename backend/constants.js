@@ -111,6 +111,26 @@ const EVT_LOGIN_REQUEST = 106
  *  Payload: { requestId, driveKey, appName, reason, topicHex, protocol } */
 const EVT_SWARM_REQUEST = 107
 
+// --- anonGPT bridge (Phase 0 plumbing — see backend/anongpt-buyer.js) ---
+
+/**
+ * The single Hyperdrive key allowed to receive the window.pear.anongpt
+ * shim. anonGPT is published as a Hyperdrive from the anongpt repo:
+ *   https://github.com/bigdestiny2/anongpt
+ *
+ * Privacy contract (see anongpt/docs/spec/01-privacy-by-design.md):
+ * the shim is injected ONLY when the loaded drive key matches this
+ * constant AND the drive's manifest.json declares the four required
+ * privacy claims (storesPrompts=false, remoteHttpInference=forbidden,
+ * requiresLocalRuntime=true, pear.anongpt.infer declared). Any other
+ * drive sees no anonGPT API and must fail closed if it depends on one.
+ *
+ * The key is hardcoded for the first cut. A future iteration will read
+ * it from a signed PearBrowser app-allowlist, or resolve it from the
+ * featured-apps catalog with a manifest-signature check.
+ */
+const ANONGPT_DRIVE_KEY = 'e3cf8b6fae6260608cbfcdf6b82d985c65f5ad1b9c85e777e296e7c521213abc'
+
 module.exports = {
   CMD_NAVIGATE, CMD_GET_STATUS,
   CMD_LOAD_CATALOG, CMD_LOAD_CATALOG_BEE, CMD_INSTALL_APP, CMD_UNINSTALL_APP,
@@ -133,4 +153,5 @@ module.exports = {
   CMD_STOP,
   EVT_READY, EVT_PEER_COUNT, EVT_ERROR, EVT_INSTALL_PROGRESS, EVT_SITE_PUBLISHED, EVT_BOOT_PROGRESS,
   EVT_LOGIN_REQUEST, EVT_SWARM_REQUEST,
+  ANONGPT_DRIVE_KEY,
 }

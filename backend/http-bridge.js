@@ -24,6 +24,8 @@ class HttpBridge {
     this._contacts = opts.contacts || null
     this._requestLogin = opts.requestLogin || null  // async (args) => attestation
     this._swarmBridge = opts.swarmBridge || null   // SwarmBridge instance — see backend/swarm-bridge.js
+    this._anongptBuyer = opts.anongptBuyer || null // AnongptBuyer — see backend/anongpt-buyer.js
+    this._anongptDriveKey = (opts.anongptDriveKey || '').toLowerCase()
     this._rateLimiter = new Map() // Simple rate limiting per IP
   }
 
@@ -523,6 +525,36 @@ class HttpBridge {
         }
 
         return this._jsonError(res, 'Unknown swarm endpoint', 404)
+      }
+
+      // --- anonGPT private buyer (Phase 0 plumbing) ---
+      //
+      // window.pear.anongpt.infer() in the page → POST here. The route
+      // gate is doubled: (1) the X-Pear-Token only validates for the
+      // drive that was issued the token (so a non-anonGPT page can't
+      // call this even by reading the token off the wire), and (2) we
+      // re-verify driveKeyHex matches the configured anonGPT key
+      // before invoking the buyer. Either gate failing yields 403 so
+      // the page can't tell whether the API exists for other drives.
+      // See backend/anongpt-buyer.js for the buyer side.
+
+      if (req.method === 'POST' && path === '/api/anongpt/infer') {
+        const auth = this._requireToken(req, res)
+        if (!auth) return true
+        if (!this._anongptDriveKey || auth.driveKeyHex.toLowerCase() !== this._anongptDriveKey) {
+          return this._jsonError(res, 'anonGPT API is restricted to the anonGPT drive', 403)
+        }
+        if (!this._anongptBuyer) {
+          // No buyer wired at all (Phase 0 not initialized). Honest
+          // fail-closed — the page's existing UI already handles this.
+          return this._json(res, {
+            ok: false,
+            code: 'buyer-not-configured',
+            message: 'PearBrowser was started without an anonGPT buyer module.'
+          })
+        }
+        const result = await this._anongptBuyer.infer(body || {})
+        return this._json(res, result)
       }
 
       // --- Status ---

@@ -31,8 +31,9 @@ const { RelayClient } = require('./relay-client.js')
 const { CatalogManager } = require('./catalog-manager.js')
 const { AppManager } = require('./app-manager.js')
 const { SiteManager } = require('./site-manager.js')
-const { PearBridge, PEAR_SWARM_V1_SHIM } = require('./pear-bridge.js')
+const { PearBridge, PEAR_SWARM_V1_SHIM, PEAR_ANONGPT_SHIM } = require('./pear-bridge.js')
 const { HttpBridge } = require('./http-bridge.js')
+const { AnongptBuyer } = require('./anongpt-buyer.js')
 const { UserData } = require('./user-data.js')
 const { Identity, validateMnemonic } = require('./identity.js')
 const { Profile } = require('./profile.js')
@@ -1104,6 +1105,15 @@ async function boot () {
   // <script src> required from the page author. See docs/SWARM-V1.md.
   proxy.setPearSwarmShim(PEAR_SWARM_V1_SHIM)
 
+  // anonGPT — page-side shim that exposes window.pear.anongpt.infer
+  // ONLY for the anonGPT drive AND only when that drive's manifest.json
+  // declares the required privacy claims. Gating lives in HyperProxy's
+  // _shouldInjectAnongptShim(). See backend/anongpt-buyer.js +
+  // anongpt/docs/spec/02-pearbrowser-dev-bridge.md.
+  const anongptBuyer = new AnongptBuyer({ swarm, identity })
+  proxy.setAnongptShim(PEAR_ANONGPT_SHIM)
+  proxy.setAnongptDriveKey(C.ANONGPT_DRIVE_KEY)
+
   // Mount direct HTTP bridge (WebView → localhost → Bare, bypasses RN relay)
   const httpBridge = new HttpBridge(pearBridge, swarm, getDriveForProxy, {
     validateToken: (token) => proxy ? proxy.validateApiToken(token) : null,
@@ -1111,6 +1121,8 @@ async function boot () {
     profile,
     contacts,
     swarmBridge,
+    anongptBuyer,
+    anongptDriveKey: C.ANONGPT_DRIVE_KEY,
     // Login ceremony plumbing — http-bridge calls requestLogin() when a
     // page invokes pear.login(). We fire EVT_LOGIN_REQUEST up to the
     // UI, which calls CMD_LOGIN_RESOLVE after the user decides. See
