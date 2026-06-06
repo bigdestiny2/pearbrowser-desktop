@@ -87,6 +87,60 @@ function isValidDriveKey (keyHex) {
 }
 
 // Escape HTML entities to prevent XSS
+/**
+ * Compute the base64 SHA-256 hash of the body of an inline-script
+ * shim string of the form `<script>BODY</script>` (the exact form
+ * PEAR_SWARM_V1_SHIM and PEAR_ANONGPT_SHIM use). The browser computes
+ * the CSP `'sha256-…'` hash over the literal text between the opening
+ * `>` of `<script>` and the closing `<` of `</script>`, so we strip
+ * the tags before hashing. Returns '' if the input doesn't look like
+ * an inline-script block (e.g. empty shim or someone passed a
+ * `<script src=…>` tag).
+ */
+function sha256ScriptBody (shimHtml) {
+  if (!shimHtml || typeof shimHtml !== 'string') return ''
+  const m = shimHtml.match(/^\s*<script\b[^>]*>([\s\S]*?)<\/script>\s*$/i)
+  if (!m) return ''
+  return crypto.createHash('sha256').update(m[1], 'utf8').digest('base64')
+}
+
+/**
+ * Modify a page's Content-Security-Policy meta tag to authorize the
+ * inline shim scripts we inject. We add `'sha256-…'` tokens to the
+ * `script-src` directive — narrowly authorizing the exact bytes we
+ * insert, without weakening the page's protection against XSS (no
+ * `'unsafe-inline'`).
+ *
+ * Three cases:
+ *   1. CSP has explicit `script-src` → append hashes to it.
+ *   2. CSP has `default-src` but no `script-src` → add a fresh
+ *      `script-src 'self' '<hashes>'` so hashes apply (CSP3 doesn't
+ *      let `'sha256-…'` tokens inherit from `default-src`).
+ *   3. CSP has neither → append `script-src 'self' '<hashes>'`.
+ *   4. No CSP meta tag in the document → no-op (page never set one).
+ *
+ * Idempotent: re-running with the same hash string yields the same
+ * policy.
+ */
+function injectCspShimHashes (html, hashesB64) {
+  if (!hashesB64 || hashesB64.length === 0) return html
+  const hashTokens = hashesB64.map((h) => `'sha256-${h}'`).join(' ')
+  // Match the meta CSP tag in either attribute order; allow single or
+  // double quotes around the content attribute value.
+  const re = /<meta\s+[^>]*?http-equiv\s*=\s*["']Content-Security-Policy["'][^>]*?content\s*=\s*(["'])([\s\S]*?)\1[^>]*>/i
+  return html.replace(re, (full, q, policy) => {
+    let newPolicy = policy
+    if (/script-src\b/i.test(newPolicy)) {
+      newPolicy = newPolicy.replace(/script-src([^;]*)/i, (m, rest) => `script-src${rest} ${hashTokens}`)
+    } else if (/default-src\b/i.test(newPolicy)) {
+      newPolicy = newPolicy.replace(/(default-src[^;]*)(;|$)/i, (m, ds, end) => `${ds}; script-src 'self' ${hashTokens}${end}`)
+    } else {
+      newPolicy = newPolicy + (newPolicy.endsWith(';') ? ' ' : '; ') + `script-src 'self' ${hashTokens}`
+    }
+    return full.replace(`${q}${policy}${q}`, `${q}${newPolicy}${q}`)
+  })
+}
+
 function escapeHtml (str) {
   if (typeof str !== 'string') return ''
   return str
@@ -154,6 +208,7 @@ class HyperProxy {
    */
   setPearSwarmShim (shimHtml) {
     this._pearSwarmShim = String(shimHtml || '')
+    this._pearSwarmShimHash = this._pearSwarmShim ? sha256ScriptBody(this._pearSwarmShim) : ''
   }
 
   /**
@@ -163,6 +218,7 @@ class HyperProxy {
    */
   setAnongptShim (shimHtml) {
     this._anongptShim = String(shimHtml || '')
+    this._anongptShimHash = this._anongptShim ? sha256ScriptBody(this._anongptShim) : ''
   }
 
   /**
@@ -295,9 +351,28 @@ class HyperProxy {
       `<meta name="pear-api-token" content="${apiToken}">` +
       (this._pearSwarmShim || '') +
       (includeAnongpt ? this._anongptShim : '')
-    const injected = html.includes('<head>')
+    let injected = html.includes('<head>')
       ? html.replace('<head>', `<head>${headInjection}`)
       : html.replace(/<html>/i, `<html><head>${headInjection}</head>`)
+
+    // Page may carry a strict CSP that forbids inline scripts (anonGPT
+    // ships `script-src 'self'` with no 'unsafe-inline' — its own
+    // scripts are hash-whitelisted in its page). Without help our
+    // shims would be in the HTML but never execute, and the page's
+    // feature detection for window.pear.* would report "private
+    // runtime unavailable" — exactly the failure mode the spec demands
+    // for missing runtimes. To make our injection visible to the page
+    // we add the shim hashes to the page's CSP `script-src` directive.
+    // We do NOT add 'unsafe-inline' (that would weaken the page's
+    // protection against XSS); we add only the exact hashes of the
+    // exact scripts we (the authorized runtime) inject.
+    const hashesToAuthorize = []
+    if (this._pearSwarmShim && this._pearSwarmShimHash) hashesToAuthorize.push(this._pearSwarmShimHash)
+    if (includeAnongpt && this._anongptShimHash) hashesToAuthorize.push(this._anongptShimHash)
+    if (hashesToAuthorize.length > 0) {
+      injected = injectCspShimHashes(injected, hashesToAuthorize)
+    }
+
     return Buffer.from(injected)
   }
 
