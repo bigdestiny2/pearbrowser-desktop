@@ -1,6 +1,12 @@
 import Runtime from 'pear-electron'
 import Bridge from 'pear-bridge'
 import ws from 'bare-ws'
+// ESM-only modules the backend needs but can't dynamic-import from CJS:
+// Bare/Pear's import() resolver has no referrer URL when called from a
+// CommonJS file, so all forms of import() from backend/*.js fail with
+// "Cannot find referrer". The fix: load them statically here in the
+// ESM entry point and hand them to the backend through bootBackend().
+import { ServiceRegistry, ServiceProtocol } from 'p2p-hiverelay/core/services/index.js'
 import { bootBackend } from './backend/pear-adapter.cjs'
 
 // Renderer scans 9876-9880 in order. Backend binds the first one
@@ -26,7 +32,13 @@ const storagePath = (Pear.config?.storage || '.') + '/pearbrowser-storage'
 let backendPipe = null
 let bootError = null
 try {
-  backendPipe = bootBackend({ storagePath })
+  backendPipe = bootBackend({
+    storagePath,
+    // Hand statically-imported ESM modules down to the CJS backend so
+    // it can build a ServiceProtocol stack for anonGPT's seller dial
+    // without paying Bare's CJS-→-ESM dynamic-import penalty.
+    esmModules: { ServiceRegistry, ServiceProtocol }
+  })
 } catch (err) {
   bootError = err
   console.error('')

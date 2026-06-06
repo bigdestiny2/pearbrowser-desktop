@@ -1110,7 +1110,16 @@ async function boot () {
   // declares the required privacy claims. Gating lives in HyperProxy's
   // _shouldInjectAnongptShim(). See backend/anongpt-buyer.js +
   // anongpt/docs/spec/02-pearbrowser-dev-bridge.md.
-  const anongptBuyer = new AnongptBuyer({ swarm, identity })
+  //
+  // The buyer needs ServiceRegistry + ServiceProtocol (ESM) which the
+  // root index.js loaded statically and stashed on globalThis via
+  // pear-adapter.cjs. We can't import them here because backend/* is
+  // CJS and Bare/Pear's import() has no referrer from this context.
+  const anongptBuyer = new AnongptBuyer({
+    swarm,
+    identity,
+    services: globalThis._pearbrowserEsmModules || null
+  })
   proxy.setAnongptShim(PEAR_ANONGPT_SHIM)
   proxy.setAnongptDriveKey(C.ANONGPT_DRIVE_KEY)
 
