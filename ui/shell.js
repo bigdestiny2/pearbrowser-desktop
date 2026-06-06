@@ -1029,6 +1029,28 @@ function Apps ({ rpc, C, onLaunch }) {
     }
   }
 
+  // Featured apps in this list are a mix of `pear://` apps (spawn
+  // their own runtime via CMD_LAUNCH_PEAR_LINK — Keet, PearPass,
+  // HiveWorm) and `hyper://` sites that are hosted INSIDE PearBrowser
+  // (anonGPT, future Pear-bridge apps). Route by scheme so the user
+  // never sees "launch: Only pear:// and file:// links can be
+  // launched" — that error is a category mismatch, not a real failure.
+  const launchFeaturedApp = (app) => {
+    const link = (app.link || '').trim()
+    if (!link) return
+    if (link.startsWith('pear://') || link.startsWith('file://')) {
+      launchPearLink(link)
+      return
+    }
+    if (link.startsWith('hyper://') || link.startsWith('http://') || link.startsWith('https://')) {
+      // onLaunch is the App-level helper that does setNavUrl(url) +
+      // setTab('browse'), opening the site in the Browse panel.
+      onLaunch?.(link)
+      return
+    }
+    setErr(`launch: unsupported scheme for featured app "${app.name}" — ${link.slice(0, 32)}`)
+  }
+
   const refreshInstalled = async () => {
     try {
       const list = await rpc.request(C.CMD_LIST_INSTALLED)
@@ -1136,7 +1158,7 @@ function Apps ({ rpc, C, onLaunch }) {
               <div class="app-meta" title=${app.link}>${app.link.slice(0, 20)}…${app.link.slice(-6)}</div>
             </div>
             <div class="app-actions">
-              <button class="btn primary" onClick=${() => launchPearLink(app.link)} disabled=${busy === 'pear-link'}>Launch</button>
+              <button class="btn primary" onClick=${() => launchFeaturedApp(app)} disabled=${busy === 'pear-link'}>${app.link.startsWith('hyper://') ? 'Open' : 'Launch'}</button>
             </div>
           </div>
         `)}
