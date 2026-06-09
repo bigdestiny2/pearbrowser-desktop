@@ -307,6 +307,36 @@ p { color: #8b949e; margin-bottom: 12px; }
 .catalog-categories {
   display: flex; flex-wrap: wrap; gap: 6px;
 }
+.catalog-sources {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  margin-bottom: 12px;
+}
+.catalog-source {
+  display: inline-flex; align-items: stretch;
+}
+.catalog-source .catalog-chip {
+  border-top-right-radius: 0; border-bottom-right-radius: 0;
+}
+.catalog-source-x {
+  font-family: inherit;
+  font-size: 13px; line-height: 1;
+  color: #8b949e;
+  background: #21262d;
+  border: 1px solid #30363d;
+  border-left: none;
+  border-radius: 0 6px 6px 0;
+  padding: 0 8px;
+  cursor: pointer;
+  transition: color 0.1s, background 0.1s;
+}
+.catalog-source-x:hover { color: #f85149; background: rgba(248,81,73,0.12); }
+.app-source-tag {
+  margin-top: 4px;
+  font-size: 10px;
+  color: #6e7681;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
 
 .apps-error {
   color: #f85149;

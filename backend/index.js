@@ -213,6 +213,21 @@ rpc.handle(C.CMD_CHECK_UPDATES, async () => {
   return await appManager.checkUpdates(allApps)
 })
 
+// Aggregated catalog-of-catalogs view: every app across every loaded
+// catalog, de-duplicated, plus the list of loaded catalogs for facets.
+rpc.handle(C.CMD_GET_CATALOG_APPS, () => {
+  if (!catalogManager) return { apps: [], catalogs: [] }
+  return {
+    apps: catalogManager.getAggregatedApps(),
+    catalogs: catalogManager.listCatalogs(),
+  }
+})
+
+rpc.handle(C.CMD_UNLOAD_CATALOG, async (data) => {
+  if (!catalogManager) return false
+  return await catalogManager.unloadCatalog(normalizeDriveKey(data.keyHex))
+})
+
 // Site Builder commands
 rpc.handle(C.CMD_CREATE_SITE, async (data) => {
   await whenReady()

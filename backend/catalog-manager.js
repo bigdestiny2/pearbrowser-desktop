@@ -189,6 +189,84 @@ class CatalogManager {
   }
 
   /**
+   * Aggregated, de-duplicated app list across every loaded catalog.
+   *
+   * This is the catalog-of-catalogs view: PearBrowser keeps several
+   * catalogs open at once (the curated default + whatever the user has
+   * added), and the Apps tab presents them as one searchable store. Each
+   * app is tagged with the catalog it came from so the UI can show its
+   * source and filter by it. When the same app id appears in more than one
+   * catalog, the highest-versioned copy wins.
+   */
+  getAggregatedApps () {
+    const byId = new Map()
+    const anon = [] // apps with no stable id — never de-duplicated
+    for (const [catalogKey, entry] of this.catalogs) {
+      if (!entry.data || !Array.isArray(entry.data.apps)) continue
+      const catalogName = entry.data.name || 'Catalog'
+      for (const app of entry.data.apps) {
+        const tagged = { ...app, catalogKey, catalogName }
+        if (app.id == null) { anon.push(tagged); continue }
+        const existing = byId.get(app.id)
+        if (!existing || this._versionGreater(app.version, existing.version)) {
+          byId.set(app.id, tagged)
+        }
+      }
+    }
+    return [...byId.values(), ...anon]
+  }
+
+  /**
+   * Metadata for every loaded catalog — powers the "loaded catalogs"
+   * facet chips in the UI.
+   */
+  listCatalogs () {
+    const out = []
+    for (const [key, entry] of this.catalogs) {
+      if (!entry.data) continue
+      out.push({
+        key,
+        name: entry.data.name || 'Catalog',
+        count: Array.isArray(entry.data.apps) ? entry.data.apps.length : 0,
+        source: entry.type === 'hyperbee' ? 'hyperbee' : 'hyperdrive',
+      })
+    }
+    return out
+  }
+
+  /**
+   * Drop a single catalog from the aggregated set and release its
+   * resources. Accepts either the raw key or the cached map key
+   * (`bee:<hex>` for Hyperbee catalogs).
+   */
+  async unloadCatalog (keyHex) {
+    for (const cacheKey of [keyHex, `bee:${keyHex}`]) {
+      const entry = this.catalogs.get(cacheKey)
+      if (!entry) continue
+      try {
+        if (entry.drive) await entry.drive.close()
+        else if (entry.bee) await entry.bee.close()
+      } catch {}
+      this.catalogs.delete(cacheKey)
+      return true
+    }
+    return false
+  }
+
+  // Compare dotted numeric versions ("1.2.0" > "1.1.9"). Missing/garbage
+  // parts count as 0, so an unversioned app never displaces a versioned one.
+  _versionGreater (a, b) {
+    const pa = String(a == null ? '0' : a).split('.').map((n) => parseInt(n, 10) || 0)
+    const pb = String(b == null ? '0' : b).split('.').map((n) => parseInt(n, 10) || 0)
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+      const da = pa[i] || 0
+      const db = pb[i] || 0
+      if (da !== db) return da > db
+    }
+    return false
+  }
+
+  /**
    * Search apps by name or description
    */
   searchApps (query) {

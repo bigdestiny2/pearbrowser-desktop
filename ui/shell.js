@@ -1020,11 +1020,17 @@ function appCategories (app) {
 
 function Apps ({ rpc, C, onLaunch }) {
   const [catalogKey, setCatalogKey] = useState('')
-  const [catalog, setCatalog] = useState(null)
-  // Discovery: free-text search + category facet over the loaded catalog,
-  // and a map of appId → available newer version (from CMD_CHECK_UPDATES).
+  // Cross-catalog store: PearBrowser keeps every catalog the user has
+  // added loaded at once and merges them into one searchable list. `apps`
+  // is the de-duplicated aggregate (each tagged with its source catalog);
+  // `loadedCatalogs` is the metadata behind the source-facet chips.
+  const [apps, setApps] = useState([])
+  const [loadedCatalogs, setLoadedCatalogs] = useState([])
+  // Discovery facets: free-text search, category, and source catalog;
+  // plus a map of appId → available newer version (from CMD_CHECK_UPDATES).
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState('all')
+  const [source, setSource] = useState('all')
   const [updates, setUpdates] = useState({})
   // Recent catalog keys (loaded successfully at least once) — persisted
   // via user-data settings so they survive across launches.
@@ -1115,29 +1121,43 @@ function Apps ({ rpc, C, onLaunch }) {
     }
   }
 
-  // Re-install an installed app at the catalog's newer version. Re-running
+  // Re-install an installed app at its catalog's newer version. Re-running
   // install re-syncs the drive and bumps the stored version, so the same
   // path that installs an app also updates it.
   const updateApp = async (id) => {
-    const catalogApp = (catalog?.apps ?? []).find((a) => a.id === id)
-    if (!catalogApp) { setErr(`update ${id}: not in the loaded catalog`); return }
+    const catalogApp = apps.find((a) => a.id === id)
+    if (!catalogApp) { setErr(`update ${id}: not in any loaded catalog`); return }
     await installApp(catalogApp)
     await refreshUpdates()
   }
 
+  // Pull the aggregated app list + loaded-catalog metadata from the
+  // backend. The backend keeps every catalog open, so this is the single
+  // source of truth for the cross-catalog view.
+  const refreshAggregate = async () => {
+    try {
+      const res = await rpc.request(C.CMD_GET_CATALOG_APPS)
+      setApps(Array.isArray(res?.apps) ? res.apps : [])
+      setLoadedCatalogs(Array.isArray(res?.catalogs) ? res.catalogs : [])
+    } catch (e) {
+      setErr(`catalog: ${e.message}`)
+    }
+  }
+
+  // Add a catalog to the set (does not replace existing ones), persist it
+  // as recent, then re-aggregate.
   const loadCatalog = async (overrideKey) => {
     const key = (typeof overrideKey === 'string' ? overrideKey : catalogKey).trim()
     if (!key) return
-    setErr(''); setBusy('catalog'); setCatalog(null)
+    setErr(''); setBusy('catalog')
     try {
-      const data = await rpc.request(C.CMD_LOAD_CATALOG, { keyHex: key }, 60000)
-      setCatalog(data)
-      setCatalogKey(key)
-      setQuery(''); setCategory('all')
+      await rpc.request(C.CMD_LOAD_CATALOG, { keyHex: key }, 60000)
+      setCatalogKey('')
+      await refreshAggregate()
       refreshUpdates()
       // Pin as recent + persist for next launch.
       setRecentCatalogs((prev) => {
-        const next = [key, ...prev.filter((k) => k !== key)].slice(0, 5)
+        const next = [key, ...prev.filter((k) => k !== key)].slice(0, 8)
         rpc.request(C.CMD_USERDATA_SET_SETTINGS, {
           updates: { lastCatalogKey: key, recentCatalogs: next }
         }).catch(() => {})
@@ -1150,17 +1170,45 @@ function Apps ({ rpc, C, onLaunch }) {
     }
   }
 
-  // First mount: fetch installed list + recent catalogs, then auto-load
-  // the most recent catalog so the Apps tab isn't empty on every launch.
+  // Drop a catalog from the aggregated set. Also clears the source facet
+  // if it was pointing at the removed catalog, and forgets it as recent.
+  const unloadCatalog = async (key) => {
+    setErr('')
+    try {
+      await rpc.request(C.CMD_UNLOAD_CATALOG, { keyHex: key })
+      if (source === key) setSource('all')
+      await refreshAggregate()
+      setRecentCatalogs((prev) => {
+        const next = prev.filter((k) => k !== key && `bee:${k}` !== key)
+        rpc.request(C.CMD_USERDATA_SET_SETTINGS, { updates: { recentCatalogs: next } }).catch(() => {})
+        return next
+      })
+    } catch (e) {
+      setErr(`unload: ${e.message}`)
+    }
+  }
+
+  // First mount: fetch installed list, then load every known catalog so
+  // the aggregated store is populated, not just the most recent one.
   useEffect(() => {
     refreshInstalled()
     ;(async () => {
       try {
         const settings = await rpc.request(C.CMD_USERDATA_GET_SETTINGS)
         const recent = Array.isArray(settings?.recentCatalogs) ? settings.recentCatalogs : []
+        // Back-compat: older builds persisted only a single lastCatalogKey.
         const last = settings?.lastCatalogKey
+        const keys = [...new Set([...recent, ...(last ? [last] : [])])]
         if (recent.length) setRecentCatalogs(recent)
-        if (last) await loadCatalog(last)
+        if (keys.length) {
+          setBusy('catalog')
+          await Promise.allSettled(
+            keys.map((k) => rpc.request(C.CMD_LOAD_CATALOG, { keyHex: k }, 60000))
+          )
+          await refreshAggregate()
+          refreshUpdates()
+          setBusy(null)
+        }
       } catch {
         // user-data not ready yet — first-launch / boot races. The user
         // can still paste a key by hand below.
@@ -1209,24 +1257,25 @@ function Apps ({ rpc, C, onLaunch }) {
 
   const isInstalled = (id) => installed.some((a) => a.id === id)
 
-  // Category facets across the loaded catalog, plus the search/category
-  // filtered view. Recomputed only when the catalog or filters change.
+  // Category facets across all loaded catalogs, plus the filtered view.
+  // Recomputed only when the aggregate or filters change.
   const categories = useMemo(() => {
     const set = new Set()
-    for (const a of (catalog?.apps ?? [])) appCategories(a).forEach((c) => set.add(c))
+    for (const a of apps) appCategories(a).forEach((c) => set.add(c))
     return ['all', ...[...set].sort()]
-  }, [catalog])
+  }, [apps])
 
   const filteredApps = useMemo(() => {
     const q = query.trim().toLowerCase()
-    return (catalog?.apps ?? []).filter((a) => {
+    return apps.filter((a) => {
+      if (source !== 'all' && a.catalogKey !== source) return false
       if (category !== 'all' && !appCategories(a).includes(category)) return false
       if (!q) return true
       return (a.name && a.name.toLowerCase().includes(q)) ||
         (a.description && a.description.toLowerCase().includes(q)) ||
         (a.author && String(a.author).toLowerCase().includes(q))
     })
-  }, [catalog, query, category])
+  }, [apps, query, category, source])
 
   return html`
     <div class="apps">
@@ -1277,43 +1326,48 @@ function Apps ({ rpc, C, onLaunch }) {
           spellcheck="false"
         />
         <button class="btn primary" onClick=${() => loadCatalog()} disabled=${!catalogKey || busy === 'catalog'}>
-          ${busy === 'catalog' ? 'Loading…' : 'Load catalog'}
+          ${busy === 'catalog' ? 'Loading…' : 'Add catalog'}
         </button>
       </div>
 
-      ${recentCatalogs.length > 0 && html`
-        <div class="catalog-recent">
-          ${recentCatalogs.map((k) => html`
-            <button
-              class=${'catalog-chip' + (k === catalogKey ? ' active' : '')}
-              key=${k}
-              title=${k}
-              onClick=${() => loadCatalog(k)}
-              disabled=${busy === 'catalog'}
-            >${k.slice(0, 8)}…${k.slice(-4)}</button>
+      ${loadedCatalogs.length > 0 && html`
+        <div class="catalog-sources">
+          <button
+            class=${'catalog-chip' + (source === 'all' ? ' active' : '')}
+            onClick=${() => setSource('all')}
+          >All · ${apps.length}</button>
+          ${loadedCatalogs.map((cat) => html`
+            <span class="catalog-source" key=${cat.key}>
+              <button
+                class=${'catalog-chip' + (source === cat.key ? ' active' : '')}
+                title=${cat.key}
+                onClick=${() => setSource(cat.key)}
+              >${cat.name} · ${cat.count}</button>
+              <button class="catalog-source-x" title="Remove this catalog" onClick=${() => unloadCatalog(cat.key)}>×</button>
+            </span>
           `)}
         </div>
       `}
 
       ${err && html`<div class="apps-error">${err}</div>`}
 
-      ${busy === 'catalog' && !catalog && html`
+      ${busy === 'catalog' && apps.length === 0 && html`
         <div class="catalog-loading">
           <span class="spinner"></span>
-          <span>Loading catalog from peers…</span>
+          <span>Loading catalogs from peers…</span>
         </div>
       `}
 
-      ${autoLoadAttempted && !catalog && !busy && !err && html`
+      ${autoLoadAttempted && apps.length === 0 && !busy && !err && html`
         <div class="catalog-empty">
-          <strong>No catalog loaded.</strong>
+          <strong>No catalogs loaded.</strong>
           Paste a catalog drive key above, or use one of the featured Pear apps to launch directly.
-          The browser also remembers catalogs you've loaded before — they'll appear here next time.
+          The browser remembers catalogs you've loaded before — they'll reload here next time.
         </div>
       `}
 
-      ${catalog && html`
-        <h2>${catalog.name || 'Catalog'} · ${catalog.apps?.length ?? 0} apps</h2>
+      ${apps.length > 0 && html`
+        <h2>All apps · ${apps.length}${loadedCatalogs.length ? ` across ${loadedCatalogs.length} ${loadedCatalogs.length === 1 ? 'catalog' : 'catalogs'}` : ''}</h2>
 
         <div class="catalog-filter">
           <input
@@ -1349,6 +1403,7 @@ function Apps ({ rpc, C, onLaunch }) {
                 <div class="app-name">${app.name || app.id || 'Untitled app'}</div>
                 <div class="app-desc">${app.description || ''}</div>
                 <div class="app-meta">${app.version ? 'v' + app.version : ''} ${app.author ? '· ' + app.author : ''}</div>
+                ${app.catalogName && html`<div class="app-source-tag">${app.catalogName}</div>`}
               </div>
               <div class="app-actions">
                 ${isInstalled(app.id)
