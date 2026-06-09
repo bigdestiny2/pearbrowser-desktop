@@ -1000,9 +1000,32 @@ function Onboarding ({ rpc, C, onPickSite, onClose }) {
   `
 }
 
+// Catalog icons arrive as base64 data URIs from an untrusted Hyperdrive.
+// Only allow image data URIs (or http/https) into an <img src> so a hostile
+// catalog can't smuggle a javascript:/other scheme into the renderer.
+function safeIconSrc (src) {
+  if (typeof src !== 'string') return null
+  if (/^data:image\//i.test(src)) return src
+  if (/^https?:\/\//i.test(src)) return src
+  return null
+}
+
+// Normalize an app's category metadata to a string array. Catalogs in the
+// wild use either `categories: [...]` or a single `category: "..."`.
+function appCategories (app) {
+  if (Array.isArray(app.categories)) return app.categories.map((c) => String(c)).filter(Boolean)
+  if (app.category) return [String(app.category)]
+  return []
+}
+
 function Apps ({ rpc, C, onLaunch }) {
   const [catalogKey, setCatalogKey] = useState('')
   const [catalog, setCatalog] = useState(null)
+  // Discovery: free-text search + category facet over the loaded catalog,
+  // and a map of appId → available newer version (from CMD_CHECK_UPDATES).
+  const [query, setQuery] = useState('')
+  const [category, setCategory] = useState('all')
+  const [updates, setUpdates] = useState({})
   // Recent catalog keys (loaded successfully at least once) — persisted
   // via user-data settings so they survive across launches.
   const [recentCatalogs, setRecentCatalogs] = useState([])
@@ -1077,6 +1100,31 @@ function Apps ({ rpc, C, onLaunch }) {
     }
   }
 
+  // Ask the backend which installed apps are behind the loaded catalog's
+  // version. Non-critical — a failure just means no update badges.
+  const refreshUpdates = async () => {
+    try {
+      const list = await rpc.request(C.CMD_CHECK_UPDATES)
+      const map = {}
+      for (const u of (Array.isArray(list) ? list : [])) {
+        if (u && u.id) map[u.id] = u.newVersion
+      }
+      setUpdates(map)
+    } catch {
+      // ignore — update detection is best-effort
+    }
+  }
+
+  // Re-install an installed app at the catalog's newer version. Re-running
+  // install re-syncs the drive and bumps the stored version, so the same
+  // path that installs an app also updates it.
+  const updateApp = async (id) => {
+    const catalogApp = (catalog?.apps ?? []).find((a) => a.id === id)
+    if (!catalogApp) { setErr(`update ${id}: not in the loaded catalog`); return }
+    await installApp(catalogApp)
+    await refreshUpdates()
+  }
+
   const loadCatalog = async (overrideKey) => {
     const key = (typeof overrideKey === 'string' ? overrideKey : catalogKey).trim()
     if (!key) return
@@ -1085,6 +1133,8 @@ function Apps ({ rpc, C, onLaunch }) {
       const data = await rpc.request(C.CMD_LOAD_CATALOG, { keyHex: key }, 60000)
       setCatalog(data)
       setCatalogKey(key)
+      setQuery(''); setCategory('all')
+      refreshUpdates()
       // Pin as recent + persist for next launch.
       setRecentCatalogs((prev) => {
         const next = [key, ...prev.filter((k) => k !== key)].slice(0, 5)
@@ -1158,6 +1208,25 @@ function Apps ({ rpc, C, onLaunch }) {
   }
 
   const isInstalled = (id) => installed.some((a) => a.id === id)
+
+  // Category facets across the loaded catalog, plus the search/category
+  // filtered view. Recomputed only when the catalog or filters change.
+  const categories = useMemo(() => {
+    const set = new Set()
+    for (const a of (catalog?.apps ?? [])) appCategories(a).forEach((c) => set.add(c))
+    return ['all', ...[...set].sort()]
+  }, [catalog])
+
+  const filteredApps = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return (catalog?.apps ?? []).filter((a) => {
+      if (category !== 'all' && !appCategories(a).includes(category)) return false
+      if (!q) return true
+      return (a.name && a.name.toLowerCase().includes(q)) ||
+        (a.description && a.description.toLowerCase().includes(q)) ||
+        (a.author && String(a.author).toLowerCase().includes(q))
+    })
+  }, [catalog, query, category])
 
   return html`
     <div class="apps">
@@ -1245,20 +1314,50 @@ function Apps ({ rpc, C, onLaunch }) {
 
       ${catalog && html`
         <h2>${catalog.name || 'Catalog'} · ${catalog.apps?.length ?? 0} apps</h2>
-        <div class="app-grid">
-          ${(catalog.apps ?? []).map((app) => html`
+
+        <div class="catalog-filter">
+          <input
+            type="text"
+            class="catalog-search"
+            placeholder="Search apps by name, description, or author…"
+            value=${query}
+            onInput=${(e) => setQuery(e.target.value)}
+            spellcheck="false"
+          />
+          ${categories.length > 1 && html`
+            <div class="catalog-categories">
+              ${categories.map((c) => html`
+                <button
+                  class=${'catalog-chip' + (c === category ? ' active' : '')}
+                  key=${c}
+                  onClick=${() => setCategory(c)}
+                >${c === 'all' ? 'All' : c}</button>
+              `)}
+            </div>
+          `}
+        </div>
+
+        ${filteredApps.length === 0
+          ? html`<p class="placeholder">No apps match ${query ? `"${query}"` : 'this filter'}.</p>`
+          : html`<div class="app-grid">
+            ${filteredApps.map((app) => html`
             <div class="app-card" key=${app.id}>
-              ${app.iconData
-                ? html`<img src=${app.iconData} alt="" class="app-icon" />`
+              ${safeIconSrc(app.iconData)
+                ? html`<img src=${safeIconSrc(app.iconData)} alt="" class="app-icon" />`
                 : html`<div class="app-icon app-icon-fallback">${(app.name || '?').charAt(0)}</div>`}
               <div class="app-info">
-                <div class="app-name">${app.name}</div>
+                <div class="app-name">${app.name || app.id || 'Untitled app'}</div>
                 <div class="app-desc">${app.description || ''}</div>
                 <div class="app-meta">${app.version ? 'v' + app.version : ''} ${app.author ? '· ' + app.author : ''}</div>
               </div>
               <div class="app-actions">
                 ${isInstalled(app.id)
                   ? html`
+                    ${updates[app.id] && html`
+                      <button class="btn primary" onClick=${() => updateApp(app.id)} disabled=${busy === `install:${app.id}`}>
+                        ${busy === `install:${app.id}` ? 'Updating…' : `Update → v${updates[app.id]}`}
+                      </button>
+                    `}
                     <button class="btn" onClick=${() => launchApp(app)} disabled=${busy === `launch:${app.id}`}>Launch</button>
                     <button class="btn subtle" onClick=${() => uninstallApp(app)} disabled=${busy === `uninstall:${app.id}`}>Uninstall</button>
                   `
@@ -1270,7 +1369,7 @@ function Apps ({ rpc, C, onLaunch }) {
               </div>
             </div>
           `)}
-        </div>
+          </div>`}
       `}
 
       <h2>Installed</h2>
@@ -1282,9 +1381,14 @@ function Apps ({ rpc, C, onLaunch }) {
                 <div class="app-icon app-icon-fallback">${(app.name || '?').charAt(0)}</div>
                 <div class="app-info">
                   <div class="app-name">${app.name}</div>
-                  <div class="app-meta">v${app.version || '?'}</div>
+                  <div class="app-meta">v${app.version || '?'}${updates[app.id] ? ` · update available → v${updates[app.id]}` : ''}</div>
                 </div>
                 <div class="app-actions">
+                  ${updates[app.id] && html`
+                    <button class="btn primary" onClick=${() => updateApp(app.id)} disabled=${busy === `install:${app.id}`}>
+                      ${busy === `install:${app.id}` ? 'Updating…' : 'Update'}
+                    </button>
+                  `}
                   <button class="btn" onClick=${() => launchApp(app)} disabled=${busy === `launch:${app.id}`}>Launch</button>
                   <button class="btn subtle" onClick=${() => uninstallApp(app)} disabled=${busy === `uninstall:${app.id}`}>Uninstall</button>
                 </div>

@@ -151,15 +151,26 @@ class CatalogManager {
    * Refresh a previously loaded catalog
    */
   async refreshCatalog (keyHex) {
-    const entry = this.catalogs.get(keyHex)
-    if (!entry) return this.loadCatalog(keyHex)
-
-    const catalogBuf = await entry.drive.get('/catalog.json')
-    if (catalogBuf) {
-      entry.data = this._safeJSONParse(catalogBuf.toString())
-      entry.lastRefresh = Date.now()
+    // Hyperdrive-backed catalog: re-read catalog.json in place.
+    const driveEntry = this.catalogs.get(keyHex)
+    if (driveEntry && driveEntry.drive) {
+      const catalogBuf = await driveEntry.drive.get('/catalog.json')
+      if (catalogBuf) {
+        driveEntry.data = this._safeJSONParse(catalogBuf.toString())
+        driveEntry.lastRefresh = Date.now()
+      }
+      return driveEntry.data
     }
-    return entry.data
+
+    // Hyperbee-backed catalog: cached under `bee:<keyHex>`. Drop the cache
+    // entry and reload so newly-replicated apps are picked up.
+    if (this.catalogs.has(`bee:${keyHex}`)) {
+      this.catalogs.delete(`bee:${keyHex}`)
+      return this.loadCatalogBee(keyHex)
+    }
+
+    // Not loaded yet.
+    return this.loadCatalog(keyHex)
   }
 
   /**
@@ -183,7 +194,7 @@ class CatalogManager {
   searchApps (query) {
     const q = query.toLowerCase()
     return this.getAllApps().filter(app =>
-      app.name.toLowerCase().includes(q) ||
+      (app.name && app.name.toLowerCase().includes(q)) ||
       (app.description && app.description.toLowerCase().includes(q))
     )
   }
@@ -223,7 +234,11 @@ class CatalogManager {
 
   async close () {
     for (const [, entry] of this.catalogs) {
-      try { await entry.drive.close() } catch {}
+      // Hyperdrive catalogs hold `drive`; Hyperbee catalogs hold `bee`.
+      try {
+        if (entry.drive) await entry.drive.close()
+        else if (entry.bee) await entry.bee.close()
+      } catch {}
     }
     this.catalogs.clear()
   }

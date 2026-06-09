@@ -287,6 +287,27 @@ p { color: #8b949e; margin-bottom: 12px; }
 }
 .catalog-loader input:focus { outline: none; border-color: #58a6ff; box-shadow: 0 0 0 2px rgba(88,166,255,0.15); }
 
+.catalog-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 12px 0 16px;
+}
+.catalog-search {
+  background: #010409;
+  color: #e6edf3;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 9px 14px;
+  font: inherit;
+  font-size: 13px;
+  transition: border-color 120ms ease;
+}
+.catalog-search:focus { outline: none; border-color: #58a6ff; box-shadow: 0 0 0 2px rgba(88,166,255,0.15); }
+.catalog-categories {
+  display: flex; flex-wrap: wrap; gap: 6px;
+}
+
 .apps-error {
   color: #f85149;
   background: rgba(248,81,73,0.08);

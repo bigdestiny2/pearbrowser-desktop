@@ -168,7 +168,8 @@ rpc.handle(C.CMD_LOAD_CATALOG, async (data) => {
 // publishes Hyperdrive catalogs today. Once a Hyperbee catalog exists,
 // ExploreScreen can switch by sending `hyperbee://<key>` URLs.)
 rpc.handle(C.CMD_LOAD_CATALOG_BEE, async (data) => {
-  return await catalogManager.loadCatalogBee(data.keyHex)
+  await whenReady()
+  return await catalogManager.loadCatalogBee(normalizeDriveKey(data.keyHex))
 })
 
 rpc.handle(C.CMD_INSTALL_APP, async (data) => {
