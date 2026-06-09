@@ -91,6 +91,7 @@ const pendingSwarmConsents = new Map()
 const SWARM_CONSENT_TIMEOUT_MS = 2 * 60 * 1000  // 2 minutes
 let peerCount = 0
 let browseDrives = new Map() // keyHex → Hyperdrive (for ad-hoc browsing)
+let storageTimer = null // handle for the periodic storage-quota check
 
 // Resolves when boot() finishes setting up all managers. Handlers that
 // need managers await this so RPC calls issued during the 1–2s boot
@@ -881,9 +882,17 @@ async function ensureBrowseDrive (keyHex) {
     return entry.drive
   }
 
-  // Evict oldest drive if at capacity
+  // Evict the least-recently-used drive if at capacity. We track
+  // lastAccess on every hit, so evict by that — not by Map insertion order
+  // (keys().next()), which would drop a frequently-used drive just because
+  // it was opened first. Matches the LRU policy in cleanupOldData().
   if (browseDrives.size >= MAX_BROWSE_DRIVES) {
-    const oldest = browseDrives.keys().next().value
+    let oldest = null
+    let oldestAccess = Infinity
+    for (const [key, entry] of browseDrives) {
+      const access = entry.lastAccess || 0
+      if (access < oldestAccess) { oldestAccess = access; oldest = key }
+    }
     const oldEntry = browseDrives.get(oldest)
     browseDrives.delete(oldest)
     try { await swarm.leave(oldEntry.drive.discoveryKey) } catch (err) {
@@ -1162,8 +1171,10 @@ async function boot () {
   console.log('HTTP proxy started on port:', port)
   rpc.event(C.EVT_BOOT_PROGRESS, { stage: 'proxy-ready', message: 'HTTP proxy ready on port ' + port })
 
-  // Start storage monitoring
-  setInterval(() => checkStorageQuota(), STORAGE_CHECK_INTERVAL)
+  // Start storage monitoring. Keep the handle so shutdown() can clear it —
+  // otherwise the timer keeps firing checkStorageQuota() against a closed
+  // store/swarm after teardown.
+  storageTimer = setInterval(() => checkStorageQuota(), STORAGE_CHECK_INTERVAL)
 
   // Notify React Native
   console.log('Sending READY event')
@@ -1172,6 +1183,7 @@ async function boot () {
 }
 
 async function shutdown () {
+  if (storageTimer) { clearInterval(storageTimer); storageTimer = null }
   if (swarmBridge) { try { await swarmBridge.destroy() } catch {} swarmBridge = null }
   if (proxy) { try { await proxy.stop() } catch {} proxy = null }
   if (pearBridge) { try { await pearBridge.close() } catch {} pearBridge = null }
