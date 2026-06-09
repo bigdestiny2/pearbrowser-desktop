@@ -337,6 +337,27 @@ p { color: #8b949e; margin-bottom: 12px; }
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
+.mycatalog {
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin: 8px 0 16px;
+}
+.mycatalog-head {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+}
+.mycatalog-key {
+  margin-top: 8px;
+  font-family: "SF Mono", Menlo, monospace;
+  font-size: 11px;
+  color: #58a6ff;
+  word-break: break-all;
+  background: #010409;
+  border: 1px solid #21262d;
+  border-radius: 6px;
+  padding: 6px 10px;
+}
 
 .apps-error {
   color: #f85149;

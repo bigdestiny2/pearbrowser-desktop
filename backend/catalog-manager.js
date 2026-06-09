@@ -16,6 +16,7 @@ class CatalogManager {
     this.store = store
     this.swarm = swarm
     this.catalogs = new Map() // catalogKey hex → { drive, data, lastRefresh }
+    this.myCatalogs = new Map() // owned (writable) catalog keyHex → Hyperdrive
   }
 
   /**
@@ -277,6 +278,107 @@ class CatalogManager {
     )
   }
 
+  // --- Catalog authoring (your own publishable catalog) ---------------
+  //
+  // A "my catalog" is a writable Hyperdrive the user owns, holding a
+  // catalog.json the same shape we read from anyone else's catalog. This
+  // closes the discovery loop: install/own an app, endorse it into your
+  // catalog, share the key, and others load it like any other catalog.
+  //
+  // Writability survives restarts: Corestore persists the secret key for
+  // cores it created, so reopening by public key (`_ensureMyCatalogDrive`)
+  // returns the same writable drive — the pattern site-manager relies on.
+
+  async createMyCatalog (name) {
+    const safeName = (typeof name === 'string' && name.trim()) ? name.trim().slice(0, 80) : 'My Catalog'
+    // Unique per-drive namespace, same approach as SiteManager.createSite,
+    // to avoid Corestore contention while relays replicate other drives.
+    const ns = this.store.namespace('catalog-' + Date.now() + '-' + Math.random().toString(36).slice(2))
+    const drive = new Hyperdrive(ns)
+    await drive.ready()
+    const keyHex = Buffer.from(drive.key).toString('hex')
+    const data = { version: 1, name: safeName, apps: [] }
+    await drive.put('/catalog.json', Buffer.from(JSON.stringify(data, null, 2)))
+    this.myCatalogs.set(keyHex, drive)
+    // Announce as a server so peers (and relays) can pull it.
+    this.swarm.join(drive.discoveryKey, { server: true, client: false })
+    return { keyHex, name: safeName, apps: [], writable: true }
+  }
+
+  async _ensureMyCatalogDrive (keyHex) {
+    if (!/^[0-9a-f]{64}$/i.test(keyHex)) throw new Error('Invalid catalog key')
+    if (this.myCatalogs.has(keyHex)) return this.myCatalogs.get(keyHex)
+    const drive = new Hyperdrive(this.store, Buffer.from(keyHex, 'hex'))
+    await drive.ready()
+    this.myCatalogs.set(keyHex, drive)
+    this.swarm.join(drive.discoveryKey, { server: true, client: false })
+    return drive
+  }
+
+  async getMyCatalog (keyHex) {
+    const drive = await this._ensureMyCatalogDrive(keyHex)
+    const buf = await drive.get('/catalog.json').catch(() => null)
+    const data = buf ? this._safeJSONParse(buf.toString()) : { version: 1, name: 'My Catalog', apps: [] }
+    const apps = Array.isArray(data.apps) ? data.apps : []
+    return { keyHex, name: data.name || 'My Catalog', apps, writable: !!drive.writable }
+  }
+
+  async addAppToCatalog (keyHex, app) {
+    const drive = await this._ensureMyCatalogDrive(keyHex)
+    if (!drive.writable) throw new Error('This catalog is not editable on this device.')
+    const entry = this._sanitizeCatalogEntry(app)
+    if (!entry.driveKey) throw new Error('App is missing a drive key.')
+    entry.id = entry.id || entry.driveKey
+
+    const buf = await drive.get('/catalog.json').catch(() => null)
+    const data = buf ? this._safeJSONParse(buf.toString()) : { version: 1, name: 'My Catalog', apps: [] }
+    if (!Array.isArray(data.apps)) data.apps = []
+    const idx = data.apps.findIndex((a) => a && a.id === entry.id)
+    if (idx >= 0) data.apps[idx] = entry
+    else data.apps.push(entry)
+
+    await drive.put('/catalog.json', Buffer.from(JSON.stringify(data, null, 2)))
+    return { keyHex, name: data.name || 'My Catalog', apps: data.apps, writable: true }
+  }
+
+  async removeAppFromCatalog (keyHex, appId) {
+    const drive = await this._ensureMyCatalogDrive(keyHex)
+    if (!drive.writable) throw new Error('This catalog is not editable on this device.')
+    const buf = await drive.get('/catalog.json').catch(() => null)
+    const data = buf ? this._safeJSONParse(buf.toString()) : { version: 1, name: 'My Catalog', apps: [] }
+    if (!Array.isArray(data.apps)) data.apps = []
+    data.apps = data.apps.filter((a) => a && a.id !== appId)
+    await drive.put('/catalog.json', Buffer.from(JSON.stringify(data, null, 2)))
+    return { keyHex, name: data.name || 'My Catalog', apps: data.apps, writable: true }
+  }
+
+  // discoveryKey of an owned catalog (for relay re-pinning after edits).
+  myCatalogDiscoveryKey (keyHex) {
+    const drive = this.myCatalogs.get(keyHex)
+    return drive ? drive.discoveryKey : null
+  }
+
+  // Keep only the fields a catalog entry needs, length-bounded, so a
+  // hostile or oversized app object can't bloat or pollute catalog.json.
+  _sanitizeCatalogEntry (app) {
+    if (!app || typeof app !== 'object') throw new Error('Invalid app')
+    const str = (v, n) => (typeof v === 'string' ? v.slice(0, n) : undefined)
+    const out = {
+      id: str(app.id, 128),
+      name: str(app.name, 200),
+      description: str(app.description, 1000),
+      driveKey: str(app.driveKey, 128),
+      version: str(app.version, 40),
+      author: str(app.author, 200),
+    }
+    if (Array.isArray(app.categories)) {
+      out.categories = app.categories.map((c) => String(c).slice(0, 60)).slice(0, 12)
+    }
+    if (typeof app.icon === 'string') out.icon = app.icon.slice(0, 300)
+    for (const k of Object.keys(out)) if (out[k] === undefined) delete out[k]
+    return out
+  }
+
   async _waitForData (drive) {
     if (drive.version > 0) return
     return new Promise((resolve) => {
@@ -319,6 +421,10 @@ class CatalogManager {
       } catch {}
     }
     this.catalogs.clear()
+    for (const [, drive] of this.myCatalogs) {
+      try { await drive.close() } catch {}
+    }
+    this.myCatalogs.clear()
   }
 }
 

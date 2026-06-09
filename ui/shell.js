@@ -1032,6 +1032,10 @@ function Apps ({ rpc, C, onLaunch }) {
   const [category, setCategory] = useState('all')
   const [source, setSource] = useState('all')
   const [updates, setUpdates] = useState({})
+  // Catalog authoring: the user's own publishable catalog (or null).
+  const [myCatalog, setMyCatalog] = useState(null)
+  const [newCatalogName, setNewCatalogName] = useState('')
+  const [copied, setCopied] = useState(false)
   // Recent catalog keys (loaded successfully at least once) — persisted
   // via user-data settings so they survive across launches.
   const [recentCatalogs, setRecentCatalogs] = useState([])
@@ -1131,6 +1135,60 @@ function Apps ({ rpc, C, onLaunch }) {
     await refreshUpdates()
   }
 
+  const inMyCatalog = (id) => !!(myCatalog && Array.isArray(myCatalog.apps) && myCatalog.apps.some((a) => a.id === id))
+
+  const copyKey = (k) => {
+    try {
+      navigator.clipboard.writeText(k)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch { /* clipboard unavailable */ }
+  }
+
+  // Create the user's own catalog, persist its key, and load it into the
+  // aggregated store so their picks show up alongside everyone else's.
+  const createMyCatalog = async () => {
+    setErr(''); setBusy('mycatalog')
+    try {
+      const res = await rpc.request(C.CMD_MYCATALOG_CREATE, { name: newCatalogName }, 60000)
+      setMyCatalog(res)
+      setNewCatalogName('')
+      rpc.request(C.CMD_USERDATA_SET_SETTINGS, { updates: { myCatalogKey: res.keyHex } }).catch(() => {})
+      await loadCatalog(res.keyHex)
+    } catch (e) {
+      setErr(`catalog create: ${e.message}`)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const addToMyCatalog = async (app) => {
+    if (!myCatalog) return
+    const id = app.id || app.driveKey
+    setErr(''); setBusy(`addcat:${id}`)
+    try {
+      const res = await rpc.request(C.CMD_MYCATALOG_ADD_APP, { keyHex: myCatalog.keyHex, app }, 60000)
+      setMyCatalog(res)
+    } catch (e) {
+      setErr(`add to catalog: ${e.message}`)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const removeFromMyCatalog = async (id) => {
+    if (!myCatalog) return
+    setErr(''); setBusy(`rmcat:${id}`)
+    try {
+      const res = await rpc.request(C.CMD_MYCATALOG_REMOVE_APP, { keyHex: myCatalog.keyHex, id }, 60000)
+      setMyCatalog(res)
+    } catch (e) {
+      setErr(`remove from catalog: ${e.message}`)
+    } finally {
+      setBusy(null)
+    }
+  }
+
   // Pull the aggregated app list + loaded-catalog metadata from the
   // backend. The backend keeps every catalog open, so this is the single
   // source of truth for the cross-catalog view.
@@ -1198,8 +1256,12 @@ function Apps ({ rpc, C, onLaunch }) {
         const recent = Array.isArray(settings?.recentCatalogs) ? settings.recentCatalogs : []
         // Back-compat: older builds persisted only a single lastCatalogKey.
         const last = settings?.lastCatalogKey
-        const keys = [...new Set([...recent, ...(last ? [last] : [])])]
+        const myKey = typeof settings?.myCatalogKey === 'string' ? settings.myCatalogKey : null
+        const keys = [...new Set([...recent, ...(last ? [last] : []), ...(myKey ? [myKey] : [])])]
         if (recent.length) setRecentCatalogs(recent)
+        if (myKey) {
+          rpc.request(C.CMD_MYCATALOG_GET, { keyHex: myKey }).then(setMyCatalog).catch(() => {})
+        }
         if (keys.length) {
           setBusy('catalog')
           await Promise.allSettled(
@@ -1421,11 +1483,65 @@ function Apps ({ rpc, C, onLaunch }) {
                       ${busy === `install:${app.id}` ? 'Installing…' : 'Install'}
                     </button>
                   `}
+                ${myCatalog && app.catalogKey !== myCatalog.keyHex && !inMyCatalog(app.id) && html`
+                  <button class="btn subtle" title="Add to my catalog" onClick=${() => addToMyCatalog(app)} disabled=${busy === `addcat:${app.id || app.driveKey}`}>+ Catalog</button>
+                `}
               </div>
             </div>
           `)}
           </div>`}
       `}
+
+      <h2>My Catalog</h2>
+      ${!myCatalog
+        ? html`
+          <div class="catalog-empty">
+            <strong>Publish your own catalog.</strong>
+            Create a catalog, add apps you want to share, then hand out its key — anyone can load it above to discover your picks. It's pinned to the relays, so it stays reachable even when you're offline.
+            <div class="catalog-loader" style=${{ marginTop: '10px' }}>
+              <input
+                type="text"
+                placeholder="Catalog name (e.g. My Picks)"
+                value=${newCatalogName}
+                onInput=${(e) => setNewCatalogName(e.target.value)}
+                onKeyDown=${(e) => e.key === 'Enter' && createMyCatalog()}
+                spellcheck="false"
+              />
+              <button class="btn primary" onClick=${createMyCatalog} disabled=${busy === 'mycatalog'}>
+                ${busy === 'mycatalog' ? 'Creating…' : 'Create catalog'}
+              </button>
+            </div>
+          </div>
+        `
+        : html`
+          <div class="mycatalog">
+            <div class="mycatalog-head">
+              <div>
+                <div class="app-name">${myCatalog.name}</div>
+                <div class="app-meta">${myCatalog.apps.length} app${myCatalog.apps.length === 1 ? '' : 's'}${myCatalog.writable ? '' : ' · read-only on this device'}</div>
+              </div>
+              <button class="btn subtle" onClick=${() => copyKey(myCatalog.keyHex)}>${copied ? 'Copied!' : 'Copy share key'}</button>
+            </div>
+            <div class="mycatalog-key" title=${myCatalog.keyHex}>${myCatalog.keyHex}</div>
+            ${myCatalog.apps.length === 0
+              ? html`<p class="placeholder">No apps yet. Use “+ Catalog” on any app above to add it.</p>`
+              : html`<div class="app-grid">
+                  ${myCatalog.apps.map((app) => html`
+                    <div class="app-card" key=${app.id}>
+                      <div class="app-icon app-icon-fallback">${(app.name || '?').charAt(0)}</div>
+                      <div class="app-info">
+                        <div class="app-name">${app.name || app.id}</div>
+                        <div class="app-desc">${app.description || ''}</div>
+                        <div class="app-meta">${app.version ? 'v' + app.version : ''} ${app.author ? '· ' + app.author : ''}</div>
+                      </div>
+                      <div class="app-actions">
+                        <button class="btn subtle" onClick=${() => removeFromMyCatalog(app.id)} disabled=${busy === `rmcat:${app.id}`}>Remove</button>
+                      </div>
+                    </div>
+                  `)}
+                </div>`}
+          </div>
+        `}
 
       <h2>Installed</h2>
       ${installed.length === 0
@@ -1446,6 +1562,9 @@ function Apps ({ rpc, C, onLaunch }) {
                   `}
                   <button class="btn" onClick=${() => launchApp(app)} disabled=${busy === `launch:${app.id}`}>Launch</button>
                   <button class="btn subtle" onClick=${() => uninstallApp(app)} disabled=${busy === `uninstall:${app.id}`}>Uninstall</button>
+                  ${myCatalog && !inMyCatalog(app.id) && html`
+                    <button class="btn subtle" title="Add to my catalog" onClick=${() => addToMyCatalog(app)} disabled=${busy === `addcat:${app.id || app.driveKey}`}>+ Catalog</button>
+                  `}
                 </div>
               </div>
             `)}

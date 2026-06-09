@@ -229,6 +229,38 @@ rpc.handle(C.CMD_UNLOAD_CATALOG, async (data) => {
   return await catalogManager.unloadCatalog(normalizeDriveKey(data.keyHex))
 })
 
+// --- Catalog authoring (your own publishable catalog) ---
+// Each mutation re-pins the catalog drive to the HiveRelay backbone so the
+// new content is durable and discoverable even when this device is offline.
+
+rpc.handle(C.CMD_MYCATALOG_GET, async (data) => {
+  await whenReady()
+  return await catalogManager.getMyCatalog(normalizeDriveKey(data.keyHex))
+})
+
+rpc.handle(C.CMD_MYCATALOG_CREATE, async (data) => {
+  await whenReady()
+  const result = await catalogManager.createMyCatalog(data && data.name)
+  await pinDriveBestEffort(result.keyHex, catalogManager.myCatalogDiscoveryKey(result.keyHex))
+  return result
+})
+
+rpc.handle(C.CMD_MYCATALOG_ADD_APP, async (data) => {
+  await whenReady()
+  const keyHex = normalizeDriveKey(data.keyHex)
+  const result = await catalogManager.addAppToCatalog(keyHex, data.app)
+  await pinDriveBestEffort(keyHex, catalogManager.myCatalogDiscoveryKey(keyHex))
+  return result
+})
+
+rpc.handle(C.CMD_MYCATALOG_REMOVE_APP, async (data) => {
+  await whenReady()
+  const keyHex = normalizeDriveKey(data.keyHex)
+  const result = await catalogManager.removeAppFromCatalog(keyHex, data.id)
+  await pinDriveBestEffort(keyHex, catalogManager.myCatalogDiscoveryKey(keyHex))
+  return result
+})
+
 // Site Builder commands
 rpc.handle(C.CMD_CREATE_SITE, async (data) => {
   await whenReady()
@@ -1194,6 +1226,18 @@ async function shutdown () {
   browseDrives.clear()
   if (swarm) { try { await swarm.destroy() } catch {} swarm = null }
   if (store) { try { await store.close() } catch {} store = null }
+}
+
+// Pin a drive to the HiveRelay backbone, best-effort. Never throws — a
+// pin failure just means the drive stays locally P2P-seeded. Mirrors the
+// seed() call in CMD_PUBLISH_SITE.
+async function pinDriveBestEffort (keyHex, discoveryKey) {
+  try {
+    if (!keyHex || !hiveRelay || typeof hiveRelay.seed !== 'function') return
+    await hiveRelay.seed(keyHex, { replicas: 3, timeout: 10000, discoveryKey: discoveryKey || undefined })
+  } catch (err) {
+    console.error('[pin] best-effort pin failed:', err && err.message)
+  }
 }
 
 // --- Storage Management ---
