@@ -35,16 +35,15 @@ const FEATURED_APPS = [
     initial: 'W',
     gradient: 'linear-gradient(135deg, #a371f7, #d946ef)'
   },
-  // anonGPT — P2P AI chat. Uses window.pear.anongpt.infer (injected
-  // ONLY for this exact drive when manifest.json declares the privacy
-  // claims). Loaded as a hyper:// site rather than a pear:// app so
-  // PearBrowser hosts the buyer instead of spawning a separate runtime.
-  // See backend/anongpt-buyer.js + anongpt/docs/spec/02-pearbrowser-dev-bridge.md.
+  // anonGPT — private P2P AI chat. Ships as its own Pear app: launching it
+  // spawns a separate runtime window via CMD_LAUNCH_PEAR_LINK. (The in-browser
+  // window.pear.anongpt buyer shim in backend/anongpt-buyer.js is a separate
+  // hyper:// hosting path and is not exercised by this pear:// launch.)
   {
     id: 'anongpt',
     name: 'anonGPT',
-    tagline: 'Private P2P AI chat — buyer runs in PearBrowser, inference from a HiveMind seller, signed receipts.',
-    link: 'hyper://e3cf8b6fae6260608cbfcdf6b82d985c65f5ad1b9c85e777e296e7c521213abc/',
+    tagline: 'Private P2P AI chat — pay-per-inference from a HiveMind seller, with signed receipts.',
+    link: 'pear://rpzh3fsgg38kfir9nmae7x3o8ubofddzzixr5js4mxd6a6drb6wo',
     initial: 'A',
     gradient: 'linear-gradient(135deg, #22d3ee, #6366f1)'
   }
