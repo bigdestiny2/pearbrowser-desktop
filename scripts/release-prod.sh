@@ -67,7 +67,13 @@ echo
 echo "============================================================"
 echo "  2/2  pear release  (deprecated path, still works)"
 echo "============================================================"
-pear release "$PROD_LINK" . 2>&1 | tail -5
+RELEASE_OUT=$(pear release "$PROD_LINK" . 2>&1)
+RELEASE_CLEAN=$(printf '%s\n' "$RELEASE_OUT" | strip_ansi)
+printf '%s\n' "$RELEASE_CLEAN" | tail -5
+RELEASE_LEN=$(printf '%s\n' "$RELEASE_CLEAN" | awk '/Latest length:/ {print $3; exit}')
+if [[ -n "$RELEASE_LEN" ]]; then
+  NEW_LEN="$RELEASE_LEN"
+fi
 echo
 
 echo "✅ Released $PROD_LINK"
