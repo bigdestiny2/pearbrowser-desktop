@@ -31,6 +31,8 @@ One install, one key, works on all three desktop platforms — Pear downloads th
 ### Apps
 - Paste any `pear://` link → opens in its own isolated window
 - Load a decentralized catalog Hyperdrive → install / launch / uninstall apps
+- Keep multiple catalogs loaded at once with search, category, and source filters across the aggregated app store
+- **My Catalog:** create a writable personal catalog, add apps from loaded catalogs or installed apps, rename it, edit saved metadata (name, description, version, author, categories), and share the catalog key; copies opened without the writer key stay read-only
 - Default catalog auto-loads on first Apps-tab visit (`hyper://0c35d12fd9b1…/` — featuring PearBrowser, HiveRelay, P2P Builders)
 - Featured apps: **Keet** · **PearPass** · **[HiveWorm](https://github.com/bigdestiny2/hiveworm)** (a multiplayer life-sim that uses `window.pear.swarm.v1` directly)
 
