@@ -150,6 +150,32 @@ rpc.handle(C.CMD_GET_STATUS, async () => {
   }
 })
 
+rpc.handle(C.CMD_GET_DRIVE_INFO, async (data = {}) => {
+  await whenReady()
+  const keyHex = normalizeDriveKey(data.keyHex || driveKeyFromUrl(data.url))
+  if (!/^[0-9a-f]{64}$/i.test(keyHex)) {
+    throw new Error('Invalid drive key format')
+  }
+
+  const drive = await getDriveForProxy(keyHex)
+  registerHiveRelayDrive(keyHex, drive)
+  await updateDriveBestEffort(drive)
+
+  const peers = getDrivePeerSnapshot(drive)
+  const bytes = getDriveByteSnapshot(drive)
+
+  return {
+    keyHex,
+    discoveryKey: drive?.discoveryKey ? b4a.toString(drive.discoveryKey, 'hex') : null,
+    version: Number.isFinite(drive?.version) ? drive.version : null,
+    writable: !!drive?.writable,
+    ...peers,
+    ...bytes,
+    relay: getRelayPinSnapshot(keyHex, drive),
+    updatedAt: Date.now()
+  }
+})
+
 rpc.handle(C.CMD_GET_IDENTITY, async () => {
   return {
     publicKey: swarm ? swarm.keyPair.publicKey.toString('hex') : null,
@@ -261,6 +287,22 @@ rpc.handle(C.CMD_MYCATALOG_REMOVE_APP, async (data) => {
   return result
 })
 
+rpc.handle(C.CMD_MYCATALOG_RENAME, async (data) => {
+  await whenReady()
+  const keyHex = normalizeDriveKey(data.keyHex)
+  const result = await catalogManager.renameMyCatalog(keyHex, data.name)
+  await pinDriveBestEffort(keyHex, catalogManager.myCatalogDiscoveryKey(keyHex))
+  return result
+})
+
+rpc.handle(C.CMD_MYCATALOG_UPDATE_APP, async (data) => {
+  await whenReady()
+  const keyHex = normalizeDriveKey(data.keyHex)
+  const result = await catalogManager.updateAppInCatalog(keyHex, data.id, data.app)
+  await pinDriveBestEffort(keyHex, catalogManager.myCatalogDiscoveryKey(keyHex))
+  return result
+})
+
 // Site Builder commands
 rpc.handle(C.CMD_CREATE_SITE, async (data) => {
   await whenReady()
@@ -302,6 +344,7 @@ rpc.handle(C.CMD_PUBLISH_SITE, async (data) => {
     const keyHex = result?.keyHex
     const site = siteManager.sites.get(data.siteId)
     if (keyHex && hiveRelay && typeof hiveRelay.seed === 'function') {
+      registerHiveRelayDrive(keyHex, site?.drive)
       const connectedRelays = hiveRelay.getRelays ? hiveRelay.getRelays().length : 0
       console.log(`[publish] pinning ${keyHex.slice(0, 8)} to ${connectedRelays} HiveRelay(s)`)
       // 0.8.5 fix (defence-in-depth): pass `discoveryKey` explicitly so
@@ -892,6 +935,7 @@ rpc.handle(C.CMD_CONTACTS_REMOVE, async ({ pubkey } = {}) => {
 // --- Drive Management ---
 
 const MAX_BROWSE_DRIVES = 20
+const driveInfoUpdates = new WeakMap()
 
 function safeJSONParse (str) {
   const obj = JSON.parse(str)
@@ -927,6 +971,7 @@ async function ensureBrowseDrive (keyHex) {
     }
     const oldEntry = browseDrives.get(oldest)
     browseDrives.delete(oldest)
+    unregisterHiveRelayDrive(oldest, oldEntry.drive)
     try { await swarm.leave(oldEntry.drive.discoveryKey) } catch (err) {
       console.error('Failed to leave swarm:', err.message)
     }
@@ -942,6 +987,7 @@ async function ensureBrowseDrive (keyHex) {
     drive,
     lastAccess: Date.now()
   })
+  registerHiveRelayDrive(keyHex, drive)
   return drive
 }
 
@@ -964,6 +1010,122 @@ async function getDriveForProxy (keyHex) {
   }
   // Load on demand
   return await ensureBrowseDrive(keyHex)
+}
+
+function driveKeyFromUrl (url) {
+  if (typeof url !== 'string' || !url.trim()) return ''
+  try {
+    const parsed = new URL(url)
+    return parsed.hostname || ''
+  } catch {
+    return ''
+  }
+}
+
+function registerHiveRelayDrive (keyHex, drive) {
+  if (!keyHex || !drive || !hiveRelay?.drives || typeof hiveRelay.drives.set !== 'function') return
+  const existing = hiveRelay.drives.get(keyHex)
+  if (!existing || existing === drive || existing.closed || existing.closing) hiveRelay.drives.set(keyHex, drive)
+}
+
+function unregisterHiveRelayDrive (keyHex, drive) {
+  if (!keyHex || !hiveRelay?.drives || typeof hiveRelay.drives.get !== 'function') return
+  if (!drive || hiveRelay.drives.get(keyHex) === drive) hiveRelay.drives.delete(keyHex)
+}
+
+async function updateDriveBestEffort (drive, timeoutMs = 2500) {
+  if (!drive || typeof drive.update !== 'function') return
+  let pending = driveInfoUpdates.get(drive)
+  if (!pending) {
+    pending = drive.update({ wait: true })
+      .catch(() => {})
+      .finally(() => driveInfoUpdates.delete(drive))
+    driveInfoUpdates.set(drive, pending)
+  }
+  try {
+    await Promise.race([
+      pending,
+      new Promise((resolve) => setTimeout(resolve, timeoutMs))
+    ])
+  } catch {}
+}
+
+function getDrivePeerSnapshot (drive) {
+  const metadataPeers = peerCollectionSize(drive?.core?.peers)
+  const blobPeers = peerCollectionSize(drive?.blobs?.core?.peers)
+  return {
+    peerCount: Math.max(metadataPeers, blobPeers),
+    metadataPeerCount: metadataPeers,
+    blobPeerCount: blobPeers
+  }
+}
+
+function peerCollectionSize (peers) {
+  if (!peers) return 0
+  if (Number.isFinite(peers.length)) return peers.length
+  if (Number.isFinite(peers.size)) return peers.size
+  return 0
+}
+
+function getDriveByteSnapshot (drive) {
+  const metadataBytes = Number.isFinite(drive?.core?.byteLength) ? drive.core.byteLength : 0
+  const blobBytes = Number.isFinite(drive?.blobs?.core?.byteLength) ? drive.blobs.core.byteLength : 0
+  return {
+    byteLength: metadataBytes + blobBytes,
+    metadataByteLength: metadataBytes,
+    blobByteLength: blobBytes
+  }
+}
+
+function getRelayPinSnapshot (keyHex, drive) {
+  const relays = hiveRelay?.getRelays ? hiveRelay.getRelays() : []
+  let seedStatus = null
+  let durableStatus = null
+  const advertisedRelayPubkeys = new Set()
+
+  try {
+    seedStatus = hiveRelay?.getSeedStatus ? hiveRelay.getSeedStatus(keyHex) : null
+  } catch {}
+
+  try {
+    registerHiveRelayDrive(keyHex, drive)
+    durableStatus = hiveRelay?.getDurableStatus ? hiveRelay.getDurableStatus(keyHex) : null
+  } catch {}
+
+  try {
+    const rows = hiveRelay?.getAvailableApps ? hiveRelay.getAvailableApps() : []
+    for (const row of rows || []) {
+      const rowKey = String(row?.appKey || row?.driveKey || row?.keyHex || row?.key || '').toLowerCase()
+      if (rowKey !== keyHex) continue
+      const relayPubkey = row?.source?.relayPubkey || row?.relayPubkey || row?.relay || null
+      if (relayPubkey) advertisedRelayPubkeys.add(String(relayPubkey))
+      if (Array.isArray(row?.relays)) {
+        for (const relay of row.relays) advertisedRelayPubkeys.add(String(relay))
+      }
+    }
+  } catch {}
+
+  const seedRelays = Array.isArray(seedStatus?.relays) ? seedStatus.relays : []
+  const seedRelayPubkeys = seedRelays.map((relay) => relay?.pubkey).filter(Boolean).map(String)
+  const pinRelayPubkeys = Array.from(new Set([...Array.from(advertisedRelayPubkeys), ...seedRelayPubkeys]))
+
+  return {
+    available: !!hiveRelay,
+    connectedRelays: relays.length,
+    connectedRelayPubkeys: relays.map((r) => r.pubkey).filter(Boolean),
+    seedAcceptances: seedStatus?.acceptances || 0,
+    seedRelays,
+    advertisedRelays: advertisedRelayPubkeys.size,
+    advertisedRelayPubkeys: Array.from(advertisedRelayPubkeys),
+    pinRelayPubkeys,
+    durable: !!durableStatus?.durable,
+    activePeers: durableStatus?.activePeers || 0,
+    driveOpen: durableStatus?.driveOpen !== false,
+    byteLengthLocal: durableStatus?.byteLengthLocal || 0,
+    byteLengthRemoteMax: durableStatus?.byteLengthRemoteMax || 0,
+    hybridFetchEnabled: relayClient?.enabled !== false,
+    gatewayRelays: Array.isArray(relayClient?.relays) ? [...relayClient.relays] : []
+  }
 }
 
 // Persist app/site state to disk
@@ -1222,7 +1384,10 @@ async function shutdown () {
   if (siteManager) { try { await siteManager.close() } catch {} siteManager = null }
   if (appManager) { try { await appManager.close() } catch {} appManager = null }
   if (catalogManager) { try { await catalogManager.close() } catch {} catalogManager = null }
-  for (const [, entry] of browseDrives) { try { await entry.drive.close() } catch {} }
+  for (const [keyHex, entry] of browseDrives) {
+    unregisterHiveRelayDrive(keyHex, entry.drive)
+    try { await entry.drive.close() } catch {}
+  }
   browseDrives.clear()
   if (swarm) { try { await swarm.destroy() } catch {} swarm = null }
   if (store) { try { await store.close() } catch {} store = null }
@@ -1298,6 +1463,7 @@ async function cleanupOldData () {
     const [key, entry] = sortedDrives[i]
     console.log(`Evicting old browse drive: ${key.slice(0, 8)}...`)
     browseDrives.delete(key)
+    unregisterHiveRelayDrive(key, entry.drive)
     try { await swarm.leave(entry.drive.discoveryKey) } catch {}
     try { await entry.drive.close() } catch {}
   }

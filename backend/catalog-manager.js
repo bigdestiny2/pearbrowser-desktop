@@ -290,7 +290,7 @@ class CatalogManager {
   // returns the same writable drive — the pattern site-manager relies on.
 
   async createMyCatalog (name) {
-    const safeName = (typeof name === 'string' && name.trim()) ? name.trim().slice(0, 80) : 'My Catalog'
+    const safeName = this._sanitizeCatalogName(name)
     // Unique per-drive namespace, same approach as SiteManager.createSite,
     // to avoid Corestore contention while relays replicate other drives.
     const ns = this.store.namespace('catalog-' + Date.now() + '-' + Math.random().toString(36).slice(2))
@@ -317,10 +317,8 @@ class CatalogManager {
 
   async getMyCatalog (keyHex) {
     const drive = await this._ensureMyCatalogDrive(keyHex)
-    const buf = await drive.get('/catalog.json').catch(() => null)
-    const data = buf ? this._safeJSONParse(buf.toString()) : { version: 1, name: 'My Catalog', apps: [] }
-    const apps = Array.isArray(data.apps) ? data.apps : []
-    return { keyHex, name: data.name || 'My Catalog', apps, writable: !!drive.writable }
+    const data = await this._readMyCatalogData(drive)
+    return this._formatMyCatalog(keyHex, data, drive)
   }
 
   async addAppToCatalog (keyHex, app) {
@@ -330,26 +328,47 @@ class CatalogManager {
     if (!entry.driveKey) throw new Error('App is missing a drive key.')
     entry.id = entry.id || entry.driveKey
 
-    const buf = await drive.get('/catalog.json').catch(() => null)
-    const data = buf ? this._safeJSONParse(buf.toString()) : { version: 1, name: 'My Catalog', apps: [] }
-    if (!Array.isArray(data.apps)) data.apps = []
+    const data = await this._readMyCatalogData(drive)
     const idx = data.apps.findIndex((a) => a && a.id === entry.id)
     if (idx >= 0) data.apps[idx] = entry
     else data.apps.push(entry)
 
-    await drive.put('/catalog.json', Buffer.from(JSON.stringify(data, null, 2)))
-    return { keyHex, name: data.name || 'My Catalog', apps: data.apps, writable: true }
+    return await this._writeMyCatalogData(keyHex, drive, data)
   }
 
   async removeAppFromCatalog (keyHex, appId) {
     const drive = await this._ensureMyCatalogDrive(keyHex)
     if (!drive.writable) throw new Error('This catalog is not editable on this device.')
-    const buf = await drive.get('/catalog.json').catch(() => null)
-    const data = buf ? this._safeJSONParse(buf.toString()) : { version: 1, name: 'My Catalog', apps: [] }
-    if (!Array.isArray(data.apps)) data.apps = []
-    data.apps = data.apps.filter((a) => a && a.id !== appId)
-    await drive.put('/catalog.json', Buffer.from(JSON.stringify(data, null, 2)))
-    return { keyHex, name: data.name || 'My Catalog', apps: data.apps, writable: true }
+    const data = await this._readMyCatalogData(drive)
+    data.apps = data.apps.filter((a) => !this._catalogAppMatches(a, appId))
+    return await this._writeMyCatalogData(keyHex, drive, data)
+  }
+
+  async renameMyCatalog (keyHex, name) {
+    const drive = await this._ensureMyCatalogDrive(keyHex)
+    if (!drive.writable) throw new Error('This catalog is not editable on this device.')
+    const data = await this._readMyCatalogData(drive)
+    data.name = this._sanitizeCatalogName(name)
+    return await this._writeMyCatalogData(keyHex, drive, data)
+  }
+
+  async updateAppInCatalog (keyHex, appId, patch) {
+    const drive = await this._ensureMyCatalogDrive(keyHex)
+    if (!drive.writable) throw new Error('This catalog is not editable on this device.')
+    if (!appId) throw new Error('App id is required.')
+
+    const data = await this._readMyCatalogData(drive)
+    const idx = data.apps.findIndex((a) => this._catalogAppMatches(a, appId))
+    if (idx < 0) throw new Error('App not found in catalog.')
+
+    const existing = data.apps[idx]
+    const stableId = existing.id || appId
+    const entry = this._sanitizeCatalogEntry({ ...existing, ...(patch || {}), id: stableId })
+    if (!entry.driveKey) throw new Error('App is missing a drive key.')
+    entry.id = stableId
+    data.apps[idx] = entry
+
+    return await this._writeMyCatalogData(keyHex, drive, data)
   }
 
   // discoveryKey of an owned catalog (for relay re-pinning after edits).
@@ -377,6 +396,47 @@ class CatalogManager {
     if (typeof app.icon === 'string') out.icon = app.icon.slice(0, 300)
     for (const k of Object.keys(out)) if (out[k] === undefined) delete out[k]
     return out
+  }
+
+  _sanitizeCatalogName (name) {
+    return (typeof name === 'string' && name.trim()) ? name.trim().slice(0, 80) : 'My Catalog'
+  }
+
+  _catalogAppMatches (app, appId) {
+    return !!(app && appId && (app.id === appId || app.driveKey === appId))
+  }
+
+  async _readMyCatalogData (drive) {
+    const buf = await drive.get('/catalog.json').catch(() => null)
+    const data = buf ? this._safeJSONParse(buf.toString()) : { version: 1, name: 'My Catalog', apps: [] }
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      return { version: 1, name: 'My Catalog', apps: [] }
+    }
+    if (!Array.isArray(data.apps)) data.apps = []
+    data.name = this._sanitizeCatalogName(data.name)
+    if (!data.version) data.version = 1
+    return data
+  }
+
+  async _writeMyCatalogData (keyHex, drive, data) {
+    await drive.put('/catalog.json', Buffer.from(JSON.stringify(data, null, 2)))
+    this._updateLoadedCatalogData(keyHex, data)
+    return this._formatMyCatalog(keyHex, data, drive)
+  }
+
+  _formatMyCatalog (keyHex, data, drive) {
+    const apps = Array.isArray(data.apps) ? data.apps : []
+    return { keyHex, name: data.name || 'My Catalog', apps, writable: !!drive.writable }
+  }
+
+  _updateLoadedCatalogData (keyHex, data) {
+    const entry = this.catalogs.get(keyHex)
+    if (!entry) return
+    entry.data = {
+      ...data,
+      apps: Array.isArray(data.apps) ? data.apps.map((app) => ({ ...app })) : [],
+    }
+    entry.lastRefresh = Date.now()
   }
 
   async _waitForData (drive) {
