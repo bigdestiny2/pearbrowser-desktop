@@ -54,7 +54,7 @@ echo "============================================================"
 STAGE_OUT=$(pear stage "$PROD_LINK" . 2>&1)
 STAGE_CLEAN=$(printf '%s\n' "$STAGE_OUT" | strip_ansi)
 printf '%s\n' "$STAGE_CLEAN" | tail -8
-NEW_LEN=$(printf '%s\n' "$STAGE_CLEAN" | awk '/^Latest:/ {print $2; exit}')
+NEW_LEN=$(printf '%s\n' "$STAGE_CLEAN" | awk '/Latest:/ {print $2; exit}')
 if [[ -z "$NEW_LEN" ]]; then
   echo "✗ Could not parse staged length from pear stage output" >&2
   exit 1
