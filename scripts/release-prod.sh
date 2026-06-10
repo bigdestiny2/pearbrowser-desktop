@@ -36,6 +36,10 @@ if [[ -z "$PROD_LINK" ]]; then
   exit 1
 fi
 
+strip_ansi() {
+  sed -E $'s/\x1B\\[[0-9;?]*[[:alpha:]]//g'
+}
+
 echo "▸ production link: $PROD_LINK"
 echo
 
@@ -48,8 +52,13 @@ echo "============================================================"
 echo "  1/2  pear stage"
 echo "============================================================"
 STAGE_OUT=$(pear stage "$PROD_LINK" . 2>&1)
-echo "$STAGE_OUT" | tail -8
-NEW_LEN=$(echo "$STAGE_OUT" | grep -E "^Latest:" | awk '{print $2}')
+STAGE_CLEAN=$(printf '%s\n' "$STAGE_OUT" | strip_ansi)
+printf '%s\n' "$STAGE_CLEAN" | tail -8
+NEW_LEN=$(printf '%s\n' "$STAGE_CLEAN" | awk '/^Latest:/ {print $2; exit}')
+if [[ -z "$NEW_LEN" ]]; then
+  echo "✗ Could not parse staged length from pear stage output" >&2
+  exit 1
+fi
 echo
 echo "▸ new staged length: $NEW_LEN"
 echo
