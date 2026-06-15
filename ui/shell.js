@@ -8,6 +8,111 @@ function copyText (text) {
   } catch {}
 }
 
+const Z32_ALPHABET = 'ybndrfg8ejkmcpqxot1uwisza345h769'
+const Z32_REVERSE = (() => {
+  const map = new Map()
+  for (let i = 0; i < Z32_ALPHABET.length; i++) map.set(Z32_ALPHABET[i], i)
+  return map
+})()
+
+function hexToBytes (hex) {
+  if (!/^[0-9a-f]+$/i.test(hex) || hex.length % 2 !== 0) return null
+  const out = new Uint8Array(hex.length / 2)
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16)
+  return out
+}
+
+function bytesToHex (bytes) {
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+function z32EncodeBytes (bytes) {
+  const max = bytes.byteLength * 8
+  let s = ''
+  for (let p = 0; p < max; p += 5) {
+    const i = p >>> 3
+    const j = p & 7
+    if (j <= 3) {
+      s += Z32_ALPHABET[(bytes[i] >>> (3 - j)) & 0b11111]
+      continue
+    }
+    const of = j - 3
+    const high = (bytes[i] << of) & 0b11111
+    const low = (i + 1 >= bytes.byteLength ? 0 : bytes[i + 1]) >>> (8 - of)
+    s += Z32_ALPHABET[high | low]
+  }
+  return s
+}
+
+function z32DecodeToBytes (s) {
+  const clean = String(s || '').toLowerCase()
+  const out = new Uint8Array(Math.ceil(clean.length * 5 / 8))
+  let pb = 0
+  let ps = 0
+  const quintet = () => {
+    const ch = clean[ps++]
+    if (!Z32_REVERSE.has(ch)) throw new Error('invalid z-base-32')
+    return Z32_REVERSE.get(ch)
+  }
+
+  const r = clean.length & 7
+  const q = (clean.length - r) / 8
+
+  for (let i = 0; i < q; i++) {
+    const a = quintet(), b = quintet(), c = quintet(), d = quintet()
+    const e = quintet(), f = quintet(), g = quintet(), h = quintet()
+    out[pb++] = (a << 3) | (b >>> 2)
+    out[pb++] = ((b & 0b11) << 6) | (c << 1) | (d >>> 4)
+    out[pb++] = ((d & 0b1111) << 4) | (e >>> 1)
+    out[pb++] = ((e & 0b1) << 7) | (f << 2) | (g >>> 3)
+    out[pb++] = ((g & 0b111) << 5) | h
+  }
+
+  if (r === 0) return out.subarray(0, pb)
+  const a = quintet(), b = quintet()
+  out[pb++] = (a << 3) | (b >>> 2)
+  if (r <= 2) return out.subarray(0, pb)
+  const c = quintet(), d = quintet()
+  out[pb++] = ((b & 0b11) << 6) | (c << 1) | (d >>> 4)
+  if (r <= 4) return out.subarray(0, pb)
+  const e = quintet()
+  out[pb++] = ((d & 0b1111) << 4) | (e >>> 1)
+  if (r <= 5) return out.subarray(0, pb)
+  const f = quintet(), g = quintet()
+  out[pb++] = ((e & 0b1) << 7) | (f << 2) | (g >>> 3)
+  if (r <= 7) return out.subarray(0, pb)
+  const h = quintet()
+  out[pb++] = ((g & 0b111) << 5) | h
+  return out.subarray(0, pb)
+}
+
+function z32FromHex (hex) {
+  const bytes = hexToBytes(hex)
+  return bytes ? z32EncodeBytes(bytes) : null
+}
+
+function hexFromZ32 (s) {
+  try {
+    const bytes = z32DecodeToBytes(s)
+    return bytes.length === 32 ? bytesToHex(bytes) : null
+  } catch {
+    return null
+  }
+}
+
+function formatBytes (value) {
+  const bytes = Number(value) || 0
+  if (bytes < 1024) return `${bytes} B`
+  const units = ['KB', 'MB', 'GB', 'TB']
+  let n = bytes / 1024
+  let unit = units[0]
+  for (let i = 1; i < units.length && n >= 1024; i++) {
+    n /= 1024
+    unit = units[i]
+  }
+  return `${n >= 10 ? n.toFixed(1) : n.toFixed(2)} ${unit}`
+}
+
 // Vetted against https://github.com/holepunchto/pear-aliases — these
 // are the canonical pear:// keys for Holepunch-ecosystem apps.
 const FEATURED_APPS = [
@@ -98,16 +203,118 @@ function normalizeUrl (raw) {
 let _tabIdSeq = 0
 function makeTabId () { _tabIdSeq += 1; return 'tab-' + _tabIdSeq + '-' + Date.now().toString(36) }
 
-function makeTab (initialUrl = '') {
+const MAX_TAB_HISTORY = 50
+const MAX_CLOSED_TABS = 20
+
+function cleanTabUrl (value) {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function cleanTabTitle (value, fallback = 'New tab') {
+  return typeof value === 'string' && value.trim() ? value : fallback
+}
+
+function normalizeTabHistory (history, fallbackUrl = '') {
+  const out = []
+  if (Array.isArray(history)) {
+    for (const entry of history) {
+      const url = cleanTabUrl(entry)
+      if (!url) continue
+      if (out[out.length - 1] !== url) out.push(url)
+    }
+  }
+  const fallback = cleanTabUrl(fallbackUrl)
+  if (out.length === 0 && fallback) out.push(fallback)
+  return out.slice(-MAX_TAB_HISTORY)
+}
+
+function clampHistoryIndex (history, histIdx) {
+  if (!Array.isArray(history) || history.length === 0) return -1
+  const idx = Number.isInteger(histIdx) ? histIdx : history.length - 1
+  return Math.max(0, Math.min(idx, history.length - 1))
+}
+
+function pushTabHistory (history, histIdx, targetUrl) {
+  const target = cleanTabUrl(targetUrl)
+  const base = normalizeTabHistory(history)
+  const idx = clampHistoryIndex(base, histIdx)
+  const next = idx >= 0 ? base.slice(0, idx + 1) : []
+  if (target && next[next.length - 1] !== target) next.push(target)
+  const offset = Math.max(0, next.length - MAX_TAB_HISTORY)
+  const trimmed = next.slice(offset)
+  return { history: trimmed, histIdx: trimmed.length ? trimmed.length - 1 : -1 }
+}
+
+function normalizeTabSnapshot (source) {
+  if (!source || typeof source !== 'object') return null
+  const url = cleanTabUrl(source.url)
+  let history = normalizeTabHistory(source.history, url)
+  let histIdx = clampHistoryIndex(history, source.histIdx)
+  if (url && (histIdx < 0 || history[histIdx] !== url)) {
+    const pushed = pushTabHistory(history, histIdx, url)
+    history = pushed.history
+    histIdx = pushed.histIdx
+  }
+  const activeUrl = histIdx >= 0 ? history[histIdx] : url
+  const displayUrl = cleanTabUrl(source.displayUrl) || activeUrl || url
+  if (!activeUrl && !displayUrl && history.length === 0) return null
   return {
-    id: makeTabId(),
-    url: initialUrl,
-    displayUrl: initialUrl,
-    src: null,
+    url: activeUrl || url,
+    displayUrl,
+    title: cleanTabTitle(source.title, activeUrl || 'New tab'),
+    history,
+    histIdx,
+    pinned: !!source.pinned
+  }
+}
+
+function serializeTab (tab, activeId) {
+  const snap = normalizeTabSnapshot(tab) || {
+    url: '',
+    displayUrl: '',
+    title: cleanTabTitle(tab?.title),
     history: [],
     histIdx: -1,
+    pinned: !!tab?.pinned
+  }
+  return { ...snap, active: tab?.id === activeId }
+}
+
+function restoreSavedTab (source) {
+  if (!source || typeof source !== 'object') return null
+  const snap = normalizeTabSnapshot(source) || {
+    url: '',
+    displayUrl: '',
+    title: cleanTabTitle(source.title),
+    history: [],
+    histIdx: -1,
+    pinned: !!source.pinned
+  }
+  return makeTab(snap.url, snap)
+}
+
+function sortTabsPinnedFirst (list) {
+  return [
+    ...list.filter((tab) => tab.pinned),
+    ...list.filter((tab) => !tab.pinned)
+  ]
+}
+
+function makeTab (initialUrl = '', opts = {}) {
+  const history = Array.isArray(opts.history) ? normalizeTabHistory(opts.history, initialUrl) : []
+  const histIdx = clampHistoryIndex(history, opts.histIdx)
+  const historyUrl = histIdx >= 0 ? history[histIdx] : ''
+  const url = cleanTabUrl(historyUrl || initialUrl)
+  return {
+    id: makeTabId(),
+    url,
+    displayUrl: cleanTabUrl(opts.displayUrl) || url,
+    src: null,
+    history,
+    histIdx,
     status: '',
-    title: 'New tab'
+    title: cleanTabTitle(opts.title),
+    pinned: !!opts.pinned
   }
 }
 
@@ -132,10 +339,10 @@ function parseDriveAddress (urlStr) {
   let hex = null, z32Form = null
   if (/^[0-9a-f]{64}$/i.test(raw)) {
     hex = raw.toLowerCase()
-    try { z32Form = require('z32').encode(Buffer.from(hex, 'hex')) } catch {}
+    z32Form = z32FromHex(hex)
   } else if (/^[13-9a-km-uw-z]{52}$/i.test(raw)) {
     z32Form = raw.toLowerCase()
-    try { hex = Buffer.from(require('z32').decode(z32Form)).toString('hex') } catch {}
+    hex = hexFromZ32(z32Form)
   }
   return { proto, raw, hex, z32: z32Form, path: u.pathname || '/', urlStr }
 }
@@ -328,8 +535,31 @@ function AboutSite ({ rpc, C, url, onClose, onBookmarkToggle }) {
               <div class="about-meta-label">Relays</div>
               <div class="about-meta-value">${driveInfo ? (driveInfo.relay?.connectedRelays || 0) : '…'}</div>
             </div>
+            <div>
+              <div class="about-meta-label">Cached</div>
+              <div class="about-meta-value">${driveInfo ? formatBytes(driveInfo.byteLength) : '…'}</div>
+            </div>
+            <div>
+              <div class="about-meta-label">Mode</div>
+              <div class="about-meta-value">${driveInfo ? (driveInfo.writable ? 'writable' : 'read-only') : '…'}</div>
+            </div>
+            <div>
+              <div class="about-meta-label">Fetch</div>
+              <div class="about-meta-value">${driveInfo ? (driveInfo.relay?.hybridFetchEnabled ? 'hybrid' : 'P2P') : '…'}</div>
+            </div>
           </div>
           <div class=${'about-pin-status ' + pin.tone}>${pin.text}</div>
+        `}
+
+        ${driveInfo && driveInfo.discoveryKey && html`
+          <div class="about-section-label">DISCOVERY KEY</div>
+          <div class="about-row">
+            <code class="about-mono">${driveInfo.discoveryKey}</code>
+            <button class="copy-btn-small ${copyState.discovery ? 'copied' : ''}"
+                    onClick=${() => copy('discovery', driveInfo.discoveryKey)}>
+              ${copyState.discovery ? '✓' : 'Copy'}
+            </button>
+          </div>
         `}
 
         <div class="about-section-label">YOUR LIBRARY</div>
@@ -359,13 +589,14 @@ function AboutSite ({ rpc, C, url, onClose, onBookmarkToggle }) {
   `
 }
 
-function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActiveId }) {
+function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActiveId, closedTabs, setClosedTabs, sessionReady }) {
   // tabs[] + activeId are now lifted to App-level state and passed in
   // as props. This survives main-tab switches (Browse→Apps→Browse no
   // longer destroys your open tabs) and lets App persist them to
   // user-data settings for cross-launch session restore.
   const inputRef = useRef(null)
   const iframeRefs = useRef({})
+  const autoLoadedRef = useRef(new Set())
   const [editingUrl, setEditingUrl] = useState('')
   // About-this-site modal — true when user clicked the (i) button.
   const [aboutOpen, setAboutOpen] = useState(false)
@@ -399,29 +630,38 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
     if (active) setEditingUrl(active.displayUrl || '')
   }, [active?.id, active?.displayUrl])
 
-  const go = async (url, tabIdOverride) => {
+  const go = async (url, tabIdOverride, opts = {}) => {
     const target = normalizeUrl(url)
     if (!target) return
     const id = tabIdOverride || activeId
+    const recordHistory = opts.recordHistory !== false
+    const rememberVisit = opts.rememberVisit ?? recordHistory
     updateTab(id, { status: `resolving ${target}…`, displayUrl: target })
     try {
       const res = await rpc.request(C.CMD_NAVIGATE, { url: target })
       setTabs((prev) => prev.map((t) => {
         if (t.id !== id) return t
-        const trimmed = t.history.slice(0, t.histIdx + 1)
-        const newHistory = [...trimmed, target]
+        let history = Array.isArray(t.history) ? t.history : []
+        let histIdx = Number.isInteger(t.histIdx) ? t.histIdx : -1
+        if (recordHistory) {
+          const pushed = pushTabHistory(history, histIdx, target)
+          history = pushed.history
+          histIdx = pushed.histIdx
+        } else if (Number.isInteger(opts.historyIndex)) {
+          histIdx = clampHistoryIndex(history, opts.historyIndex)
+        }
         return {
           ...t,
           src: res.localUrl,
           status: '',
-          history: newHistory,
-          histIdx: newHistory.length - 1,
+          history,
+          histIdx,
           url: target,
           displayUrl: target,
           title: target
         }
       }))
-      rpc.request(C.CMD_USERDATA_ADD_HISTORY, { url: target, title: target }).catch(() => {})
+      if (rememberVisit) rpc.request(C.CMD_USERDATA_ADD_HISTORY, { url: target, title: target }).catch(() => {})
     } catch (err) {
       updateTab(id, { status: `error: ${err.message}` })
     }
@@ -440,18 +680,18 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
   }
 
   const back = () => {
+    const history = active?.history || []
     if (!active || active.histIdx <= 0) return
     const i = active.histIdx - 1
-    const url = active.history[i]
-    updateTab(active.id, { histIdx: i, displayUrl: url })
-    go(url, active.id)
+    const url = history[i]
+    go(url, active.id, { recordHistory: false, rememberVisit: false, historyIndex: i })
   }
   const forward = () => {
-    if (!active || active.histIdx >= active.history.length - 1) return
+    const history = active?.history || []
+    if (!active || active.histIdx >= history.length - 1) return
     const i = active.histIdx + 1
-    const url = active.history[i]
-    updateTab(active.id, { histIdx: i, displayUrl: url })
-    go(url, active.id)
+    const url = history[i]
+    go(url, active.id, { recordHistory: false, rememberVisit: false, historyIndex: i })
   }
   const reload = () => {
     const el = iframeRefs.current[activeId]
@@ -463,16 +703,18 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
     setTabs((prev) => [...prev, t])
     setActiveId(t.id)
     setEditingUrl(url || '')
-    if (url) {
-      // Defer go() until next tick so setActiveId has applied.
-      setTimeout(() => go(url, t.id), 0)
-    }
   }
 
   const closeTab = (id) => {
+    const closing = tabs.find((t) => t.id === id)
+    const closed = normalizeTabSnapshot(closing)
+    if (closed) setClosedTabs((prev) => [closed, ...prev].slice(0, MAX_CLOSED_TABS))
     setTabs((prev) => {
       const idx = prev.findIndex((t) => t.id === id)
+      if (idx === -1) return prev
       const remaining = prev.filter((t) => t.id !== id)
+      // Drop the iframe ref so it can GC.
+      delete iframeRefs.current[id]
       if (remaining.length === 0) {
         const fresh = makeTab('')
         setActiveId(fresh.id)
@@ -484,10 +726,25 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
         setActiveId(next.id)
         setEditingUrl(next.displayUrl || '')
       }
-      // Drop the iframe ref so it can GC.
-      delete iframeRefs.current[id]
       return remaining
     })
+  }
+
+  const reopenClosedTab = () => {
+    const closed = closedTabs[0]
+    if (!closed) return
+    const restored = restoreSavedTab(closed)
+    if (!restored) return
+    setClosedTabs((prev) => prev.slice(1))
+    setTabs((prev) => sortTabsPinnedFirst([...prev, restored]))
+    setActiveId(restored.id)
+    setEditingUrl(restored.displayUrl || '')
+  }
+
+  const togglePinned = (id) => {
+    setTabs((prev) => sortTabsPinnedFirst(prev.map((tab) => (
+      tab.id === id ? { ...tab, pinned: !tab.pinned } : tab
+    ))))
   }
 
   // Try to open devtools for the active tab's iframe. pear-electron
@@ -519,8 +776,9 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
       const meta = e.metaKey || e.ctrlKey
       if (!meta) return
       if (e.key === 't' || e.key === 'T') {
-        if (e.shiftKey) return // Cmd-Shift-T (reopen) — not implemented
-        e.preventDefault(); newTab()
+        e.preventDefault()
+        if (e.shiftKey) reopenClosedTab()
+        else newTab()
       } else if (e.key === 'w' || e.key === 'W') {
         e.preventDefault(); closeTab(activeId)
       } else if (e.key === 'l' || e.key === 'L') {
@@ -537,13 +795,24 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [activeId, tabs])
+  }, [activeId, tabs, closedTabs])
 
-  // Auto-navigate to the landing page once on mount.
+  // Auto-load restored tabs on first activation without adding duplicate
+  // entries to the per-tab back/forward list.
   useEffect(() => {
-    if (active && !active.src && active.url) go(active.url, active.id)
+    if (!sessionReady) return
+    if (!active || active.src || !active.url) return
+    const key = `${active.id}:${active.url}`
+    if (autoLoadedRef.current.has(key)) return
+    autoLoadedRef.current.add(key)
+    const hasHistory = Array.isArray(active.history) && active.history.length > 0
+    go(active.url, active.id, {
+      recordHistory: !hasHistory,
+      rememberVisit: !hasHistory,
+      historyIndex: active.histIdx
+    })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [sessionReady, active?.id, active?.url, active?.src])
 
   // External navUrl prop (Apps tab → "open in Browse"). Open in a new
   // tab if the active tab already has content; otherwise navigate the
@@ -645,20 +914,26 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
         ${tabs.map((t, i) => html`
           <button
             key=${t.id}
-            class=${'tabchip' + (t.id === activeId ? ' active' : '')}
+            class=${'tabchip' + (t.id === activeId ? ' active' : '') + (t.pinned ? ' pinned' : '')}
             onClick=${() => setActive(t.id)}
             title=${t.displayUrl || 'New tab'}
           >
             <span class="tabchip-favicon">${t.src ? '🌐' : '🆕'}</span>
+            <span
+              class=${'tabchip-pin' + (t.pinned ? ' on' : '')}
+              title=${t.pinned ? 'Unpin tab' : 'Pin tab'}
+              onClick=${(e) => { e.stopPropagation(); togglePinned(t.id) }}
+            >${t.pinned ? '●' : '○'}</span>
             <span class="tabchip-title">${t.title || (t.displayUrl ? t.displayUrl.replace(/^hyper:\/\//, '').slice(0, 28) : 'New tab')}</span>
             <span class="tabchip-close" onClick=${(e) => { e.stopPropagation(); closeTab(t.id) }}>×</span>
           </button>
         `)}
         <button class="tabchip-new" onClick=${() => newTab()} title="New tab (⌘T)">+</button>
+        <button class="tabchip-new tabchip-restore" onClick=${reopenClosedTab} disabled=${closedTabs.length === 0} title="Reopen closed tab (⌘⇧T)">↺</button>
       </div>
       <div class="urlbar">
         <button class="nav" onClick=${back} disabled=${!active || active.histIdx <= 0} title="Back">◀</button>
-        <button class="nav" onClick=${forward} disabled=${!active || active.histIdx >= active.history.length - 1} title="Forward">▶</button>
+        <button class="nav" onClick=${forward} disabled=${!active || active.histIdx >= (active.history || []).length - 1} title="Forward">▶</button>
         <button class="nav" onClick=${reload} disabled=${!active?.src} title="Reload (⌘R)">⟳</button>
         <input
           ref=${inputRef}
@@ -723,7 +998,7 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
                     <button class="btn primary" onClick=${() => go(DEFAULT_URL)}>Try the PearBrowser site</button>
                     <button class="btn subtle" onClick=${() => { inputRef.current?.focus(); inputRef.current?.select?.() }}>Focus the URL bar</button>
                   </div>
-                  <div class="browse-welcome-tip">Tip: <code>⌘T</code> opens a new tab, <code>⌘W</code> closes one, <code>⌘L</code> jumps to the URL bar, <code>⌘1</code>–<code>⌘9</code> switches between tabs.</div>
+                  <div class="browse-welcome-tip">Tip: <code>⌘T</code> opens a new tab, <code>⌘⇧T</code> reopens one, <code>⌘W</code> closes one, <code>⌘L</code> jumps to the URL bar, <code>⌘1</code>–<code>⌘9</code> switches between tabs.</div>
                 </div>
               </div>`
             : null
@@ -752,7 +1027,10 @@ const SCOPE_LABELS = {
   'profile:name': { label: 'Display name', detail: 'Your chosen public name' },
   'profile:avatar': { label: 'Avatar', detail: 'Your profile picture URL' },
   'profile:email': { label: 'Email', detail: 'Email you put in your profile' },
-  'profile:website': { label: 'Website', detail: 'Personal site URL on your profile' }
+  'profile:website': { label: 'Website', detail: 'Personal site URL on your profile' },
+  'profile:read': { label: 'Full profile', detail: 'All filled profile fields' },
+  'profile:contact': { label: 'Contact profile', detail: 'Email and website fields' },
+  'contacts:read': { label: 'Contacts', detail: 'Your saved contacts list' }
 }
 
 function shortKey (k) {
@@ -1940,23 +2218,57 @@ function Library ({ rpc, C, onBrowse }) {
 
 // --- Settings sub-sections -----------------------------------------------
 //
-// Three additions that surface backend power that's been there for a while:
+// Settings additions that surface backend power that's been there for a while:
 //
 //   - ProfileSection      Edit display name / bio / avatar URL / website /
 //                         email — what apps see when you grant a login.
-//   - ConnectedAppsSection View per-app login grants and revoke them
-//                         individually or all at once.
+//   - PermissionCenter    View per-app login/profile/contact/swarm grants
+//                         and revoke them individually or per app.
 //   - RelaysSection       Add/remove/reorder relay URLs, toggle hybrid fetch.
 //
-// All three call CMD_* handlers that already live in backend/index.js.
+// These call CMD_* handlers that already live in backend/index.js.
 
 const PROFILE_FIELDS = [
-  { key: 'name', label: 'Display name', placeholder: 'How apps will refer to you' },
+  { key: 'displayName', label: 'Display name', placeholder: 'How apps will refer to you' },
   { key: 'bio', label: 'Bio', placeholder: 'A short bio (optional)', textarea: true },
   { key: 'avatar', label: 'Avatar URL', placeholder: 'https://… or hyper://… (optional)' },
   { key: 'website', label: 'Website', placeholder: 'https://your.site (optional)' },
   { key: 'email', label: 'Email', placeholder: 'name@example.com (optional)' }
 ]
+
+function normalizeProfile (profile) {
+  const p = { ...(profile || {}) }
+  if (!p.displayName && p.name) p.displayName = p.name
+  return p
+}
+
+function normalizeLoginGrant (grant) {
+  const driveKey = grant?.driveKey || grant?.driveKeyHex || ''
+  return { ...(grant || {}), driveKey, driveKeyHex: driveKey }
+}
+
+function scopeMeta (scope) {
+  return SCOPE_LABELS[scope] || { label: scope, detail: scope }
+}
+
+function scopeLabels (scopes) {
+  return (Array.isArray(scopes) ? scopes : []).map((scope) => scopeMeta(scope).label)
+}
+
+function profileFieldsForScopes (scopes) {
+  const set = new Set(Array.isArray(scopes) ? scopes : [])
+  if (set.has('profile:read')) return ['Display name', 'Avatar', 'Bio', 'Email', 'Website', 'Pronouns', 'Location']
+  const fields = []
+  if (set.has('profile:name')) fields.push('Display name')
+  if (set.has('profile:avatar')) fields.push('Avatar')
+  if (set.has('profile:email')) fields.push('Email')
+  if (set.has('profile:website')) fields.push('Website')
+  if (set.has('profile:contact')) {
+    if (!fields.includes('Email')) fields.push('Email')
+    if (!fields.includes('Website')) fields.push('Website')
+  }
+  return fields
+}
 
 function ProfileSection ({ rpc, C }) {
   const [profile, setProfile] = useState({})
@@ -1969,7 +2281,7 @@ function ProfileSection ({ rpc, C }) {
     setErr('')
     try {
       const res = await rpc.request(C.CMD_PROFILE_GET)
-      const p = res?.profile || {}
+      const p = normalizeProfile(res?.profile || {})
       setProfile(p); setDraft(p)
     } catch (e) { setErr(`profile: ${e.message}`) }
   }
@@ -2044,11 +2356,10 @@ function ProfileSection ({ rpc, C }) {
   `
 }
 
-function ConnectedAppsSection ({ rpc, C }) {
-  // Login grants — apps the user has signed into.
-  const [grants, setGrants] = useState([])
-  // Swarm grants — apps that hold persisted Tier C topic-join consents.
+function PermissionCenterSection ({ rpc, C }) {
+  const [loginGrants, setLoginGrants] = useState([])
   const [swarmGrants, setSwarmGrants] = useState([])
+  const [contacts, setContacts] = useState([])
   const [busy, setBusy] = useState(null)
   const [err, setErr] = useState('')
   const [loaded, setLoaded] = useState(false)
@@ -2056,119 +2367,221 @@ function ConnectedAppsSection ({ rpc, C }) {
   const load = async () => {
     setErr('')
     try {
-      const [loginRes, swarmRes] = await Promise.all([
-        rpc.request(C.CMD_LOGIN_LIST_GRANTS),
-        rpc.request(C.CMD_SWARM_LIST_GRANTS).catch(() => ({ grants: [] }))
+      const [loginRes, swarmRes, contactsRes] = await Promise.all([
+        rpc.request(C.CMD_LOGIN_LIST_GRANTS).catch((e) => ({ error: e })),
+        rpc.request(C.CMD_SWARM_LIST_GRANTS).catch(() => ({ grants: [] })),
+        rpc.request(C.CMD_CONTACTS_LIST, { limit: 1000 }).catch(() => ({ contacts: [] }))
       ])
-      setGrants(Array.isArray(loginRes?.grants) ? loginRes.grants : [])
-      setSwarmGrants(Array.isArray(swarmRes?.grants) ? swarmRes.grants : [])
-    } catch (e) { setErr(`grants: ${e.message}`) }
+      if (loginRes?.error) throw loginRes.error
+      setLoginGrants((Array.isArray(loginRes?.grants) ? loginRes.grants : []).map(normalizeLoginGrant).filter((g) => g.driveKey))
+      setSwarmGrants(Array.isArray(swarmRes?.grants) ? swarmRes.grants.filter((g) => g?.driveKey) : [])
+      setContacts(Array.isArray(contactsRes?.contacts) ? contactsRes.contacts : [])
+    } catch (e) { setErr(`permissions: ${e.message}`) }
     finally { setLoaded(true) }
   }
   useEffect(() => { load() }, [])
 
-  const revoke = async (grant) => {
+  const apps = useMemo(() => {
+    const map = new Map()
+    const ensure = (driveKey) => {
+      if (!map.has(driveKey)) map.set(driveKey, { driveKey, appName: null, login: null, swarm: [] })
+      return map.get(driveKey)
+    }
+    for (const grant of loginGrants) {
+      const app = ensure(grant.driveKey)
+      app.login = grant
+      app.appName = grant.appName || app.appName
+    }
+    for (const grant of swarmGrants) {
+      const app = ensure(grant.driveKey)
+      app.swarm.push(grant)
+      app.appName = app.appName || grant.appName
+    }
+    return [...map.values()].sort((a, b) => {
+      const at = Math.max(a.login?.grantedAt || 0, ...a.swarm.map((g) => g.grantedAt || 0))
+      const bt = Math.max(b.login?.grantedAt || 0, ...b.swarm.map((g) => g.grantedAt || 0))
+      return bt - at
+    })
+  }, [loginGrants, swarmGrants])
+
+  const contactReaders = loginGrants.filter((g) => (g.scopes || []).includes('contacts:read'))
+  const profileReaders = loginGrants.filter((g) => profileFieldsForScopes(g.scopes).length > 0)
+
+  const revokeLogin = async (grant) => {
     const label = grant.appName || shortKey(grant.driveKey)
-    if (!confirm(`Revoke ${label}? Next time it tries to sign in you'll be asked again.`)) return
-    setErr(''); setBusy(`revoke:${grant.driveKey}`)
+    if (!confirm(`Revoke sign-in for ${label}? It will need to ask again next time.`)) return
+    setErr(''); setBusy(`login:${grant.driveKey}`)
     try {
       await rpc.request(C.CMD_LOGIN_REVOKE_GRANT, { driveKeyHex: grant.driveKey })
       await load()
-    } catch (e) { setErr(`revoke: ${e.message}`) }
+    } catch (e) { setErr(`revoke sign-in: ${e.message}`) }
     finally { setBusy(null) }
   }
 
-  const revokeAll = async () => {
-    if (grants.length === 0) return
-    if (!confirm(`Revoke ALL ${grants.length} grant(s)? Every connected app will need to ask for sign-in again.`)) return
-    setErr(''); setBusy('revoke-all')
+  const revokeSwarmGrant = async (grant) => {
+    const label = grant.appName || shortKey(grant.driveKey)
+    if (!confirm(`Revoke ${label}'s access to topic ${shortKey(grant.topicHex)}?`)) return
+    setErr(''); setBusy(`swarm:${grant.driveKey}:${grant.topicHex}`)
+    try {
+      await rpc.request(C.CMD_SWARM_REVOKE_GRANT, { driveKey: grant.driveKey, topicHex: grant.topicHex })
+      await load()
+    } catch (e) { setErr(`revoke topic: ${e.message}`) }
+    finally { setBusy(null) }
+  }
+
+  const revokeAppSwarm = async (app) => {
+    if (!app.swarm.length) return
+    const label = app.appName || shortKey(app.driveKey)
+    if (!confirm(`Revoke all ${app.swarm.length} swarm topic grant(s) for ${label}?`)) return
+    setErr(''); setBusy(`swarm-all:${app.driveKey}`)
+    try {
+      await rpc.request(C.CMD_SWARM_REVOKE_ALL_FOR_APP, { driveKey: app.driveKey })
+      await load()
+    } catch (e) { setErr(`revoke topics: ${e.message}`) }
+    finally { setBusy(null) }
+  }
+
+  const revokeEverythingForApp = async (app) => {
+    const label = app.appName || shortKey(app.driveKey)
+    if (!confirm(`Revoke every stored permission for ${label}?`)) return
+    setErr(''); setBusy(`app:${app.driveKey}`)
+    try {
+      if (app.login) await rpc.request(C.CMD_LOGIN_REVOKE_GRANT, { driveKeyHex: app.driveKey })
+      if (app.swarm.length) await rpc.request(C.CMD_SWARM_REVOKE_ALL_FOR_APP, { driveKey: app.driveKey })
+      await load()
+    } catch (e) { setErr(`revoke app: ${e.message}`) }
+    finally { setBusy(null) }
+  }
+
+  const revokeAllLogin = async () => {
+    if (!loginGrants.length) return
+    if (!confirm(`Revoke all ${loginGrants.length} sign-in grant(s)?`)) return
+    setErr(''); setBusy('login-all')
     try {
       await rpc.request(C.CMD_LOGIN_REVOKE_ALL)
       await load()
-    } catch (e) { setErr(`revoke-all: ${e.message}`) }
+    } catch (e) { setErr(`revoke all sign-ins: ${e.message}`) }
     finally { setBusy(null) }
-  }
-
-  const revokeSwarmGrant = async (g) => {
-    const label = g.appName || shortKey(g.driveKey)
-    if (!confirm(`Revoke ${label}'s access to topic ${shortKey(g.topicHex)}? It will need to ask again on next join.`)) return
-    setErr(''); setBusy(`swarm-revoke:${g.driveKey}:${g.topicHex}`)
-    try {
-      await rpc.request(C.CMD_SWARM_REVOKE_GRANT, { driveKey: g.driveKey, topicHex: g.topicHex })
-      await load()
-    } catch (e) { setErr(`swarm-revoke: ${e.message}`) }
-    finally { setBusy(null) }
-  }
-
-  // Group swarm grants by app for a tighter visual.
-  const swarmByApp = new Map()
-  for (const g of swarmGrants) {
-    const key = g.driveKey
-    if (!swarmByApp.has(key)) swarmByApp.set(key, [])
-    swarmByApp.get(key).push(g)
   }
 
   return html`
-    <div class="settings-card">
+    <div class="settings-card permission-center">
       ${err && html`<div class="apps-error">${err}</div>`}
 
-      <div class="settings-subsection-label">Sign-in grants</div>
-      ${!loaded
-        ? html`<div class="settings-subtle">Loading…</div>`
-        : grants.length === 0
-          ? html`<div class="settings-subtle">No apps have asked you to sign in yet.</div>`
-          : html`
-            ${grants.map((g) => html`
-              <div class="settings-row" key=${g.driveKey}>
-                <div>
-                  <div class="settings-label">${g.appName || shortKey(g.driveKey)}</div>
-                  <div class="settings-subtle">
-                    <code class="settings-code">${shortKey(g.driveKey)}</code>
-                    · ${(g.scopes || []).join(', ') || 'sign-in only'}
-                    ${g.expiresAt ? html` · expires ${new Date(g.expiresAt).toLocaleDateString()}` : ''}
-                  </div>
-                </div>
-                <button class="btn subtle danger" onClick=${() => revoke(g)}
-                        disabled=${busy === `revoke:${g.driveKey}`}>
-                  ${busy === `revoke:${g.driveKey}` ? 'Revoking…' : 'Revoke'}
-                </button>
-              </div>
-            `)}
-            <div class="settings-row settings-row-actions">
-              <button class="btn subtle danger" onClick=${revokeAll} disabled=${busy === 'revoke-all'}>
-                ${busy === 'revoke-all' ? 'Revoking all…' : 'Revoke all'}
-              </button>
-            </div>
-          `}
+      <div class="permission-summary">
+        <div class="permission-stat">
+          <div class="permission-stat-value">${loginGrants.length}</div>
+          <div class="permission-stat-label">sign-in grants</div>
+        </div>
+        <div class="permission-stat">
+          <div class="permission-stat-value">${profileReaders.length}</div>
+          <div class="permission-stat-label">profile readers</div>
+        </div>
+        <div class="permission-stat">
+          <div class="permission-stat-value">${contactReaders.length}</div>
+          <div class="permission-stat-label">contact readers</div>
+        </div>
+        <div class="permission-stat">
+          <div class="permission-stat-value">${swarmGrants.length}</div>
+          <div class="permission-stat-label">swarm topics</div>
+        </div>
+      </div>
 
-      <div class="settings-subsection-label">Swarm topic grants</div>
+      <div class="settings-subsection-label">Apps and sites</div>
       ${!loaded
         ? html`<div class="settings-subtle">Loading…</div>`
-        : swarmGrants.length === 0
-          ? html`<div class="settings-subtle">No swarm topic grants. Apps using only drive-derived (Tier A) topics never appear here.</div>`
-          : html`
-            ${[...swarmByApp.entries()].map(([driveKey, list]) => html`
-              <div class="swarm-grant-app" key=${driveKey}>
-                <div class="settings-label">${list[0].appName || shortKey(driveKey)}</div>
-                <div class="settings-subtle"><code class="settings-code">${shortKey(driveKey)}</code> — ${list.length} topic${list.length === 1 ? '' : 's'}</div>
-                ${list.map((g) => html`
-                  <div class="settings-row swarm-grant-row" key=${g.topicHex}>
+        : apps.length === 0
+          ? html`<div class="settings-subtle">No stored app permissions yet.</div>`
+          : apps.map((app) => {
+              const profileFields = profileFieldsForScopes(app.login?.scopes || [])
+              const contactAccess = (app.login?.scopes || []).includes('contacts:read')
+              return html`
+                <div class="permission-app" key=${app.driveKey}>
+                  <div class="permission-app-head">
                     <div>
-                      <code class="settings-code">${g.protocol || 'pear.swarm.v1'} · ${shortKey(g.topicHex)}</code>
-                      <div class="settings-subtle">
-                        Granted ${new Date(g.grantedAt).toLocaleDateString()}
-                        ${g.lastUsedAt && g.lastUsedAt !== g.grantedAt ? html` · last used ${new Date(g.lastUsedAt).toLocaleDateString()}` : ''}
-                      </div>
+                      <div class="settings-label">${app.appName || shortKey(app.driveKey)}</div>
+                      <code class="settings-code">${shortKey(app.driveKey)}</code>
                     </div>
-                    <button class="btn subtle danger" onClick=${() => revokeSwarmGrant(g)}
-                            disabled=${busy === `swarm-revoke:${g.driveKey}:${g.topicHex}`}>
-                      ${busy === `swarm-revoke:${g.driveKey}:${g.topicHex}` ? 'Revoking…' : 'Revoke'}
+                    <button class="btn subtle danger" onClick=${() => revokeEverythingForApp(app)}
+                            disabled=${busy === `app:${app.driveKey}`}>
+                      ${busy === `app:${app.driveKey}` ? 'Revoking…' : 'Revoke app'}
                     </button>
                   </div>
-                `)}
-              </div>
-            `)}
-          `}
+
+                  <div class="permission-cap-grid">
+                    <div class="permission-cap">
+                      <div class="permission-cap-label">Sign-in</div>
+                      ${app.login
+                        ? html`
+                          <div class="permission-chip-row">
+                            ${(scopeLabels(app.login.scopes).length ? scopeLabels(app.login.scopes) : ['sign-in only']).map((label) => html`
+                              <span class="permission-chip" key=${label}>${label}</span>
+                            `)}
+                          </div>
+                          <div class="settings-subtle">
+                            Granted ${new Date(app.login.grantedAt).toLocaleDateString()}
+                            ${app.login.expiresAt ? html` · expires ${new Date(app.login.expiresAt).toLocaleDateString()}` : ''}
+                          </div>
+                          <button class="btn subtle danger small" onClick=${() => revokeLogin(app.login)}
+                                  disabled=${busy === `login:${app.driveKey}`}>Revoke sign-in</button>
+                        `
+                        : html`<div class="settings-subtle">No sign-in grant.</div>`}
+                    </div>
+
+                    <div class="permission-cap">
+                      <div class="permission-cap-label">Profile fields</div>
+                      ${profileFields.length
+                        ? html`<div class="permission-chip-row">
+                            ${profileFields.map((label) => html`<span class="permission-chip" key=${label}>${label}</span>`)}
+                          </div>`
+                        : html`<div class="settings-subtle">No profile fields shared.</div>`}
+                    </div>
+
+                    <div class="permission-cap">
+                      <div class="permission-cap-label">Contacts</div>
+                      ${contactAccess
+                        ? html`
+                          <div class="permission-chip-row"><span class="permission-chip warn">contacts:read</span></div>
+                          <div class="settings-subtle">${contacts.length} saved contact${contacts.length === 1 ? '' : 's'} visible through this scope.</div>
+                        `
+                        : html`<div class="settings-subtle">No contact access.</div>`}
+                    </div>
+
+                    <div class="permission-cap">
+                      <div class="permission-cap-label">Swarm topics</div>
+                      ${app.swarm.length
+                        ? html`
+                          <div class="settings-subtle">${app.swarm.length} persisted topic${app.swarm.length === 1 ? '' : 's'}.</div>
+                          ${app.swarm.map((grant) => html`
+                            <div class="permission-topic" key=${grant.topicHex}>
+                              <div>
+                                <code class="settings-code">${grant.protocol || 'pear.swarm.v1'} · ${shortKey(grant.topicHex)}</code>
+                                <div class="settings-subtle">
+                                  Granted ${new Date(grant.grantedAt).toLocaleDateString()}
+                                  ${grant.lastUsedAt && grant.lastUsedAt !== grant.grantedAt ? html` · last used ${new Date(grant.lastUsedAt).toLocaleDateString()}` : ''}
+                                </div>
+                              </div>
+                              <button class="btn subtle danger small" onClick=${() => revokeSwarmGrant(grant)}
+                                      disabled=${busy === `swarm:${grant.driveKey}:${grant.topicHex}`}>Revoke</button>
+                            </div>
+                          `)}
+                          <button class="btn subtle danger small" onClick=${() => revokeAppSwarm(app)}
+                                  disabled=${busy === `swarm-all:${app.driveKey}`}>Revoke all topics</button>
+                        `
+                        : html`<div class="settings-subtle">No arbitrary topic grants.</div>`}
+                    </div>
+                  </div>
+                </div>
+              `
+            })}
+
+      ${loginGrants.length > 0 && html`
+        <div class="settings-row settings-row-actions">
+          <button class="btn subtle danger" onClick=${revokeAllLogin} disabled=${busy === 'login-all'}>
+            ${busy === 'login-all' ? 'Revoking…' : 'Revoke all sign-ins'}
+          </button>
+        </div>
+      `}
     </div>
   `
 }
@@ -2492,9 +2905,9 @@ function Settings ({ rpc, C, status, storagePath, log }) {
       <p class="subtitle">What apps see when you grant a sign-in. Each field is opt-in — leave blank to share nothing.</p>
       <${ProfileSection} rpc=${rpc} C=${C} />
 
-      <h2>Connected Apps</h2>
-      <p class="subtitle">Pear apps that have been granted access to your identity. Revoke any time.</p>
-      <${ConnectedAppsSection} rpc=${rpc} C=${C} />
+      <h2>Permission Center</h2>
+      <p class="subtitle">Persistent app grants grouped by drive: sign-in, profile fields, contacts, and arbitrary swarm topics.</p>
+      <${PermissionCenterSection} rpc=${rpc} C=${C} />
 
       <h2>Relays</h2>
       <p class="subtitle">HiveRelay endpoints used for fast first-paint and persistence. Hybrid mode falls back to pure P2P if a relay is down.</p>
@@ -2859,6 +3272,7 @@ export function App ({ rpc, C, storagePath }) {
   // step below replaces it once user-data is ready.
   const [tabs, setTabs] = useState(() => [makeTab(DEFAULT_URL)])
   const [browseActiveId, setBrowseActiveId] = useState(() => 'placeholder')
+  const [closedTabs, setClosedTabs] = useState(() => [])
   // Tracks whether we've completed the one-time tabs-restore from
   // user-data so the persistence effect doesn't overwrite saved state
   // with the placeholder during boot.
@@ -2881,29 +3295,28 @@ export function App ({ rpc, C, storagePath }) {
         const s = unwrapSettings(res)
         setOnboardingState(s?.onboardingDone ? 'done' : 'show')
         // Session restore: rehydrate browse tabs from previous session.
-        // We only restore the URL list — history/scroll/iframe-src are
-        // recreated on first navigation. Skip if no saved tabs (first
-        // run) or if the saved list is empty.
+        // Iframes are recreated on first activation, but tab order,
+        // active tab, pinned state, and per-tab back/forward history
+        // are preserved.
         const savedTabs = Array.isArray(s?.browseTabs) ? s.browseTabs : null
         if (savedTabs && savedTabs.length > 0) {
-          const restored = savedTabs
-            .filter((t) => t && typeof t.url === 'string')
-            .map((t) => {
-              const fresh = makeTab(t.url || '')
-              fresh.displayUrl = t.displayUrl || t.url || ''
-              fresh.title = t.title || fresh.title
-              return fresh
-            })
-          if (restored.length > 0) {
+          const restoredPairs = savedTabs
+            .map((t) => ({ saved: t, tab: restoreSavedTab(t) }))
+            .filter((entry) => entry.tab)
+          if (restoredPairs.length > 0) {
+            const restored = sortTabsPinnedFirst(restoredPairs.map((entry) => entry.tab))
             setTabs(restored)
             // Resume on whichever tab was active last time, fall back to first.
-            const targetIdx = Math.max(0, Math.min(
-              savedTabs.findIndex((t) => t && t.active === true),
-              restored.length - 1
-            ))
-            setBrowseActiveId(restored[targetIdx].id)
+            const activePair = restoredPairs.find((entry) => entry.saved && entry.saved.active === true)
+            setBrowseActiveId((activePair?.tab || restored[0]).id)
           }
         }
+        const savedClosedTabs = Array.isArray(s?.browseClosedTabs) ? s.browseClosedTabs : []
+        const restoredClosed = savedClosedTabs
+          .map((tab) => normalizeTabSnapshot(tab))
+          .filter(Boolean)
+          .slice(0, MAX_CLOSED_TABS)
+        setClosedTabs(restoredClosed)
       }).catch(() => {
         // Couldn't read settings — be conservative and skip onboarding
         // rather than show it on every launch when the bee is broken.
@@ -2959,18 +3372,17 @@ export function App ({ rpc, C, storagePath }) {
   useEffect(() => {
     if (!tabsRestored) return
     const t = setTimeout(() => {
-      const serialized = tabs.map((tab) => ({
-        url: tab.url || '',
-        displayUrl: tab.displayUrl || '',
-        title: tab.title || 'New tab',
-        active: tab.id === browseActiveId
-      }))
+      const serialized = tabs.map((tab) => serializeTab(tab, browseActiveId))
+      const serializedClosed = closedTabs
+        .map((tab) => normalizeTabSnapshot(tab))
+        .filter(Boolean)
+        .slice(0, MAX_CLOSED_TABS)
       rpc.request(C.CMD_USERDATA_SET_SETTINGS, {
-        updates: { browseTabs: serialized }
+        updates: { browseTabs: serialized, browseClosedTabs: serializedClosed }
       }).catch(() => {})
     }, 800)
     return () => clearTimeout(t)
-  }, [tabs, browseActiveId, tabsRestored, rpc, C])
+  }, [tabs, closedTabs, browseActiveId, tabsRestored, rpc, C])
 
   const launchInBrowse = (url) => {
     setNavUrl(url)
@@ -3002,7 +3414,7 @@ export function App ({ rpc, C, storagePath }) {
       </div>
 
       <div class=${'panel' + (tab === 'browse' ? ' panel-browse' : '')}>
-        ${tab === 'browse' && html`<${Browse} rpc=${rpc} C=${C} navUrl=${navUrl} onNavigated=${() => setNavUrl(null)} tabs=${tabs} setTabs=${setTabs} activeId=${browseActiveId} setActiveId=${setBrowseActiveId} />`}
+        ${tab === 'browse' && html`<${Browse} rpc=${rpc} C=${C} navUrl=${navUrl} onNavigated=${() => setNavUrl(null)} tabs=${tabs} setTabs=${setTabs} activeId=${browseActiveId} setActiveId=${setBrowseActiveId} closedTabs=${closedTabs} setClosedTabs=${setClosedTabs} sessionReady=${tabsRestored} />`}
         ${tab === 'apps' && html`<${Apps} rpc=${rpc} C=${C} onLaunch=${launchInBrowse} />`}
         ${tab === 'sites' && html`<${Sites} rpc=${rpc} C=${C} onBrowse=${launchInBrowse} />`}
         ${tab === 'library' && html`<${Library} rpc=${rpc} C=${C} onBrowse=${launchInBrowse} />`}
