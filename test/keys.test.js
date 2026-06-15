@@ -3,7 +3,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   hexToBytes, bytesToHex, z32FromHex, hexFromZ32,
-  formatBytes, shortKey, normalizeUrl
+  formatBytes, shortKey, normalizeUrl, parseCatalogRef
 } from '../ui/lib/keys.js'
 
 // Real 32-byte drive keys used in the shell (DEFAULT_CATALOG_KEY / DEFAULT_URL).
@@ -58,4 +58,18 @@ test('normalizeUrl canonicalizes URL-bar input', () => {
   assert.equal(normalizeUrl(z), `hyper://${z}/`)
   assert.equal(normalizeUrl('example/path'), 'example/path')   // has slash → left as-is
   assert.equal(normalizeUrl('plainname'), 'hyper://plainname')
+})
+
+test('parseCatalogRef routes bee vs drive and strips the scheme', () => {
+  assert.equal(parseCatalogRef(''), null)
+  assert.equal(parseCatalogRef('   '), null)
+  assert.equal(parseCatalogRef('hyperbee://'), null)          // scheme with no key
+
+  // Bare key / hyper:// → Hyperdrive catalog.
+  assert.deepEqual(parseCatalogRef(CATALOG_HEX), { key: CATALOG_HEX, bee: false })
+  assert.deepEqual(parseCatalogRef(`hyper://${CATALOG_HEX}/`), { key: CATALOG_HEX, bee: false })
+
+  // hyperbee:// → Hyperbee catalog, scheme + trailing slash stripped.
+  assert.deepEqual(parseCatalogRef(`hyperbee://${CATALOG_HEX}`), { key: CATALOG_HEX, bee: true })
+  assert.deepEqual(parseCatalogRef(`HYPERBEE://${CATALOG_HEX}/`), { key: CATALOG_HEX, bee: true })
 })

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { html } from 'htm/react'
 import { Logo, Wordmark } from './logo.js'
-import { z32FromHex, hexFromZ32, formatBytes, shortKey, normalizeUrl } from './lib/keys.js'
+import { z32FromHex, hexFromZ32, formatBytes, shortKey, normalizeUrl, parseCatalogRef } from './lib/keys.js'
 import {
   MAX_TAB_HISTORY, MAX_CLOSED_TABS,
   makeTab, cleanTabUrl, cleanTabTitle,
@@ -1462,19 +1462,24 @@ function Apps ({ rpc, C, onLaunch }) {
   // Add a catalog to the set (does not replace existing ones), persist it
   // as recent, then re-aggregate.
   const loadCatalog = async (overrideKey) => {
-    const key = (typeof overrideKey === 'string' ? overrideKey : catalogKey).trim()
-    if (!key) return
+    const raw = (typeof overrideKey === 'string' ? overrideKey : catalogKey).trim()
+    const parsed = parseCatalogRef(raw)
+    if (!parsed) return
     setErr(''); setBusy('catalog')
     try {
-      await rpc.request(C.CMD_LOAD_CATALOG, { keyHex: key }, 60000)
+      // hyperbee:// → Hyperbee catalog, bare key / hyper:// → Hyperdrive.
+      const cmd = parsed.bee ? C.CMD_LOAD_CATALOG_BEE : C.CMD_LOAD_CATALOG
+      await rpc.request(cmd, { keyHex: parsed.key }, 60000)
       setCatalogKey('')
       await refreshAggregate()
       refreshUpdates()
-      // Pin as recent + persist for next launch.
+      // Pin as recent + persist for next launch. Keep the scheme-qualified
+      // ref so the next launch routes to the same loader.
+      const persistRef = parsed.bee ? `hyperbee://${parsed.key}` : parsed.key
       setRecentCatalogs((prev) => {
-        const next = [key, ...prev.filter((k) => k !== key)].slice(0, 8)
+        const next = [persistRef, ...prev.filter((k) => k !== persistRef)].slice(0, 8)
         rpc.request(C.CMD_USERDATA_SET_SETTINGS, {
-          updates: { lastCatalogKey: key, recentCatalogs: next }
+          updates: { lastCatalogKey: persistRef, recentCatalogs: next }
         }).catch(() => {})
         return next
       })
@@ -1519,11 +1524,29 @@ function Apps ({ rpc, C, onLaunch }) {
         if (myKey) {
           rpc.request(C.CMD_MYCATALOG_GET, { keyHex: myKey }).then(setMyCatalog).catch(() => {})
         }
-        if (keys.length) {
+        // Fresh install: nothing saved yet. Seed the curated default catalog
+        // once so the Apps tab shows apps on first visit instead of an empty
+        // store. We only seed a single time (defaultCatalogSeeded) so that if
+        // the user later unloads everything we respect that rather than
+        // re-adding the default on every launch.
+        const seeded = settings?.defaultCatalogSeeded === true
+        const toLoad = keys.length ? keys : (seeded ? [] : [DEFAULT_CATALOG_KEY])
+        if (toLoad.length) {
           setBusy('catalog')
           await Promise.allSettled(
-            keys.map((k) => rpc.request(C.CMD_LOAD_CATALOG, { keyHex: k }, 60000))
+            toLoad.map((k) => {
+              const parsed = parseCatalogRef(k)
+              if (!parsed) return Promise.resolve()
+              const cmd = parsed.bee ? C.CMD_LOAD_CATALOG_BEE : C.CMD_LOAD_CATALOG
+              return rpc.request(cmd, { keyHex: parsed.key }, 60000)
+            })
           )
+          if (!keys.length && !seeded) {
+            setRecentCatalogs([DEFAULT_CATALOG_KEY])
+            rpc.request(C.CMD_USERDATA_SET_SETTINGS, {
+              updates: { recentCatalogs: [DEFAULT_CATALOG_KEY], defaultCatalogSeeded: true }
+            }).catch(() => {})
+          }
           await refreshAggregate()
           refreshUpdates()
           setBusy(null)
