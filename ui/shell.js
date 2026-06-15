@@ -1,116 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { html } from 'htm/react'
 import { Logo, Wordmark } from './logo.js'
+import { z32FromHex, hexFromZ32, formatBytes, shortKey, normalizeUrl } from './lib/keys.js'
+import {
+  MAX_TAB_HISTORY, MAX_CLOSED_TABS,
+  makeTab, cleanTabUrl, cleanTabTitle,
+  normalizeTabHistory, clampHistoryIndex, pushTabHistory,
+  normalizeTabSnapshot, serializeTab, restoreSavedTab, sortTabsPinnedFirst
+} from './lib/tabs.js'
 
 function copyText (text) {
   try {
     navigator.clipboard?.writeText(text)
   } catch {}
-}
-
-const Z32_ALPHABET = 'ybndrfg8ejkmcpqxot1uwisza345h769'
-const Z32_REVERSE = (() => {
-  const map = new Map()
-  for (let i = 0; i < Z32_ALPHABET.length; i++) map.set(Z32_ALPHABET[i], i)
-  return map
-})()
-
-function hexToBytes (hex) {
-  if (!/^[0-9a-f]+$/i.test(hex) || hex.length % 2 !== 0) return null
-  const out = new Uint8Array(hex.length / 2)
-  for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16)
-  return out
-}
-
-function bytesToHex (bytes) {
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
-}
-
-function z32EncodeBytes (bytes) {
-  const max = bytes.byteLength * 8
-  let s = ''
-  for (let p = 0; p < max; p += 5) {
-    const i = p >>> 3
-    const j = p & 7
-    if (j <= 3) {
-      s += Z32_ALPHABET[(bytes[i] >>> (3 - j)) & 0b11111]
-      continue
-    }
-    const of = j - 3
-    const high = (bytes[i] << of) & 0b11111
-    const low = (i + 1 >= bytes.byteLength ? 0 : bytes[i + 1]) >>> (8 - of)
-    s += Z32_ALPHABET[high | low]
-  }
-  return s
-}
-
-function z32DecodeToBytes (s) {
-  const clean = String(s || '').toLowerCase()
-  const out = new Uint8Array(Math.ceil(clean.length * 5 / 8))
-  let pb = 0
-  let ps = 0
-  const quintet = () => {
-    const ch = clean[ps++]
-    if (!Z32_REVERSE.has(ch)) throw new Error('invalid z-base-32')
-    return Z32_REVERSE.get(ch)
-  }
-
-  const r = clean.length & 7
-  const q = (clean.length - r) / 8
-
-  for (let i = 0; i < q; i++) {
-    const a = quintet(), b = quintet(), c = quintet(), d = quintet()
-    const e = quintet(), f = quintet(), g = quintet(), h = quintet()
-    out[pb++] = (a << 3) | (b >>> 2)
-    out[pb++] = ((b & 0b11) << 6) | (c << 1) | (d >>> 4)
-    out[pb++] = ((d & 0b1111) << 4) | (e >>> 1)
-    out[pb++] = ((e & 0b1) << 7) | (f << 2) | (g >>> 3)
-    out[pb++] = ((g & 0b111) << 5) | h
-  }
-
-  if (r === 0) return out.subarray(0, pb)
-  const a = quintet(), b = quintet()
-  out[pb++] = (a << 3) | (b >>> 2)
-  if (r <= 2) return out.subarray(0, pb)
-  const c = quintet(), d = quintet()
-  out[pb++] = ((b & 0b11) << 6) | (c << 1) | (d >>> 4)
-  if (r <= 4) return out.subarray(0, pb)
-  const e = quintet()
-  out[pb++] = ((d & 0b1111) << 4) | (e >>> 1)
-  if (r <= 5) return out.subarray(0, pb)
-  const f = quintet(), g = quintet()
-  out[pb++] = ((e & 0b1) << 7) | (f << 2) | (g >>> 3)
-  if (r <= 7) return out.subarray(0, pb)
-  const h = quintet()
-  out[pb++] = ((g & 0b111) << 5) | h
-  return out.subarray(0, pb)
-}
-
-function z32FromHex (hex) {
-  const bytes = hexToBytes(hex)
-  return bytes ? z32EncodeBytes(bytes) : null
-}
-
-function hexFromZ32 (s) {
-  try {
-    const bytes = z32DecodeToBytes(s)
-    return bytes.length === 32 ? bytesToHex(bytes) : null
-  } catch {
-    return null
-  }
-}
-
-function formatBytes (value) {
-  const bytes = Number(value) || 0
-  if (bytes < 1024) return `${bytes} B`
-  const units = ['KB', 'MB', 'GB', 'TB']
-  let n = bytes / 1024
-  let unit = units[0]
-  for (let i = 1; i < units.length && n >= 1024; i++) {
-    n /= 1024
-    unit = units[i]
-  }
-  return `${n >= 10 ? n.toFixed(1) : n.toFixed(2)} ${unit}`
 }
 
 // Vetted against https://github.com/holepunchto/pear-aliases — these
@@ -177,16 +79,6 @@ const DEFAULT_URL = 'hyper://2d6c2be92f07e10ed5a4b07b5c1286a56f0c1220c79ad3c3293
 // ~/Desktop/pearbrowser-publishers/catalog/. Pinned on 5 HiveRelays.
 const DEFAULT_CATALOG_KEY = '0c35d12fd9b1115dd2d1fb1cd1751817c9173d3196ac7c62ae37d023340dcb75'
 
-function normalizeUrl (raw) {
-  const s = raw.trim()
-  if (!s) return null
-  if (s.startsWith('hyper://')) return s
-  if (/^[0-9a-f]{64}$/i.test(s)) return `hyper://${s}/`
-  if (/^[13-9a-km-uw-z]{52}$/i.test(s)) return `hyper://${s}/`
-  if (s.includes('/') || s.startsWith('pear://')) return s
-  return `hyper://${s}`
-}
-
 // --- Multi-tab Browse ---------------------------------------------------
 //
 // Each tab keeps its own iframe (hidden via display:none when inactive
@@ -199,124 +91,6 @@ function normalizeUrl (raw) {
 //   Cmd-Shift-I or Cmd-Alt-I opens the per-iframe devtools via Pear's
 //   Window.openDevTools API when available. Falls back gracefully if
 //   the runtime doesn't expose it.
-
-let _tabIdSeq = 0
-function makeTabId () { _tabIdSeq += 1; return 'tab-' + _tabIdSeq + '-' + Date.now().toString(36) }
-
-const MAX_TAB_HISTORY = 50
-const MAX_CLOSED_TABS = 20
-
-function cleanTabUrl (value) {
-  return typeof value === 'string' ? value.trim() : ''
-}
-
-function cleanTabTitle (value, fallback = 'New tab') {
-  return typeof value === 'string' && value.trim() ? value : fallback
-}
-
-function normalizeTabHistory (history, fallbackUrl = '') {
-  const out = []
-  if (Array.isArray(history)) {
-    for (const entry of history) {
-      const url = cleanTabUrl(entry)
-      if (!url) continue
-      if (out[out.length - 1] !== url) out.push(url)
-    }
-  }
-  const fallback = cleanTabUrl(fallbackUrl)
-  if (out.length === 0 && fallback) out.push(fallback)
-  return out.slice(-MAX_TAB_HISTORY)
-}
-
-function clampHistoryIndex (history, histIdx) {
-  if (!Array.isArray(history) || history.length === 0) return -1
-  const idx = Number.isInteger(histIdx) ? histIdx : history.length - 1
-  return Math.max(0, Math.min(idx, history.length - 1))
-}
-
-function pushTabHistory (history, histIdx, targetUrl) {
-  const target = cleanTabUrl(targetUrl)
-  const base = normalizeTabHistory(history)
-  const idx = clampHistoryIndex(base, histIdx)
-  const next = idx >= 0 ? base.slice(0, idx + 1) : []
-  if (target && next[next.length - 1] !== target) next.push(target)
-  const offset = Math.max(0, next.length - MAX_TAB_HISTORY)
-  const trimmed = next.slice(offset)
-  return { history: trimmed, histIdx: trimmed.length ? trimmed.length - 1 : -1 }
-}
-
-function normalizeTabSnapshot (source) {
-  if (!source || typeof source !== 'object') return null
-  const url = cleanTabUrl(source.url)
-  let history = normalizeTabHistory(source.history, url)
-  let histIdx = clampHistoryIndex(history, source.histIdx)
-  if (url && (histIdx < 0 || history[histIdx] !== url)) {
-    const pushed = pushTabHistory(history, histIdx, url)
-    history = pushed.history
-    histIdx = pushed.histIdx
-  }
-  const activeUrl = histIdx >= 0 ? history[histIdx] : url
-  const displayUrl = cleanTabUrl(source.displayUrl) || activeUrl || url
-  if (!activeUrl && !displayUrl && history.length === 0) return null
-  return {
-    url: activeUrl || url,
-    displayUrl,
-    title: cleanTabTitle(source.title, activeUrl || 'New tab'),
-    history,
-    histIdx,
-    pinned: !!source.pinned
-  }
-}
-
-function serializeTab (tab, activeId) {
-  const snap = normalizeTabSnapshot(tab) || {
-    url: '',
-    displayUrl: '',
-    title: cleanTabTitle(tab?.title),
-    history: [],
-    histIdx: -1,
-    pinned: !!tab?.pinned
-  }
-  return { ...snap, active: tab?.id === activeId }
-}
-
-function restoreSavedTab (source) {
-  if (!source || typeof source !== 'object') return null
-  const snap = normalizeTabSnapshot(source) || {
-    url: '',
-    displayUrl: '',
-    title: cleanTabTitle(source.title),
-    history: [],
-    histIdx: -1,
-    pinned: !!source.pinned
-  }
-  return makeTab(snap.url, snap)
-}
-
-function sortTabsPinnedFirst (list) {
-  return [
-    ...list.filter((tab) => tab.pinned),
-    ...list.filter((tab) => !tab.pinned)
-  ]
-}
-
-function makeTab (initialUrl = '', opts = {}) {
-  const history = Array.isArray(opts.history) ? normalizeTabHistory(opts.history, initialUrl) : []
-  const histIdx = clampHistoryIndex(history, opts.histIdx)
-  const historyUrl = histIdx >= 0 ? history[histIdx] : ''
-  const url = cleanTabUrl(historyUrl || initialUrl)
-  return {
-    id: makeTabId(),
-    url,
-    displayUrl: cleanTabUrl(opts.displayUrl) || url,
-    src: null,
-    history,
-    histIdx,
-    status: '',
-    title: cleanTabTitle(opts.title),
-    pinned: !!opts.pinned
-  }
-}
 
 // --- About-this-site panel -----------------------------------------------
 //
@@ -1033,11 +807,6 @@ const SCOPE_LABELS = {
   'contacts:read': { label: 'Contacts', detail: 'Your saved contacts list' }
 }
 
-function shortKey (k) {
-  if (!k || typeof k !== 'string') return ''
-  if (k.length <= 16) return k
-  return k.slice(0, 8) + '…' + k.slice(-6)
-}
 
 function LoginConsent ({ rpc, C, request, identity, onClose }) {
   const initial = new Set(request.scopes || [])

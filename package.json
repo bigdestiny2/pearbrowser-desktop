@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "start": "pear run --dev .",
-    "run": "pear run ."
+    "run": "pear run .",
+    "test": "node --test 'test/*.test.js'"
   },
   "pear": {
     "name": "pearbrowser-desktop",
