@@ -164,8 +164,11 @@ class Profile {
    *
    * Scope mapping:
    *   profile:read         → all PROFILE_FIELDS
-   *   profile:name         → displayName + avatar
-   *   profile:contact      → email + website
+   *   profile:name         → displayName
+   *   profile:avatar       → avatar
+   *   profile:email        → email
+   *   profile:website      → website
+   *   profile:contact      → email + website (legacy bundle)
    *
    * Apps that have no grant receive `null`.
    */
@@ -181,10 +184,10 @@ class Profile {
     if (scopes.has('profile:read')) {
       for (const [k, v] of Object.entries(all)) visible[k] = v
     } else {
-      if (scopes.has('profile:name')) {
-        if (all.displayName) visible.displayName = all.displayName
-        if (all.avatar) visible.avatar = all.avatar
-      }
+      if (scopes.has('profile:name') && all.displayName) visible.displayName = all.displayName
+      if (scopes.has('profile:avatar') && all.avatar) visible.avatar = all.avatar
+      if (scopes.has('profile:email') && all.email) visible.email = all.email
+      if (scopes.has('profile:website') && all.website) visible.website = all.website
       if (scopes.has('profile:contact')) {
         if (all.email) visible.email = all.email
         if (all.website) visible.website = all.website
