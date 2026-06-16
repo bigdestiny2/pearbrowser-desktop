@@ -1,0 +1,139 @@
+// Live two-writer convergence smoke test for the Autobee collaborative
+// catalog (Rollout Phase 1 — docs/AUTOBEE-RESEARCH.md). Exercises REAL
+// autobase: two independent Corestores, a writer-invite handshake,
+// concurrent edits, bidirectional replication, and convergence — plus a
+// read-only (non-writer) instance.
+//
+// Run on demand (NOT part of `npm test`, since it spins up swarmless
+// replication and can take a few seconds):
+//
+//   node scripts/autobee-catalog-smoke.js
+//
+// Exit 0 = converged + all assertions held; non-zero = failure.
+
+import Corestore from 'corestore'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { AutobeeCatalogManager } from './lib/autobee-catalog-manager.js'
+
+const tmps = []
+async function tmpStore () {
+  const dir = await mkdtemp(join(tmpdir(), 'autobee-smoke-'))
+  tmps.push(dir)
+  return new Corestore(dir)
+}
+
+// Pipe two corestores together so their cores replicate live.
+function wire (a, b) {
+  const s1 = a.replicate(true)
+  const s2 = b.replicate(false)
+  s1.on('error', () => {})
+  s2.on('error', () => {})
+  s1.pipe(s2).pipe(s1)
+  return () => { try { s1.destroy() } catch {} try { s2.destroy() } catch {} }
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+// Poll until predicate() or timeout — autobase needs a few ticks to linearize
+// across the replication stream.
+async function until (label, predicate, ms = 8000) {
+  const t0 = Date.now()
+  while (Date.now() - t0 < ms) {
+    if (await predicate()) return true
+    await sleep(150)
+  }
+  throw new Error(`timeout waiting for: ${label}`)
+}
+
+function assert (cond, msg) { if (!cond) throw new Error('ASSERT FAILED: ' + msg) }
+
+async function main () {
+  console.log('🐝 Autobee collaborative-catalog smoke test\n')
+
+  // --- Writer A boots a fresh catalog ------------------------------------
+  const storeA = await tmpStore()
+  const A = await new AutobeeCatalogManager(storeA).ready()
+  console.log('  · A booted   autobase key:', A.key.slice(0, 16) + '…  writable:', A.writable)
+  assert(A.writable, 'creator A must be writable')
+
+  await A.rename('Shared Picks')
+  await A.upsertApp({ id: 'keet', name: 'Keet', driveKey: 'a'.repeat(64) })
+
+  // --- Writer B joins as a read-only replica first -----------------------
+  const storeB = await tmpStore()
+  const B = await new AutobeeCatalogManager(storeB, { bootstrap: A.key }).ready()
+  const unwire = wire(storeA, storeB)
+  console.log('  · B booted   local key:', B.localKey.slice(0, 16) + '…  writable:', B.writable)
+
+  // B can read A's catalog even before being granted write.
+  await until('B sees Keet (read-only replica)', async () => {
+    const cat = (await B.catalog()).apps.map((a) => a.id)
+    return cat.includes('keet')
+  })
+  const roView = await B.catalog()
+  assert(roView.writable === false, 'B must report writable:false before invite')
+  console.log('  · B (read-only) sees apps:', roView.apps.map((a) => a.id).join(', '), '| writable:', roView.writable)
+
+  // --- A invites B as a writer -------------------------------------------
+  await A.addWriter(B.localKey)
+  await until('B becomes writable after invite', async () => {
+    await B.update()
+    return B.writable
+  })
+  console.log('  · B is now writable:', B.writable)
+
+  // --- Concurrent edits from both writers --------------------------------
+  await Promise.all([
+    A.upsertApp({ id: 'pearpass', name: 'PearPass', driveKey: 'b'.repeat(64) }),
+    B.upsertApp({ id: 'hiveworm', name: 'HiveWorm', driveKey: 'c'.repeat(64) })
+  ])
+  // B removes the app A added at boot; later linear order decides the winner.
+  await B.removeApp('keet')
+
+  // --- Converge ----------------------------------------------------------
+  await until('A and B converge', async () => {
+    await A.update(); await B.update()
+    const a = (await A.catalog()).apps.map((x) => x.id).sort()
+    const b = (await B.catalog()).apps.map((x) => x.id).sort()
+    return a.length > 0 && JSON.stringify(a) === JSON.stringify(b)
+  })
+
+  const finalA = await A.catalog()
+  const finalB = await B.catalog()
+  const idsA = finalA.apps.map((x) => x.id).sort()
+  const idsB = finalB.apps.map((x) => x.id).sort()
+  console.log('\n  A view:', finalA.name, '→', idsA.join(', '))
+  console.log('  B view:', finalB.name, '→', idsB.join(', '))
+
+  assert(JSON.stringify(idsA) === JSON.stringify(idsB), 'A and B must converge to identical app sets')
+  assert(finalA.name === finalB.name && finalA.name === 'Shared Picks', 'catalog name must converge')
+  assert(idsA.includes('pearpass') && idsA.includes('hiveworm'), 'both concurrent upserts must survive')
+
+  // --- Restart determinism: reopen A's store from disk -------------------
+  await A.close()
+  const A2 = await new AutobeeCatalogManager(await reopen(), { bootstrap: A.key }).ready()
+  const reopened = await A2.catalog()
+  console.log('  · A reopened from disk →', reopened.apps.map((x) => x.id).sort().join(', '))
+  assert(JSON.stringify(reopened.apps.map((x) => x.id).sort()) === JSON.stringify(idsA),
+    'reopened view must match pre-restart view (op log rebuilds same view)')
+
+  unwire()
+  await B.close(); await A2.close()
+  console.log('\n✅ PASS — two writers converged, read-only enforced, restart deterministic')
+}
+
+// Reopen the same on-disk corestore (last temp dir A used).
+async function reopen () {
+  const dir = tmps[0]
+  return new Corestore(dir)
+}
+
+main()
+  .then(async () => { await cleanup(); process.exit(0) })
+  .catch(async (err) => { console.error('\n❌ FAIL:', err && err.message); await cleanup(); process.exit(1) })
+
+async function cleanup () {
+  for (const dir of tmps) { try { await rm(dir, { recursive: true, force: true }) } catch {} }
+}

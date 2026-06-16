@@ -225,31 +225,51 @@ Conflict rules for first spike:
 - Unknown op types are ignored but retained in the log.
 - Oversized ops are rejected before append.
 
-Open question: define "deterministic op order" from Autobee node data without relying on local timestamps.
+~~Open question: define "deterministic op order" from Autobee node data without relying on local timestamps.~~
+
+**Resolved (Phase 1):** Autobase already linearizes nodes into one
+deterministic order shared by every replica — `apply()` receives nodes in
+that order, with no wall-clock involved. The view Hyperbee records each op in
+apply-order (`op!<index>`); the materialized catalog is rebuilt by the pure
+reducer `applyView()`. Autobase owns ordering + replication, PearBrowser owns
+conflict semantics, and the two cannot drift. For pure unit tests (no
+autobase) the same total order is modeled by sorting node tags on
+`(seq, writerKey, stableHash)` — see `scripts/lib/autobee-catalog-apply.js`
+`linearize()`.
 
 ## Acceptance Criteria
 
 The prototype is useful only if:
 
-- Two independent Corestores converge on the same catalog view.
-- The same op log rebuilds the same Hyperbee view after restart.
-- Read-only instances expose `writable: false`.
-- Existing Apps DTO shape can be produced from the Autobee view.
+- Two independent Corestores converge on the same catalog view. ✅
+- The same op log rebuilds the same Hyperbee view after restart. ✅
+- Read-only instances expose `writable: false`. ✅
+- Existing Apps DTO shape can be produced from the Autobee view. ✅ (`toCatalogData()`)
 - Basic malicious inputs are rejected or ignored:
-  - giant records
-  - prototype pollution keys
-  - missing drive keys
-  - invalid writer keys
-  - unknown op versions
-- Tests cover concurrent add/edit/remove and restart.
+  - giant records ✅
+  - prototype pollution keys ✅
+  - missing drive keys ✅
+  - invalid writer keys ✅
+  - unknown op versions ✅ (retained-but-ignored, forward-compat)
+- Tests cover concurrent add/edit/remove and restart. ✅
+
+**All met** — see `test/autobee-catalog.test.js` (pure reducer, in `npm test`)
+and `scripts/autobee-catalog-smoke.js` (live two-writer autobase convergence,
+run on demand).
 
 ## Rollout Plan
 
-Phase 0: Research doc and dependency watch.
+Phase 0: Research doc and dependency watch. ✅
 
-Phase 1: Local-only Autobee catalog smoke test. No UI.
+Phase 1: Local-only Autobee catalog smoke test. No UI. ✅ **Done** —
+`scripts/lib/autobee-catalog-{ops,apply,manager}.js`, with
+`test/autobee-catalog.test.js` (pure) and `scripts/autobee-catalog-smoke.js`
+(live two-writer convergence against autobase 7.27.3). All acceptance
+criteria above pass. Code lives under `scripts/lib/` (ESM, Node-testable)
+rather than `backend/` (CommonJS/Bare) until Phase 2 wires it in; the module
+boundary is unchanged.
 
-Phase 2: Hidden backend manager behind a feature flag. Load an Autobee catalog alongside Hyperdrive and Hyperbee catalogs.
+Phase 2: Hidden backend manager behind a feature flag. Load an Autobee catalog alongside Hyperdrive and Hyperbee catalogs. **Next** — promote the manager into `backend/` (CommonJS), add `CMD_LOAD_CATALOG_AUTOBEE` mirrored in `ui/boot.js`, route via the existing `parseCatalogRef()` (`autobee://` scheme), all behind an off-by-default flag.
 
 Phase 3: Experimental UI for "Create collaborative catalog" and "Invite writer."
 
