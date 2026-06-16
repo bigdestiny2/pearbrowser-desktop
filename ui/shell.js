@@ -1393,6 +1393,44 @@ function CollaborativeCatalog ({ rpc, C }) {
   `
 }
 
+// Browser-side dedup. getAggregatedApps only collapses by per-row id, so the
+// SAME app (same driveKey/link) arriving from different catalogues — or as
+// different schema-sheets rows/uuids — would appear multiple times. Collapse by
+// stable identity (driveKey, else link), keep the most-trustworthy copy
+// (verification, then version), and record which catalogues list it.
+const VERIFICATION_RANK = { 'author-signed': 3, 'relay-listed': 2, unverified: 1 }
+function appVersionGreater (a, b) {
+  const pa = String(a || '0').split('.').map((n) => parseInt(n, 10) || 0)
+  const pb = String(b || '0').split('.').map((n) => parseInt(n, 10) || 0)
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] || 0; const y = pb[i] || 0
+    if (x !== y) return x > y
+  }
+  return false
+}
+function betterApp (a, b) {
+  const va = VERIFICATION_RANK[a.verification] || 1
+  const vb = VERIFICATION_RANK[b.verification] || 1
+  if (va !== vb) return va > vb ? a : b
+  if (appVersionGreater(a.version, b.version)) return a
+  if (appVersionGreater(b.version, a.version)) return b
+  return b
+}
+function dedupeApps (list) {
+  const byKey = new Map()
+  for (const app of list) {
+    const key = app.driveKey || app.link || ('id:' + (app.id || ''))
+    const existing = byKey.get(key)
+    if (!existing) {
+      byKey.set(key, { ...app, _sources: app.catalogName ? [app.catalogName] : [] })
+      continue
+    }
+    const sources = [...new Set([...(existing._sources || []), app.catalogName].filter(Boolean))]
+    byKey.set(key, { ...betterApp(app, existing), _sources: sources })
+  }
+  return [...byKey.values()]
+}
+
 function Apps ({ rpc, C, onLaunch }) {
   const [catalogKey, setCatalogKey] = useState('')
   // Cross-catalog store: PearBrowser keeps every catalog the user has
@@ -1856,7 +1894,7 @@ function Apps ({ rpc, C, onLaunch }) {
 
   const filteredApps = useMemo(() => {
     const q = query.trim().toLowerCase()
-    return apps.filter((a) => {
+    const matched = apps.filter((a) => {
       if (source !== 'all' && a.catalogKey !== source) return false
       if (category !== 'all' && !appCategories(a).includes(category)) return false
       if (!q) return true
@@ -1864,7 +1902,12 @@ function Apps ({ rpc, C, onLaunch }) {
         (a.description && a.description.toLowerCase().includes(q)) ||
         (a.author && String(a.author).toLowerCase().includes(q))
     })
+    // Collapse the same app across catalogues / duplicate rows.
+    return dedupeApps(matched)
   }, [apps, query, category, source])
+
+  // Total unique-app count (deduped, ignoring search/category) for the headers.
+  const uniqueAppCount = useMemo(() => dedupeApps(apps).length, [apps])
 
   const renderMyCatalogApp = (app) => {
     const savedId = app.id || app.driveKey || app.name || 'untitled'
@@ -1987,7 +2030,7 @@ function Apps ({ rpc, C, onLaunch }) {
           <button
             class=${'catalog-chip' + (source === 'all' ? ' active' : '')}
             onClick=${() => setSource('all')}
-          >All · ${apps.length}</button>
+          >All · ${uniqueAppCount}</button>
           ${loadedCatalogs.map((cat) => html`
             <span class="catalog-source" key=${cat.key}>
               <button
@@ -2019,7 +2062,7 @@ function Apps ({ rpc, C, onLaunch }) {
       `}
 
       ${apps.length > 0 && html`
-        <h2>All apps · ${apps.length}${loadedCatalogs.length ? ` across ${loadedCatalogs.length} ${loadedCatalogs.length === 1 ? 'catalog' : 'catalogs'}` : ''}</h2>
+        <h2>All apps · ${uniqueAppCount}${loadedCatalogs.length ? ` across ${loadedCatalogs.length} ${loadedCatalogs.length === 1 ? 'catalog' : 'catalogs'}` : ''}</h2>
 
         <div class="catalog-filter">
           <input
@@ -2217,7 +2260,9 @@ function Apps ({ rpc, C, onLaunch }) {
               <div><strong style=${{ color: '#c9d1d9' }}>Verification:</strong> ${detailApp.verification || 'unverified'}</div>
               ${detailApp.link ? html`<div style=${{ wordBreak: 'break-all' }}><strong style=${{ color: '#c9d1d9' }}>Link:</strong> ${detailApp.link}</div>` : ''}
               ${detailApp.driveKey ? html`<div style=${{ wordBreak: 'break-all' }}><strong style=${{ color: '#c9d1d9' }}>Drive:</strong> ${detailApp.driveKey}</div>` : ''}
-              ${detailApp.catalogName ? html`<div><strong style=${{ color: '#c9d1d9' }}>Catalogue:</strong> ${detailApp.catalogName}</div>` : ''}
+              ${(detailApp._sources && detailApp._sources.length)
+                ? html`<div><strong style=${{ color: '#c9d1d9' }}>Catalogue${detailApp._sources.length > 1 ? 's' : ''}:</strong> ${detailApp._sources.join(', ')}</div>`
+                : (detailApp.catalogName ? html`<div><strong style=${{ color: '#c9d1d9' }}>Catalogue:</strong> ${detailApp.catalogName}</div>` : '')}
               ${detailApp.publisherKey ? html`<div style=${{ wordBreak: 'break-all' }}><strong style=${{ color: '#c9d1d9' }}>Publisher:</strong> ${shortKey(detailApp.publisherKey)}</div>` : ''}
             </div>
             <div style=${{ display: 'flex', gap: '8px' }}>
