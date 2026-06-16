@@ -28,6 +28,7 @@ const CMD_LOAD_CATALOG_AUTOBEE = 19  // Phase 2 — Autobase collaborative catal
 const CMD_SHEETS_LOAD = 170
 const CMD_SHEETS_LIST = 171
 const CMD_SHEETS_LIST_SCHEMAS = 175
+const CMD_LOAD_CATALOG_INDEX = 176 // Phase 5 — load catalogue from a relay's index room (hiveindex://)
 
 // Site Builder
 const CMD_CREATE_SITE = 20
@@ -157,7 +158,20 @@ const EVT_SWARM_REQUEST = 107
  */
 const ANONGPT_DRIVE_KEY = 'e3cf8b6fae6260608cbfcdf6b82d985c65f5ad1b9c85e777e296e7c521213abc'
 
+// Phase 5 — well-known bootstrap relays the client self-populates its relay
+// directory from (RelayClient.listRelays), replacing the single hardcoded
+// gateway. Each seed is { gatewayUrl, indexRoom }: gatewayUrl is the relay's
+// HTTP base; indexRoom is its schema-sheets index z32 (for P2P directory/
+// catalogue replication). indexRoom is null until a relay deploys the index
+// sidecar (services/index-sidecar) and publishes one — until then the client
+// bootstraps over HTTP (GET <gateway>/index/relays) and falls back to the seed
+// list itself. Fill production gateways + z32 here once the sidecar is live.
+const BOOTSTRAP_RELAYS = [
+  { gatewayUrl: 'http://127.0.0.1:9100', indexRoom: null }
+]
+
 module.exports = {
+  CMD_LOAD_CATALOG_INDEX, BOOTSTRAP_RELAYS,
   CMD_NAVIGATE, CMD_GET_STATUS, CMD_GET_DRIVE_INFO,
   CMD_LOAD_CATALOG, CMD_LOAD_CATALOG_BEE, CMD_LOAD_CATALOG_AUTOBEE, CMD_INSTALL_APP, CMD_UNINSTALL_APP,
   CMD_LAUNCH_APP, CMD_LIST_INSTALLED, CMD_CHECK_UPDATES,

@@ -7,6 +7,7 @@
 
 const http = require('bare-http1')
 const { getUserFriendlyError } = require('./hyper-proxy')
+const { mergeRelayDirectory } = require('./relay-directory')
 
 class RelayClient {
   constructor (opts = {}) {
@@ -285,6 +286,48 @@ class RelayClient {
       req.write(body)
       req.end()
     })
+  }
+
+  /**
+   * Phase 5 — bootstrap the relay directory from a seed relay, replacing the
+   * hardcoded list. GETs `<seed>/index/relays` (the relay reverse-proxies this
+   * to its index sidecar), reads the relay-directory rows, and self-populates
+   * setRelays() with the discovered gatewayUrls (the seed kept too).
+   *
+   * Trust: relay-directory rows carry the full signed capability `doc` +
+   * `capabilitySig`. If a `verify(doc)` fn is supplied, only rows that verify
+   * are adopted (the room is an index, not an authority); without one, rows are
+   * adopted unverified (and flagged). Graceful: a relay with no sidecar returns
+   * 501/empty → we keep the current list, no error.
+   *
+   * @param {string} seedUrl  the bootstrap relay's gatewayUrl
+   * @param {object} [opts]
+   * @param {(doc:object)=>boolean} [opts.verify]  capability-doc verifier
+   * @returns {{ ok, discovered, adopted, verified, relays }}
+   */
+  async listRelays (seedUrl, opts = {}) {
+    const seed = typeof seedUrl === 'string' ? seedUrl.trim().replace(/\/+$/, '') : null
+    if (!seed || !/^https?:\/\//i.test(seed)) {
+      return { ok: false, error: 'invalid seed url', discovered: 0, adopted: 0, verified: 0, relays: [...this.relays] }
+    }
+    let rows = []
+    try {
+      const res = await this._httpGet(`${seed}/index/relays?pageSize=500`, this.timeout)
+      if (res.status !== 200) {
+        // 501 (no sidecar) / 404 (older relay) — keep the current list as-is.
+        return { ok: false, status: res.status, discovered: 0, adopted: 0, verified: 0, relays: [...this.relays] }
+      }
+      const body = JSON.parse(res.body.toString('utf8'))
+      rows = Array.isArray(body.rows) ? body.rows : []
+    } catch (err) {
+      return { ok: false, error: err.message, discovered: 0, adopted: 0, verified: 0, relays: [...this.relays] }
+    }
+
+    // Always keep the seed in the set so a bad directory never strands us.
+    const current = this.relays.includes(seed) ? this.relays : [...this.relays, seed]
+    const { relays, discovered, verified } = mergeRelayDirectory(rows, current, opts.verify)
+    this.setRelays(relays)
+    return { ok: true, discovered, adopted: relays.length, verified, relays }
   }
 
   addRelay (url) {
