@@ -8,6 +8,7 @@
 const http = require('bare-http1')
 const { getUserFriendlyError } = require('./hyper-proxy')
 const { mergeRelayDirectory } = require('./relay-directory')
+const { resolveBootstrapRelays } = require('./relay-record')
 
 class RelayClient {
   constructor (opts = {}) {
@@ -328,6 +329,31 @@ class RelayClient {
     const { relays, discovered, verified } = mergeRelayDirectory(rows, current, opts.verify)
     this.setRelays(relays)
     return { ok: true, discovered, adopted: relays.length, verified, relays }
+  }
+
+  /**
+   * Bootstrap the relay directory from DHT-resolvable relay records (iroh
+   * adoption — completes the Phase-5 bootstrap). Resolves each seed's pubkey
+   * over the DHT (hyperdht verifies the signature), merges discovered gateways
+   * into the relay list (keeping current entries so we never strand), and
+   * returns the discovered index rooms so the caller can load their catalogues.
+   * Best-effort: DHT failures leave the current list untouched.
+   *
+   * @param {object} dht    hyperdht instance (e.g. swarm.dht)
+   * @param {Array}  seeds  BOOTSTRAP_RELAYS entries ({ gatewayUrl?, indexRoom?, pubkey? })
+   * @returns {{ relays: string[], indexRooms: Array }}
+   */
+  async bootstrapFromDht (dht, seeds) {
+    let result
+    try {
+      result = await resolveBootstrapRelays(dht, seeds)
+    } catch {
+      return { relays: [...this.relays], indexRooms: [] }
+    }
+    if (result.relays.length) {
+      this.setRelays([...new Set([...this.relays, ...result.relays])])
+    }
+    return result
   }
 
   addRelay (url) {

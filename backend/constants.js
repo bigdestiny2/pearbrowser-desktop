@@ -159,15 +159,20 @@ const EVT_SWARM_REQUEST = 107
 const ANONGPT_DRIVE_KEY = 'e3cf8b6fae6260608cbfcdf6b82d985c65f5ad1b9c85e777e296e7c521213abc'
 
 // Phase 5 — well-known bootstrap relays the client self-populates its relay
-// directory from (RelayClient.listRelays), replacing the single hardcoded
-// gateway. Each seed is { gatewayUrl, indexRoom }: gatewayUrl is the relay's
-// HTTP base; indexRoom is its schema-sheets index z32 (for P2P directory/
-// catalogue replication). indexRoom is null until a relay deploys the index
-// sidecar (services/index-sidecar) and publishes one — until then the client
-// bootstraps over HTTP (GET <gateway>/index/relays) and falls back to the seed
-// list itself. Fill production gateways + z32 here once the sidecar is live.
+// directory from, replacing the single hardcoded gateway. Each seed is
+// { gatewayUrl?, indexRoom?, pubkey? }:
+//   - pubkey (relay identity, 64-hex) is the PREFERRED bootstrap: the client
+//     resolves the relay's CURRENT gatewayUrl + indexRoom from the DHT
+//     (RelayClient.bootstrapFromDht → resolveRelayRecord), signature-verified
+//     by hyperdht. With a pubkey you don't hardcode the address at all — the
+//     relay's signed DHT record carries it. (iroh adoption Phase 1.)
+//   - gatewayUrl / indexRoom are the static fallback when no pubkey is given
+//     or DHT resolution fails; the client can also bootstrap over HTTP
+//     (RelayClient.listRelays → GET <gateway>/index/relays).
+// Production: add a fleet relay's `pubkey` here once it runs the index sidecar;
+// gateway + index room then resolve themselves over the DHT.
 const BOOTSTRAP_RELAYS = [
-  { gatewayUrl: 'http://127.0.0.1:9100', indexRoom: null }
+  { gatewayUrl: 'http://127.0.0.1:9100', indexRoom: null, pubkey: null }
 ]
 
 module.exports = {

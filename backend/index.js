@@ -1445,6 +1445,28 @@ async function boot () {
     timeout: 5000
   })
 
+  // iroh adoption — bootstrap the relay directory + index rooms from
+  // DHT-resolvable relay records (resolve each seed's pubkey over swarm.dht,
+  // signature-verified by hyperdht). Best-effort + fire-and-forget so it never
+  // blocks boot; the static DEFAULT_RELAYS already give a working fallback, and
+  // a seed with no pubkey simply no-ops. Completes the Phase-5 bootstrap loop:
+  // a baked-in relay pubkey resolves its current gateway + index room with no
+  // hardcoded address and no running sidecar.
+  ;(async () => {
+    try {
+      if (!swarm || !swarm.dht || !Array.isArray(C.BOOTSTRAP_RELAYS) || !C.BOOTSTRAP_RELAYS.length) return
+      const { indexRooms } = await relayClient.bootstrapFromDht(swarm.dht, C.BOOTSTRAP_RELAYS)
+      for (const r of indexRooms) {
+        if (!r || !r.indexRoom || !catalogManager) continue
+        try { await catalogManager.loadCatalogIndexRoom(r.indexRoom) } catch (e) {
+          console.error('[iroh] index-room load failed:', e && e.message)
+        }
+      }
+    } catch (err) {
+      console.error('[iroh] relay bootstrap failed:', err && err.message)
+    }
+  })()
+
   // Start HTTP proxy with hybrid fetching (relay + P2P)
   proxy = new HyperProxy(getDriveForProxy, (path, err) => {
     rpc.event(C.EVT_ERROR, { type: 'proxy-error', path, message: err })
