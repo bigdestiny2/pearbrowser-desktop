@@ -1401,6 +1401,8 @@ function Apps ({ rpc, C, onLaunch }) {
   // `loadedCatalogs` is the metadata behind the source-facet chips.
   const [apps, setApps] = useState([])
   const [loadedCatalogs, setLoadedCatalogs] = useState([])
+  // The app whose detail "product page" is open (null = closed).
+  const [detailApp, setDetailApp] = useState(null)
   // Discovery facets: free-text search, category, and source catalog;
   // plus a map of appId → available newer version (from CMD_CHECK_UPDATES).
   const [query, setQuery] = useState('')
@@ -2049,7 +2051,7 @@ function Apps ({ rpc, C, onLaunch }) {
               ${safeIconSrc(app.iconData)
                 ? html`<img src=${safeIconSrc(app.iconData)} alt="" class="app-icon" />`
                 : html`<div class="app-icon app-icon-fallback">${(app.name || '?').charAt(0)}</div>`}
-              <div class="app-info">
+              <div class="app-info" onClick=${() => setDetailApp(app)} style=${{ cursor: 'pointer' }} title="View details">
                 <div class="app-name">
                   ${app.name || app.id || 'Untitled app'}
                   ${app.verification === 'relay-listed' ? html`<span title="Relay-listed" style=${{ marginLeft: '5px', color: '#58a6ff', fontSize: '12px' }}>✓</span>` : ''}
@@ -2184,6 +2186,53 @@ function Apps ({ rpc, C, onLaunch }) {
           </div>`}
 
       <${CollaborativeCatalog} rpc=${rpc} C=${C} />
+
+      ${detailApp && html`
+        <div onClick=${() => setDetailApp(null)} style=${{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '24px' }}>
+          <div onClick=${(e) => e.stopPropagation()} style=${{ background: '#11161f', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '14px', padding: '20px 24px 24px', maxWidth: '480px', width: '100%', maxHeight: '82vh', overflowY: 'auto' }}>
+            <div style=${{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button class="btn subtle" title="Close" onClick=${() => setDetailApp(null)} style=${{ padding: '2px 9px' }}>✕</button>
+            </div>
+            <div style=${{ display: 'flex', gap: '14px', alignItems: 'center', marginBottom: '14px' }}>
+              ${safeIconSrc(detailApp.iconData)
+                ? html`<img src=${safeIconSrc(detailApp.iconData)} alt="" style=${{ width: '56px', height: '56px', borderRadius: '12px' }} />`
+                : html`<div style=${{ width: '56px', height: '56px', borderRadius: '12px', background: '#1f2733', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px', fontWeight: 600 }}>${(detailApp.name || '?').charAt(0)}</div>`}
+              <div style=${{ minWidth: 0 }}>
+                <div style=${{ fontSize: '18px', fontWeight: 600 }}>
+                  ${detailApp.name || 'Untitled app'}
+                  ${detailApp.verification === 'relay-listed' ? html`<span title="Relay-listed" style=${{ marginLeft: '6px', color: '#58a6ff', fontSize: '14px' }}>✓</span>` : ''}
+                  ${detailApp.verification === 'author-signed' ? html`<span title="Author-signed" style=${{ marginLeft: '6px', color: '#3fb950', fontSize: '14px' }}>✦</span>` : ''}
+                </div>
+                <div style=${{ color: '#8b949e', fontSize: '13px' }}>${detailApp.author || ''}</div>
+              </div>
+            </div>
+            <p style=${{ color: '#c9d1d9', lineHeight: 1.6, margin: '0 0 14px' }}>${detailApp.description || 'No description.'}</p>
+            ${(detailApp.categories && detailApp.categories.length) ? html`
+              <div style=${{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '14px' }}>
+                ${detailApp.categories.map((c) => html`<span style=${{ fontSize: '12px', padding: '2px 9px', borderRadius: '8px', background: 'rgba(255,255,255,0.06)', color: '#8b949e' }}>${c}</span>`)}
+              </div>` : ''}
+            <div style=${{ fontSize: '13px', color: '#8b949e', display: 'grid', gap: '6px', marginBottom: '18px' }}>
+              <div><strong style=${{ color: '#c9d1d9' }}>Runs:</strong> ${detailApp.type === 'hypersite' ? 'headless in a tab' : 'in its own window'}</div>
+              ${detailApp.version ? html`<div><strong style=${{ color: '#c9d1d9' }}>Version:</strong> v${detailApp.version}</div>` : ''}
+              <div><strong style=${{ color: '#c9d1d9' }}>Verification:</strong> ${detailApp.verification || 'unverified'}</div>
+              ${detailApp.link ? html`<div style=${{ wordBreak: 'break-all' }}><strong style=${{ color: '#c9d1d9' }}>Link:</strong> ${detailApp.link}</div>` : ''}
+              ${detailApp.driveKey ? html`<div style=${{ wordBreak: 'break-all' }}><strong style=${{ color: '#c9d1d9' }}>Drive:</strong> ${detailApp.driveKey}</div>` : ''}
+              ${detailApp.catalogName ? html`<div><strong style=${{ color: '#c9d1d9' }}>Catalogue:</strong> ${detailApp.catalogName}</div>` : ''}
+              ${detailApp.publisherKey ? html`<div style=${{ wordBreak: 'break-all' }}><strong style=${{ color: '#c9d1d9' }}>Publisher:</strong> ${shortKey(detailApp.publisherKey)}</div>` : ''}
+            </div>
+            <div style=${{ display: 'flex', gap: '8px' }}>
+              ${detailApp.type === 'hypersite'
+                ? html`<button class="btn primary" onClick=${() => { runInTab(detailApp); setDetailApp(null) }}>Run in tab</button>`
+                : (detailApp.link && !detailApp.driveKey)
+                  ? html`<button class="btn primary" onClick=${() => { launchFeaturedApp(detailApp); setDetailApp(null) }}>Open</button>`
+                  : (isInstalled(detailApp.id)
+                    ? html`<button class="btn primary" onClick=${() => { launchApp(detailApp); setDetailApp(null) }}>Launch</button>`
+                    : html`<button class="btn primary" onClick=${() => { installApp(detailApp); setDetailApp(null) }}>Install</button>`)}
+              <button class="btn" onClick=${() => setDetailApp(null)}>Close</button>
+            </div>
+          </div>
+        </div>
+      `}
     </div>
   `
 }

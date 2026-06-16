@@ -1522,9 +1522,23 @@ async function ensureDevCatalogue () {
   await sc.open(null)
   await sc.join('pearbrowser')
   await sc.update()
+  // Clean up any duplicate rows from earlier boots that seeded before the
+  // idempotent guard existed (dedup by name + link/driveKey, keep the first).
+  let existing = await sc.listApps()
+  const seen = new Set()
+  let removed = 0
+  for (const app of existing) {
+    const k = (app.name || '') + '|' + (app.link || app.driveKey || '')
+    if (seen.has(k)) { try { await sc.deleteApp(app.id); removed++ } catch {} } else seen.add(k)
+  }
+  if (removed) {
+    await sc.update()
+    await new Promise((r) => setTimeout(r, 200))
+    existing = await sc.listApps()
+    console.log('[dev-catalogue] removed ' + removed + ' duplicate rows')
+  }
   // Idempotent: the room key is stable per store, so only seed an empty room —
   // otherwise every boot would append duplicate rows.
-  const existing = await sc.listApps()
   if (existing.length === 0) {
     const base = Date.now()
     for (let i = 0; i < SEED_APPS.length; i++) {

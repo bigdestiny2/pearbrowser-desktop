@@ -202,6 +202,11 @@ class SheetsCatalog {
     return this.sheets.addRow(sid, appJson, publishedAt)
   }
 
+  // Delete one app row by uuid.
+  async deleteApp (uuid) {
+    return this.sheets.deleteRow(uuid)
+  }
+
   async update () {
     if (this.sheets && this.sheets.base) await this.sheets.base.update()
   }
