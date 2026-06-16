@@ -305,7 +305,35 @@ covers the exact owner-create dance (mint → reopen-by-key → writable →
 rename + add app). The Bare in-app + GUI paths weren't run in this
 environment; everything ships gated off + lazily loaded.
 
-Phase 4: Multi-device bookmarks/tabs experiment using the same adapter pattern.
+Phase 4: Multi-device bookmarks/tabs experiment using the same adapter
+pattern. ✅ **Done (bookmarks)** — the original "sync my own browser state
+across devices" goal, ENCRYPTED:
+- `backend/browser-state-{ops,apply}.cjs` — bookmark op schema + deterministic
+  reducer (bookmark.add/remove, later-in-order wins, url is identity, no
+  wall-clock). `test/browser-state.test.js` (6 tests).
+- `backend/browser-state-sync.cjs` — encrypted Autobase manager
+  (`encryptionKey`), same op-log architecture as the catalog manager.
+- `scripts/browser-state-sync-smoke.js` — two devices sharing the key
+  converge on bookmarks; a device WITHOUT the key replicates the bytes but
+  reads nothing (encryption verified end-to-end); restart deterministic.
+- `CMD_SYNC_*` (180–187) in `constants.js`, mirrored in `ui/boot.js`;
+  `index.js` owns a lazily-(re)opened `browserSync`, all handlers gated by
+  `requireSync()` (the `experimentalDeviceSync` flag, server-side, fails
+  closed). Encryption key is random per sync base, persisted in settings,
+  and shipped in the pairing invite.
+- UI: Settings → Experimental toggle + a Device-sync section
+  (`DeviceSyncSection`) — enable/create, copy the `sync://<key>:<encKey>`
+  pairing invite, pair a device, exchange writer keys to grant write, push
+  local bookmarks in, view/remove synced bookmarks.
+
+Pairing model: one device creates the encrypted base and shares
+`sync://<key>:<encKey>`; another device opens it (read-only) and hands back
+its writer key; the first device adds it as a writer. Only holders of the
+encryption key can read — it IS the sensitive capability.
+
+Tabs/history sync: deferred. Tabs need a per-device identity (you don't want
+device A's open tabs clobbering device B's); history is deferred for
+privacy/retention as noted below.
 
 Phase 5: Shared site drafts if catalog and browser-state experiments behave well.
 

@@ -738,6 +738,137 @@ async function requireAutobee () {
   }
 }
 
+// --- Multi-device browser-state sync (encrypted) — Rollout Phase 4 ---------
+// EXPERIMENTAL, off by default. One encrypted Autobase per user holding their
+// own bookmark edits, replicated across their paired devices. The encryption
+// key + bootstrap key + writer key form the pairing invite. The instance is
+// owned here and lazily (re)opened from persisted settings (syncKey/syncEncKey).
+let browserSync = null
+
+async function requireSync () {
+  let on = false
+  try { on = !!(await requireUserData().getSettings()).experimentalDeviceSync } catch {}
+  if (!on) throw new Error('Device sync is experimental — enable it in Settings first.')
+}
+
+// Reopen the user's existing sync base from persisted settings, if paired.
+// Returns the live instance or null (not paired yet).
+async function ensureBrowserSync () {
+  const s = await requireUserData().getSettings()
+  const key = typeof s.syncKey === 'string' && /^[0-9a-f]{64}$/i.test(s.syncKey) ? s.syncKey : null
+  const enc = typeof s.syncEncKey === 'string' && /^[0-9a-f]{64}$/i.test(s.syncEncKey) ? s.syncEncKey : null
+  if (!key || !enc) return null
+  if (browserSync && browserSync.key === key) return browserSync
+  if (browserSync) { try { await browserSync.close() } catch {} browserSync = null }
+  const { BrowserStateSync } = require('./browser-state-sync.cjs')
+  browserSync = await new BrowserStateSync(store, { bootstrap: key, encryptionKey: enc }).ready()
+  if (browserSync.discoveryKey) swarm.join(browserSync.discoveryKey, { server: true, client: true })
+  return browserSync
+}
+
+rpc.handle(C.CMD_SYNC_STATUS, async () => {
+  await whenReady(); await requireSync()
+  const sy = await ensureBrowserSync()
+  if (!sy) return { enabled: true, paired: false }
+  const st = await sy.state()
+  const s = await requireUserData().getSettings()
+  return { enabled: true, paired: true, key: sy.key, encKey: s.syncEncKey, writerKey: sy.localKey, writable: sy.writable, count: st.count, bookmarks: st.bookmarks }
+})
+
+// Enable + create a fresh encrypted sync base (this device becomes the first
+// writer). Returns the pairing invite: { key, encKey, writerKey }.
+rpc.handle(C.CMD_SYNC_CREATE, async () => {
+  await whenReady(); await requireSync()
+  const existing = await ensureBrowserSync()
+  if (existing) {
+    const st = await existing.state()
+    const s = await requireUserData().getSettings()
+    return { key: existing.key, encKey: s.syncEncKey, writerKey: existing.localKey, writable: existing.writable, ...st }
+  }
+  const { BrowserStateSync } = require('./browser-state-sync.cjs')
+  const encKey = require('crypto').randomBytes(32).toString('hex')
+  // Mint the autobase key under a throwaway namespace, then reopen by key so
+  // create/reopen share the deterministic key-derived namespace (and stay
+  // writable — verified by the smoke).
+  const mint = await new BrowserStateSync(store, { bootstrap: null, encryptionKey: encKey, namespace: 'bss-mint-' + Date.now() }).ready()
+  const key = mint.key
+  await mint.close()
+  await requireUserData().setSettings({ syncKey: key, syncEncKey: encKey })
+  browserSync = await new BrowserStateSync(store, { bootstrap: key, encryptionKey: encKey }).ready()
+  if (browserSync.discoveryKey) swarm.join(browserSync.discoveryKey, { server: true, client: true })
+  const st = await browserSync.state()
+  return { key, encKey, writerKey: browserSync.localKey, writable: browserSync.writable, ...st }
+})
+
+// Pair THIS device using an invite from another device: { key, encKey }. The
+// device is read-only until the inviting device adds its writerKey.
+rpc.handle(C.CMD_SYNC_JOIN, async (data) => {
+  await whenReady(); await requireSync()
+  const key = normalizeDriveKey(String((data && data.key) || ''))
+  const encKey = String((data && data.encKey) || '').trim().toLowerCase()
+  if (!/^[0-9a-f]{64}$/i.test(key) || !/^[0-9a-f]{64}$/i.test(encKey)) throw new Error('Invalid pairing invite (need a 64-hex key and encryption key).')
+  if (browserSync) { try { await browserSync.close() } catch {} browserSync = null }
+  await requireUserData().setSettings({ syncKey: key, syncEncKey: encKey })
+  const { BrowserStateSync } = require('./browser-state-sync.cjs')
+  browserSync = await new BrowserStateSync(store, { bootstrap: key, encryptionKey: encKey }).ready()
+  if (browserSync.discoveryKey) swarm.join(browserSync.discoveryKey, { server: true, client: true })
+  const st = await browserSync.state()
+  return { key, encKey, writerKey: browserSync.localKey, writable: browserSync.writable, ...st }
+})
+
+// Add another device as a writer (paste the writerKey it showed you).
+rpc.handle(C.CMD_SYNC_ADD_WRITER, async (data) => {
+  await whenReady(); await requireSync()
+  const sy = await ensureBrowserSync()
+  if (!sy) throw new Error('Sync is not set up on this device yet.')
+  if (!sy.writable) throw new Error('Only a writer can add another writer.')
+  const writerKey = String((data && data.writerKey) || '').trim().toLowerCase()
+  if (!/^[0-9a-f]{64}$/i.test(writerKey)) throw new Error('Invalid writer key (need 64-hex).')
+  await sy.addWriter(writerKey)
+  return { ok: true, writerKey }
+})
+
+rpc.handle(C.CMD_SYNC_GET_BOOKMARKS, async () => {
+  await whenReady(); await requireSync()
+  const sy = await ensureBrowserSync()
+  if (!sy) return { paired: false, bookmarks: [] }
+  return { paired: true, writable: sy.writable, ...(await sy.state()) }
+})
+
+rpc.handle(C.CMD_SYNC_ADD_BOOKMARK, async (data) => {
+  await whenReady(); await requireSync()
+  const sy = await ensureBrowserSync()
+  if (!sy) throw new Error('Sync is not set up on this device yet.')
+  if (!sy.writable) throw new Error('This device is read-only — ask another device to add it as a writer.')
+  await sy.addBookmark({ url: String((data && data.url) || ''), title: String((data && data.title) || ''), addedAt: Date.now() })
+  return await sy.state()
+})
+
+rpc.handle(C.CMD_SYNC_REMOVE_BOOKMARK, async (data) => {
+  await whenReady(); await requireSync()
+  const sy = await ensureBrowserSync()
+  if (!sy) throw new Error('Sync is not set up on this device yet.')
+  if (!sy.writable) throw new Error('This device is read-only.')
+  await sy.removeBookmark(String((data && data.url) || ''))
+  return await sy.state()
+})
+
+// Push this device's LOCAL bookmarks into the synced set (one-way import).
+rpc.handle(C.CMD_SYNC_PUSH_LOCAL, async () => {
+  await whenReady(); await requireSync()
+  const sy = await ensureBrowserSync()
+  if (!sy) throw new Error('Sync is not set up on this device yet.')
+  if (!sy.writable) throw new Error('This device is read-only.')
+  const local = await requireUserData().listBookmarks().catch(() => [])
+  let pushed = 0
+  for (const b of (Array.isArray(local) ? local : [])) {
+    if (!b || !b.url) continue
+    await sy.addBookmark({ url: String(b.url), title: String(b.title || ''), addedAt: Number.isFinite(b.addedAt) ? b.addedAt : Date.now() })
+    pushed++
+  }
+  return { pushed, ...(await sy.state()) }
+})
+
 rpc.handle(C.CMD_USERDATA_LIST_BOOKMARKS, async () => {
   if (!userData) return { bookmarks: [] }
   return { bookmarks: await userData.listBookmarks() }
@@ -1596,6 +1727,7 @@ async function shutdown () {
   if (siteManager) { try { await siteManager.close() } catch {} siteManager = null }
   if (appManager) { try { await appManager.close() } catch {} appManager = null }
   if (catalogManager) { try { await catalogManager.close() } catch {} catalogManager = null }
+  if (browserSync) { try { await browserSync.close() } catch {} browserSync = null }
   for (const [keyHex, entry] of browseDrives) {
     unregisterHiveRelayDrive(keyHex, entry.drive)
     try { await entry.drive.close() } catch {}
