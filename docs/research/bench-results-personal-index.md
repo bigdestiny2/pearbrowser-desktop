@@ -85,3 +85,27 @@ Mean **~477 block round-trips** for a 500-result cold scan. In-process wall-cloc
 3. **The digest-first fan-out (Bloom + top-terms, ~34 KB ≈ a handful of blocks) is mandatory** — naive "replicate the contact's index and scan" is ~477 blocks/query; the digest avoids it entirely for non-matching peers and gates the expensive full-shard pull to confirmed hits.
 
 Net: the two owed numbers are measured. One (byte reduction) is **less favorable than modeled** but reinforces the digest decision; the other (hop-1 cold cost) **confirms the hop-0-only interactivity model**. The design's architecture holds; one optimistic figure is corrected.
+
+---
+
+## Phase 4 GATE — cross-shard multi-keyword AND latency (`bench-shard-and.mjs`)
+
+The determinative question for the full-text shard tier (what killed YaCy):
+does intersecting Zipf-hot posting lists across shards stay interactive?
+Corpus: 80k docs / 1.93M postings. Hottest term `w0` = 70,964 postings (89% of
+docs), `w5` = 29,798.
+
+| pair      | UNBOUNDED p50 | TOP-K=500 p50 | TOP-K=2000 p50 |
+|-----------|--------------:|--------------:|---------------:|
+| hot×hot   | **1148 ms**   | **8.8 ms**    | 25.5 ms        |
+| hot×cold  | 686 ms        | 4.1 ms        | 13.0 ms        |
+| cold×cold | 0.1 ms        | 0.07 ms       | 0.07 ms        |
+
+**Gate verdict: PASS, conditionally.** Cross-shard AND is interactive **iff
+per-term scans are top-K-bounded** (the design's "intersect only small
+pre-filtered candidate sets" rule): hot×hot drops from 1148 ms (the YaCy trap)
+to **8.8 ms** at K=500. Unbounded full-list intersection is non-interactive and
+must never be done. So the shard tier ships only with (a) hard top-K caps per
+term and (b) co-located bigram shards for the hottest pairs (`search-shard.cjs`
+`planCrossShardAnd().bigram`) — and stays a flag-gated, trust-scoped increment
+(cross-CORE transfer adds the hop-1 block-fetch cost), never a global fan-out.
