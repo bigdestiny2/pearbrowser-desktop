@@ -67,13 +67,20 @@ function decodeSheetsLink (link) {
 // backticks (raw literals), expression-refs and anything else. The Phase-2
 // search UI builds queries from structured input through this chokepoint.
 const SAFE_JMESPATH = /^\[\?[\w\s.,'"=!<>|&()-]+\]$/
+const MAX_QUERY_LEN = 512
+// Bound on rows scanned/returned from a sheets/index room. schema-sheets
+// list() materializes the whole result in memory and JMESPath-scans it in JS
+// (O(rows)); the benchmark (docs/research/bench-results-personal-index.md) puts
+// ~10k rows at ~22ms and 50k at ~99ms main-thread block, so cap well under the
+// cliff. Also consumed by index-room-client.js.
+const MAX_SHEETS_ROWS = 5000
 function safeJmesPath (query) {
   if (query == null || query === '') return undefined
-  const q = String(query)
-  if (q.length > 512) throw new Error('Search query too long')
-  if (q.includes('`')) throw new Error('Unsupported search query')
-  if (!SAFE_JMESPATH.test(q)) throw new Error('Unsupported search query')
-  return q
+  if (typeof query !== 'string') throw new Error('Search query must be a string')
+  if (query.length > MAX_QUERY_LEN) throw new Error('Search query too long')
+  if (query.includes('`')) throw new Error('Unsupported search query')
+  if (!SAFE_JMESPATH.test(query)) throw new Error('Unsupported search query')
+  return query
 }
 
 let _SchemaSheets = null
@@ -175,8 +182,18 @@ class SheetsCatalog {
     const q = safeJmesPath(jmespath)
     const sid = await this.appsSchemaId()
     if (!sid) return []
-    const rows = await this.sheets.list(sid, q ? { query: q } : {})
-    return rows.filter(Boolean).map(rowToApp).filter(Boolean)
+    let rows
+    try {
+      rows = await this.sheets.list(sid, { limit: MAX_SHEETS_ROWS, ...(q ? { query: q } : {}) })
+    } catch (e) {
+      // A query that passed the whitelist can still fail to compile in the
+      // engine (e.g. unbalanced parens) — wrap it cleanly so the raw library
+      // stack never escapes. A failure with NO query is a genuine backend
+      // error and must propagate unmasked.
+      if (q) throw new Error(`Invalid search query: ${e && e.message}`)
+      throw e
+    }
+    return rows.filter(Boolean).map(rowToApp).filter(Boolean).slice(0, MAX_SHEETS_ROWS)
   }
 
   // --- writer side (operator/seed use; a loaded read-only catalogue skips these) ---
@@ -216,4 +233,4 @@ class SheetsCatalog {
   }
 }
 
-module.exports = { SheetsCatalog, APPS_SCHEMA, rowToApp, decodeSheetsLink, safeJmesPath }
+module.exports = { SheetsCatalog, APPS_SCHEMA, rowToApp, decodeSheetsLink, safeJmesPath, MAX_QUERY_LEN, MAX_SHEETS_ROWS }
