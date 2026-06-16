@@ -27,6 +27,7 @@ function normalizeDriveKey (raw) {
 }
 const { WorkletRPC } = require('./rpc.js')
 const { HyperProxy } = require('./hyper-proxy.js')
+const { TabRuntime } = require('./tab-runtime.js')
 const { RelayClient } = require('./relay-client.js')
 const { CatalogManager } = require('./catalog-manager.js')
 const { AppManager } = require('./app-manager.js')
@@ -72,6 +73,7 @@ const EVICT_THRESHOLD = 0.8 // Start cleanup at 80% capacity
 let swarm = null
 let store = null
 let proxy = null
+let tabRuntime = null
 let catalogManager = null
 let appManager = null
 let siteManager = null
@@ -109,6 +111,12 @@ rpc.handle(C.CMD_NAVIGATE, async (data) => {
   await whenReady()
   const { url } = data
   const parsed = new URL(url)
+  // The run-in-tab wrapper is served by tab-runtime on a loopback http(s) port
+  // (whitelisted in pear.json links) — load it directly, not via /hyper/<key>.
+  if ((parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
+      (parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost')) {
+    return { localUrl: url, key: null, path: parsed.pathname || '/', apiToken: null }
+  }
   const key = normalizeDriveKey(parsed.hostname)
   const path = parsed.pathname || '/'
   const apiToken = /^[0-9a-f]{64}$/i.test(key) && proxy?.issueApiToken
@@ -547,6 +555,20 @@ rpc.handle(C.CMD_LAUNCH_PEAR_LINK, async (data) => {
   } catch (err) {
     throw new Error('Launch failed: ' + (err && err.message))
   }
+})
+
+// Run a pear-request app HEADLESS, streamed into a browser tab (the in-tab
+// sibling of CMD_LAUNCH_PEAR_LINK's window spawn). Returns the wrapper URL the
+// UI opens in a Browse tab. 'demo' runs the in-process demo router.
+rpc.handle(C.CMD_RUN_APP_IN_TAB, async (data) => {
+  const link = String(data?.link || 'demo').trim()
+  if (!tabRuntime) throw new Error('tab runtime is not available')
+  if (link !== 'demo' && !/^pear:\/\/.+/.test(link) && !/^file:\/\/.+/.test(link)) {
+    throw new Error('Only the demo, or pear:// / file:// apps, can run in a tab')
+  }
+  const res = tabRuntime.open(link)
+  console.log('[tab-runtime] run-in-tab', link, '->', res.url)
+  return res
 })
 
 rpc.handle(C.CMD_DELETE_SITE, async (data) => {
@@ -1432,6 +1454,17 @@ async function boot () {
   const port = await proxy.start()
   console.log('HTTP proxy started on port:', port)
   rpc.event(C.EVT_BOOT_PROGRESS, { stage: 'proxy-ready', message: 'HTTP proxy ready on port ' + port })
+
+  // Tab runtime: the "run in a tab" path. Serves the headless-app wrapper +
+  // bridges each tab's WebSocket to a pear-request worker pipe. Best-effort —
+  // a failure here just means the in-tab path is unavailable, not a boot block.
+  try {
+    tabRuntime = new TabRuntime({ pearRun: (link) => require('pear-run')(link) })
+    await tabRuntime.start()
+  } catch (err) {
+    console.error('[tab-runtime] failed to start:', err && err.message)
+    tabRuntime = null
+  }
 
   // Start storage monitoring. Keep the handle so shutdown() can clear it —
   // otherwise the timer keeps firing checkStorageQuota() against a closed

@@ -17,10 +17,24 @@ function copyText (text) {
 
 // Vetted against https://github.com/holepunchto/pear-aliases — these
 // are the canonical pear:// keys for Holepunch-ecosystem apps.
+//
+// The `type` field + the window-vs-tab distinction is adopted from
+// Drache93's Pear Browser (https://github.com/Drache93/pear-browser), which
+// pioneered running P2P apps in a tab via pear-request (htmx hooked to a
+// worker pipe). Two kinds of apps, exactly as Drache93 models them:
+//   - 'standalone' : a full Bare app with its own UI (Keet, PearPass …). It
+//                    can only open in its OWN WINDOW — there is no htmx/pipe
+//                    UI to stream into a tab. (Drache93: "Standalone site
+//                    opened in new window".)
+//   - 'hypersite'  : a pear-request/htmx app whose UI IS served over a pipe,
+//                    so it renders HEADLESS in a tab.
+// The UI gates the action on this: standalone → "Open" (window); hypersite →
+// "Run in tab". This removes the confusing "Run in tab" on apps that can't.
 const FEATURED_APPS = [
   {
     id: 'keet',
     name: 'Keet',
+    type: 'standalone',
     tagline: 'End-to-end encrypted P2P chat, voice, and video calls by Holepunch.',
     link: 'pear://oeeoz3w6fjjt7bym3ndpa6hhicm8f8naxyk11z4iypeoupn6jzpo',
     initial: 'K',
@@ -29,6 +43,7 @@ const FEATURED_APPS = [
   {
     id: 'pearpass',
     name: 'PearPass',
+    type: 'standalone',
     tagline: 'Peer-to-peer password manager from Tether — synced across devices without a cloud.',
     link: 'pear://tywsat7gz8m65ejx4zjn3773pbdc4j8m66tukis8dgzekraymtzo',
     initial: 'P',
@@ -37,22 +52,44 @@ const FEATURED_APPS = [
   {
     id: 'hiveworm',
     name: 'HiveWorm',
+    type: 'standalone',
     tagline: 'Perpetual P2P life-sim — runs as a Pear app via swarm.v1.',
     link: 'pear://d1xbkcpcbi1xa8dexp49rsendra5r67w3qh5a9k8t44oemm4k16y',
     initial: 'W',
     gradient: 'linear-gradient(135deg, #a371f7, #d946ef)'
   },
-  // anonGPT — private P2P AI chat. Ships as its own Pear app: launching it
-  // spawns a separate runtime window via CMD_LAUNCH_PEAR_LINK. (The in-browser
-  // window.pear.anongpt buyer shim in backend/anongpt-buyer.js is a separate
-  // hyper:// hosting path and is not exercised by this pear:// launch.)
+  // anonGPT — private P2P AI chat. A full Pear app: opens in its own window.
+  // (The in-browser window.pear.anongpt buyer shim in backend/anongpt-buyer.js
+  // is a separate hyper:// hosting path, not exercised by this pear:// launch.)
   {
     id: 'anongpt',
     name: 'anonGPT',
+    type: 'standalone',
     tagline: 'Private P2P AI chat — pay-per-inference from a HiveMind seller, with signed receipts.',
     link: 'pear://rpzh3fsgg38kfir9nmae7x3o8ubofddzzixr5js4mxd6a6drb6wo',
     initial: 'A',
     gradient: 'linear-gradient(135deg, #22d3ee, #6366f1)'
+  },
+  // pear-request htmx apps that render HEADLESS in a tab (no window): the tab's
+  // XMLHttpRequest is hooked to a streamx talking to a worker. Pattern from
+  // Drache93's Pear Browser; our run-in-tab bridge in backend/tab-runtime.js.
+  {
+    id: 'headless-demo',
+    name: 'Headless Demo',
+    type: 'hypersite',
+    tagline: 'A pear-request htmx app streamed headless into this tab — no separate window. Runs the in-process demo router.',
+    link: 'demo',
+    initial: '▶',
+    gradient: 'linear-gradient(135deg, #16a34a, #22d3ee)'
+  },
+  {
+    id: 'headless-demo-worker',
+    name: 'Headless Demo (worker)',
+    type: 'hypersite',
+    tagline: 'The real path: a pear-request terminal app spawned as an isolated pear-run worker, UI streamed into this tab. (Local file:// demo app.)',
+    link: 'file:///Users/localllm/Desktop/pear-request-demo',
+    initial: '⚙',
+    gradient: 'linear-gradient(135deg, #6366f1, #d946ef)'
   }
 ]
 
@@ -603,8 +640,18 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
   // current empty tab.
   useEffect(() => {
     if (!navUrl) return
-    if (active && active.src) newTab(navUrl)
-    else go(navUrl, active?.id)
+    if (active && active.src) {
+      // Open a fresh tab AND navigate it. newTab() alone only sets .url, not
+      // .src, so a second run-in-tab rendered the empty-state until a manual
+      // reload — create the tab here and drive go() so it's one click every time.
+      const t = makeTab(navUrl)
+      setTabs((prev) => [...prev, t])
+      setActiveId(t.id)
+      setEditingUrl(navUrl)
+      go(navUrl, t.id)
+    } else {
+      go(navUrl, active?.id)
+    }
     onNavigated?.()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navUrl])
@@ -1433,6 +1480,23 @@ function Apps ({ rpc, C, onLaunch }) {
     setErr(`launch: unsupported scheme for featured app "${app.name}" — ${link.slice(0, 32)}`)
   }
 
+  // Run in tab: spawn the app as a HEADLESS pear-request worker and stream its
+  // htmx UI into a Browse tab (no separate window). The backend returns a local
+  // wrapper URL; onLaunch opens it in Browse just like any other page.
+  const runInTab = async (app) => {
+    setErr(''); setBusy('run-in-tab'); setLaunched('')
+    try {
+      const res = await rpc.request(C.CMD_RUN_APP_IN_TAB, { link: app.link }, 30000)
+      onLaunch?.(res.url)
+      setLaunched(`Running ${app.name} headless in a tab.`)
+      setTimeout(() => setLaunched(''), 4000)
+    } catch (e) {
+      setErr(`run in tab: ${e.message}`)
+    } finally {
+      setBusy(null)
+    }
+  }
+
   const refreshInstalled = async () => {
     try {
       const list = await rpc.request(C.CMD_LIST_INSTALLED)
@@ -1873,7 +1937,9 @@ function Apps ({ rpc, C, onLaunch }) {
               <div class="app-meta" title=${app.link}>${app.link.slice(0, 20)}…${app.link.slice(-6)}</div>
             </div>
             <div class="app-actions">
-              <button class="btn primary" onClick=${() => launchFeaturedApp(app)} disabled=${busy === 'pear-link'}>Launch</button>
+              ${app.type === 'hypersite'
+                ? html`<button class="btn primary" onClick=${() => runInTab(app)} disabled=${busy === 'run-in-tab'} title="Run headless — the app's UI streams into a tab over a pipe">Run in tab</button>`
+                : html`<button class="btn primary" onClick=${() => launchFeaturedApp(app)} disabled=${busy === 'pear-link'} title="Full Pear app — opens in its own window">Open</button>`}
             </div>
           </div>
         `)}
