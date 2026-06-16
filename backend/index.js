@@ -235,6 +235,17 @@ rpc.handle(C.CMD_SHEETS_LOAD, async (data) => {
   return result
 })
 
+// Phase 5 — load a catalogue from a relay's index room (hiveindex://). Takes a
+// z32 indexRoom LINK (from the relay's capability doc / catalog.json). The relay
+// hosts its own index room, so no client-side pin is needed (unlike a
+// user-shared sheets catalogue). Coexists with the other sources.
+rpc.handle(C.CMD_LOAD_CATALOG_INDEX, async (data) => {
+  await whenReady()
+  const link = String((data && data.link) || '').trim()
+  if (!link) throw new Error('index-room link required')
+  return await catalogManager.loadCatalogIndexRoom(link)
+})
+
 // Re-query a loaded sheets catalogue with a JMESPath filter (powers search).
 // The query is validated against a whitelist in SheetsCatalog.listApps; the
 // length cap here is an early-reject defense-in-depth (Risk #2 / #9).

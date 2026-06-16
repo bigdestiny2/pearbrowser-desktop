@@ -124,6 +124,45 @@ class CatalogManager {
   }
 
   /**
+   * Load a catalogue from a relay's INDEX ROOM (Phase 5) — the 5th source. The
+   * index sidecar publishes app-manifest rows in a schema-sheets room advertised
+   * as `indexRoom`; this replicates that room read-only and maps its
+   * app-manifest rows to the same app DTO as the other formats, so
+   * getAggregatedApps treats it identically. Coexists with the other four.
+   * `link` is a z32 (or `hiveindex://`) link. Read-only — never joins as writer.
+   */
+  async loadCatalogIndexRoom (link) {
+    const { decodeIndexLink, IndexRoomClient } = require('./index-room-client')
+    const { keyHex } = decodeIndexLink(link)
+    const cacheKey = `hiveindex:${keyHex}`
+    if (this.catalogs.has(cacheKey)) return this.catalogs.get(cacheKey).data
+
+    // Coalesce concurrent loads of the same room (mirror loadCatalogSheets).
+    if (!this._pendingIndex) this._pendingIndex = new Map()
+    if (this._pendingIndex.has(cacheKey)) return this._pendingIndex.get(cacheKey)
+
+    const p = (async () => {
+      const irc = new IndexRoomClient(this.store, this.swarm)
+      await irc.open(link)
+      const apps = await irc.listApps()
+      const data = { version: 1, name: 'Relay Index', apps, writable: false, link: irc.link() }
+      this.catalogs.set(cacheKey, { index: irc, data, lastRefresh: Date.now(), type: 'hiveindex' })
+      return data
+    })()
+    this._pendingIndex.set(cacheKey, p)
+    try { return await p } finally { this._pendingIndex.delete(cacheKey) }
+  }
+
+  /** Re-query a loaded index-room catalogue with a JMESPath filter. */
+  async queryIndexCatalog (link, jmespath) {
+    const { decodeIndexLink } = require('./index-room-client')
+    const { keyHex } = decodeIndexLink(link)
+    const entry = this.catalogs.get(`hiveindex:${keyHex}`)
+    if (!entry || !entry.index) throw new Error('Index-room catalogue not loaded')
+    return entry.index.listApps(jmespath)
+  }
+
+  /**
    * Load a catalog that's published as a Hyperbee rather than a Hyperdrive.
    *
    * Phase 1 ticket 1 of the Holepunch alignment plan. This is the canonical
@@ -459,7 +498,7 @@ class CatalogManager {
    * (`bee:<hex>` for Hyperbee catalogs).
    */
   async unloadCatalog (keyHex) {
-    for (const cacheKey of [keyHex, `bee:${keyHex}`, `autobee:${keyHex}`, `sheets:${keyHex}`]) {
+    for (const cacheKey of [keyHex, `bee:${keyHex}`, `autobee:${keyHex}`, `sheets:${keyHex}`, `hiveindex:${keyHex}`]) {
       const entry = this.catalogs.get(cacheKey)
       if (!entry) continue
       try {
@@ -467,6 +506,7 @@ class CatalogManager {
         else if (entry.bee) await entry.bee.close()
         else if (entry.manager) await entry.manager.close()
         else if (entry.sheets) await entry.sheets.close()
+        else if (entry.index) await entry.index.close()
       } catch {}
       this.catalogs.delete(cacheKey)
       return true
