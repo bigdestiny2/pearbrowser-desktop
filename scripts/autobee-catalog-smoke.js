@@ -127,13 +127,40 @@ async function main () {
 
   unwire()
   await B.close(); await A2.close()
-  console.log('\n✅ PASS — two writers converged, read-only enforced, restart deterministic')
+
+  await createPatternScenario()
+
+  console.log('\n✅ PASS — converged, read-only enforced, restart deterministic, owner-create verified')
 }
 
 // Reopen the same on-disk corestore (last temp dir A used).
 async function reopen () {
   const dir = tmps[0]
   return new Corestore(dir)
+}
+
+// Mirrors catalog-manager.createAutobeeCatalog: mint the autobase key under a
+// throwaway namespace, close, then reopen by key (default key-derived
+// namespace) — it must still be writable — then rename + add an app. This is
+// the exact owner-create dance the RPC layer performs.
+async function createPatternScenario () {
+  console.log('\n  — owner-create pattern (mint → reopen-by-key) —')
+  const dir = await mkdtemp(join(tmpdir(), 'autobee-smoke-create-'))
+  tmps.push(dir)
+
+  const mint = await new AutobeeCatalogManager(new Corestore(dir), { bootstrap: null, namespace: 'mint' }).ready()
+  const keyHex = mint.key
+  await mint.close()
+
+  const owner = await new AutobeeCatalogManager(new Corestore(dir), { bootstrap: keyHex }).ready()
+  assert(owner.writable, 'owner reopened by key must be writable')
+  await owner.rename('My Picks')
+  await owner.upsertApp({ id: 'app1', name: 'App One', driveKey: 'd'.repeat(64) })
+  const cat = await owner.catalog()
+  console.log('  · created → name:', cat.name, '| apps:', cat.apps.map((a) => a.id).join(','), '| writable:', cat.writable)
+  assert(cat.name === 'My Picks' && cat.apps.length === 1 && cat.writable,
+    'created catalog must be writable with the rename + app applied')
+  await owner.close()
 }
 
 main()

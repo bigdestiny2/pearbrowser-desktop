@@ -1178,6 +1178,174 @@ function unwrapSettings (res) {
   return (res && typeof res.settings === 'object' && res.settings !== null) ? res.settings : (res || {})
 }
 
+// Experimental collaborative-catalog (Autobee) panel for the Apps tab. Renders
+// nothing unless the experimentalAutobeeCatalogs flag is on (toggled in
+// Settings). Tabs are conditionally mounted, so flipping the flag and
+// reopening the Apps tab reveals it. Lets you create a co-editable catalog,
+// share its autobee:// key, exchange writer keys to invite collaborators, and
+// add/remove apps. The backend enforces the flag and writability.
+function CollaborativeCatalog ({ rpc, C }) {
+  const [enabled, setEnabled] = useState(null) // null = still loading
+  const [cat, setCat] = useState(null)          // { keyHex, shareKey, writerKey, writable, name, apps }
+  const [busy, setBusy] = useState(null)
+  const [err, setErr] = useState('')
+  const [notice, setNotice] = useState('')
+  const [newName, setNewName] = useState('')
+  const [joinKey, setJoinKey] = useState('')
+  const [inviteKey, setInviteKey] = useState('')
+  const [appKey, setAppKey] = useState('')
+  const [appName, setAppName] = useState('')
+  const [copied, setCopied] = useState('')
+
+  useEffect(() => {
+    rpc.request(C.CMD_USERDATA_GET_SETTINGS).then((res) => {
+      const s = unwrapSettings(res)
+      setEnabled(!!s?.experimentalAutobeeCatalogs)
+      const owned = typeof s?.autobeeOwnedKey === 'string' ? s.autobeeOwnedKey : null
+      if (s?.experimentalAutobeeCatalogs && owned) {
+        rpc.request(C.CMD_AUTOBEE_GET, { keyHex: owned }).then(setCat).catch(() => {})
+      }
+    }).catch(() => setEnabled(false))
+  }, [])
+
+  const persistOwned = (keyHex) =>
+    rpc.request(C.CMD_USERDATA_SET_SETTINGS, { updates: { autobeeOwnedKey: keyHex } }).catch(() => {})
+  const flash = (msg) => { setNotice(msg); setTimeout(() => setNotice(''), 1800) }
+  const copy = (text, what) => { try { navigator.clipboard.writeText(text); setCopied(what); setTimeout(() => setCopied(''), 1500) } catch {} }
+
+  const create = async () => {
+    setErr(''); setBusy('create')
+    try {
+      const res = await rpc.request(C.CMD_AUTOBEE_CREATE, { name: newName || 'Collaborative Catalog' }, 60000)
+      setCat(res); setNewName(''); persistOwned(res.keyHex); flash('Catalog created.')
+    } catch (e) { setErr(e.message) } finally { setBusy(null) }
+  }
+
+  const open = async () => {
+    const parsed = parseCatalogRef(joinKey)
+    if (!parsed) return
+    setErr(''); setBusy('open')
+    try {
+      const res = await rpc.request(C.CMD_AUTOBEE_GET, { keyHex: parsed.key }, 60000)
+      setCat(res); setJoinKey(''); persistOwned(res.keyHex)
+      flash(res.writable ? 'Opened — you are a writer.' : 'Opened read-only — share your writer key to be invited.')
+    } catch (e) { setErr(e.message) } finally { setBusy(null) }
+  }
+
+  const invite = async () => {
+    const writerKey = (parseCatalogRef(inviteKey)?.key || inviteKey).trim()
+    setErr(''); setBusy('invite')
+    try {
+      await rpc.request(C.CMD_AUTOBEE_ADD_WRITER, { keyHex: cat.keyHex, writerKey }, 60000)
+      setInviteKey(''); flash('Writer added — they can edit once they sync.')
+    } catch (e) { setErr(e.message) } finally { setBusy(null) }
+  }
+
+  const addApp = async () => {
+    const val = appKey.trim()
+    if (!val) return
+    const app = /^pear:\/\//i.test(val)
+      ? { link: val, name: appName || val }
+      : { driveKey: val.replace(/^hyper:\/\//i, '').replace(/\/+$/, ''), name: appName || val }
+    setErr(''); setBusy('addapp')
+    try {
+      const res = await rpc.request(C.CMD_AUTOBEE_ADD_APP, { keyHex: cat.keyHex, app }, 60000)
+      setCat(res); setAppKey(''); setAppName(''); flash('App added.')
+    } catch (e) { setErr(e.message) } finally { setBusy(null) }
+  }
+
+  const removeApp = async (id) => {
+    setErr(''); setBusy('rm:' + id)
+    try {
+      const res = await rpc.request(C.CMD_AUTOBEE_REMOVE_APP, { keyHex: cat.keyHex, id }, 60000)
+      setCat(res)
+    } catch (e) { setErr(e.message) } finally { setBusy(null) }
+  }
+
+  if (!enabled) return null // hidden while loading and when the flag is off
+
+  return html`
+    <h2>Collaborative catalog <span class="settings-subtle">(experimental)</span></h2>
+    <p class="subtitle">An app catalog several people can co-edit, synced peer-to-peer. Not pinned on relays yet — reachable only while a writer is online.</p>
+    <div class="settings-card">
+      ${err && html`<div class="apps-error">${err}</div>`}
+      ${notice && html`<div class="apps-ok">${notice}</div>`}
+
+      ${!cat && html`
+        <div class="settings-row">
+          <div class="profile-field">
+            <div class="settings-label">Create a new collaborative catalog</div>
+            <input class="profile-input" placeholder="Catalog name" value=${newName} onInput=${(e) => setNewName(e.target.value)} />
+          </div>
+          <button class="btn primary" onClick=${create} disabled=${busy === 'create'}>${busy === 'create' ? 'Creating…' : 'Create'}</button>
+        </div>
+        <div class="settings-row">
+          <div class="profile-field">
+            <div class="settings-label">…or open one by key</div>
+            <input class="profile-input" placeholder="autobee://… or 64-hex key" value=${joinKey} onInput=${(e) => setJoinKey(e.target.value)} onKeyDown=${(e) => e.key === 'Enter' && open()} />
+          </div>
+          <button class="btn" onClick=${open} disabled=${busy === 'open' || !joinKey.trim()}>${busy === 'open' ? 'Opening…' : 'Open'}</button>
+        </div>
+      `}
+
+      ${cat && html`
+        <div class="settings-row">
+          <div>
+            <div class="settings-label">${cat.name} ${cat.writable ? '' : html`<span class="settings-subtle">· read-only</span>`}</div>
+            <div class="settings-subtle">${cat.apps.length} app(s)</div>
+          </div>
+          <button class="btn subtle" onClick=${() => { setCat(null); persistOwned('') }}>Close</button>
+        </div>
+        <div class="settings-row">
+          <div class="profile-field">
+            <div class="settings-label">Share key — anyone can load this in the Apps tab</div>
+            <code class="settings-code">${cat.shareKey}</code>
+          </div>
+          <button class="btn small" onClick=${() => copy(cat.shareKey, 'share')}>${copied === 'share' ? 'Copied' : 'Copy'}</button>
+        </div>
+        <div class="settings-row">
+          <div class="profile-field">
+            <div class="settings-label">Your writer key — give this to the owner to be invited</div>
+            <code class="settings-code">${cat.writerKey}</code>
+          </div>
+          <button class="btn small" onClick=${() => copy(cat.writerKey, 'writer')}>${copied === 'writer' ? 'Copied' : 'Copy'}</button>
+        </div>
+
+        ${cat.writable && html`
+          <div class="settings-row">
+            <div class="profile-field">
+              <div class="settings-label">Invite a writer (paste their writer key)</div>
+              <input class="profile-input" placeholder="64-hex writer key" value=${inviteKey} onInput=${(e) => setInviteKey(e.target.value)} />
+            </div>
+            <button class="btn" onClick=${invite} disabled=${busy === 'invite' || !inviteKey.trim()}>${busy === 'invite' ? 'Adding…' : 'Invite'}</button>
+          </div>
+          <div class="settings-row">
+            <div class="profile-field">
+              <div class="settings-label">Add an app</div>
+              <input class="profile-input" placeholder="App name (optional)" value=${appName} onInput=${(e) => setAppName(e.target.value)} />
+              <input class="profile-input" placeholder="hyper:// drive key or pear:// link" value=${appKey} onInput=${(e) => setAppKey(e.target.value)} onKeyDown=${(e) => e.key === 'Enter' && addApp()} />
+            </div>
+            <button class="btn primary" onClick=${addApp} disabled=${busy === 'addapp' || !appKey.trim()}>${busy === 'addapp' ? 'Adding…' : 'Add app'}</button>
+          </div>
+        `}
+
+        ${cat.apps.length > 0 && html`
+          <div class="settings-row"><div class="settings-label">Apps</div></div>
+          ${cat.apps.map((a) => html`
+            <div class="settings-row" key=${a.id}>
+              <div>
+                <div class="settings-label">${a.name || a.id}</div>
+                <div class="settings-subtle">${a.driveKey || a.link || ''}</div>
+              </div>
+              ${cat.writable && html`<button class="btn small subtle" onClick=${() => removeApp(a.id)} disabled=${busy === 'rm:' + a.id}>Remove</button>`}
+            </div>
+          `)}
+        `}
+      `}
+    </div>
+  `
+}
+
 function Apps ({ rpc, C, onLaunch }) {
   const [catalogKey, setCatalogKey] = useState('')
   // Cross-catalog store: PearBrowser keeps every catalog the user has
@@ -1933,6 +2101,8 @@ function Apps ({ rpc, C, onLaunch }) {
               </div>
             `)}
           </div>`}
+
+      <${CollaborativeCatalog} rpc=${rpc} C=${C} />
     </div>
   `
 }
@@ -2548,6 +2718,48 @@ function RelaysSection ({ rpc, C }) {
   `
 }
 
+// Experimental-features toggles. Currently just the Autobee collaborative-
+// catalog flag, which unlocks the create/load `autobee://` paths in the Apps
+// tab. The backend enforces this flag server-side; this is the user-facing
+// switch (persisted in user-data settings).
+function ExperimentalSection ({ rpc, C, onAutobeeChange }) {
+  const [autobee, setAutobee] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  useEffect(() => {
+    rpc.request(C.CMD_USERDATA_GET_SETTINGS)
+      .then((res) => setAutobee(!!unwrapSettings(res)?.experimentalAutobeeCatalogs))
+      .catch(() => {})
+  }, [])
+
+  const toggle = async () => {
+    const next = !autobee
+    setBusy(true); setErr('')
+    try {
+      await rpc.request(C.CMD_USERDATA_SET_SETTINGS, { updates: { experimentalAutobeeCatalogs: next } })
+      setAutobee(next)
+      onAutobeeChange?.(next)
+    } catch (e) { setErr(`save: ${e.message}`) }
+    finally { setBusy(false) }
+  }
+
+  return html`
+    <div class="settings-card">
+      ${err && html`<div class="apps-error">${err}</div>`}
+      <div class="settings-row">
+        <div>
+          <div class="settings-label">Collaborative catalogs (Autobee)</div>
+          <div class="settings-subtle">Create app catalogs several people can co-edit, synced peer-to-peer with no server. Experimental — load or create them with <code>autobee://</code> keys in the Apps tab. Not yet pinned on relays, so a catalog is reachable only while a writer is online.</div>
+        </div>
+        <label class="login-scope${autobee ? ' on' : ''}">
+          <input type="checkbox" checked=${autobee} disabled=${busy} onChange=${toggle} />
+        </label>
+      </div>
+    </div>
+  `
+}
+
 function Settings ({ rpc, C, status, storagePath, log }) {
   const [identity, setIdentity] = useState(null)
   const [seedPhrase, setSeedPhrase] = useState(null)
@@ -2749,6 +2961,10 @@ function Settings ({ rpc, C, status, storagePath, log }) {
           <button class="btn subtle" onClick=${clearCache} disabled=${busy === 'cache'}>Clear cache</button>
         </div>
       </div>
+
+      <h2>Experimental</h2>
+      <p class="subtitle">Early features behind a flag. They may change, break, or be removed.</p>
+      <${ExperimentalSection} rpc=${rpc} C=${C} />
 
       <h2>Danger zone</h2>
       <div class="settings-card danger">

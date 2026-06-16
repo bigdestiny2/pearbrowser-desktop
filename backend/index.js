@@ -205,9 +205,7 @@ rpc.handle(C.CMD_LOAD_CATALOG_BEE, async (data) => {
 // `experimentalAutobeeCatalogs` user-data setting. See AUTOBEE-RESEARCH.md.
 rpc.handle(C.CMD_LOAD_CATALOG_AUTOBEE, async (data) => {
   await whenReady()
-  if (!(await isAutobeeEnabled())) {
-    throw new Error('Collaborative (Autobee) catalogs are experimental — enable them in Settings first.')
-  }
+  await requireAutobee()
   return await catalogManager.loadCatalogAutobee(normalizeDriveKey(data.keyHex))
 })
 
@@ -313,6 +311,48 @@ rpc.handle(C.CMD_MYCATALOG_UPDATE_APP, async (data) => {
   const result = await catalogManager.updateAppInCatalog(keyHex, data.id, data.app)
   await pinDriveBestEffort(keyHex, catalogManager.myCatalogDiscoveryKey(keyHex))
   return result
+})
+
+// Collaborative (Autobee) catalog authoring — Rollout Phase 3. All gated by
+// the experimentalAutobeeCatalogs flag (server-side, fails closed). NOTE:
+// these deliberately do NOT pin on HiveRelay — the doc's "Do Not Do Yet"
+// defers Autobee relay durability until all its cores are understood. Owned
+// catalogs are served over the swarm (server:true) while the app runs.
+rpc.handle(C.CMD_AUTOBEE_CREATE, async (data) => {
+  await whenReady()
+  await requireAutobee()
+  return await catalogManager.createAutobeeCatalog(data && data.name)
+})
+
+rpc.handle(C.CMD_AUTOBEE_GET, async (data) => {
+  await whenReady()
+  await requireAutobee()
+  return await catalogManager.getAutobeeCatalog(normalizeDriveKey(data.keyHex))
+})
+
+rpc.handle(C.CMD_AUTOBEE_ADD_APP, async (data) => {
+  await whenReady()
+  await requireAutobee()
+  return await catalogManager.autobeeAddApp(normalizeDriveKey(data.keyHex), data.app)
+})
+
+rpc.handle(C.CMD_AUTOBEE_REMOVE_APP, async (data) => {
+  await whenReady()
+  await requireAutobee()
+  return await catalogManager.autobeeRemoveApp(normalizeDriveKey(data.keyHex), data.id)
+})
+
+rpc.handle(C.CMD_AUTOBEE_RENAME, async (data) => {
+  await whenReady()
+  await requireAutobee()
+  return await catalogManager.autobeeRename(normalizeDriveKey(data.keyHex), data.name)
+})
+
+rpc.handle(C.CMD_AUTOBEE_ADD_WRITER, async (data) => {
+  await whenReady()
+  await requireAutobee()
+  // data.writerKey is a 64-hex Autobase writer key, not a drive key.
+  return await catalogManager.autobeeAddWriter(normalizeDriveKey(data.keyHex), data.writerKey)
 })
 
 // Site Builder commands
@@ -627,6 +667,12 @@ async function isAutobeeEnabled () {
     const s = await requireUserData().getSettings()
     return !!(s && s.experimentalAutobeeCatalogs)
   } catch { return false }
+}
+
+async function requireAutobee () {
+  if (!(await isAutobeeEnabled())) {
+    throw new Error('Collaborative (Autobee) catalogs are experimental — enable them in Settings first.')
+  }
 }
 
 rpc.handle(C.CMD_USERDATA_LIST_BOOKMARKS, async () => {

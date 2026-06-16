@@ -148,53 +148,150 @@ class CatalogManager {
     })
   }
 
-  /**
-   * Load a collaborative catalog published as an Autobase op-log ("Autobee").
-   * EXPERIMENTAL — gated by a feature flag at the RPC layer (index.js), so
-   * this is never reached unless the user opted in. The autobase manager is
-   * required lazily so a disabled/absent experiment can't affect boot. The
-   * returned `data` shape matches loadCatalog/loadCatalogBee, so the
-   * aggregated view treats it identically. See docs/AUTOBEE-RESEARCH.md.
-   */
-  async loadCatalogAutobee (keyHex) {
-    const cacheKey = `autobee:${keyHex}`
-    if (this.catalogs.has(cacheKey)) {
-      return this.catalogs.get(cacheKey).data
-    }
+  // EXPERIMENTAL Autobee (collaborative) catalogs — gated by a feature flag at
+  // the RPC layer (index.js), never reached unless the user opted in. The
+  // autobase manager is required lazily so a disabled/absent experiment can't
+  // affect boot. Read + write share ONE manager per key (kept on the
+  // `autobee:<key>` aggregate entry), so a single store never opens two
+  // Autobase instances on the same writer core. See docs/AUTOBEE-RESEARCH.md.
 
-    let AutobeeCatalogManager
+  _autobeeManagerClass () {
     try {
-      ({ AutobeeCatalogManager } = require('./autobee-catalog-manager.cjs'))
+      return require('./autobee-catalog-manager.cjs').AutobeeCatalogManager
     } catch (err) {
       throw new Error(`Autobee catalogs unavailable: ${getUserFriendlyError(err && err.message)}`)
     }
+  }
 
-    const manager = new AutobeeCatalogManager(this.store, { bootstrap: keyHex })
+  // Open (and retain) the single manager for a catalog key, materialize it,
+  // and register it in the aggregate set. Joins the swarm as both server and
+  // client so an owned/writable catalog is served while a loaded one is
+  // pulled. The view namespace defaults to the key, so reopening is stable.
+  async _ensureAutobeeManager (keyHex) {
+    if (!/^[0-9a-f]{64}$/i.test(keyHex)) throw new Error('Invalid catalog key')
+    const cacheKey = `autobee:${keyHex}`
+    const existing = this.catalogs.get(cacheKey)
+    if (existing && existing.manager) return existing.manager
+
+    const Manager = this._autobeeManagerClass()
+    const manager = new Manager(this.store, { bootstrap: keyHex })
     try {
       await manager.ready()
     } catch (err) {
       try { await manager.close() } catch {}
       throw new Error(`Could not open collaborative catalog: ${getUserFriendlyError(err && err.message)}`)
     }
-
-    // Join the swarm so the op log replicates from peers serving it. The
-    // shared corestore is already wired to replicate on every connection
-    // (backend/index.js), so Autobase's cores sync over the same link.
-    const topic = manager.discoveryKey
-    if (topic) this.swarm.join(topic, { server: false, client: true })
+    if (manager.discoveryKey) this.swarm.join(manager.discoveryKey, { server: true, client: true })
 
     let data
-    try {
-      // First materialization may be empty until peers sync; refreshCatalog
-      // re-materializes once replication has delivered the op log.
-      data = await manager.catalog()
-    } catch (err) {
+    try { data = await manager.catalog() } catch (err) {
       try { await manager.close() } catch {}
       throw new Error(`Could not read collaborative catalog: ${getUserFriendlyError(err && err.message)}`)
     }
-
     this.catalogs.set(cacheKey, { manager, data, lastRefresh: Date.now(), type: 'autobee' })
-    return data
+    return manager
+  }
+
+  // Re-materialize an owned/loaded autobee catalog and refresh the aggregate
+  // entry. Used after every write.
+  async _refreshAutobee (keyHex) {
+    const manager = await this._ensureAutobeeManager(keyHex)
+    const data = await manager.catalog()
+    const entry = this.catalogs.get(`autobee:${keyHex}`)
+    if (entry) { entry.data = data; entry.lastRefresh = Date.now() }
+    return { manager, data }
+  }
+
+  /**
+   * Load a collaborative catalog by key (read path — Rollout Phase 2). The
+   * returned `data` shape matches loadCatalog/loadCatalogBee so the aggregated
+   * view treats it identically.
+   */
+  async loadCatalogAutobee (keyHex) {
+    await this._ensureAutobeeManager(keyHex)
+    return this.catalogs.get(`autobee:${keyHex}`).data
+  }
+
+  // --- Collaborative (Autobee) authoring — Rollout Phase 3 ------------------
+  // Create / write / invite on a writable Autobase op-log catalog. Mirrors the
+  // My Catalog authoring API but the data model is the multi-writer op log.
+
+  async createAutobeeCatalog (name) {
+    const Manager = this._autobeeManagerClass()
+    // Mint the autobase key under a throwaway namespace, then reopen by key so
+    // create / load / join all share the deterministic key-derived view
+    // namespace. Reopen-by-key stays writable (verified by the smoke).
+    const mintNs = 'autobee-mint-' + Date.now() + '-' + Math.random().toString(36).slice(2)
+    const mint = new Manager(this.store, { bootstrap: null, namespace: mintNs })
+    await mint.ready()
+    const keyHex = mint.key
+    await mint.close()
+
+    const manager = await this._ensureAutobeeManager(keyHex)
+    await manager.rename(this._sanitizeCatalogName(name))
+    const { data } = await this._refreshAutobee(keyHex)
+    return this._formatAutobee(keyHex, manager, data)
+  }
+
+  async getAutobeeCatalog (keyHex) {
+    const manager = await this._ensureAutobeeManager(keyHex)
+    const data = this.catalogs.get(`autobee:${keyHex}`).data
+    return this._formatAutobee(keyHex, manager, data)
+  }
+
+  async autobeeRename (keyHex, name) {
+    const manager = await this._ensureAutobeeManager(keyHex)
+    if (!manager.writable) throw new Error('You are not a writer on this catalog.')
+    await manager.rename(this._sanitizeCatalogName(name))
+    const { data } = await this._refreshAutobee(keyHex)
+    return this._formatAutobee(keyHex, manager, data)
+  }
+
+  async autobeeAddApp (keyHex, app) {
+    const manager = await this._ensureAutobeeManager(keyHex)
+    if (!manager.writable) throw new Error('You are not a writer on this catalog.')
+    const driveKey = app && typeof app.driveKey === 'string' ? app.driveKey.trim() : ''
+    const link = app && typeof app.link === 'string' ? app.link.trim() : ''
+    if (!driveKey && !link) throw new Error('App needs a driveKey or link.')
+    await manager.upsertApp(app)  // ops layer whitelists/clamps + derives id
+    const { data } = await this._refreshAutobee(keyHex)
+    return this._formatAutobee(keyHex, manager, data)
+  }
+
+  async autobeeRemoveApp (keyHex, appId) {
+    const manager = await this._ensureAutobeeManager(keyHex)
+    if (!manager.writable) throw new Error('You are not a writer on this catalog.')
+    if (!appId) throw new Error('App id is required.')
+    await manager.removeApp(appId)
+    const { data } = await this._refreshAutobee(keyHex)
+    return this._formatAutobee(keyHex, manager, data)
+  }
+
+  // Invite another device/person as a writer (Autobase addWriter). They share
+  // their writer key (getAutobeeCatalog().writerKey); the owner appends it.
+  async autobeeAddWriter (keyHex, writerKeyHex) {
+    if (!/^[0-9a-f]{64}$/i.test(writerKeyHex || '')) throw new Error('Invalid writer key (need 64-hex).')
+    const manager = await this._ensureAutobeeManager(keyHex)
+    if (!manager.writable) throw new Error('Only a writer can invite others.')
+    await manager.addWriter(writerKeyHex)
+    return { ok: true, keyHex, writerKey: writerKeyHex }
+  }
+
+  // discoveryKey of an autobee catalog (for relay re-pinning after edits).
+  autobeeDiscoveryKey (keyHex) {
+    const entry = this.catalogs.get(`autobee:${keyHex}`)
+    return entry && entry.manager && entry.manager.discoveryKey ? entry.manager.discoveryKey : null
+  }
+
+  _formatAutobee (keyHex, manager, data) {
+    return {
+      keyHex,
+      shareKey: `autobee://${keyHex}`,
+      writerKey: manager.localKey,
+      writable: manager.writable,
+      name: (data && data.name) || 'Collaborative Catalog',
+      apps: (data && Array.isArray(data.apps)) ? data.apps : []
+    }
   }
 
   /**

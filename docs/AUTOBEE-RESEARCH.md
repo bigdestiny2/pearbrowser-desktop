@@ -283,12 +283,27 @@ catalog alongside Hyperdrive and Hyperbee catalogs. ✅ **Done**:
 - UI `parseCatalogRef()` routes `autobee://<key>` → the new command;
   `catalogLoadPlan()` centralizes drive/hyperbee/autobee routing.
 
-  To enable for testing (no UI toggle yet — that's Phase 3), set the flag via
-  RPC, e.g. `CMD_USERDATA_SET_SETTINGS { updates: { experimentalAutobeeCatalogs: true } }`,
-  then load an `autobee://<key>` ref in the Apps tab.
-
 Phase 3: Experimental UI for "Create collaborative catalog" and "Invite
-writer" — plus a Settings toggle for `experimentalAutobeeCatalogs`. **Next.**
+writer" — plus a Settings toggle for `experimentalAutobeeCatalogs`. ✅ **Done**:
+- Settings → Experimental: a toggle (`ExperimentalSection`) that flips
+  `experimentalAutobeeCatalogs`. The backend already enforces it.
+- Backend authoring API on `catalog-manager.js`: `createAutobeeCatalog`
+  (mint-then-reopen-by-key so create/load/join share the deterministic
+  key-derived view namespace; reopen-by-key stays writable — verified),
+  `getAutobeeCatalog`, `autobeeRename/AddApp/RemoveApp`, `autobeeAddWriter`
+  (invite). Read + write share ONE manager per key (no double-open).
+- `CMD_AUTOBEE_CREATE/GET/ADD_APP/REMOVE_APP/RENAME/ADD_WRITER` (160–165) in
+  `constants.js`, mirrored in `ui/boot.js`; handlers in `index.js` all gated
+  by `requireAutobee()`. Deliberately **not** relay-pinned (see "Do Not Do
+  Yet" — Autobee durability deferred); owned catalogs serve over the swarm.
+- Apps tab: `CollaborativeCatalog` panel (hidden unless the flag is on) —
+  create, show the `autobee://` share key + your writer key, invite a writer
+  by key, add/remove apps, open an existing catalog by key.
+
+Verified: full unit suite passes; `scripts/autobee-catalog-smoke.js` now also
+covers the exact owner-create dance (mint → reopen-by-key → writable →
+rename + add app). The Bare in-app + GUI paths weren't run in this
+environment; everything ships gated off + lazily loaded.
 
 Phase 4: Multi-device bookmarks/tabs experiment using the same adapter pattern.
 
