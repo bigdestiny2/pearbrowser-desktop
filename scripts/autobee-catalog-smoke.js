@@ -15,7 +15,9 @@ import Corestore from 'corestore'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { AutobeeCatalogManager } from './lib/autobee-catalog-manager.js'
+// Manager is CommonJS (backend/, Bare-native); default-import + destructure.
+import managerMod from '../backend/autobee-catalog-manager.cjs'
+const { AutobeeCatalogManager } = managerMod
 
 const tmps = []
 async function tmpStore () {
@@ -54,7 +56,11 @@ async function main () {
 
   // --- Writer A boots a fresh catalog ------------------------------------
   const storeA = await tmpStore()
-  const A = await new AutobeeCatalogManager(storeA).ready()
+  // Explicit namespace so the create (bootstrap=null) and the later reopen
+  // (bootstrap=A.key) address the SAME local view core. (Load-by-key in the
+  // app defaults the namespace to the stable bootstrap key, so this only
+  // matters for the create-then-reopen path the smoke exercises.)
+  const A = await new AutobeeCatalogManager(storeA, { namespace: 'smoke' }).ready()
   console.log('  · A booted   autobase key:', A.key.slice(0, 16) + '…  writable:', A.writable)
   assert(A.writable, 'creator A must be writable')
 
@@ -113,7 +119,7 @@ async function main () {
 
   // --- Restart determinism: reopen A's store from disk -------------------
   await A.close()
-  const A2 = await new AutobeeCatalogManager(await reopen(), { bootstrap: A.key }).ready()
+  const A2 = await new AutobeeCatalogManager(await reopen(), { bootstrap: A.key, namespace: 'smoke' }).ready()
   const reopened = await A2.catalog()
   console.log('  · A reopened from disk →', reopened.apps.map((x) => x.id).sort().join(', '))
   assert(JSON.stringify(reopened.apps.map((x) => x.id).sort()) === JSON.stringify(idsA),

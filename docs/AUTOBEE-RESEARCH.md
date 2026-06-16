@@ -261,17 +261,34 @@ run on demand).
 
 Phase 0: Research doc and dependency watch. ✅
 
-Phase 1: Local-only Autobee catalog smoke test. No UI. ✅ **Done** —
-`scripts/lib/autobee-catalog-{ops,apply,manager}.js`, with
-`test/autobee-catalog.test.js` (pure) and `scripts/autobee-catalog-smoke.js`
-(live two-writer convergence against autobase 7.27.3). All acceptance
-criteria above pass. Code lives under `scripts/lib/` (ESM, Node-testable)
-rather than `backend/` (CommonJS/Bare) until Phase 2 wires it in; the module
-boundary is unchanged.
+Phase 1: Local-only Autobee catalog smoke test. No UI. ✅ **Done** — pure
+reducer + ops (`backend/autobee-catalog-{ops,apply}.cjs`),
+`test/autobee-catalog.test.js`, and `scripts/autobee-catalog-smoke.js` (live
+two-writer convergence against autobase 7.27.3). All acceptance criteria
+above pass.
 
-Phase 2: Hidden backend manager behind a feature flag. Load an Autobee catalog alongside Hyperdrive and Hyperbee catalogs. **Next** — promote the manager into `backend/` (CommonJS), add `CMD_LOAD_CATALOG_AUTOBEE` mirrored in `ui/boot.js`, route via the existing `parseCatalogRef()` (`autobee://` scheme), all behind an off-by-default flag.
+Phase 2: Hidden backend manager behind a feature flag. Load an Autobee
+catalog alongside Hyperdrive and Hyperbee catalogs. ✅ **Done**:
+- `backend/autobee-catalog-{ops,apply,manager}.cjs` — CommonJS so Bare can
+  require it and Node can default-import it for tests (single source, no
+  drift). Manager mirrors the proven `backend/pear-bridge.js` Autobase usage.
+- `CMD_LOAD_CATALOG_AUTOBEE = 19` in `backend/constants.js`, mirrored in
+  `ui/boot.js`.
+- `catalog-manager.js` gains `loadCatalogAutobee()` and integrates autobee
+  entries into refresh / aggregate / listCatalogs (`source: 'autobee'`,
+  `writable`) / unload / close. Manager is **lazily** required so a disabled
+  experiment can never affect boot.
+- `index.js` handler is gated server-side by the `experimentalAutobeeCatalogs`
+  user-data setting (fails closed) so a stale renderer can't enable it.
+- UI `parseCatalogRef()` routes `autobee://<key>` → the new command;
+  `catalogLoadPlan()` centralizes drive/hyperbee/autobee routing.
 
-Phase 3: Experimental UI for "Create collaborative catalog" and "Invite writer."
+  To enable for testing (no UI toggle yet — that's Phase 3), set the flag via
+  RPC, e.g. `CMD_USERDATA_SET_SETTINGS { updates: { experimentalAutobeeCatalogs: true } }`,
+  then load an `autobee://<key>` ref in the Apps tab.
+
+Phase 3: Experimental UI for "Create collaborative catalog" and "Invite
+writer" — plus a Settings toggle for `experimentalAutobeeCatalogs`. **Next.**
 
 Phase 4: Multi-device bookmarks/tabs experiment using the same adapter pattern.
 

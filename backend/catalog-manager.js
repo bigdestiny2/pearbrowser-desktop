@@ -149,6 +149,55 @@ class CatalogManager {
   }
 
   /**
+   * Load a collaborative catalog published as an Autobase op-log ("Autobee").
+   * EXPERIMENTAL — gated by a feature flag at the RPC layer (index.js), so
+   * this is never reached unless the user opted in. The autobase manager is
+   * required lazily so a disabled/absent experiment can't affect boot. The
+   * returned `data` shape matches loadCatalog/loadCatalogBee, so the
+   * aggregated view treats it identically. See docs/AUTOBEE-RESEARCH.md.
+   */
+  async loadCatalogAutobee (keyHex) {
+    const cacheKey = `autobee:${keyHex}`
+    if (this.catalogs.has(cacheKey)) {
+      return this.catalogs.get(cacheKey).data
+    }
+
+    let AutobeeCatalogManager
+    try {
+      ({ AutobeeCatalogManager } = require('./autobee-catalog-manager.cjs'))
+    } catch (err) {
+      throw new Error(`Autobee catalogs unavailable: ${getUserFriendlyError(err && err.message)}`)
+    }
+
+    const manager = new AutobeeCatalogManager(this.store, { bootstrap: keyHex })
+    try {
+      await manager.ready()
+    } catch (err) {
+      try { await manager.close() } catch {}
+      throw new Error(`Could not open collaborative catalog: ${getUserFriendlyError(err && err.message)}`)
+    }
+
+    // Join the swarm so the op log replicates from peers serving it. The
+    // shared corestore is already wired to replicate on every connection
+    // (backend/index.js), so Autobase's cores sync over the same link.
+    const topic = manager.discoveryKey
+    if (topic) this.swarm.join(topic, { server: false, client: true })
+
+    let data
+    try {
+      // First materialization may be empty until peers sync; refreshCatalog
+      // re-materializes once replication has delivered the op log.
+      data = await manager.catalog()
+    } catch (err) {
+      try { await manager.close() } catch {}
+      throw new Error(`Could not read collaborative catalog: ${getUserFriendlyError(err && err.message)}`)
+    }
+
+    this.catalogs.set(cacheKey, { manager, data, lastRefresh: Date.now(), type: 'autobee' })
+    return data
+  }
+
+  /**
    * Refresh a previously loaded catalog
    */
   async refreshCatalog (keyHex) {
@@ -168,6 +217,15 @@ class CatalogManager {
     if (this.catalogs.has(`bee:${keyHex}`)) {
       this.catalogs.delete(`bee:${keyHex}`)
       return this.loadCatalogBee(keyHex)
+    }
+
+    // Autobee-backed collaborative catalog: re-materialize from the op log
+    // in place (Autobase.update() pulls any newly-replicated ops).
+    const autobeeEntry = this.catalogs.get(`autobee:${keyHex}`)
+    if (autobeeEntry && autobeeEntry.manager) {
+      autobeeEntry.data = await autobeeEntry.manager.catalog()
+      autobeeEntry.lastRefresh = Date.now()
+      return autobeeEntry.data
     }
 
     // Not loaded yet.
@@ -229,7 +287,8 @@ class CatalogManager {
         key,
         name: entry.data.name || 'Catalog',
         count: Array.isArray(entry.data.apps) ? entry.data.apps.length : 0,
-        source: entry.type === 'hyperbee' ? 'hyperbee' : 'hyperdrive',
+        source: entry.type === 'autobee' ? 'autobee' : entry.type === 'hyperbee' ? 'hyperbee' : 'hyperdrive',
+        writable: !!entry.data.writable,
       })
     }
     return out
@@ -241,12 +300,13 @@ class CatalogManager {
    * (`bee:<hex>` for Hyperbee catalogs).
    */
   async unloadCatalog (keyHex) {
-    for (const cacheKey of [keyHex, `bee:${keyHex}`]) {
+    for (const cacheKey of [keyHex, `bee:${keyHex}`, `autobee:${keyHex}`]) {
       const entry = this.catalogs.get(cacheKey)
       if (!entry) continue
       try {
         if (entry.drive) await entry.drive.close()
         else if (entry.bee) await entry.bee.close()
+        else if (entry.manager) await entry.manager.close()
       } catch {}
       this.catalogs.delete(cacheKey)
       return true
@@ -474,10 +534,11 @@ class CatalogManager {
 
   async close () {
     for (const [, entry] of this.catalogs) {
-      // Hyperdrive catalogs hold `drive`; Hyperbee catalogs hold `bee`.
+      // Hyperdrive catalogs hold `drive`; Hyperbee `bee`; Autobee `manager`.
       try {
         if (entry.drive) await entry.drive.close()
         else if (entry.bee) await entry.bee.close()
+        else if (entry.manager) await entry.manager.close()
       } catch {}
     }
     this.catalogs.clear()

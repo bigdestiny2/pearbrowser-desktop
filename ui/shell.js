@@ -79,6 +79,16 @@ const DEFAULT_URL = 'hyper://2d6c2be92f07e10ed5a4b07b5c1286a56f0c1220c79ad3c3293
 // ~/Desktop/pearbrowser-publishers/catalog/. Pinned on 5 HiveRelays.
 const DEFAULT_CATALOG_KEY = '0c35d12fd9b1115dd2d1fb1cd1751817c9173d3196ac7c62ae37d023340dcb75'
 
+// Map a parsed catalog ref (parseCatalogRef) to the RPC command that loads
+// it and the scheme-qualified string to persist, so a relaunch routes to the
+// same loader. Drive keys stay bare (unchanged behavior); hyperbee:// and
+// autobee:// keep their scheme.
+function catalogLoadPlan (parsed, C) {
+  if (parsed.autobee) return { cmd: C.CMD_LOAD_CATALOG_AUTOBEE, persistRef: `autobee://${parsed.key}` }
+  if (parsed.bee) return { cmd: C.CMD_LOAD_CATALOG_BEE, persistRef: `hyperbee://${parsed.key}` }
+  return { cmd: C.CMD_LOAD_CATALOG, persistRef: parsed.key }
+}
+
 // --- Multi-tab Browse ---------------------------------------------------
 //
 // Each tab keeps its own iframe (hidden via display:none when inactive
@@ -1467,15 +1477,14 @@ function Apps ({ rpc, C, onLaunch }) {
     if (!parsed) return
     setErr(''); setBusy('catalog')
     try {
-      // hyperbee:// → Hyperbee catalog, bare key / hyper:// → Hyperdrive.
-      const cmd = parsed.bee ? C.CMD_LOAD_CATALOG_BEE : C.CMD_LOAD_CATALOG
+      // Route by scheme: hyper(drive) / hyperbee:// / autobee://.
+      const { cmd, persistRef } = catalogLoadPlan(parsed, C)
       await rpc.request(cmd, { keyHex: parsed.key }, 60000)
       setCatalogKey('')
       await refreshAggregate()
       refreshUpdates()
-      // Pin as recent + persist for next launch. Keep the scheme-qualified
-      // ref so the next launch routes to the same loader.
-      const persistRef = parsed.bee ? `hyperbee://${parsed.key}` : parsed.key
+      // Pin as recent + persist the scheme-qualified ref so the next launch
+      // routes to the same loader.
       setRecentCatalogs((prev) => {
         const next = [persistRef, ...prev.filter((k) => k !== persistRef)].slice(0, 8)
         rpc.request(C.CMD_USERDATA_SET_SETTINGS, {
@@ -1537,7 +1546,7 @@ function Apps ({ rpc, C, onLaunch }) {
             toLoad.map((k) => {
               const parsed = parseCatalogRef(k)
               if (!parsed) return Promise.resolve()
-              const cmd = parsed.bee ? C.CMD_LOAD_CATALOG_BEE : C.CMD_LOAD_CATALOG
+              const { cmd } = catalogLoadPlan(parsed, C)
               return rpc.request(cmd, { keyHex: parsed.key }, 60000)
             })
           )

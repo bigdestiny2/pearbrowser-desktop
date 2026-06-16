@@ -2,12 +2,12 @@
 // Maps to docs/AUTOBEE-RESEARCH.md "Acceptance Criteria".
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {
-  upsertOp, removeOp, renameOp, validateOp, sanitizeApp, MAX_OP_BYTES
-} from '../scripts/lib/autobee-catalog-ops.js'
-import {
-  linearize, applyView, applyTagged, toCatalogData
-} from '../scripts/lib/autobee-catalog-apply.js'
+// The autobee logic lives in backend/ as CommonJS (.cjs) so Bare can require
+// it; Node imports it here via default-import + destructure.
+import opsMod from '../backend/autobee-catalog-ops.cjs'
+import applyMod from '../backend/autobee-catalog-apply.cjs'
+const { upsertOp, removeOp, renameOp, validateOp, sanitizeApp, MAX_OP_BYTES } = opsMod
+const { linearize, applyView, applyTagged, toCatalogData } = applyMod
 
 const app = (id, extra = {}) => ({ id, name: id.toUpperCase(), driveKey: `key-${id}`, ...extra })
 

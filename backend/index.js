@@ -199,6 +199,18 @@ rpc.handle(C.CMD_LOAD_CATALOG_BEE, async (data) => {
   return await catalogManager.loadCatalogBee(normalizeDriveKey(data.keyHex))
 })
 
+// Phase 2 — Autobase collaborative catalog ("Autobee"). EXPERIMENTAL and
+// OFF BY DEFAULT: the flag is enforced here (server-side) so a stale or
+// tampered renderer can't enable the experiment. Toggle via the
+// `experimentalAutobeeCatalogs` user-data setting. See AUTOBEE-RESEARCH.md.
+rpc.handle(C.CMD_LOAD_CATALOG_AUTOBEE, async (data) => {
+  await whenReady()
+  if (!(await isAutobeeEnabled())) {
+    throw new Error('Collaborative (Autobee) catalogs are experimental — enable them in Settings first.')
+  }
+  return await catalogManager.loadCatalogAutobee(normalizeDriveKey(data.keyHex))
+})
+
 rpc.handle(C.CMD_INSTALL_APP, async (data) => {
   await whenReady()
   const result = await appManager.install(data, (progress) => {
@@ -605,6 +617,16 @@ rpc.handle(C.CMD_SET_RELAY_ENABLED, async ({ enabled } = {}) => {
 function requireUserData () {
   if (!userData) throw new Error('User data not available — worklet still booting')
   return userData
+}
+
+// Experimental-feature gate for Autobee collaborative catalogs (Phase 2).
+// Off unless the user has set `experimentalAutobeeCatalogs` in settings;
+// failures (no user data yet, etc.) fail closed.
+async function isAutobeeEnabled () {
+  try {
+    const s = await requireUserData().getSettings()
+    return !!(s && s.experimentalAutobeeCatalogs)
+  } catch { return false }
 }
 
 rpc.handle(C.CMD_USERDATA_LIST_BOOKMARKS, async () => {

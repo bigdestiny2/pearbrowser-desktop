@@ -129,16 +129,18 @@ export function normalizeUrl (raw) {
   return `hyper://${s}`
 }
 
-// Route a catalog reference to the right backend loader. Catalogs published
-// as a Hyperbee (the Pear-native, queryable format) are addressed with a
-// `hyperbee://` scheme; a bare key or `hyper://` is a Hyperdrive catalog.
-// Returns the scheme-stripped key plus a `bee` flag the caller uses to pick
-// CMD_LOAD_CATALOG vs CMD_LOAD_CATALOG_BEE, or null for empty input.
+// Route a catalog reference to the right backend loader by URL scheme:
+//   bare key / hyper://  → Hyperdrive catalog  (CMD_LOAD_CATALOG)
+//   hyperbee://          → Hyperbee catalog     (CMD_LOAD_CATALOG_BEE)
+//   autobee://           → Autobase collab cat. (CMD_LOAD_CATALOG_AUTOBEE)
+// Returns the scheme-stripped key plus `bee`/`autobee` flags, or null for
+// empty input. (`bee` stays for back-compat; `kind` is the canonical field.)
 export function parseCatalogRef (raw) {
   const s = String(raw || '').trim()
   if (!s) return null
+  const autobee = /^autobee:\/\//i.test(s)
   const bee = /^hyperbee:\/\//i.test(s)
-  const key = s.replace(/^hyper(bee)?:\/\//i, '').replace(/\/+$/, '').trim()
+  const key = s.replace(/^(autobee|hyperbee|hyper):\/\//i, '').replace(/\/+$/, '').trim()
   if (!key) return null
-  return { key, bee }
+  return { key, bee, autobee, kind: autobee ? 'autobee' : bee ? 'hyperbee' : 'drive' }
 }

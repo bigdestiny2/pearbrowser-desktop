@@ -60,16 +60,21 @@ test('normalizeUrl canonicalizes URL-bar input', () => {
   assert.equal(normalizeUrl('plainname'), 'hyper://plainname')
 })
 
-test('parseCatalogRef routes bee vs drive and strips the scheme', () => {
+test('parseCatalogRef routes drive/hyperbee/autobee and strips the scheme', () => {
   assert.equal(parseCatalogRef(''), null)
   assert.equal(parseCatalogRef('   '), null)
   assert.equal(parseCatalogRef('hyperbee://'), null)          // scheme with no key
+  assert.equal(parseCatalogRef('autobee://'), null)
 
   // Bare key / hyper:// → Hyperdrive catalog.
-  assert.deepEqual(parseCatalogRef(CATALOG_HEX), { key: CATALOG_HEX, bee: false })
-  assert.deepEqual(parseCatalogRef(`hyper://${CATALOG_HEX}/`), { key: CATALOG_HEX, bee: false })
+  assert.deepEqual(parseCatalogRef(CATALOG_HEX), { key: CATALOG_HEX, bee: false, autobee: false, kind: 'drive' })
+  assert.deepEqual(parseCatalogRef(`hyper://${CATALOG_HEX}/`), { key: CATALOG_HEX, bee: false, autobee: false, kind: 'drive' })
 
   // hyperbee:// → Hyperbee catalog, scheme + trailing slash stripped.
-  assert.deepEqual(parseCatalogRef(`hyperbee://${CATALOG_HEX}`), { key: CATALOG_HEX, bee: true })
-  assert.deepEqual(parseCatalogRef(`HYPERBEE://${CATALOG_HEX}/`), { key: CATALOG_HEX, bee: true })
+  assert.deepEqual(parseCatalogRef(`hyperbee://${CATALOG_HEX}`), { key: CATALOG_HEX, bee: true, autobee: false, kind: 'hyperbee' })
+  assert.deepEqual(parseCatalogRef(`HYPERBEE://${CATALOG_HEX}/`), { key: CATALOG_HEX, bee: true, autobee: false, kind: 'hyperbee' })
+
+  // autobee:// → Autobase collaborative catalog.
+  assert.deepEqual(parseCatalogRef(`autobee://${CATALOG_HEX}`), { key: CATALOG_HEX, bee: false, autobee: true, kind: 'autobee' })
+  assert.deepEqual(parseCatalogRef(`AUTOBEE://${CATALOG_HEX}/`), { key: CATALOG_HEX, bee: false, autobee: true, kind: 'autobee' })
 })

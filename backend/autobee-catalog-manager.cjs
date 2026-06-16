@@ -1,40 +1,37 @@
-// Autobase-backed collaborative catalog manager (EXPERIMENTAL — Rollout
-// Phase 1, docs/AUTOBEE-RESEARCH.md). Feature-flagged, no UI, not wired into
-// the Bare backend. autobase/hyperbee are loaded lazily so importing this
-// module is safe where the experiment is disabled.
+// Autobase-backed collaborative catalog manager (EXPERIMENTAL — feature
+// flagged, off by default). CommonJS (.cjs) so Bare can require() it and Node
+// can default-import it for the smoke test. Models the proven in-app Autobase
+// usage in backend/pear-bridge.js (Sync Groups).
 //
-// Architecture (honors "view must be deterministic, derived only from
-// store + nodes"): Autobase provides a replicated, linearized OP LOG; the
-// view Hyperbee simply records each op in apply-order under `op!<index>`.
-// The materialized catalog is produced by the PURE, unit-tested reducer
-// (autobee-catalog-apply.js). So Autobase owns ordering + replication, and
-// PearBrowser owns the conflict semantics — and they can't drift, because
-// catalog() rebuilds from the same applyView() the tests cover.
+// Architecture: Autobase provides a replicated, linearized OP LOG; the view
+// Hyperbee records each op in apply-order under `op!<index>`; the materialized
+// catalog is produced by the PURE, unit-tested reducer (autobee-catalog-apply).
+// Autobase owns ordering + replication, PearBrowser owns conflict semantics —
+// they can't drift. No wall-clock anywhere.
 
-import {
+const Autobase = require('autobase')
+const Hyperbee = require('hyperbee')
+const {
   upsertOp, removeOp, renameOp, addWriterOp, validateOp, OP_ADD_WRITER
-} from './autobee-catalog-ops.js'
-import { applyView, toCatalogData } from './autobee-catalog-apply.js'
+} = require('./autobee-catalog-ops.cjs')
+const { applyView, toCatalogData } = require('./autobee-catalog-apply.cjs')
 
-async function load (name) {
-  const mod = await import(name)
-  return mod.default || mod
-}
-
-export class AutobeeCatalogManager {
-  constructor (store, { bootstrap = null } = {}) {
+class AutobeeCatalogManager {
+  constructor (store, opts = {}) {
     this.store = store
-    this.bootstrap = bootstrap
+    // Accept bootstrap as a hex string or Buffer (or null for a new catalog).
+    const b = opts.bootstrap || null
+    this.bootstrap = typeof b === 'string' ? Buffer.from(b, 'hex') : b
+    this._ns = opts.namespace ||
+      (this.bootstrap ? Buffer.from(this.bootstrap).toString('hex') : 'local')
     this.base = null
   }
 
   async ready () {
-    const Autobase = await load('autobase')
-    const Hyperbee = await load('hyperbee')
-
+    const ns = this._ns
     this.base = new Autobase(this.store, this.bootstrap, {
       valueEncoding: 'json',
-      open: (store) => new Hyperbee(store.get('catalog'), {
+      open: (store) => new Hyperbee(store.get({ name: `autobee-catalog-${ns}-view` }), {
         extension: false, keyEncoding: 'utf-8', valueEncoding: 'json'
       }),
       apply: async (nodes, view, host) => {
@@ -42,14 +39,10 @@ export class AutobeeCatalogManager {
         let count = head && Number.isFinite(head.value) ? head.value : 0
         for (const node of nodes) {
           const op = node.value
-          // Writer management — never enters the catalog view.
           if (op && op.type === OP_ADD_WRITER && /^[0-9a-f]{64}$/i.test(op.key || '')) {
             await host.addWriter(Buffer.from(op.key, 'hex'), { indexer: true })
             continue
           }
-          // Defense in depth: drop ops that should never have been appended.
-          // (unknown-version/unknown-type carry retain:true and ARE logged so
-          // newer clients can interpret them — matches the schema rules.)
           const verdict = validateOp(op)
           if (!verdict.ok && !verdict.retain) continue
           await view.put('op!' + String(count).padStart(12, '0'), op)
@@ -64,6 +57,7 @@ export class AutobeeCatalogManager {
 
   get writable () { return !!(this.base && this.base.writable) }
   get key () { return this.base && this.base.key ? Buffer.from(this.base.key).toString('hex') : '' }
+  get discoveryKey () { return this.base && this.base.discoveryKey ? Buffer.from(this.base.discoveryKey) : null }
   get localKey () { return this.base && this.base.local && this.base.local.key ? Buffer.from(this.base.local.key).toString('hex') : '' }
 
   async rename (name) { await this.base.append(renameOp(name)) }
@@ -87,3 +81,5 @@ export class AutobeeCatalogManager {
 
   async close () { try { if (this.base) await this.base.close() } catch {} }
 }
+
+module.exports = { AutobeeCatalogManager }
