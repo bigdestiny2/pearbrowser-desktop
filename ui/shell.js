@@ -1753,6 +1753,10 @@ function Apps ({ rpc, C, onLaunch }) {
   // the aggregated store is populated, not just the most recent one.
   useEffect(() => {
     refreshInstalled()
+    // Pull the aggregated store immediately so backend-registered catalogues
+    // (e.g. the default schema-sheets catalogue, seeded on boot) show up without
+    // waiting on a recent/relay catalog load to resolve.
+    refreshAggregate()
     ;(async () => {
       try {
         const settings = unwrapSettings(await rpc.request(C.CMD_USERDATA_GET_SETTINGS))
@@ -2046,27 +2050,38 @@ function Apps ({ rpc, C, onLaunch }) {
                 ? html`<img src=${safeIconSrc(app.iconData)} alt="" class="app-icon" />`
                 : html`<div class="app-icon app-icon-fallback">${(app.name || '?').charAt(0)}</div>`}
               <div class="app-info">
-                <div class="app-name">${app.name || app.id || 'Untitled app'}</div>
+                <div class="app-name">
+                  ${app.name || app.id || 'Untitled app'}
+                  ${app.verification === 'relay-listed' ? html`<span title="Relay-listed" style=${{ marginLeft: '5px', color: '#58a6ff', fontSize: '12px' }}>✓</span>` : ''}
+                  ${app.verification === 'author-signed' ? html`<span title="Author-signed" style=${{ marginLeft: '5px', color: '#3fb950', fontSize: '12px' }}>✦</span>` : ''}
+                </div>
                 <div class="app-desc">${app.description || ''}</div>
-                <div class="app-meta">${app.version ? 'v' + app.version : ''} ${app.author ? '· ' + app.author : ''}</div>
+                <div class="app-meta">
+                  ${app.version ? 'v' + app.version : ''} ${app.author ? '· ' + app.author : ''}
+                  ${app.type === 'hypersite' ? html`<span style=${{ marginLeft: '6px', opacity: 0.75 }}>· runs in a tab</span>` : (app.link && !app.driveKey ? html`<span style=${{ marginLeft: '6px', opacity: 0.75 }}>· opens in a window</span>` : '')}
+                </div>
                 ${app.catalogName && html`<div class="app-source-tag">${app.catalogName}</div>`}
               </div>
               <div class="app-actions">
-                ${isInstalled(app.id)
-                  ? html`
-                    ${updates[app.id] && html`
-                      <button class="btn primary" onClick=${() => updateApp(app.id)} disabled=${busy === `install:${app.id}`}>
-                        ${busy === `install:${app.id}` ? 'Updating…' : `Update → v${updates[app.id]}`}
-                      </button>
-                    `}
-                    <button class="btn" onClick=${() => launchApp(app)} disabled=${busy === `launch:${app.id}`}>Launch</button>
-                    <button class="btn subtle" onClick=${() => uninstallApp(app)} disabled=${busy === `uninstall:${app.id}`}>Uninstall</button>
-                  `
-                  : html`
-                    <button class="btn primary" onClick=${() => installApp(app)} disabled=${busy === `install:${app.id}`}>
-                      ${busy === `install:${app.id}` ? 'Installing…' : 'Install'}
-                    </button>
-                  `}
+                ${app.type === 'hypersite'
+                  ? html`<button class="btn primary" onClick=${() => runInTab(app)} disabled=${busy === 'run-in-tab'} title="Run headless — UI streams into a tab">Run in tab</button>`
+                  : (app.link && !app.driveKey)
+                    ? html`<button class="btn primary" onClick=${() => launchFeaturedApp(app)} disabled=${busy === 'pear-link'} title="Full app — opens in its own window">Open</button>`
+                    : (isInstalled(app.id)
+                      ? html`
+                        ${updates[app.id] && html`
+                          <button class="btn primary" onClick=${() => updateApp(app.id)} disabled=${busy === `install:${app.id}`}>
+                            ${busy === `install:${app.id}` ? 'Updating…' : `Update → v${updates[app.id]}`}
+                          </button>
+                        `}
+                        <button class="btn" onClick=${() => launchApp(app)} disabled=${busy === `launch:${app.id}`}>Launch</button>
+                        <button class="btn subtle" onClick=${() => uninstallApp(app)} disabled=${busy === `uninstall:${app.id}`}>Uninstall</button>
+                      `
+                      : html`
+                        <button class="btn primary" onClick=${() => installApp(app)} disabled=${busy === `install:${app.id}`}>
+                          ${busy === `install:${app.id}` ? 'Installing…' : 'Install'}
+                        </button>
+                      `)}
                 ${canEditMyCatalog && app.catalogKey !== myCatalog.keyHex && !inMyCatalog(app.id || app.driveKey) && html`
                   <button class="btn subtle" title="Add to my catalog" onClick=${() => addToMyCatalog(app)} disabled=${busy === `addcat:${app.id || app.driveKey}`}>+ Catalog</button>
                 `}

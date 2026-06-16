@@ -62,6 +62,68 @@ class CatalogManager {
   }
 
   /**
+   * Load a catalogue published as a schema-sheets room — the 4th source,
+   * coexisting with Hyperdrive / Hyperbee / Autobee (nothing removed).
+   *
+   * `link` is a z32 string (key32 [++ enc32]), optionally `sheets://`-prefixed.
+   * Apps come from the room's validated `apps` schema rows, mapped to the same
+   * in-memory DTO as the other formats, so getAggregatedApps treats them
+   * identically. Read-only here — loading a catalogue never joins as a writer.
+   *
+   * schema-sheets gives this format what the bespoke three lack: ajv schema
+   * validation, JMESPath query, multiwriter membership + signed provenance.
+   * Library: ryanramage's schema-sheets; pattern: Drache93's Pear Browser.
+   */
+  async loadCatalogSheets (link) {
+    const { decodeSheetsLink, SheetsCatalog } = require('./sheets-catalog')
+    const { keyHex } = decodeSheetsLink(link)
+    const cacheKey = `sheets:${keyHex}`
+    if (this.catalogs.has(cacheKey)) return this.catalogs.get(cacheKey).data
+
+    // Coalesce concurrent loads of the same room so we never open two instances
+    // (the second would overwrite + leak the first's sheets handle + swarm join).
+    if (!this._pendingSheets) this._pendingSheets = new Map()
+    if (this._pendingSheets.has(cacheKey)) return this._pendingSheets.get(cacheKey)
+
+    const p = (async () => {
+      const sc = new SheetsCatalog(this.store, this.swarm)
+      await sc.open(link)
+      const apps = await sc.listApps()
+      const data = { version: 1, name: 'Sheets Catalogue', apps, writable: false, link: sc.link() }
+      this.catalogs.set(cacheKey, { sheets: sc, data, lastRefresh: Date.now(), type: 'sheets' })
+      return data
+    })()
+    this._pendingSheets.set(cacheKey, p)
+    try { return await p } finally { this._pendingSheets.delete(cacheKey) }
+  }
+
+  /**
+   * Register an already-open SheetsCatalog as a loaded catalogue (used by the
+   * dev self-seed, where the same instance is both writer and the loaded view —
+   * reopening it on the same store would conflict).
+   */
+  async registerSheetsCatalog (sc, name) {
+    const apps = await sc.listApps()
+    const cacheKey = `sheets:${sc.keyHex()}`
+    this.catalogs.set(cacheKey, {
+      sheets: sc,
+      data: { version: 1, name: name || 'Apps', apps, writable: true, link: sc.link() },
+      lastRefresh: Date.now(),
+      type: 'sheets'
+    })
+    return sc.link()
+  }
+
+  /** Re-query a loaded sheets room with a JMESPath filter (validated in listApps). */
+  async querySheetsCatalog (link, jmespath) {
+    const { decodeSheetsLink } = require('./sheets-catalog')
+    const { keyHex } = decodeSheetsLink(link)
+    const entry = this.catalogs.get(`sheets:${keyHex}`)
+    if (!entry || !entry.sheets) throw new Error('Sheets catalogue not loaded')
+    return entry.sheets.listApps(jmespath)
+  }
+
+  /**
    * Load a catalog that's published as a Hyperbee rather than a Hyperdrive.
    *
    * Phase 1 ticket 1 of the Holepunch alignment plan. This is the canonical
@@ -384,7 +446,7 @@ class CatalogManager {
         key,
         name: entry.data.name || 'Catalog',
         count: Array.isArray(entry.data.apps) ? entry.data.apps.length : 0,
-        source: entry.type === 'autobee' ? 'autobee' : entry.type === 'hyperbee' ? 'hyperbee' : 'hyperdrive',
+        source: entry.type === 'autobee' ? 'autobee' : entry.type === 'hyperbee' ? 'hyperbee' : entry.type === 'sheets' ? 'sheets' : 'hyperdrive',
         writable: !!entry.data.writable,
       })
     }
@@ -397,13 +459,14 @@ class CatalogManager {
    * (`bee:<hex>` for Hyperbee catalogs).
    */
   async unloadCatalog (keyHex) {
-    for (const cacheKey of [keyHex, `bee:${keyHex}`, `autobee:${keyHex}`]) {
+    for (const cacheKey of [keyHex, `bee:${keyHex}`, `autobee:${keyHex}`, `sheets:${keyHex}`]) {
       const entry = this.catalogs.get(cacheKey)
       if (!entry) continue
       try {
         if (entry.drive) await entry.drive.close()
         else if (entry.bee) await entry.bee.close()
         else if (entry.manager) await entry.manager.close()
+        else if (entry.sheets) await entry.sheets.close()
       } catch {}
       this.catalogs.delete(cacheKey)
       return true
@@ -631,11 +694,13 @@ class CatalogManager {
 
   async close () {
     for (const [, entry] of this.catalogs) {
-      // Hyperdrive catalogs hold `drive`; Hyperbee `bee`; Autobee `manager`.
+      // Hyperdrive catalogs hold `drive`; Hyperbee `bee`; Autobee `manager`;
+      // schema-sheets `sheets`. Close whichever this entry carries.
       try {
         if (entry.drive) await entry.drive.close()
         else if (entry.bee) await entry.bee.close()
         else if (entry.manager) await entry.manager.close()
+        else if (entry.sheets) await entry.sheets.close()
       } catch {}
     }
     this.catalogs.clear()

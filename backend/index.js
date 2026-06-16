@@ -217,6 +217,36 @@ rpc.handle(C.CMD_LOAD_CATALOG_AUTOBEE, async (data) => {
   return await catalogManager.loadCatalogAutobee(normalizeDriveKey(data.keyHex))
 })
 
+// schema-sheets catalogue (the 4th source). Takes a z32 room LINK (key, or
+// key+encryptionKey) — NOT a normalized hex drive key. Pins best-effort so the
+// catalogue survives writers going offline. Coexists with the other formats.
+rpc.handle(C.CMD_SHEETS_LOAD, async (data) => {
+  await whenReady()
+  const link = String((data && data.link) || '').trim()
+  if (!link) throw new Error('sheets catalogue link required')
+  const result = await catalogManager.loadCatalogSheets(link)
+  try {
+    const { decodeSheetsLink } = require('./sheets-catalog')
+    const { keyHex } = decodeSheetsLink(link)
+    const entry = catalogManager.catalogs.get(`sheets:${keyHex}`)
+    const dk = entry && entry.sheets && entry.sheets.discoveryKey()
+    if (dk) await pinDriveBestEffort(keyHex, dk)
+  } catch (err) { console.error('[sheets] pin best-effort failed:', err && err.message) }
+  return result
+})
+
+// Re-query a loaded sheets catalogue with a JMESPath filter (powers search).
+// The query is validated against a whitelist in SheetsCatalog.listApps; the
+// length cap here is an early-reject defense-in-depth (Risk #2 / #9).
+rpc.handle(C.CMD_SHEETS_LIST, async (data) => {
+  await whenReady()
+  const link = String((data && data.link) || '').trim()
+  if (!link) throw new Error('sheets catalogue link required')
+  const query = data && data.query != null ? String(data.query) : undefined
+  if (query && query.length > 512) throw new Error('Search query too long')
+  return await catalogManager.querySheetsCatalog(link, query)
+})
+
 rpc.handle(C.CMD_INSTALL_APP, async (data) => {
   await whenReady()
   const result = await appManager.install(data, (progress) => {
@@ -1471,10 +1501,44 @@ async function boot () {
   // store/swarm after teardown.
   storageTimer = setInterval(() => checkStorageQuota(), STORAGE_CHECK_INTERVAL)
 
+  // Seed + load the dev app catalogue (schema-sheets). Best-effort, off the
+  // critical path. Replaced by the relay's canonical room once it publishes one.
+  ensureDevCatalogue().catch((err) => console.error('[dev-catalogue]', err && err.message))
+
   // Notify React Native
   console.log('Sending READY event')
   rpc.event(C.EVT_READY, { port })
   bootResolve()
+}
+
+// DEV catalogue seed: create + seed a schema-sheets catalogue room locally on
+// boot so the Apps store is populated end-to-end from the real sheets read path.
+// The same instance is both the writer and the loaded view (registered directly,
+// not reopened). Swap for loadCatalogSheets(relayZ32) when the relay ships one.
+async function ensureDevCatalogue () {
+  const { SheetsCatalog } = require('./sheets-catalog')
+  const { SEED_APPS } = require('./catalogue-seed')
+  const sc = new SheetsCatalog(store, swarm)
+  await sc.open(null)
+  await sc.join('pearbrowser')
+  await sc.update()
+  // Idempotent: the room key is stable per store, so only seed an empty room —
+  // otherwise every boot would append duplicate rows.
+  const existing = await sc.listApps()
+  if (existing.length === 0) {
+    const base = Date.now()
+    for (let i = 0; i < SEED_APPS.length; i++) {
+      const ts = base - (SEED_APPS.length - i) * 1000
+      try { await sc.addApp({ ...SEED_APPS[i], publishedAt: ts }, ts) } catch (e) {
+        console.error('[dev-catalogue] seed', SEED_APPS[i].name, e && e.message)
+      }
+    }
+    await sc.update()
+    await new Promise((r) => setTimeout(r, 300))
+  }
+  const link = await catalogManager.registerSheetsCatalog(sc, 'PearBrowser Apps')
+  console.log('[dev-catalogue] ' + (existing.length ? 'loaded ' + existing.length : 'seeded ' + SEED_APPS.length) + ' apps; sheets://' + link)
+  try { await pinDriveBestEffort(sc.keyHex(), sc.discoveryKey()) } catch {}
 }
 
 async function shutdown () {

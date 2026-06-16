@@ -65,6 +65,7 @@
     "pear-electron": "latest",
     "pear-run": "latest",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "schema-sheets": "^3.1.1"
   }
 }
