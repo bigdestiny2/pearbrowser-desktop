@@ -307,6 +307,53 @@ class Identity {
   }
 
   /**
+   * Verify an Ed25519 detached signature over a payload — the counterpart to
+   * sign(). PURE: needs only the public key, never the root seed, so it can
+   * verify ANY party's signature, not just our own. This is the anti-forgery
+   * gate every signed-record consumer (naming, payments, nostr, routing) in
+   * docs/research/ depends on (Phase P0 of IMPLEMENTATION-PLAN.md).
+   *
+   * Returns a boolean. Never throws on malformed / attacker-controlled input
+   * (fail-closed → false); throws only if the crypto backend is missing, the
+   * same hard-environment failure sign() raises.
+   */
+  verify (payload, signatureHex, publicKeyHex) {
+    if (!sodium) throw new Error('sodium-universal not available — ed25519 verify disabled')
+    try {
+      const signature = b4a.from(String(signatureHex), 'hex')
+      const publicKey = b4a.from(String(publicKeyHex), 'hex')
+      if (signature.length !== sodium.crypto_sign_BYTES) return false
+      if (publicKey.length !== sodium.crypto_sign_PUBLICKEYBYTES) return false
+      const message = typeof payload === 'string' ? b4a.from(payload, 'utf-8') : b4a.from(payload || [])
+      if (message.length === 0) return false
+      return sodium.crypto_sign_verify_detached(signature, message, publicKey)
+    } catch {
+      return false
+    }
+  }
+
+  /**
+   * Verify a per-app signature produced by signForApp(). Reconstructs the
+   * `pear.app.<driveKey>:<namespace>:` domain-separator tag (signForApp():264)
+   * before verifying, so a signature minted for one (app, namespace) can't be
+   * replayed in another. `signed` is the { signature, publicKey } shape
+   * signForApp() returns.
+   *
+   * NOTE: this confirms the signature is valid for the PROVIDED publicKey; the
+   * caller must still bind that pubkey to an expected identity (see the
+   * IdentityBinding record in the naming/payments designs) to prevent a
+   * forger from simply presenting their own key.
+   */
+  verifyForApp (driveKeyHex, payload, namespace = '', signed = {}) {
+    const tag = `pear.app.${driveKeyHex}:${namespace}:`
+    const message = b4a.concat([
+      b4a.from(tag, 'utf-8'),
+      typeof payload === 'string' ? b4a.from(payload, 'utf-8') : b4a.from(payload || []),
+    ])
+    return this.verify(message, signed.signature, signed.publicKey)
+  }
+
+  /**
    * Replace the current identity with one derived from a user-provided phrase.
    * The caller is responsible for closing the current Corestore and reopening
    * a new one after this — data stored under the old identity is NOT migrated.

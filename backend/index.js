@@ -964,6 +964,20 @@ rpc.handle(C.CMD_IDENTITY_SIGN, async ({ payload, driveKey } = {}) => {
   return id.sign(typeof payload === 'string' ? payload : Buffer.from(payload))
 })
 
+// Phase P0 — verify an ed25519 detached signature. With a driveKey, verifies
+// a per-app signForApp() signature (reconstructs the domain-separator tag);
+// otherwise a plain verify against the provided publicKey. Backend consumers
+// (naming/payments/nostr verify-and-drop) call identity.verify() directly;
+// this command exposes the same primitive to the renderer.
+rpc.handle(C.CMD_IDENTITY_VERIFY, async ({ payload, signature, publicKey, driveKey, namespace } = {}) => {
+  if (payload === undefined || payload === null) throw new Error('payload required')
+  const id = requireIdentity()
+  const ok = (typeof driveKey === 'string' && driveKey.length > 0)
+    ? id.verifyForApp(driveKey, payload, namespace || '', { signature, publicKey })
+    : id.verify(payload, signature, publicKey)
+  return { ok: !!ok, algorithm: 'ed25519' }
+})
+
 // --- Profile (Identity Plan Phase B) ---
 
 function requireProfile () {
