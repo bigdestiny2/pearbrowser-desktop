@@ -75,6 +75,7 @@ let store = null
 let proxy = null
 let tabRuntime = null
 let catalogManager = null
+let personalIndex = null // Lighthouse Phase-0 local self-search (search-core)
 let appManager = null
 let siteManager = null
 let pearBridge = null
@@ -312,6 +313,35 @@ rpc.handle(C.CMD_GET_CATALOG_APPS, () => {
 rpc.handle(C.CMD_UNLOAD_CATALOG, async (data) => {
   if (!catalogManager) return false
   return await catalogManager.unloadCatalog(normalizeDriveKey(data.keyHex))
+})
+
+// --- Lighthouse P2P search (Phase 0 — local self-search) ---
+// Query / feed the personal index. Querying is fully local (no network);
+// indexing is best-effort and never throws to the caller.
+rpc.handle(C.CMD_SEARCH, async (data) => {
+  await whenReady()
+  if (!personalIndex) return { results: [], stats: { docs: 0 } }
+  const results = await personalIndex.search(String((data && data.query) || ''),
+    { now0: Date.now(), limit: (data && data.limit) || 50 })
+  return { results, stats: await personalIndex.stats() }
+})
+
+rpc.handle(C.CMD_SEARCH_INDEX, async (data) => {
+  await whenReady()
+  if (!personalIndex || !data || !data.driveKey) return { ok: false }
+  try {
+    const docId = await personalIndex.indexDoc({
+      driveKey: normalizeDriveKey(data.driveKey),
+      path: data.path || '/',
+      title: data.title || '',
+      body: data.text || data.body || '',
+      publishedAt: Number.isFinite(data.publishedAt) ? data.publishedAt : 0,
+    })
+    return { ok: !!docId, docId }
+  } catch (err) {
+    console.error('[search] index failed:', err && err.message)
+    return { ok: false }
+  }
 })
 
 // --- Catalog authoring (your own publishable catalog) ---
@@ -1534,6 +1564,24 @@ async function boot () {
     userData = null
   }
 
+  // Lighthouse Phase 0 — local self-search index over the user's own browsed/
+  // bookmarked content (docs/P2P-SEARCH-RESEARCH.md). Each posting is signed by
+  // the per-user 'search' subkey (forward-compat with the networked phases);
+  // queried fully locally. Lazy require so a .cjs-resolution hiccup under Bare
+  // disables search gracefully instead of crashing boot.
+  try {
+    const { PersonalIndex } = require('./personal-index.cjs')
+    const sign = (canonDoc) => {
+      const r = identity.signForApp('search', JSON.stringify(canonDoc), 'lighthouse-doc-v2')
+      return { sig: r.signature, pubkey: r.publicKey }
+    }
+    personalIndex = await new PersonalIndex(store, { sign }).ready()
+    console.log('PersonalIndex ready')
+  } catch (err) {
+    console.error('PersonalIndex init failed:', err && err.message)
+    personalIndex = null
+  }
+
   // Identity Plan Phase B + D — profile attributes + contacts Hyperbees.
   profile = new Profile(store)
   try { await profile.ready(); console.log('Profile ready') }
@@ -1741,6 +1789,7 @@ async function shutdown () {
   if (siteManager) { try { await siteManager.close() } catch {} siteManager = null }
   if (appManager) { try { await appManager.close() } catch {} appManager = null }
   if (catalogManager) { try { await catalogManager.close() } catch {} catalogManager = null }
+  if (personalIndex) { try { await personalIndex.close() } catch {} personalIndex = null }
   if (browserSync) { try { await browserSync.close() } catch {} browserSync = null }
   for (const [keyHex, entry] of browseDrives) {
     unregisterHiveRelayDrive(keyHex, entry.drive)
