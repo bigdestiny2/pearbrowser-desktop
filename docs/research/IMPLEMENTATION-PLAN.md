@@ -7,6 +7,26 @@
 
 This is the single sequenced plan that implements **all four tracks** (naming, payments, nostr, privacy-routing) as one program. It is concrete enough that an engineer can start **Phase 0 (P0)** from it. Every file path is absolute-from-repo-root and grounded against the real tree; every new RPC constant lists the numeric id and the **mirror obligation** (`backend/constants.js` ↔ `ui/boot.js` — verified hand-mirrored: `CMD_IDENTITY_SIGN:74`, `CMD_LOAD_CATALOG_INDEX:176`, `CMD_CONTACTS_ADD:92`).
 
+> **⚠ Reconciliation with the Lighthouse search track (2026-06-17).** The parallel
+> `search(phase1–5)` work already shipped the **shared substrate** this plan's
+> §1 specifies — so naming/payments/nostr **reuse it, not rebuild it** (decision:
+> "reuse Lighthouse modules as the substrate"). Concretely:
+> - `backend/identity-binding.cjs` = the IdentityBinding + detached `verifyAppSig`
+>   (same `pear.app.<id>:<ns>:` tag). It is **already generic** (`rootPubkey →
+>   subPubkey`, named "search"). **Phase N2 is superseded** — naming binds its
+>   name key via `makeBinding`/`verifyBinding`/`resolveSearchKey`. *Open coordination:*
+>   add a `purpose` domain field to the binding (`name`/`merchant`/`nostr`/`search`)
+>   so one binding can't be cross-purpose-replayed — a small, coordinated change to
+>   the shared module, scheduled at N2.
+> - `backend/search-frontier.cjs` `verifyIndexPointer` = the **social-graph Sybil
+>   gate** (shared primitive #7). `backend/search-completeness.cjs`
+>   `verifyAnchor`/`verifyFreshness` = **omission/eclipse detection** (program wall #2).
+> - P0's `identity.verify()`/`verifyForApp()` (instance method + `CMD_IDENTITY_VERIFY`)
+>   stays as the **Bare/RPC layer**; pure verify-and-drop in the tracks uses the
+>   `.cjs` `verifyAppSig`/`verifyBinding`.
+> - Infra builds on its **own branch** (`feat/p2p-infra-naming`) off the search
+>   substrate, to avoid colliding with active `search(*)` commits.
+
 ---
 
 ## 0. Thesis & dependency graph
