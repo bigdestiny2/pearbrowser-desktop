@@ -162,8 +162,9 @@ function mergeFederated (sources, graph, { now0 = 0, limit = 50 } = {}) {
       if (better) byDoc.set(key, tagged)
     }
   }
-  // explicit null/NaN limit coalesces back to the default rather than 0 results
-  const lim = Number(limit)
+  // explicit null/NaN/Infinity limit coalesces back to the default rather than
+  // 0 results (Number(null)===0 would otherwise slip through).
+  const lim = limit == null ? 50 : Number(limit)
   const n = Number.isFinite(lim) && lim >= 0 ? Math.floor(lim) : 50
   return sc.rankCandidates([...byDoc.values()], { now0 }).slice(0, n)
 }

@@ -80,6 +80,10 @@ test('verifyBinding/verifyRevocation reject a non-integer (string) version', () 
   assert.equal(ib.verifyBinding(evilB, rootHex), false, 'string version must not verify')
   // and so resolveSearchKey never lets it win / break order-independence
   assert.equal(ib.resolveSearchKey(rootHex, [evilB], []), null)
+  // searchPubkey must also be a string (number/null reopen the order-dependence)
+  const cS = 'pear.lighthouse.binding.v2:' + JSON.stringify({ r: rootHex, s: 5, v: 1 }, ['r', 's', 'v'])
+  const evilS = { kind: 'binding', v: 2, rootPubkey: rootHex, searchPubkey: 5, version: 1, sig: signer(root)(cS) }
+  assert.equal(ib.verifyBinding(evilS, rootHex), false, 'non-string searchPubkey must not verify')
 })
 
 // --- digest tier --------------------------------------------------------------

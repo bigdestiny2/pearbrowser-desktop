@@ -78,6 +78,11 @@ function verifyBinding (binding, expectedRootPubkey) {
   // over its JSON form) yet break resolveSearchKey's `===`/`>` version logic,
   // re-opening the equivocation the tie-break exists to close.
   if (!Number.isInteger(binding.version) || binding.version < 1) return false
+  // searchPubkey must be a string too: a number/null at the same version would
+  // make resolveSearchKey's `<` tie-break number-vs-string (false both ways) →
+  // array-order-dependent resolution (the equivocation split-view), and a null
+  // "winner" collides with the no-key sentinel.
+  if (typeof binding.searchPubkey !== 'string' || !binding.searchPubkey) return false
   if (binding.rootPubkey !== expectedRootPubkey) return false
   try {
     return crypto.verify(b4a.from(canonBinding(binding.rootPubkey, binding.searchPubkey, binding.version), 'utf-8'),
@@ -88,6 +93,7 @@ function verifyBinding (binding, expectedRootPubkey) {
 function verifyRevocation (rev, expectedRootPubkey) {
   if (!rev || rev.kind !== 'revoke') return false
   if (!Number.isInteger(rev.version) || rev.version < 1) return false
+  if (typeof rev.searchPubkey !== 'string' || !rev.searchPubkey) return false
   if (rev.rootPubkey !== expectedRootPubkey) return false
   try {
     return crypto.verify(b4a.from(canonRevoke(rev.rootPubkey, rev.searchPubkey, rev.version), 'utf-8'),

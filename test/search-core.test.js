@@ -91,6 +91,16 @@ test('ranker: a strong text match is not buried by a zero low-cardinality featur
   assert.equal(out[0].docId, 'strong', 'high-tf/zero-endorser outranks low-tf/some-endorser — absent feature is neutral, not a penalty')
 })
 
+test('ranker coerces non-numeric features to neutral — no NaN-poisoned score', () => {
+  const base = (over) => ({ docId: 'd', driveKey: 'k', tf: 5, tier: 'self', ...over })
+  const out = rankCandidates([
+    base({ docId: 'poison', publishedAt: '2026-01-01', trustHop: 'x', endorsers: 'lots' }),
+    base({ docId: 'clean', tf: 9 }),
+  ], { now0: 1700000000000, diversity: false })
+  for (const c of out) assert.ok(Number.isFinite(c._score), 'every _score is finite')
+  assert.equal(out[0].docId, 'clean', 'poisoned row never outranks a clean strong match')
+})
+
 test('ranker: a hostile negative tf cannot invert to maximum text relevance', () => {
   const base = (over) => ({ docId: 'd', driveKey: 'k', tf: 1, trustHop: 0, endorsers: 0, tier: 'self', ...over })
   const out = rankCandidates([base({ docId: 'evil', tf: -5 }), base({ docId: 'real', tf: 10 })], { diversity: false })

@@ -134,14 +134,21 @@ function rankCandidates (candidates, { now0 = 0, diversity = true } = {}) {
   // bury a strong text match — fixing the ε-cliff where a single zero feature
   // dominated the log-product. Boosts are bounded by their weights.
   const boost = (w, f) => Math.log(1 + w * clamp01(f))
+  // Coerce EVERY feature input to a finite number with a NEUTRAL default —
+  // any non-numeric tf/trustHop/endorsers/publishedAt (a peer-supplied ISO
+  // date string, a typo) must never poison _score with NaN, which would make
+  // the order comparator non-transitive. This is the deterministic trust
+  // boundary; it self-defends all inputs, not just some.
+  const num = (x, dflt) => { const v = Number(x); return Number.isFinite(v) ? v : dflt }
   const scored = candidates.map((c) => {
-    // clamp tf ≥ 0: a hostile peer-supplied negative tf hits the BM25 pole at
-    // -K1 and inverts to MAX relevance (tf=-5 → ratio 1.3 → clamped to 1.0).
-    const tfc = Math.max(0, Number(c.tf) || 0)
+    // clamp tf ≥ 0: a hostile negative tf hits the BM25 pole at -K1 and inverts
+    // to MAX relevance (tf=-5 → ratio 1.3 → clamped to 1.0).
+    const tfc = Math.max(0, num(c.tf, 0))
     const f1 = tfc / (tfc + RANK.K1)                                       // text (BM25-ish saturation)
-    const f2 = 1 / (1 + (c.trustHop == null ? 0 : c.trustHop))             // trust proximity (hop-0 → 1)
-    const f3 = Math.min(c.endorsers || 0, RANK.E_CAP) / RANK.E_CAP         // endorser breadth, hard-capped
-    const ageDays = now0 && c.publishedAt ? Math.max(0, (now0 - c.publishedAt) / 86400000) : 0
+    const f2 = 1 / (1 + Math.max(0, num(c.trustHop, 0)))                   // trust proximity (hop-0 → 1)
+    const f3 = Math.min(Math.max(0, num(c.endorsers, 0)), RANK.E_CAP) / RANK.E_CAP // endorser breadth, capped
+    const pub = num(c.publishedAt, 0)
+    const ageDays = now0 && pub ? Math.max(0, (now0 - pub) / 86400000) : 0
     const f4 = Math.pow(2, -ageDays / RANK.HALFLIFE_DAYS)                  // recency half-life
     // typeof-number guard: a prototype-chain tier key ('__proto__', 'toString'…)
     // would resolve RANK.TIER[c.tier] to an object (!= null), making f5 an object
@@ -152,7 +159,9 @@ function rankCandidates (candidates, { now0 = 0, diversity = true } = {}) {
       boost(RANK.W.trust, f2) + boost(RANK.W.endorse, f3) +
       boost(RANK.W.recency, f4) + boost(RANK.W.tier, f5)
     const dither = RANK.LAMBDA * fnvUnit(c.docId || c.path || '')
-    return { ...c, _score: logScore + dither }
+    const score = logScore + dither
+    // backstop: never let a non-finite score reach the comparator
+    return { ...c, _score: Number.isFinite(score) ? score : -Infinity }
   })
   // total order: score desc, then contentHash, then signerPubkey (deterministic,
   // antisymmetric — never returns 1 for equal operands)

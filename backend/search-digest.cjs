@@ -33,7 +33,9 @@ function buildDigest (docIds, termDf = [], { p = 0.001, topK = 2048 } = {}) {
     const [h1, h2] = hashPair(id)
     for (let i = 0; i < k; i++) {
       const bit = (h1 + i * h2) % m
-      bytes[bit >> 3] |= (1 << (bit & 7))
+      // Math.floor/%, not >>3/&7: a bit index ≥ 2^31 would sign-overflow the
+      // 32-bit bitwise op (negative index → silent corruption / false negatives).
+      bytes[Math.floor(bit / 8)] |= (1 << (bit % 8))
     }
   }
   const topTerms = [...(termDf || [])]
@@ -61,7 +63,7 @@ function digestMayContainDoc (digest, docId) {
   const [h1, h2] = hashPair(docId)
   for (let i = 0; i < k; i++) {
     const bit = (h1 + i * h2) % m
-    if (!(bytes[bit >> 3] & (1 << (bit & 7)))) return false // definitely absent
+    if (!(bytes[Math.floor(bit / 8)] & (1 << (bit % 8)))) return false // definitely absent
   }
   return true // probably present
 }
