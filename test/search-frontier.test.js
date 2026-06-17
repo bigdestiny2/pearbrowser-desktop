@@ -24,6 +24,14 @@ test('IndexPointer verifies against the Contacts-held root + resolves latest ver
   assert.equal(fr.resolveIndexKey(rootHex, [p1, p2, forged]), 'idxB')
 })
 
+test('verifyIndexPointer rejects a non-integer (string) version', () => {
+  const root = crypto.keyPair(); const rootHex = hex(root.publicKey)
+  const canon = 'pear.lighthouse.indexptr.v1:' + JSON.stringify({ i: 'idx', r: rootHex, v: '10' }, ['i', 'r', 'v'])
+  const evil = { kind: 'indexptr', rootPubkey: rootHex, indexKey: 'idx', version: '10', sig: signer(root)(canon) }
+  assert.equal(fr.verifyIndexPointer(evil, rootHex), false)
+  assert.equal(fr.resolveIndexKey(rootHex, [evil]), null)
+})
+
 test('planFanout is digest-first: peers whose digest lacks the term are skipped', () => {
   const frontier = [
     peer('a', 1, ['chat', 'peer']),

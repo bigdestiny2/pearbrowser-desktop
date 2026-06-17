@@ -49,6 +49,11 @@ test('trustRowsToEdges hex-normalizes a Buffer memberkey', () => {
   assert.deepEqual(edges, [{ from: 'deadbeef', to: A }])
 })
 
+test('resourceRowToCandidate hex-normalizes a Buffer memberkey (deterministic dedup)', () => {
+  const c = resourceRowToCandidate({ json: { name: 'X', driveKey: 'dk' }, memberkey: Buffer.from('aa', 'hex') })
+  assert.equal(c.signerPubkey, 'aa', 'Buffer memberkey → hex, so the dedup tie-break is order-stable')
+})
+
 test('mergeFederated dedup winner is independent of source order (deterministic)', () => {
   const g = buildTrustGraph(ME, [{ from: ME, to: A }], { maxFollowHops: 2 })
   // same doc, same trustHop+tf from two followed sources → tie broken by signerPubkey

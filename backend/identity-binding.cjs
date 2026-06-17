@@ -74,6 +74,10 @@ function makeRevocation ({ rootPubkey, searchPubkey, version }, rootSign) {
 // controllable on first sight). This is the MITM defense.
 function verifyBinding (binding, expectedRootPubkey) {
   if (!binding || binding.kind !== 'binding') return false
+  // version must be a canonical integer: a string "10" would verify (the sig is
+  // over its JSON form) yet break resolveSearchKey's `===`/`>` version logic,
+  // re-opening the equivocation the tie-break exists to close.
+  if (!Number.isInteger(binding.version) || binding.version < 1) return false
   if (binding.rootPubkey !== expectedRootPubkey) return false
   try {
     return crypto.verify(b4a.from(canonBinding(binding.rootPubkey, binding.searchPubkey, binding.version), 'utf-8'),
@@ -83,6 +87,7 @@ function verifyBinding (binding, expectedRootPubkey) {
 
 function verifyRevocation (rev, expectedRootPubkey) {
   if (!rev || rev.kind !== 'revoke') return false
+  if (!Number.isInteger(rev.version) || rev.version < 1) return false
   if (rev.rootPubkey !== expectedRootPubkey) return false
   try {
     return crypto.verify(b4a.from(canonRevoke(rev.rootPubkey, rev.searchPubkey, rev.version), 'utf-8'),

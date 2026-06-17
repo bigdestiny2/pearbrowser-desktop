@@ -67,9 +67,13 @@ function postingSetHash (terms) {
   // Injective canonical encoding: JSON of sorted [term, tf, field] triples. A
   // delimiter-join ('term:tf:field' | …) collides when a term contains the
   // delimiters, which would let a tamperer alter the posting set undetected.
+  // canonNum keeps non-finite tf/field DISTINCT (JSON.stringify maps NaN /
+  // Infinity / undefined / null all to `null`, which would collide distinct
+  // tampered posting sets under one integrity hash).
+  const canonNum = (x) => Number.isFinite(x) ? x : 'nf:' + String(x)
   const canon = [...terms]
     .sort((a, b) => (a.term < b.term ? -1 : a.term > b.term ? 1 : 0))
-    .map((t) => [t.term, t.tf, t.field || 1])
+    .map((t) => [t.term, canonNum(t.tf), canonNum(t.field || 1)])
   return hashHex(JSON.stringify(canon))
 }
 
@@ -139,7 +143,11 @@ function rankCandidates (candidates, { now0 = 0, diversity = true } = {}) {
     const f3 = Math.min(c.endorsers || 0, RANK.E_CAP) / RANK.E_CAP         // endorser breadth, hard-capped
     const ageDays = now0 && c.publishedAt ? Math.max(0, (now0 - c.publishedAt) / 86400000) : 0
     const f4 = Math.pow(2, -ageDays / RANK.HALFLIFE_DAYS)                  // recency half-life
-    const f5 = RANK.TIER[c.tier] != null ? RANK.TIER[c.tier] : RANK.TIER.default
+    // typeof-number guard: a prototype-chain tier key ('__proto__', 'toString'…)
+    // would resolve RANK.TIER[c.tier] to an object (!= null), making f5 an object
+    // → NaN _score → a non-transitive comparator that breaks the total order.
+    const f5raw = RANK.TIER[c.tier]
+    const f5 = typeof f5raw === 'number' ? f5raw : RANK.TIER.default
     const logScore = RANK.W.text * Math.log(eps + clamp01(f1)) +
       boost(RANK.W.trust, f2) + boost(RANK.W.endorse, f3) +
       boost(RANK.W.recency, f4) + boost(RANK.W.tier, f5)

@@ -100,7 +100,9 @@ function trustRowsToEdges (rows) {
     // edge and promote a Sybil into the followed tier.
     const from = memberRootHex(r.memberkey)
     const to = r.json && r.json.curatorRoot
-    if (from && to) edges.push({ from, to })
+    // curatorRoot must be a hex STRING (TRUST_SCHEMA declares it so); a
+    // Buffer/number would be mis-keyed and silently demoted to the default tier.
+    if (from && typeof to === 'string' && to) edges.push({ from, to })
   }
   return edges
 }
@@ -120,7 +122,10 @@ function resourceRowToCandidate (row, tf = 1) {
     tf,
     publishedAt: j.publishedAt || 0,
     contentHash: '',
-    signerPubkey: (row && row.memberkey) || '',
+    // hex-normalize the Buffer memberkey so the mergeFederated dedup tie-break
+    // (lexicographic on signerPubkey) is deterministic across peers — a raw
+    // Buffer compares via lossy utf-8 coercion.
+    signerPubkey: memberRootHex(row && row.memberkey),
   }
 }
 
@@ -157,7 +162,9 @@ function mergeFederated (sources, graph, { now0 = 0, limit = 50 } = {}) {
       if (better) byDoc.set(key, tagged)
     }
   }
-  const n = Math.max(0, Math.floor(Number(limit) || 0))
+  // explicit null/NaN limit coalesces back to the default rather than 0 results
+  const lim = Number(limit)
+  const n = Number.isFinite(lim) && lim >= 0 ? Math.floor(lim) : 50
   return sc.rankCandidates([...byDoc.values()], { now0 }).slice(0, n)
 }
 

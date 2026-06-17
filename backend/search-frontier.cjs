@@ -31,6 +31,9 @@ function makeIndexPointer ({ rootPubkey, indexKey, version }, rootSign) {
 
 function verifyIndexPointer (ptr, expectedRootPubkey) {
   if (!ptr || ptr.kind !== 'indexptr' || ptr.rootPubkey !== expectedRootPubkey) return false
+  // canonical integer version (mirror verifyBinding/verifyAnchor) so a string
+  // version can't beat legit ones / make resolveIndexKey order-dependent.
+  if (!Number.isInteger(ptr.version) || ptr.version < 1) return false
   try {
     return crypto.verify(b4a.from(canonPointer(ptr.rootPubkey, ptr.indexKey, ptr.version), 'utf-8'),
       b4a.from(ptr.sig, 'hex'), b4a.from(expectedRootPubkey, 'hex'))

@@ -73,6 +73,15 @@ test('resolveSearchKey breaks equal-version equivocation deterministically', () 
   assert.equal(ib.resolveSearchKey(rootHex, [bB, bA], []), 'aaa')
 })
 
+test('verifyBinding/verifyRevocation reject a non-integer (string) version', () => {
+  const root = crypto.keyPair(); const rootHex = hex(root.publicKey)
+  const cB = 'pear.lighthouse.binding.v2:' + JSON.stringify({ r: rootHex, s: 'sk', v: '10' }, ['r', 's', 'v'])
+  const evilB = { kind: 'binding', v: 2, rootPubkey: rootHex, searchPubkey: 'sk', version: '10', sig: signer(root)(cB) }
+  assert.equal(ib.verifyBinding(evilB, rootHex), false, 'string version must not verify')
+  // and so resolveSearchKey never lets it win / break order-independence
+  assert.equal(ib.resolveSearchKey(rootHex, [evilB], []), null)
+})
+
 // --- digest tier --------------------------------------------------------------
 
 test('malformed/hostile digest fails CLOSED (no fail-open to true)', () => {
