@@ -488,6 +488,27 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
     }
   }
 
+  // Lighthouse Phase 0 — feed the local self-search index as you browse. On
+  // each hyper:// page load, extract title + visible text (same-origin via the
+  // proxy; degrades to title-only if blocked) and push it to CMD_SEARCH_INDEX.
+  // Fully best-effort — never throws into the render path.
+  const indexPage = (tab, el) => {
+    try {
+      const u = (tab && (tab.url || tab.displayUrl)) || ''
+      if (!/^hyper:\/\//i.test(u)) return // only index P2P content
+      const rest = u.replace(/^hyper:\/\//i, '')
+      const slash = rest.indexOf('/')
+      const driveKey = slash >= 0 ? rest.slice(0, slash) : rest
+      const path = slash >= 0 ? rest.slice(slash) : '/'
+      let title = ''; let text = ''
+      try {
+        const doc = el && el.contentDocument
+        if (doc) { title = doc.title || ''; text = ((doc.body && doc.body.innerText) || '').slice(0, 200000) }
+      } catch { /* cross-origin / not ready — index by url + title only */ }
+      rpc.request(C.CMD_SEARCH_INDEX, { driveKey, path, title: title || u, text }).catch(() => {})
+    } catch { /* never break browsing */ }
+  }
+
   const bookmark = async () => {
     const target = normalizeUrl(editingUrl)
     if (!target) return
@@ -817,6 +838,7 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
               ref=${(el) => { if (el) iframeRefs.current[t.id] = el }}
               class=${'webview' + (t.id === activeId ? '' : ' hidden')}
               src=${t.src}
+              onLoad=${(e) => indexPage(t, e.target)}
               sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-pointer-lock"
             ></iframe>`
           : t.id === activeId
@@ -2286,6 +2308,24 @@ function Library ({ rpc, C, onBrowse }) {
   const [bookmarks, setBookmarks] = useState([])
   const [history, setHistory] = useState([])
   const [err, setErr] = useState('')
+  // Lighthouse Phase 0 — local self-search over everything you've browsed.
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState(null) // null = not searched yet
+  const [indexed, setIndexed] = useState(0)
+  const [searching, setSearching] = useState(false)
+
+  const runSearch = async () => {
+    const q = query.trim()
+    if (!q) { setResults(null); return }
+    setSearching(true)
+    try {
+      const res = await rpc.request(C.CMD_SEARCH, { query: q, limit: 50 })
+      setResults(Array.isArray(res?.results) ? res.results : [])
+      setIndexed(res?.stats?.docs || 0)
+    } catch (e) { setErr(`search: ${e.message}`) }
+    finally { setSearching(false) }
+  }
+  const resultUrl = (r) => `hyper://${r.driveKey}${r.path && r.path !== '/' ? r.path : '/'}`
 
   const refresh = async () => {
     try {
@@ -2324,6 +2364,33 @@ function Library ({ rpc, C, onBrowse }) {
       <h1>Library</h1>
       <p class="subtitle">Your saved bookmarks and recent browsing history, stored locally in your Hyperbee.</p>
       ${err && html`<div class="apps-error">${err}</div>`}
+
+      <h2>Search your P2P content</h2>
+      <p class="subtitle">Full-text search over everything you've browsed, fully local — no query ever leaves your device.${indexed ? ` ${indexed} page(s) indexed.` : ''}</p>
+      <div class="urlbar" style="margin-bottom:12px">
+        <input
+          type="text"
+          class="url-input"
+          placeholder="Search pages you've visited…"
+          value=${query}
+          onInput=${(e) => setQuery(e.target.value)}
+          onKeyDown=${(e) => e.key === 'Enter' && runSearch()}
+        />
+        <button class="btn primary" onClick=${runSearch} disabled=${searching || !query.trim()}>${searching ? 'Searching…' : 'Search'}</button>
+      </div>
+      ${results !== null && (results.length === 0
+        ? html`<p class="placeholder">No matches${indexed === 0 ? ' yet — browse some hyper:// pages first to build your index.' : '.'}</p>`
+        : html`<div class="library-list">
+            ${results.map((r) => html`
+              <div class="library-row" key=${r.docId || (r.driveKey + r.path)}>
+                <div class="library-row-main">
+                  <div class="library-title">${r.title || resultUrl(r)}</div>
+                  <div class="library-url">${resultUrl(r)}</div>
+                </div>
+                <button class="btn small" onClick=${() => onBrowse(resultUrl(r))}>Open</button>
+              </div>
+            `)}
+          </div>`)}
 
       <h2>Bookmarks (${bookmarks.length})</h2>
       ${bookmarks.length === 0
