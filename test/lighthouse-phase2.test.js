@@ -81,6 +81,9 @@ test('malformed/hostile digest fails CLOSED (no fail-open to true)', () => {
   assert.equal(dg.digestMayContainDoc({ bits: '', m: 0, k: 1 }, 'anyid'), false)
   assert.equal(dg.digestMayContainDoc({ bits: 'AA', m: 99999, k: 3 }, 'anyid'), false) // wrong bit-length
   assert.equal(dg.digestMayContainDoc(null, 'anyid'), false)
+  // a truthy NON-string bits must fail closed, not throw (DoS the verifier)
+  assert.equal(dg.digestMayContainDoc({ bits: 999, m: 16, k: 3 }, 'anyid'), false)
+  assert.equal(dg.digestMayContainDoc({ bits: {}, m: 16, k: 3 }, 'anyid'), false)
 })
 
 test('digest has no false negatives and bounded false positives', () => {

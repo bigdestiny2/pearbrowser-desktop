@@ -100,11 +100,15 @@ class PersonalIndex {
   async _evictIfNeeded () {
     let count = await this._meta('count', 0)
     let guard = 0
-    while (count > this.maxDocs && guard++ < this.maxDocs + 16) {
+    while (count > this.maxDocs && guard++ < this.maxDocs + 64) {
       let oldest = null
       for await (const entry of this.bee.createReadStream({ gte: 'o!', lt: 'o!~', limit: 1 })) oldest = entry
       if (!oldest) break
-      await this._removeDocImpl(oldest.value)
+      const removed = await this._removeDocImpl(oldest.value)
+      // A dangling order-key (its d! record is gone, e.g. a seq-less re-index or
+      // a crash mid-eviction) would otherwise sit at the head forever and stall
+      // the scan — delete it directly so eviction makes progress.
+      if (!removed) await this.bee.del(oldest.key)
       count = await this._meta('count', 0)
     }
   }

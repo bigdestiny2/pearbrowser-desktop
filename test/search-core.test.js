@@ -91,6 +91,12 @@ test('ranker: a strong text match is not buried by a zero low-cardinality featur
   assert.equal(out[0].docId, 'strong', 'high-tf/zero-endorser outranks low-tf/some-endorser — absent feature is neutral, not a penalty')
 })
 
+test('ranker: a hostile negative tf cannot invert to maximum text relevance', () => {
+  const base = (over) => ({ docId: 'd', driveKey: 'k', tf: 1, trustHop: 0, endorsers: 0, tier: 'self', ...over })
+  const out = rankCandidates([base({ docId: 'evil', tf: -5 }), base({ docId: 'real', tf: 10 })], { diversity: false })
+  assert.equal(out[0].docId, 'real', 'negative tf is clamped to 0, not the BM25 pole')
+})
+
 test('searchIndex limit is clamped (negative/garbage → empty, not off-by-one)', async () => {
   // pure-function check on the clamp via rankCandidates + slice contract
   const ranked = rankCandidates([{ docId: 'a', driveKey: 'k', tf: 5, tier: 'self' }], {})

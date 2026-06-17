@@ -35,6 +35,15 @@ test('isFork flags equal-length divergent-treeHash equivocation', () => {
   assert.equal(cp.isFork(a, a), false)     // identical → not a fork
 })
 
+test('verifyAnchor rejects a non-integer (string) length — closes the isFork bypass', () => {
+  const root = crypto.keyPair(); const rootHex = hex(root.publicKey)
+  // a validly root-signed anchor whose length is the STRING "500" (sig is over
+  // the canonical JSON form, so it would pass the sig check without the guard)
+  const canon = 'pear.lighthouse.anchor.v1:' + JSON.stringify({ r: rootHex, i: 'idx', l: '500', h: 'hE' }, ['h', 'i', 'l', 'r'])
+  const evil = { kind: 'anchor', rootPubkey: rootHex, indexKey: 'idx', length: '500', treeHash: 'hE', sig: signer(root)(canon) }
+  assert.equal(cp.verifyAnchor(evil, rootHex), false, 'string length must not verify')
+})
+
 test('withholding: probes a digest-claimed doc the server omitted', () => {
   const refDocs = Array.from({ length: 500 }, (_, i) => 'doc' + i)
   const digest = dg.buildDigest(refDocs, [], { p: 0.001 })

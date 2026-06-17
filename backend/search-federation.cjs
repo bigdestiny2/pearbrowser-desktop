@@ -11,6 +11,15 @@
 // the testable engine.
 
 const sc = require('./search-core.cjs')
+const b4a = require('b4a')
+
+// schema-sheets per-row verified author provenance is `memberkey` (a Buffer);
+// normalize to hex. Matches resourceRowToCandidate + sheets-catalog rowToApp.
+function memberRootHex (v) {
+  if (v == null) return ''
+  if (typeof v === 'string') return v
+  try { return b4a.toString(v, 'hex') } catch { return '' }
+}
 
 // schema-sheets schema for a RESOURCE descriptor room: a signed pointer that
 // supplies the human-meaningful corner of Zooko's triangle for a hyper:// key.
@@ -83,13 +92,14 @@ function buildTrustGraph (selfRoot, edges, { maxFollowHops = 2 } = {}) {
 function trustRowsToEdges (rows) {
   const edges = []
   for (const r of rows || []) {
-    // Provenance must come from VERIFIED fields ONLY: `authorRoot` (the signed
-    // row author / memberkey set by the sheets layer) and the signed body's
+    if (!r) continue
+    // Provenance must come from VERIFIED fields ONLY: the row's `memberkey`
+    // (the sheets layer's per-row signed author) and the signed body's
     // `json.curatorRoot`. Unsigned top-level `.from`/`.to`/`.curatorRoot` are
     // attacker-controllable — accepting them would let anyone forge a follow
-    // edge and promote a Sybil into the followed tier. Drop those fallbacks.
-    const from = r && r.authorRoot
-    const to = r && r.json && r.json.curatorRoot
+    // edge and promote a Sybil into the followed tier.
+    const from = memberRootHex(r.memberkey)
+    const to = r.json && r.json.curatorRoot
     if (from && to) edges.push({ from, to })
   }
   return edges
@@ -127,8 +137,10 @@ function tagCandidate (c, sourceRoot, graph) {
 function mergeFederated (sources, graph, { now0 = 0, limit = 50 } = {}) {
   const byDoc = new Map()
   for (const src of sources || []) {
+    if (!src) continue
     const root = src.rootPubkey
     for (const c of (src.candidates || [])) {
+      if (!c) continue
       const tagged = tagCandidate(c, root, graph)
       const key = c.docId || (c.driveKey + '|' + (c.path || '/'))
       const prev = byDoc.get(key)
@@ -145,7 +157,8 @@ function mergeFederated (sources, graph, { now0 = 0, limit = 50 } = {}) {
       if (better) byDoc.set(key, tagged)
     }
   }
-  return sc.rankCandidates([...byDoc.values()], { now0 }).slice(0, limit)
+  const n = Math.max(0, Math.floor(Number(limit) || 0))
+  return sc.rankCandidates([...byDoc.values()], { now0 }).slice(0, n)
 }
 
 module.exports = {

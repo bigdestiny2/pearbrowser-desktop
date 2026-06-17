@@ -34,6 +34,10 @@ function makeAnchor ({ rootPubkey, indexKey, length, treeHash }, rootSign) {
 }
 function verifyAnchor (anchor, expectedRootPubkey) {
   if (!anchor || anchor.kind !== 'anchor' || anchor.rootPubkey !== expectedRootPubkey) return false
+  // length must be a canonical integer: a string '500' would otherwise verify
+  // (the sig is over its JSON form) yet evade the numeric === / < comparisons in
+  // isFork/isTruncation, letting an equivocating author bypass Layer-1 detection.
+  if (!Number.isInteger(anchor.length)) return false
   try {
     return crypto.verify(b4a.from(canonAnchor(anchor.rootPubkey, anchor.indexKey, anchor.length, anchor.treeHash), 'utf-8'),
       b4a.from(anchor.sig, 'hex'), b4a.from(expectedRootPubkey, 'hex'))

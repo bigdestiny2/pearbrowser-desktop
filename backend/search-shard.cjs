@@ -46,9 +46,11 @@ function bigramShardOf (t1, t2, numShards = 256) {
 //              intersection; the case that stays interactive)
 //   shards   — the distinct shard ids that must be contacted
 //   byShard  — Map<shardId, terms[]>
-//   bigram   — for the two rarest-looking terms, the co-located bigram shard +
-//              key prefix to TRY first (single-shard if the index built it),
-//              converting the worst cross-host AND into one shard fetch.
+//   bigram   — for the FIRST TWO query terms, the co-located bigram shard + key
+//              prefix to TRY first (single-shard if the index built that pair),
+//              converting a cross-host AND into one shard fetch. (This pure
+//              module has no document-frequency signal, so it cannot pick the
+//              rarest pair; a caller with df can choose the two terms to pass.)
 function planCrossShardAnd (queryTerms, numShards = 256) {
   const terms = [...new Set((queryTerms || []).filter((t) => typeof t === 'string' && t))]
   const byShard = new Map()

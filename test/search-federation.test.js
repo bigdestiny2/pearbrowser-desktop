@@ -28,17 +28,25 @@ test('maxFollowHops bounds the followed tier', () => {
   assert.equal(g.tierOf(B), 'default')   // hop 2 > maxFollowHops 1
 })
 
-test('trustRowsToEdges uses ONLY verified provenance, dropping forged unsigned rows', () => {
+test('trustRowsToEdges uses ONLY verified provenance (memberkey + signed body)', () => {
   const edges = trustRowsToEdges([
-    { authorRoot: ME, json: { curatorRoot: A } }, // valid: signed author + signed body
-    { authorRoot: A, json: { curatorRoot: B } },  // valid
+    { memberkey: ME, json: { curatorRoot: A } }, // valid: sheets memberkey author + signed body
+    { memberkey: A, json: { curatorRoot: B } },  // valid
     { from: A, curatorRoot: B },                   // forged: unsigned top-level → DROPPED
-    { authorRoot: ME, curatorRoot: A },            // curatorRoot not in signed body → DROPPED
-    { json: { curatorRoot: A } },                  // no signed author → DROPPED
+    { memberkey: ME, curatorRoot: A },             // curatorRoot not in signed body → DROPPED
+    { json: { curatorRoot: A } },                  // no memberkey author → DROPPED
     { json: {} },                                  // incomplete → DROPPED
+    null,                                          // null row → DROPPED (no throw)
   ])
-  // a Sybil cannot inject a follow edge via attacker-controllable fields
+  // matches the real sheets contract (row.memberkey); a Sybil cannot inject a
+  // follow edge via attacker-controllable fields
   assert.deepEqual(edges, [{ from: ME, to: A }, { from: A, to: B }])
+})
+
+test('trustRowsToEdges hex-normalizes a Buffer memberkey', () => {
+  const mk = Buffer.from('deadbeef', 'hex')
+  const edges = trustRowsToEdges([{ memberkey: mk, json: { curatorRoot: A } }])
+  assert.deepEqual(edges, [{ from: 'deadbeef', to: A }])
 })
 
 test('mergeFederated dedup winner is independent of source order (deterministic)', () => {

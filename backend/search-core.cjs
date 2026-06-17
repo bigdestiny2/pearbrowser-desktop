@@ -131,7 +131,10 @@ function rankCandidates (candidates, { now0 = 0, diversity = true } = {}) {
   // dominated the log-product. Boosts are bounded by their weights.
   const boost = (w, f) => Math.log(1 + w * clamp01(f))
   const scored = candidates.map((c) => {
-    const f1 = (c.tf || 0) / ((c.tf || 0) + RANK.K1)                       // text (BM25-ish saturation)
+    // clamp tf ≥ 0: a hostile peer-supplied negative tf hits the BM25 pole at
+    // -K1 and inverts to MAX relevance (tf=-5 → ratio 1.3 → clamped to 1.0).
+    const tfc = Math.max(0, Number(c.tf) || 0)
+    const f1 = tfc / (tfc + RANK.K1)                                       // text (BM25-ish saturation)
     const f2 = 1 / (1 + (c.trustHop == null ? 0 : c.trustHop))             // trust proximity (hop-0 → 1)
     const f3 = Math.min(c.endorsers || 0, RANK.E_CAP) / RANK.E_CAP         // endorser breadth, hard-capped
     const ageDays = now0 && c.publishedAt ? Math.max(0, (now0 - c.publishedAt) / 86400000) : 0

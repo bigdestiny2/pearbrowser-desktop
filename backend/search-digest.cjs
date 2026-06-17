@@ -49,9 +49,13 @@ function digestMayContainDoc (digest, docId) {
   // m/k ≤ 0, or wrong bit-buffer length) must fail CLOSED (no-hit), never
   // fail-open to "probably present" for every docId — otherwise a corrupt or
   // hostile digest triggers false withholding accusations and pointless pulls.
-  if (!digest || !digest.bits || !Number.isInteger(digest.m) || digest.m <= 0 ||
+  if (!digest || typeof digest.bits !== 'string' || !digest.bits ||
+      !Number.isInteger(digest.m) || digest.m <= 0 ||
       !Number.isInteger(digest.k) || digest.k <= 0) return false
-  const bytes = b4a.from(digest.bits, 'base64')
+  // a truthy NON-string bits (e.g. a hostile JSON {"bits":999}) would throw in
+  // b4a.from — catch it and fail CLOSED, never crash withholding detection.
+  let bytes
+  try { bytes = b4a.from(digest.bits, 'base64') } catch { return false }
   if (bytes.length !== Math.ceil(digest.m / 8)) return false
   const { m, k } = digest
   const [h1, h2] = hashPair(docId)

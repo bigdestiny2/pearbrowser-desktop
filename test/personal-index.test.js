@@ -72,6 +72,19 @@ test('LRU eviction caps the index at maxDocs (oldest dropped)', async () => {
   })
 })
 
+test('eviction advances past an orphaned order-key (no permanent stall)', async () => {
+  await withIndex({ maxDocs: 2 }, async (idx) => {
+    // inject a dangling order-key (smallest, so it sits at the scan head) whose
+    // docId has no d! record — the old code would loop forever on it
+    await idx.bee.put('o!0000000000000000', 'deadbeefdeadbeef')
+    for (let i = 0; i < 4; i++) {
+      await idx.indexDoc({ driveKey: 'd' + i, path: '/', title: 'Doc ' + i, body: 'commonword w' + i })
+    }
+    assert.ok((await idx.stats()).docs <= 2, 'doc cap re-enforced despite the orphan')
+    assert.equal(await idx.bee.get('o!0000000000000000'), null, 'dangling order-key deleted, scan advanced')
+  })
+})
+
 test('concurrent indexDoc is serialized — no lost-update on the count', async () => {
   await withIndex({}, async (idx) => {
     await Promise.all(Array.from({ length: 10 }, (_, i) =>
