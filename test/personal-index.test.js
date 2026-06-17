@@ -72,6 +72,15 @@ test('LRU eviction caps the index at maxDocs (oldest dropped)', async () => {
   })
 })
 
+test('concurrent indexDoc is serialized — no lost-update on the count', async () => {
+  await withIndex({}, async (idx) => {
+    await Promise.all(Array.from({ length: 10 }, (_, i) =>
+      idx.indexDoc({ driveKey: 'd' + i, path: '/', title: 'Doc ' + i, body: 'commonword token' + i })))
+    assert.equal((await idx.stats()).docs, 10, 'count not corrupted by the race')
+    assert.equal((await idx.search('commonword')).length, 10, 'all 10 searchable (no orphaned order-keys)')
+  })
+})
+
 test('indexing a page with no indexable terms is a no-op', async () => {
   await withIndex({}, async (idx) => {
     assert.equal(await idx.indexDoc({ driveKey: 'd1', path: '/', title: 'the and of', body: 'a an it' }), null)

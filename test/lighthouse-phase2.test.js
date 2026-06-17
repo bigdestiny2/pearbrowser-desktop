@@ -64,7 +64,24 @@ test('resolveSearchKey rotates to the highest non-revoked version', () => {
   assert.equal(ib.resolveSearchKey(rootHex, [b1, b2], [fakeRev]), sk2, 'forged revocation ignored')
 })
 
+test('resolveSearchKey breaks equal-version equivocation deterministically', () => {
+  const root = crypto.keyPair(); const rootHex = hex(root.publicKey)
+  const bA = ib.makeBinding({ rootPubkey: rootHex, searchPubkey: 'aaa', version: 2 }, signer(root))
+  const bB = ib.makeBinding({ rootPubkey: rootHex, searchPubkey: 'bbb', version: 2 }, signer(root))
+  // same resolution regardless of array order; smaller searchPubkey wins
+  assert.equal(ib.resolveSearchKey(rootHex, [bA, bB], []), ib.resolveSearchKey(rootHex, [bB, bA], []))
+  assert.equal(ib.resolveSearchKey(rootHex, [bB, bA], []), 'aaa')
+})
+
 // --- digest tier --------------------------------------------------------------
+
+test('malformed/hostile digest fails CLOSED (no fail-open to true)', () => {
+  // a digest with k=0 must not report every docId as "probably present"
+  assert.equal(dg.digestMayContainDoc({ bits: 'AAAA', m: 16, k: 0 }, 'anyid'), false)
+  assert.equal(dg.digestMayContainDoc({ bits: '', m: 0, k: 1 }, 'anyid'), false)
+  assert.equal(dg.digestMayContainDoc({ bits: 'AA', m: 99999, k: 3 }, 'anyid'), false) // wrong bit-length
+  assert.equal(dg.digestMayContainDoc(null, 'anyid'), false)
+})
 
 test('digest has no false negatives and bounded false positives', () => {
   const present = Array.from({ length: 2000 }, (_, i) => 'docid' + i.toString(16).padStart(16, '0'))

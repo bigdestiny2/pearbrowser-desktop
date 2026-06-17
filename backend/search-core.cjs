@@ -44,9 +44,12 @@ function hashHex (str) {
   return b4a.toString(crypto.data(b4a.from(String(str))), 'hex')
 }
 
-// Stable doc id = sha256(driveKey \0 path)[:16]. Identifies a page across re-crawls.
+// Stable doc id = hash(len(driveKey)|driveKey|path)[:16]. Length-prefixed so
+// (driveKey,path) is unambiguous (a NUL separator could be forged across the
+// boundary). Identifies a page across re-crawls.
 function docIdFor (driveKey, path) {
-  return hashHex(String(driveKey || '') + '\0' + String(path || '/')).slice(0, 16)
+  const dk = String(driveKey || ''); const p = String(path || '/')
+  return hashHex(dk.length + '|' + dk + '|' + p).slice(0, 16)
 }
 
 // invScore makes a forward Hyperbee range scan return highest-score-first.
@@ -61,8 +64,13 @@ const docKey = (docId) => `d!${docId}`
 // Hash binding the thin t! postings to the per-doc signature: a peer cannot
 // inject/alter/drop a posting without breaking this (recomputed at verify).
 function postingSetHash (terms) {
-  const canon = [...terms].sort((a, b) => (a.term < b.term ? -1 : 1)).map((t) => `${t.term}:${t.tf}:${t.field || 1}`).join('|')
-  return hashHex(canon)
+  // Injective canonical encoding: JSON of sorted [term, tf, field] triples. A
+  // delimiter-join ('term:tf:field' | …) collides when a term contains the
+  // delimiters, which would let a tamperer alter the posting set undetected.
+  const canon = [...terms]
+    .sort((a, b) => (a.term < b.term ? -1 : a.term > b.term ? 1 : 0))
+    .map((t) => [t.term, t.tf, t.field || 1])
+  return hashHex(JSON.stringify(canon))
 }
 
 // Build the v2 records for one document: one signed d! record carrying the
@@ -92,9 +100,15 @@ function fnvUnit (str) {
   return (h >>> 0) / 0xffffffff
 }
 
+// Stable 3-way string compare for deterministic, antisymmetric tie-breaks.
+function cmp (a, b) { return a < b ? -1 : a > b ? 1 : 0 }
+
 const RANK = {
   W: { text: 1.0, trust: 0.9, endorse: 0.6, recency: 0.5, tier: 0.7 }, // feature weights
-  EPS: 1e-3,        // ε-floor: no single zero feature annihilates the product
+  // ε-floor kept SHALLOW: with a tiny eps, ln(eps) is a deep cliff so a single
+  // zero/low feature (e.g. 0 endorsers) would dominate the log-product and bury
+  // a strong text match. 0.15 keeps every feature's contribution bounded.
+  EPS: 0.15,
   E_CAP: 8,         // hard cap on endorser breadth (sybil-proof)
   HALFLIFE_DAYS: 30,
   LAMBDA: 0.05,     // exploration dither magnitude (small, deterministic)
@@ -109,23 +123,32 @@ const RANK = {
 // candidates sorted best-first with a `_score`, after MMR diversity by driveKey.
 function rankCandidates (candidates, { now0 = 0, diversity = true } = {}) {
   const eps = RANK.EPS
-  const ln = (x) => Math.log(eps + Math.max(0, Math.min(1, x)))
+  const clamp01 = (x) => Math.max(0, Math.min(1, x))
+  // Text relevance is the PRIMARY base (low text → low score, correct). Every
+  // other feature is a NON-NEGATIVE boost via ln(1 + w·f): an absent feature
+  // (0 endorsers, an old doc) contributes ln(1)=0 (neutral), so it can never
+  // bury a strong text match — fixing the ε-cliff where a single zero feature
+  // dominated the log-product. Boosts are bounded by their weights.
+  const boost = (w, f) => Math.log(1 + w * clamp01(f))
   const scored = candidates.map((c) => {
     const f1 = (c.tf || 0) / ((c.tf || 0) + RANK.K1)                       // text (BM25-ish saturation)
-    const f2 = 1 / (1 + (c.trustHop == null ? 0 : c.trustHop))             // PPR-lite by hop (hop-0 → 1)
+    const f2 = 1 / (1 + (c.trustHop == null ? 0 : c.trustHop))             // trust proximity (hop-0 → 1)
     const f3 = Math.min(c.endorsers || 0, RANK.E_CAP) / RANK.E_CAP         // endorser breadth, hard-capped
     const ageDays = now0 && c.publishedAt ? Math.max(0, (now0 - c.publishedAt) / 86400000) : 0
     const f4 = Math.pow(2, -ageDays / RANK.HALFLIFE_DAYS)                  // recency half-life
     const f5 = RANK.TIER[c.tier] != null ? RANK.TIER[c.tier] : RANK.TIER.default
-    const logScore = RANK.W.text * ln(f1) + RANK.W.trust * ln(f2) + RANK.W.endorse * ln(f3) +
-      RANK.W.recency * ln(f4) + RANK.W.tier * ln(f5)
+    const logScore = RANK.W.text * Math.log(eps + clamp01(f1)) +
+      boost(RANK.W.trust, f2) + boost(RANK.W.endorse, f3) +
+      boost(RANK.W.recency, f4) + boost(RANK.W.tier, f5)
     const dither = RANK.LAMBDA * fnvUnit(c.docId || c.path || '')
     return { ...c, _score: logScore + dither }
   })
-  // total order: score desc, then contentHash, then signerPubkey (deterministic)
-  scored.sort((a, b) => (b._score - a._score) ||
-    ((a.contentHash || '') < (b.contentHash || '') ? -1 : (a.contentHash || '') > (b.contentHash || '') ? 1 : 0) ||
-    ((a.signerPubkey || '') < (b.signerPubkey || '') ? -1 : 1))
+  // total order: score desc, then contentHash, then signerPubkey (deterministic,
+  // antisymmetric — never returns 1 for equal operands)
+  const order = (a, b) => (b._score - a._score) ||
+    cmp(a.contentHash || '', b.contentHash || '') ||
+    cmp(a.signerPubkey || '', b.signerPubkey || '')
+  scored.sort(order)
   if (!diversity) return scored
   // greedy MMR-lite: lightly penalize repeats of the same driveKey so one site
   // can't monopolize the page. Pure (penalty depends only on prior selections).
@@ -135,8 +158,7 @@ function rankCandidates (candidates, { now0 = 0, diversity = true } = {}) {
     c._score -= 0.15 * n
     seen.set(c.driveKey, n + 1)
   }
-  scored.sort((a, b) => (b._score - a._score) ||
-    ((a.contentHash || '') < (b.contentHash || '') ? -1 : 1))
+  scored.sort(order)
   return scored
 }
 
@@ -176,7 +198,8 @@ async function searchIndex (bee, query, { limit = 200, perTerm = 500, now0 = 0, 
       contentHash: d.h || '', signerPubkey: d.signerPubkey || '',
     })
   }
-  return rankCandidates(candidates, { now0 }).slice(0, limit)
+  const n = Math.max(0, Math.floor(Number(limit) || 0))
+  return rankCandidates(candidates, { now0 }).slice(0, n)
 }
 
 module.exports = {

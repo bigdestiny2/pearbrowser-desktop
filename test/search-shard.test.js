@@ -40,3 +40,21 @@ test('single-term query has no bigram and is single-shard', () => {
   assert.equal(plan.single, true)
   assert.equal(plan.bigram, null)
 })
+
+test('same-shard 2-term query emits no redundant bigram hint', () => {
+  // numShards=1 forces both terms into one shard → single → no divergent bigram
+  const plan = sh.planCrossShardAnd(['peer', 'chat'], 1)
+  assert.equal(plan.single, true)
+  assert.equal(plan.bigram, null)
+})
+
+test('shardOf guards a bad numShards instead of returning NaN', () => {
+  assert.ok(Number.isInteger(sh.shardOf('term', 0)))   // 0 → default, not NaN
+  assert.ok(Number.isInteger(sh.shardOf('term', -5)))  // negative → default
+  assert.ok(Number.isInteger(sh.shardOf('term', 256)))
+})
+
+test('bigram pair encoding is injective when a term contains the join char', () => {
+  // 'a_b' + 'c'  vs  'a' + 'b_c' must not collide
+  assert.notEqual(sh.bigramKey('a_b', 'c', '0', 'd'), sh.bigramKey('a', 'b_c', '0', 'd'))
+})

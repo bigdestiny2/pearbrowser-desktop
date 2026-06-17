@@ -17,21 +17,28 @@ function hash32 (str) {
   return (((h[0] << 24) >>> 0) + (h[1] << 16) + (h[2] << 8) + h[3]) >>> 0
 }
 
+// Guard numShards (0/negative/NaN would make hash32 % N return NaN, poisoning
+// routing); fall back to the 256 default.
+function safeN (numShards) { return Number.isInteger(numShards) && numShards >= 1 ? numShards : 256 }
+
 // Deterministic shard id in [0, numShards) for a term.
 function shardOf (term, numShards = 256) {
-  return hash32(term) % numShards
+  return hash32(term) % safeN(numShards)
 }
+
+// Injective, order-independent id for a term pair. '_'/'!'/'%' are escaped so a
+// term containing the join character can't collide two distinct pairs.
+function escTerm (t) { return String(t).replace(/[%_!]/g, (c) => '%' + c.charCodeAt(0).toString(16)) }
+function pairId (t1, t2) { const [a, b] = t1 < t2 ? [t1, t2] : [t2, t1]; return escTerm(a) + '_' + escTerm(b) }
 
 // Inverted-index posting key within a shard (same shape as the personal index).
 const shardPostingKey = (term, invScore, docId) => `t!${term}!${invScore}!${docId}`
 // Co-located bigram posting key: a pre-intersected list for an ordered term pair.
 function bigramKey (t1, t2, invScore, docId) {
-  const [a, b] = t1 < t2 ? [t1, t2] : [t2, t1]
-  return `tt!${a}_${b}!${invScore}!${docId}`
+  return `tt!${pairId(t1, t2)}!${invScore}!${docId}`
 }
 function bigramShardOf (t1, t2, numShards = 256) {
-  const [a, b] = t1 < t2 ? [t1, t2] : [t2, t1]
-  return shardOf(a + '_' + b, numShards)
+  return shardOf(pairId(t1, t2), numShards)
 }
 
 // Plan a multi-keyword AND across shards. Returns:
@@ -52,9 +59,12 @@ function planCrossShardAnd (queryTerms, numShards = 256) {
   }
   const shards = [...byShard.keys()]
   const plan = { terms, single: shards.length <= 1, shards, byShard, bigram: null }
-  if (terms.length >= 2) {
+  // Offer a bigram hint ONLY for a genuine cross-shard AND (terms in distinct
+  // shards). When single, the AND is already a local single-shard intersection,
+  // so a divergent bigram shard would just add a redundant extra hop.
+  if (terms.length >= 2 && !plan.single) {
     const [t1, t2] = terms
-    plan.bigram = { shard: bigramShardOf(t1, t2, numShards), keyPrefix: `tt!${[t1, t2].sort().join('_')}!` }
+    plan.bigram = { shard: bigramShardOf(t1, t2, numShards), keyPrefix: `tt!${pairId(t1, t2)}!` }
   }
   return plan
 }

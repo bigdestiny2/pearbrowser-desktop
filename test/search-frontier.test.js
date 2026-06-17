@@ -65,6 +65,14 @@ test('planFanout respects the live-session ceiling', () => {
   assert.equal(plan.connects, 0, 'already at the live-session ceiling → no new connects')
 })
 
+test('planFanout counts ALL held warm sessions against the ceiling (not just query-matching)', () => {
+  // 24 warm peers that DON'T match this query still occupy the session ceiling
+  const idleWarm = Array.from({ length: 24 }, (_, i) => peer('w' + i, 1, ['recipes'], true))
+  const cold = [peer('c1', 1, ['chat'])]
+  const plan = fr.planFanout([...idleWarm, ...cold], ['chat'], { maxConnectsPerQuery: 4, maxLiveSessions: 24 })
+  assert.equal(plan.connects, 0, 'ceiling reached by non-matching warm sessions → no new connect')
+})
+
 test('buildFrontier skips self and unreachable roots', () => {
   const graph = { hopOf: (r) => ({ me: 0, a: 1, b: 2 }[r] ?? Infinity) }
   const out = fr.buildFrontier(['me', 'a', 'b', 'stranger'], graph, { warm: new Set(['a']) })

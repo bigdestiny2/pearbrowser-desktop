@@ -25,6 +25,16 @@ test('completeness anchor: root-signed, MITM-safe, truncation-aware', () => {
   assert.equal(cp.isTruncation(a1, a2grow), false)
 })
 
+test('isFork flags equal-length divergent-treeHash equivocation', () => {
+  const root = crypto.keyPair(); const rootHex = hex(root.publicKey)
+  const a = cp.makeAnchor({ rootPubkey: rootHex, indexKey: 'idx', length: 1000, treeHash: 'hA' }, signer(root))
+  const b = cp.makeAnchor({ rootPubkey: rootHex, indexKey: 'idx', length: 1000, treeHash: 'hB' }, signer(root))
+  const grow = cp.makeAnchor({ rootPubkey: rootHex, indexKey: 'idx', length: 1001, treeHash: 'hC' }, signer(root))
+  assert.equal(cp.isFork(a, b), true)      // same length, different hash → fork
+  assert.equal(cp.isFork(a, grow), false)  // longer → growth, not a fork
+  assert.equal(cp.isFork(a, a), false)     // identical → not a fork
+})
+
 test('withholding: probes a digest-claimed doc the server omitted', () => {
   const refDocs = Array.from({ length: 500 }, (_, i) => 'doc' + i)
   const digest = dg.buildDigest(refDocs, [], { p: 0.001 })

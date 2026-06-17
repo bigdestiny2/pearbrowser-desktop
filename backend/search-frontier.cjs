@@ -24,6 +24,8 @@ function canonPointer (rootPubkey, indexKey, version) {
 // `rootSign(msgString) -> sigHex` (identity.sign in the app).
 function makeIndexPointer ({ rootPubkey, indexKey, version }, rootSign) {
   if (!Number.isInteger(version) || version < 1) throw new Error('version must be a positive integer')
+  if (typeof rootPubkey !== 'string' || !rootPubkey) throw new Error('rootPubkey required')
+  if (typeof indexKey !== 'string' || !indexKey) throw new Error('indexKey required')
   return { kind: 'indexptr', rootPubkey, indexKey, version, sig: rootSign(canonPointer(rootPubkey, indexKey, version)) }
 }
 
@@ -39,8 +41,12 @@ function verifyIndexPointer (ptr, expectedRootPubkey) {
 function resolveIndexKey (expectedRootPubkey, pointers) {
   let best = null
   for (const p of pointers || []) {
+    if (!p || typeof p.indexKey !== 'string' || !p.indexKey) continue
     if (!verifyIndexPointer(p, expectedRootPubkey)) continue
-    if (!best || p.version > best.version) best = p
+    // highest version wins; equal-version ties broken deterministically by
+    // indexKey so resolution is independent of pointer array order.
+    if (!best || p.version > best.version ||
+      (p.version === best.version && p.indexKey < best.indexKey)) best = p
   }
   return best ? best.indexKey : null
 }
@@ -70,8 +76,12 @@ function planFanout (frontier, queryTerms, budget = {}) {
   const warm = hits.filter((p) => p.warm)            // reuse existing sessions — no new connect
   const cold = hits.filter((p) => !p.warm)
 
-  // cap NEW connects per query, and keep total live sessions under the ceiling
-  const connectSlots = Math.max(0, Math.min(b.maxConnectsPerQuery, b.maxLiveSessions - warm.length))
+  // Sessions held against the ceiling = ALL warm peers we currently hold open,
+  // not just those matching THIS query (a replication session is held
+  // regardless of the current term). Counting only query-matching warm peers
+  // would overshoot maxLiveSessions.
+  const liveHeld = (frontier || []).filter((p) => p && p.warm).length
+  const connectSlots = Math.max(0, Math.min(b.maxConnectsPerQuery, b.maxLiveSessions - liveHeld))
   const coldPull = cold.slice(0, connectSlots)
   const deferred = cold.slice(connectSlots)          // background / next round
 

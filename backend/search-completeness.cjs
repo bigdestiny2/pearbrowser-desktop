@@ -49,6 +49,15 @@ function isTruncation (prevAnchor, newAnchor) {
   return newAnchor.length < prevAnchor.length
 }
 
+// Fork/substitution: two validly-signed anchors at the SAME length with
+// different tree hashes are provable equivocation (the author published two
+// divergent histories). Callers reject on truncation OR fork.
+function isFork (prevAnchor, newAnchor) {
+  if (!prevAnchor || !newAnchor) return false
+  if (prevAnchor.indexKey !== newAnchor.indexKey) return false
+  return newAnchor.length === prevAnchor.length && newAnchor.treeHash !== prevAnchor.treeHash
+}
+
 // --- Layer 2: sample-detectable withholding ----------------------------------
 
 // Deterministically sample R docIds from a reference set the verifier believes
@@ -56,14 +65,16 @@ function isTruncation (prevAnchor, newAnchor) {
 // seeded by the anchor so the server can't predict the probes ahead of serving.
 function deriveProbes (seed, referenceDocIds, R) {
   const ids = [...new Set(referenceDocIds || [])]
-  if (ids.length === 0) return []
-  const out = []
-  const used = new Set()
-  for (let i = 0; out.length < Math.min(R, ids.length) && i < R * 8; i++) {
-    const idx = hash32(seed + ':' + i) % ids.length
-    if (!used.has(idx)) { used.add(idx); out.push(ids[idx]) }
+  const n = ids.length
+  const take = Math.max(0, Math.min(Math.floor(Number(R) || 0), n))
+  // deterministic seeded partial Fisher-Yates — selects exactly `take` distinct
+  // probes in O(n), never under-samples (the old reject-on-collision loop could
+  // return fewer than R under coupon-collector pressure, weakening detection).
+  for (let i = 0; i < take; i++) {
+    const j = i + (hash32(seed + ':' + i) % (n - i))
+    const tmp = ids[i]; ids[i] = ids[j]; ids[j] = tmp
   }
-  return out
+  return ids.slice(0, take)
 }
 
 // Given the server's served docId set, flag probes the digest says are present
@@ -77,8 +88,13 @@ function detectWithholding (digest, probeDocIds, servedDocIds) {
   return { checked: (probeDocIds || []).length, missing, suspected: missing.length > 0 }
 }
 
-// Probability a fraction-f omission is caught by R independent probes.
-function detectionProbability (f, R) { return 1 - Math.pow(1 - f, R) }
+// Probability a fraction-f omission is caught by R independent probes. Inputs
+// clamped so the published guarantee is robust to caller mis-scaling.
+function detectionProbability (f, R) {
+  const ff = Math.min(Math.max(Number(f) || 0, 0), 1)
+  const rr = Math.max(0, Math.floor(Number(R) || 0))
+  return 1 - Math.pow(1 - ff, rr)
+}
 
 // --- PoR freshness challenge -------------------------------------------------
 
@@ -88,13 +104,17 @@ function makeFreshnessChallenge (nonce, minLength) { return { kind: 'por-challen
 // Holder answers: a root-signed assertion of current length + tree hash bound
 // to the challenge nonce (proves liveness, not just a replayable old snapshot).
 function answerFreshness (challenge, { rootPubkey, indexKey, length, treeHash }, rootSign) {
+  if (!Number.isInteger(length) || length < 0) throw new Error('length must be a non-negative integer')
   const msg = POR_TAG + JSON.stringify({ n: challenge.nonce, r: rootPubkey, i: indexKey, l: length, h: treeHash }, ['h', 'i', 'l', 'n', 'r'])
   return { kind: 'por-response', nonce: challenge.nonce, rootPubkey, indexKey, length, treeHash, sig: rootSign(msg) }
 }
 function verifyFreshness (challenge, response, expectedRootPubkey) {
   if (!challenge || !response || response.nonce !== challenge.nonce) return false
   if (response.rootPubkey !== expectedRootPubkey) return false
-  if (!(response.length >= challenge.minLength)) return false
+  // length bound must be a purely numeric comparison — reject string/NaN lengths
+  // (a non-canonical "1500" would otherwise pass `>=` via coercion).
+  if (!Number.isInteger(response.length) || !Number.isInteger(challenge.minLength)) return false
+  if (response.length < challenge.minLength) return false
   const msg = POR_TAG + JSON.stringify({ n: response.nonce, r: response.rootPubkey, i: response.indexKey, l: response.length, h: response.treeHash }, ['h', 'i', 'l', 'n', 'r'])
   try {
     return crypto.verify(b4a.from(msg, 'utf-8'), b4a.from(response.sig, 'hex'), b4a.from(expectedRootPubkey, 'hex'))
@@ -102,7 +122,7 @@ function verifyFreshness (challenge, response, expectedRootPubkey) {
 }
 
 module.exports = {
-  makeAnchor, verifyAnchor, isTruncation,
+  makeAnchor, verifyAnchor, isTruncation, isFork,
   deriveProbes, detectWithholding, detectionProbability,
   makeFreshnessChallenge, answerFreshness, verifyFreshness,
 }

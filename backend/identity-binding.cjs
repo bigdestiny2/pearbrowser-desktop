@@ -64,6 +64,7 @@ function makeBinding ({ rootPubkey, searchPubkey, version }, rootSign) {
 }
 
 function makeRevocation ({ rootPubkey, searchPubkey, version }, rootSign) {
+  if (!Number.isInteger(version) || version < 1) throw new Error('version must be a positive integer')
   const sig = rootSign(canonRevoke(rootPubkey, searchPubkey, version))
   return { kind: 'revoke', v: 2, rootPubkey, searchPubkey, version, sig }
 }
@@ -101,7 +102,11 @@ function resolveSearchKey (expectedRootPubkey, bindings, revocations) {
   for (const b of bindings || []) {
     if (!verifyBinding(b, expectedRootPubkey)) continue
     if (revoked.has(b.version + ':' + b.searchPubkey)) continue
-    if (!best || b.version > best.version) best = b
+    // highest version wins; equal-version ties (equivocation — two valid
+    // bindings at the same version) broken deterministically by searchPubkey so
+    // every peer resolves the same key regardless of array order.
+    if (!best || b.version > best.version ||
+      (b.version === best.version && b.searchPubkey < best.searchPubkey)) best = b
   }
   return best ? best.searchPubkey : null
 }

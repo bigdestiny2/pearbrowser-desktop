@@ -23,8 +23,10 @@ function optimalK (m, n) { return Math.max(1, Math.round((m / Math.max(1, n)) * 
 // Build a digest from the author's docIds + per-term document frequencies.
 // termDf: [{ term, df }]. p = target false-positive rate. topK = head size.
 function buildDigest (docIds, termDf = [], { p = 0.001, topK = 2048 } = {}) {
+  // clamp p into (0,0.5]: p≤0 → -log(p)=∞ → RangeError; non-finite → corrupt m
+  const pp = Math.min(Math.max(Number(p) || 0.001, 1e-12), 0.5)
   const ids = [...new Set(docIds || [])]
-  const m = optimalM(Math.max(1, ids.length), p)
+  const m = optimalM(Math.max(1, ids.length), pp)
   const k = optimalK(m, ids.length)
   const bytes = new Uint8Array(Math.ceil(m / 8))
   for (const id of ids) {
@@ -35,16 +37,22 @@ function buildDigest (docIds, termDf = [], { p = 0.001, topK = 2048 } = {}) {
     }
   }
   const topTerms = [...(termDf || [])]
-    .filter((t) => t && typeof t.term === 'string')
-    .sort((a, b) => (b.df - a.df) || (a.term < b.term ? -1 : 1))
+    .filter((t) => t && typeof t.term === 'string' && Number.isFinite(t.df))
+    .sort((a, b) => (b.df - a.df) || (a.term < b.term ? -1 : a.term > b.term ? 1 : 0))
     .slice(0, topK)
     .map((t) => t.term)
   return { v: 1, m, k, n: ids.length, bits: b4a.toString(b4a.from(bytes), 'base64'), topTerms }
 }
 
 function digestMayContainDoc (digest, docId) {
-  if (!digest || !digest.bits) return false
+  // Validate the UNTRUSTED digest before use. A malformed digest (missing bits,
+  // m/k ≤ 0, or wrong bit-buffer length) must fail CLOSED (no-hit), never
+  // fail-open to "probably present" for every docId — otherwise a corrupt or
+  // hostile digest triggers false withholding accusations and pointless pulls.
+  if (!digest || !digest.bits || !Number.isInteger(digest.m) || digest.m <= 0 ||
+      !Number.isInteger(digest.k) || digest.k <= 0) return false
   const bytes = b4a.from(digest.bits, 'base64')
+  if (bytes.length !== Math.ceil(digest.m / 8)) return false
   const { m, k } = digest
   const [h1, h2] = hashPair(docId)
   for (let i = 0; i < k; i++) {
@@ -67,11 +75,10 @@ function digestWorthPulling (digest, queryTerms) {
   return (queryTerms || []).some((t) => digestHasTerm(digest, t))
 }
 
-// Approximate serialized byte size of the digest (for budgeting).
+// True serialized wire size of the digest (for fan-out budgeting) — the actual
+// JSON bytes that replicate, not a lossy bloom+head estimate.
 function digestBytes (digest) {
-  const bloom = digest && digest.bits ? Math.ceil(digest.bits.length * 3 / 4) : 0
-  const head = digest && digest.topTerms ? digest.topTerms.join(',').length : 0
-  return bloom + head
+  try { return b4a.byteLength(JSON.stringify(digest)) } catch { return 0 }
 }
 
 module.exports = {

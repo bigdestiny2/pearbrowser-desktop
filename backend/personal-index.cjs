@@ -22,8 +22,18 @@ class PersonalIndex {
     this.store = store
     this.name = opts.name || DEFAULT_NAME
     this.sign = typeof opts.sign === 'function' ? opts.sign : null
-    this.maxDocs = opts.maxDocs || DEFAULT_MAX_DOCS
+    this.maxDocs = Number.isInteger(opts.maxDocs) && opts.maxDocs >= 0 ? opts.maxDocs : DEFAULT_MAX_DOCS
     this.bee = null
+    // Serialize index mutations: the read-modify-write of meta!count/seq spans
+    // awaits, so concurrent indexDoc()/removeDoc() would lose updates and orphan
+    // order-keys. Every mutation runs through this chain (one at a time).
+    this._chain = Promise.resolve()
+  }
+
+  _serialize (fn) {
+    const run = this._chain.then(fn, fn)
+    this._chain = run.then(() => {}, () => {}) // the lock never rejects
+    return run
   }
 
   async ready () {
@@ -39,8 +49,11 @@ class PersonalIndex {
 
   // Index (or re-index) one document. Re-indexing the same (driveKey,path)
   // refreshes its recency and replaces stale postings. Returns the docId, or
-  // null if the page had no indexable terms.
-  async indexDoc (doc) {
+  // null if the page had no indexable terms. Serialized against other mutations.
+  async indexDoc (doc) { return this._serialize(() => this._indexDocImpl(doc)) }
+  async removeDoc (docId) { return this._serialize(() => this._removeDocImpl(docId)) }
+
+  async _indexDocImpl (doc) {
     const { records, docId, terms } = sc.buildDocRecords(doc, this.sign)
     if (!terms.length) return null
 
@@ -74,14 +87,16 @@ class PersonalIndex {
     await batch.flush()
   }
 
-  async removeDoc (docId) {
+  async _removeDocImpl (docId) {
     const e = await this.bee.get(sc.docKey(docId)).catch(() => null)
     if (!e || !e.value) return false
     await this._removeByRecord(docId, e.value)
     return true
   }
 
-  // Evict the least-recently-indexed docs until under the doc cap.
+  // Evict the least-recently-indexed docs until under the doc cap. Runs INSIDE
+  // the serialized mutation, so it calls the unwrapped impl (not the public,
+  // re-locking removeDoc) to avoid self-deadlock.
   async _evictIfNeeded () {
     let count = await this._meta('count', 0)
     let guard = 0
@@ -89,7 +104,7 @@ class PersonalIndex {
       let oldest = null
       for await (const entry of this.bee.createReadStream({ gte: 'o!', lt: 'o!~', limit: 1 })) oldest = entry
       if (!oldest) break
-      await this.removeDoc(oldest.value)
+      await this._removeDocImpl(oldest.value)
       count = await this._meta('count', 0)
     }
   }

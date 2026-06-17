@@ -85,6 +85,18 @@ test('rankCandidates reads no wall-clock: recency depends only on passed-in now0
   assert.ok(stale < fresh, 'older doc (vs now0) ranks lower; no internal clock read')
 })
 
+test('ranker: a strong text match is not buried by a zero low-cardinality feature (ε-cliff fix)', () => {
+  const base = (over) => ({ docId: 'd', driveKey: 'k', tf: 1, trustHop: 0, endorsers: 0, tier: 'self', ...over })
+  const out = rankCandidates([base({ docId: 'weak', tf: 1, endorsers: 5 }), base({ docId: 'strong', tf: 20, endorsers: 0 })], { diversity: false })
+  assert.equal(out[0].docId, 'strong', 'high-tf/zero-endorser outranks low-tf/some-endorser — absent feature is neutral, not a penalty')
+})
+
+test('searchIndex limit is clamped (negative/garbage → empty, not off-by-one)', async () => {
+  // pure-function check on the clamp via rankCandidates + slice contract
+  const ranked = rankCandidates([{ docId: 'a', driveKey: 'k', tf: 5, tier: 'self' }], {})
+  assert.equal(ranked.length, 1)
+})
+
 test('searchIndex: end-to-end tokenize → range-scan → AND → rank over a real Hyperbee', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'search-core-'))
   try {

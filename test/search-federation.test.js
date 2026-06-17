@@ -28,13 +28,28 @@ test('maxFollowHops bounds the followed tier', () => {
   assert.equal(g.tierOf(B), 'default')   // hop 2 > maxFollowHops 1
 })
 
-test('trustRowsToEdges maps signed follow rows to edges', () => {
+test('trustRowsToEdges uses ONLY verified provenance, dropping forged unsigned rows', () => {
   const edges = trustRowsToEdges([
-    { authorRoot: ME, json: { curatorRoot: A } },
-    { from: A, curatorRoot: B },
-    { json: {} }, // incomplete → dropped
+    { authorRoot: ME, json: { curatorRoot: A } }, // valid: signed author + signed body
+    { authorRoot: A, json: { curatorRoot: B } },  // valid
+    { from: A, curatorRoot: B },                   // forged: unsigned top-level → DROPPED
+    { authorRoot: ME, curatorRoot: A },            // curatorRoot not in signed body → DROPPED
+    { json: { curatorRoot: A } },                  // no signed author → DROPPED
+    { json: {} },                                  // incomplete → DROPPED
   ])
+  // a Sybil cannot inject a follow edge via attacker-controllable fields
   assert.deepEqual(edges, [{ from: ME, to: A }, { from: A, to: B }])
+})
+
+test('mergeFederated dedup winner is independent of source order (deterministic)', () => {
+  const g = buildTrustGraph(ME, [{ from: ME, to: A }], { maxFollowHops: 2 })
+  // same doc, same trustHop+tf from two followed sources → tie broken by signerPubkey
+  const c1 = { docId: 'same', driveKey: 'd', path: '/', title: 'x', tf: 5, signerPubkey: 'aaa', contentHash: 'h1' }
+  const c2 = { docId: 'same', driveKey: 'd', path: '/', title: 'x', tf: 5, signerPubkey: 'bbb', contentHash: 'h2' }
+  const fwd = mergeFederated([{ rootPubkey: A, candidates: [c1] }, { rootPubkey: A, candidates: [c2] }], g)
+  const rev = mergeFederated([{ rootPubkey: A, candidates: [c2] }, { rootPubkey: A, candidates: [c1] }], g)
+  assert.equal(fwd[0].signerPubkey, rev[0].signerPubkey, 'same winner regardless of array order')
+  assert.equal(fwd[0].signerPubkey, 'aaa') // lexicographically smaller signerPubkey wins
 })
 
 test('resourceRowToCandidate maps a descriptor row to a ranking candidate', () => {

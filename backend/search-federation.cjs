@@ -83,8 +83,13 @@ function buildTrustGraph (selfRoot, edges, { maxFollowHops = 2 } = {}) {
 function trustRowsToEdges (rows) {
   const edges = []
   for (const r of rows || []) {
-    const from = r.authorRoot || r.from
-    const to = (r.json && r.json.curatorRoot) || r.curatorRoot || r.to
+    // Provenance must come from VERIFIED fields ONLY: `authorRoot` (the signed
+    // row author / memberkey set by the sheets layer) and the signed body's
+    // `json.curatorRoot`. Unsigned top-level `.from`/`.to`/`.curatorRoot` are
+    // attacker-controllable — accepting them would let anyone forge a follow
+    // edge and promote a Sybil into the followed tier. Drop those fallbacks.
+    const from = r && r.authorRoot
+    const to = r && r.json && r.json.curatorRoot
     if (from && to) edges.push({ from, to })
   }
   return edges
@@ -127,11 +132,17 @@ function mergeFederated (sources, graph, { now0 = 0, limit = 50 } = {}) {
       const tagged = tagCandidate(c, root, graph)
       const key = c.docId || (c.driveKey + '|' + (c.path || '/'))
       const prev = byDoc.get(key)
-      if (!prev ||
+      // best trust (lowest hop) wins, then best text match, then a deterministic
+      // signerPubkey/contentHash tie-break so the retained copy is independent
+      // of `sources` iteration order (cross-peer reproducibility).
+      const sig = (x) => x.signerPubkey || ''
+      const ch = (x) => x.contentHash || ''
+      const better = !prev ||
         tagged.trustHop < prev.trustHop ||
-        (tagged.trustHop === prev.trustHop && (tagged.tf || 0) > (prev.tf || 0))) {
-        byDoc.set(key, tagged)
-      }
+        (tagged.trustHop === prev.trustHop && (tagged.tf || 0) > (prev.tf || 0)) ||
+        (tagged.trustHop === prev.trustHop && (tagged.tf || 0) === (prev.tf || 0) &&
+          (sig(tagged) < sig(prev) || (sig(tagged) === sig(prev) && ch(tagged) < ch(prev))))
+      if (better) byDoc.set(key, tagged)
     }
   }
   return sc.rankCandidates([...byDoc.values()], { now0 }).slice(0, limit)
