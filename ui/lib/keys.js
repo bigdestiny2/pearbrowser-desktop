@@ -129,6 +129,21 @@ export function normalizeUrl (raw) {
   return `hyper://${s}`
 }
 
+// Naming Phase N1 — true when `raw` is a bare name token the resolver should
+// try BEFORE URL handling: a single word like "keet" or "pear-pass", not a
+// drive key, domain, path, or scheme. A cheap pre-filter so the URL bar only
+// issues CMD_NAME_RESOLVE for plausible names (the backend resolver still
+// returns null for anything unknown, so this never changes correctness — only
+// avoids an RPC on ordinary navigations). Rejects keys explicitly so a typed
+// 64-hex/52-z32 key always goes straight to drive loading.
+export function looksLikeName (raw) {
+  const s = String(raw || '').trim()
+  if (!/^[a-z0-9][a-z0-9_-]{0,127}$/i.test(s)) return false  // single token: no dot/slash/scheme/space
+  if (/^[0-9a-f]{64}$/i.test(s)) return false                 // 64-char hex drive key
+  if (/^[13-9a-km-uw-z]{52}$/i.test(s)) return false          // 52-char z-base-32 key
+  return true
+}
+
 // Route a catalog reference to the right backend loader by URL scheme:
 //   bare key / hyper://  → Hyperdrive catalog  (CMD_LOAD_CATALOG)
 //   hyperbee://          → Hyperbee catalog     (CMD_LOAD_CATALOG_BEE)

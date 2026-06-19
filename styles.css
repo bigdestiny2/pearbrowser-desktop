@@ -227,6 +227,35 @@ p { color: #8b949e; margin-bottom: 12px; }
   border-bottom: 1px solid #30363d;
 }
 
+/* Naming Phase N1 — provenance chip shown when the URL bar resolved a bare
+   name (e.g. "keet") through the petname/curated resolver. The honest-trust
+   signal (Zooko): the tier label says HOW it resolved, never hiding it. */
+.name-prov-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 14px 0;
+  padding: 3px 10px;
+  width: fit-content;
+  border-radius: 999px;
+  border: 1px solid #30363d;
+  background: rgba(22,27,34,0.6);
+  font-size: 11px;
+}
+.name-prov-chip .name-prov-name { font-weight: 600; color: #e6edf3; }
+.name-prov-chip .name-prov-tier {
+  font-family: "SF Mono", Menlo, monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #8b949e;
+}
+/* Tier-0 petname — the user's own saved alias (highest authority). */
+.name-prov-chip.name-prov-petname { border-color: rgba(46,160,67,0.5); }
+.name-prov-chip.name-prov-petname .name-prov-tier { color: #3fb950; }
+/* Tier-3 curated bootstrap floor (lowest authority; overridden by anything above). */
+.name-prov-chip.name-prov-curated .name-prov-tier { color: #58a6ff; }
+
 .browse-empty {
   flex: 1;
   display: flex;

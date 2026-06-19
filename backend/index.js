@@ -1205,22 +1205,29 @@ async function requireNaming () {
 // case — returns { resolved: null } so the UI falls through to plain URL
 // handling. Tiers 1/2 (contacts, followed rooms) slot in at N3/N4.
 rpc.handle(C.CMD_NAME_RESOLVE, async ({ name } = {}) => {
+  await whenReady()
   if (!(await isNamingEnabled())) return { resolved: null, enabled: false }
   const petnames = names ? await names.petnameMap() : {}
-  return { resolved: resolveName(name, { petnames, aliases: true }), enabled: true }
+  // `enabled` reflects the FULL feature: false if the petname store failed to
+  // open even though the flag is on (curated aliases still resolve store-free,
+  // so `resolved` may be non-null while `enabled` is false).
+  return { resolved: resolveName(name, { petnames, aliases: true }), enabled: !!names }
 })
 
 rpc.handle(C.CMD_NAME_PETNAME_LIST, async ({ limit } = {}) => {
+  await whenReady()
   if (!names || !(await isNamingEnabled())) return { petnames: [] }
   return { petnames: await requireNames().list({ limit }) }
 })
 
 rpc.handle(C.CMD_NAME_PETNAME_SET, async ({ name, key, link, label } = {}) => {
+  await whenReady()
   await requireNaming()
   return { petname: await requireNames().setPetname({ name, key, link, label }) }
 })
 
 rpc.handle(C.CMD_NAME_PETNAME_REMOVE, async ({ name } = {}) => {
+  await whenReady()
   await requireNaming()
   await requireNames().removePetname(name)
   return { ok: true }

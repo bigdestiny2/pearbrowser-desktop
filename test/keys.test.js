@@ -3,7 +3,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   hexToBytes, bytesToHex, z32FromHex, hexFromZ32,
-  formatBytes, shortKey, normalizeUrl, parseCatalogRef
+  formatBytes, shortKey, normalizeUrl, parseCatalogRef, looksLikeName
 } from '../ui/lib/keys.js'
 
 // Real 32-byte drive keys used in the shell (DEFAULT_CATALOG_KEY / DEFAULT_URL).
@@ -77,4 +77,26 @@ test('parseCatalogRef routes drive/hyperbee/autobee and strips the scheme', () =
   // autobee:// → Autobase collaborative catalog.
   assert.deepEqual(parseCatalogRef(`autobee://${CATALOG_HEX}`), { key: CATALOG_HEX, bee: false, autobee: true, kind: 'autobee' })
   assert.deepEqual(parseCatalogRef(`AUTOBEE://${CATALOG_HEX}/`), { key: CATALOG_HEX, bee: false, autobee: true, kind: 'autobee' })
+})
+
+test('looksLikeName accepts bare name tokens, rejects URLs/keys/domains', () => {
+  // Bare names the resolver should try (Tier 0 petname / Tier 3 curated floor).
+  assert.equal(looksLikeName('keet'), true)
+  assert.equal(looksLikeName('PearPass'), true)        // case-insensitive
+  assert.equal(looksLikeName('pear-pass'), true)       // hyphen allowed
+  assert.equal(looksLikeName('anon_gpt'), true)        // underscore allowed
+  assert.equal(looksLikeName('  keet  '), true)        // trimmed
+
+  // NOT names — must fall straight through to URL handling.
+  assert.equal(looksLikeName(''), false)
+  assert.equal(looksLikeName('   '), false)
+  assert.equal(looksLikeName('foo.com'), false)        // domain (has a dot)
+  assert.equal(looksLikeName('foo/bar'), false)        // has a path
+  assert.equal(looksLikeName('hyper://keet'), false)   // scheme
+  assert.equal(looksLikeName('pear://keet'), false)
+  assert.equal(looksLikeName('a b'), false)            // space
+  assert.equal(looksLikeName('-leading'), false)       // must start alphanumeric
+  assert.equal(looksLikeName(CATALOG_HEX), false)      // 64-hex drive key
+  assert.equal(looksLikeName(z32FromHex(CATALOG_HEX)), false) // 52-char z-base-32 key
+  assert.equal(looksLikeName(null), false)
 })
