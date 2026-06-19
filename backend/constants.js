@@ -130,6 +130,16 @@ const CMD_SYNC_ADD_BOOKMARK = 185
 const CMD_SYNC_REMOVE_BOOKMARK = 186
 const CMD_SYNC_PUSH_LOCAL = 187
 
+// Naming (Phase N1) — petnames + curated bootstrap resolver (experimentalNaming).
+// Resolver tiers 0 (local petname, wins) + 3 (curated NAME_ALIASES floor) ship
+// now; both are pure/Node-tested (resolve-name.cjs / names.cjs / name-aliases.cjs).
+// 254 (CMD_NAME_LOAD_DIRECTORY — verify-and-drop name-directory ingest) is
+// RESERVED for N3/N4, where Tiers 1/2 (contacts, followed rooms) land.
+const CMD_NAME_RESOLVE = 250
+const CMD_NAME_PETNAME_LIST = 251
+const CMD_NAME_PETNAME_SET = 252
+const CMD_NAME_PETNAME_REMOVE = 253
+
 // Pear Bridge (WebView → worklet via RN relay)
 const CMD_BRIDGE = 200
 
@@ -217,6 +227,7 @@ module.exports = {
   CMD_AUTOBEE_RENAME, CMD_AUTOBEE_ADD_WRITER,
   CMD_SYNC_STATUS, CMD_SYNC_CREATE, CMD_SYNC_JOIN, CMD_SYNC_ADD_WRITER,
   CMD_SYNC_GET_BOOKMARKS, CMD_SYNC_ADD_BOOKMARK, CMD_SYNC_REMOVE_BOOKMARK, CMD_SYNC_PUSH_LOCAL,
+  CMD_NAME_RESOLVE, CMD_NAME_PETNAME_LIST, CMD_NAME_PETNAME_SET, CMD_NAME_PETNAME_REMOVE,
   CMD_BRIDGE,
   CMD_STOP,
   EVT_READY, EVT_PEER_COUNT, EVT_ERROR, EVT_INSTALL_PROGRESS, EVT_SITE_PUBLISHED, EVT_BOOT_PROGRESS,

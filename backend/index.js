@@ -39,6 +39,8 @@ const { UserData } = require('./user-data.js')
 const { Identity, validateMnemonic } = require('./identity.js')
 const { Profile } = require('./profile.js')
 const { Contacts } = require('./contacts.js')
+const { Names } = require('./names.cjs')
+const { resolveName } = require('./resolve-name.cjs')
 const { SwarmBridge } = require('./swarm-bridge.js')
 const { SwarmGrants } = require('./swarm-grants.js')
 const C = require('./constants.js')
@@ -85,6 +87,7 @@ let userData = null
 let identity = null
 let profile = null
 let contacts = null
+let names = null // naming Phase N1 — local petname store (names.cjs); null until ready
 let swarmBridge = null
 let swarmGrants = null
 /** Map<requestId, { resolve, reject, timer }> for login() ceremonies. */
@@ -1171,6 +1174,58 @@ rpc.handle(C.CMD_CONTACTS_UPDATE, async ({ pubkey, updates } = {}) => {
   return { contact: await requireContacts().update(pubkey, updates || {}) }
 })
 
+// --- Naming (Phase N1) — petnames + curated bootstrap resolver ---
+//
+// Local Hyperbee petname store (Tier 0) + the pure tiered resolver
+// (names.cjs / resolve-name.cjs, both Node-tested). Gated behind the
+// experimentalNaming user-data flag, modelled on requireAutobee: disabled ⇒
+// CMD_NAME_RESOLVE answers null and the URL bar behaves EXACTLY as before, so
+// the flag-off path has no boot/navigation impact. Mutations fail closed.
+
+function requireNames () {
+  if (!names) throw new Error('Names not available — worklet still booting')
+  return names
+}
+
+async function isNamingEnabled () {
+  try {
+    const s = await requireUserData().getSettings()
+    return !!(s && s.experimentalNaming)
+  } catch { return false }
+}
+
+async function requireNaming () {
+  if (!(await isNamingEnabled())) {
+    throw new Error('Naming (petnames) is experimental — enable it in Settings first.')
+  }
+}
+
+// Resolve a typed word against the local petname store (Tier 0, wins) + the
+// curated NAME_ALIASES floor (Tier 3). Never throws for the disabled/unknown
+// case — returns { resolved: null } so the UI falls through to plain URL
+// handling. Tiers 1/2 (contacts, followed rooms) slot in at N3/N4.
+rpc.handle(C.CMD_NAME_RESOLVE, async ({ name } = {}) => {
+  if (!(await isNamingEnabled())) return { resolved: null, enabled: false }
+  const petnames = names ? await names.petnameMap() : {}
+  return { resolved: resolveName(name, { petnames, aliases: true }), enabled: true }
+})
+
+rpc.handle(C.CMD_NAME_PETNAME_LIST, async ({ limit } = {}) => {
+  if (!names || !(await isNamingEnabled())) return { petnames: [] }
+  return { petnames: await requireNames().list({ limit }) }
+})
+
+rpc.handle(C.CMD_NAME_PETNAME_SET, async ({ name, key, link, label } = {}) => {
+  await requireNaming()
+  return { petname: await requireNames().setPetname({ name, key, link, label }) }
+})
+
+rpc.handle(C.CMD_NAME_PETNAME_REMOVE, async ({ name } = {}) => {
+  await requireNaming()
+  await requireNames().removePetname(name)
+  return { ok: true }
+})
+
 // --- swarm.v1 — swarm consent ceremony + grants management ---
 //
 // When http-bridge → swarm-bridge sees a Tier C topic-join request,
@@ -1590,6 +1645,13 @@ async function boot () {
   contacts = new Contacts(store)
   try { await contacts.ready(); console.log('Contacts ready') }
   catch (err) { console.error('Contacts init failed:', err && err.message); contacts = null }
+
+  // Naming Phase N1 — local petname store (crypto-free Hyperbee). Always
+  // inited; the experimentalNaming flag only gates whether the resolver/
+  // mutations are reachable, not whether the store opens.
+  names = new Names(store)
+  try { await names.ready(); console.log('Names ready') }
+  catch (err) { console.error('Names init failed:', err && err.message); names = null }
 
   // swarm.v1 — direct Hyperswarm access for hyper:// pages.
   // SwarmGrants persists Tier C topic-join grants across launches.
