@@ -144,3 +144,25 @@ export function parseCatalogRef (raw) {
   if (!key) return null
   return { key, bee, autobee, kind: autobee ? 'autobee' : bee ? 'hyperbee' : 'drive' }
 }
+
+// Parse a multi-device sync pairing invite: `sync://<key>:<encKey>` (the bare
+// `<key>:<encKey>` form is also accepted). Both halves are 64-hex — the base
+// bootstrap key and the encryption key. Returns { key, encKey } lowercased, or
+// null if malformed. The pair is a sensitive capability: it IS the key to the
+// user's encrypted, synced bookmarks, so anyone holding it can read them.
+export function parseSyncInvite (raw) {
+  const s = String(raw || '').trim().replace(/^sync:\/\//i, '').replace(/\/+$/, '')
+  const m = s.match(/^([0-9a-f]{64}):([0-9a-f]{64})$/i)
+  if (!m) return null
+  return { key: m[1].toLowerCase(), encKey: m[2].toLowerCase() }
+}
+
+// Build the shareable pairing invite from a sync base key + encryption key.
+// Returns '' if either half is not 64-hex (so callers can disable a Copy
+// button rather than offer a malformed invite).
+export function formatSyncInvite (key, encKey) {
+  const k = String(key || '').trim().toLowerCase()
+  const e = String(encKey || '').trim().toLowerCase()
+  if (!/^[0-9a-f]{64}$/.test(k) || !/^[0-9a-f]{64}$/.test(e)) return ''
+  return `sync://${k}:${e}`
+}
