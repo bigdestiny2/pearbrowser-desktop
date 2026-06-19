@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { html } from 'htm/react'
 import { Logo, Wordmark } from './logo.js'
-import { z32FromHex, hexFromZ32, formatBytes, shortKey, normalizeUrl, parseCatalogRef, looksLikeName } from './lib/keys.js'
+import { z32FromHex, hexFromZ32, formatBytes, shortKey, normalizeUrl, parseCatalogRef, looksLikeName, parseSyncInvite, formatSyncInvite } from './lib/keys.js'
 import {
   MAX_TAB_HISTORY, MAX_CLOSED_TABS,
   makeTab, cleanTabUrl, cleanTabTitle,
@@ -3005,30 +3005,202 @@ function RelaysSection ({ rpc, C }) {
   `
 }
 
-// Experimental-features toggles. Currently just the Autobee collaborative-
-// catalog flag, which unlocks the create/load `autobee://` paths in the Apps
-// tab. The backend enforces this flag server-side; this is the user-facing
-// switch (persisted in user-data settings).
-function ExperimentalSection ({ rpc, C, onAutobeeChange }) {
+// --- Multi-device bookmark sync (encrypted) — Settings panel ---------------
+//
+// Surfaces the CMD_SYNC_* backend (Rollout Phase 4). Rendered only when the
+// experimentalDeviceSync flag is on. Mirrors the collaborative-catalog pairing
+// flow, but the base is ENCRYPTED and private to the user's own devices: the
+// invite `sync://<key>:<encKey>` carries the encryption key, so only paired
+// devices can read the bookmarks.
+//
+// Pairing (two of your own devices):
+//   Device A — "Set up sync" (becomes the first writer) → copy the invite.
+//   Device B — paste the invite → "Pair" (read-only) → copy B's writer key.
+//   Device A — paste B's writer key → "Add device". B becomes a writer on sync.
+function DeviceSync ({ rpc, C }) {
+  const [status, setStatus] = useState(null) // null = still loading
+  const [busy, setBusy] = useState(null)
+  const [err, setErr] = useState('')
+  const [notice, setNotice] = useState('')
+  const [joinInput, setJoinInput] = useState('')
+  const [writerInput, setWriterInput] = useState('')
+  const [copied, setCopied] = useState('')
+
+  const flash = (msg) => { setNotice(msg); setTimeout(() => setNotice(''), 2200) }
+  const copy = (text, what) => { if (!text) return; try { navigator.clipboard.writeText(text); setCopied(what); setTimeout(() => setCopied(''), 1500) } catch {} }
+
+  const loadStatus = async () => {
+    setErr('')
+    try { setStatus(await rpc.request(C.CMD_SYNC_STATUS)) }
+    catch (e) { setErr(e.message); setStatus({ enabled: true, paired: false }) }
+  }
+  useEffect(() => { loadStatus() }, [])
+
+  // Manual re-check — there is no push event when another device promotes this
+  // one from read-only to writer, so the user refreshes to pick it up.
+  const refresh = async () => { setBusy('refresh'); try { await loadStatus() } finally { setBusy(null) } }
+
+  const create = async () => {
+    setErr(''); setBusy('create')
+    try { await rpc.request(C.CMD_SYNC_CREATE, {}, 60000); await loadStatus(); flash('Sync is on — this device is the first writer.') }
+    catch (e) { setErr(e.message) } finally { setBusy(null) }
+  }
+
+  const join = async () => {
+    const parsed = parseSyncInvite(joinInput)
+    if (!parsed) { setErr('That is not a valid sync invite — expected sync://<64-hex>:<64-hex>.'); return }
+    setErr(''); setBusy('join')
+    try {
+      await rpc.request(C.CMD_SYNC_JOIN, parsed, 60000)
+      setJoinInput(''); await loadStatus()
+      flash('Paired. Copy this device’s writer key below, then add it from a writer device.')
+    } catch (e) { setErr(e.message) } finally { setBusy(null) }
+  }
+
+  const addWriter = async () => {
+    // Accept a bare writer key or a paste that happens to be a sync invite.
+    const writerKey = (parseSyncInvite(writerInput)?.key || writerInput).trim().toLowerCase()
+    setErr(''); setBusy('writer')
+    try {
+      await rpc.request(C.CMD_SYNC_ADD_WRITER, { writerKey }, 60000)
+      setWriterInput(''); flash('Device added — it becomes a writer once it syncs.')
+    } catch (e) { setErr(e.message) } finally { setBusy(null) }
+  }
+
+  const pushLocal = async () => {
+    setErr(''); setBusy('push')
+    try {
+      const res = await rpc.request(C.CMD_SYNC_PUSH_LOCAL, {}, 60000)
+      await loadStatus(); flash(`Imported ${res?.pushed ?? 0} local bookmark(s) into the synced set.`)
+    } catch (e) { setErr(e.message) } finally { setBusy(null) }
+  }
+
+  const removeBookmark = async (url) => {
+    setErr(''); setBusy('rm:' + url)
+    try { await rpc.request(C.CMD_SYNC_REMOVE_BOOKMARK, { url }, 60000); await loadStatus() }
+    catch (e) { setErr(e.message) } finally { setBusy(null) }
+  }
+
+  if (status === null) return html`<div class="settings-card"><div class="settings-subtle">Loading…</div></div>`
+
+  const paired = !!status.paired
+  const writable = !!status.writable
+  const invite = formatSyncInvite(status.key, status.encKey)
+  const bookmarks = Array.isArray(status.bookmarks) ? status.bookmarks : []
+  const count = (status.count && Number.isFinite(status.count.bookmarks)) ? status.count.bookmarks : bookmarks.length
+
+  return html`
+    <div class="settings-card">
+      ${err && html`<div class="apps-error">${err}</div>`}
+      ${notice && html`<div class="apps-ok">${notice}</div>`}
+
+      ${!paired && html`
+        <div class="settings-row">
+          <div>
+            <div class="settings-label">Set up sync on this device</div>
+            <div class="settings-subtle">Creates a private, encrypted bookmark store. This device becomes the first writer; pair your other devices to it.</div>
+          </div>
+          <button class="btn primary" onClick=${create} disabled=${busy === 'create'}>${busy === 'create' ? 'Setting up…' : 'Set up sync'}</button>
+        </div>
+        <div class="settings-row">
+          <div class="profile-field">
+            <div class="settings-label">…or pair this device with another</div>
+            <input class="profile-input" placeholder="sync://<key>:<encryption-key>" value=${joinInput}
+                   onInput=${(e) => setJoinInput(e.target.value)} onKeyDown=${(e) => e.key === 'Enter' && join()} />
+          </div>
+          <button class="btn" onClick=${join} disabled=${busy === 'join' || !joinInput.trim()}>${busy === 'join' ? 'Pairing…' : 'Pair'}</button>
+        </div>
+      `}
+
+      ${paired && html`
+        <div class="settings-row">
+          <div>
+            <div class="settings-label">Syncing ${writable ? '' : html`<span class="settings-subtle">· read-only on this device</span>`}</div>
+            <div class="settings-subtle">${count} bookmark(s) in the synced set</div>
+          </div>
+          <div class="settings-row-actions">
+            <button class="btn subtle small" onClick=${refresh} disabled=${busy === 'refresh'} title="Re-check sync status (e.g. after another device added this one as a writer)">${busy === 'refresh' ? 'Refreshing…' : 'Refresh'}</button>
+            ${writable && html`<button class="btn subtle" onClick=${pushLocal} disabled=${busy === 'push'}>${busy === 'push' ? 'Importing…' : 'Import local bookmarks'}</button>`}
+          </div>
+        </div>
+
+        <div class="settings-row">
+          <div class="profile-field">
+            <div class="settings-label">Pairing invite — open this on another device to sync it</div>
+            <code class="settings-code">${invite || '(unavailable)'}</code>
+            <div class="settings-subtle">Carries your encryption key. Anyone with it can read your synced bookmarks — treat it like a password.</div>
+          </div>
+          <button class="btn small" onClick=${() => copy(invite, 'invite')} disabled=${!invite}>${copied === 'invite' ? 'Copied' : 'Copy'}</button>
+        </div>
+
+        <div class="settings-row">
+          <div class="profile-field">
+            <div class="settings-label">This device’s writer key${writable ? '' : ' — give it to a writer device to be added'}</div>
+            <code class="settings-code">${status.writerKey || '(unavailable)'}</code>
+          </div>
+          <button class="btn small" onClick=${() => copy(status.writerKey, 'writer')} disabled=${!status.writerKey}>${copied === 'writer' ? 'Copied' : 'Copy'}</button>
+        </div>
+
+        ${writable && html`
+          <div class="settings-row">
+            <div class="profile-field">
+              <div class="settings-label">Add another device (paste its writer key)</div>
+              <input class="profile-input" placeholder="64-hex writer key" value=${writerInput}
+                     onInput=${(e) => setWriterInput(e.target.value)} onKeyDown=${(e) => e.key === 'Enter' && addWriter()} />
+            </div>
+            <button class="btn" onClick=${addWriter} disabled=${busy === 'writer' || !writerInput.trim()}>${busy === 'writer' ? 'Adding…' : 'Add device'}</button>
+          </div>
+        `}
+
+        ${!writable && html`<div class="settings-subtle">This device is read-only until a writer device adds the key above. Synced bookmarks still replicate here in the meantime.</div>`}
+
+        ${bookmarks.length > 0 && html`
+          <div class="settings-row"><div class="settings-label">Synced bookmarks</div></div>
+          ${bookmarks.map((b) => html`
+            <div class="settings-row" key=${b.url}>
+              <div>
+                <div class="settings-label">${b.title || b.url}</div>
+                <div class="settings-subtle">${b.url}</div>
+              </div>
+              ${writable && html`<button class="btn small subtle" onClick=${() => removeBookmark(b.url)} disabled=${busy === 'rm:' + b.url}>Remove</button>`}
+            </div>
+          `)}
+        `}
+      `}
+    </div>
+  `
+}
+
+// Experimental-features toggles. The backend enforces each flag server-side;
+// these are the user-facing switches (persisted in user-data settings):
+//   - experimentalAutobeeCatalogs  unlocks the create/load `autobee://` paths
+//                                  in the Apps tab.
+//   - experimentalDeviceSync       unlocks the Device sync panel below (and the
+//                                  CMD_SYNC_* handlers, gated by requireSync).
+function ExperimentalSection ({ rpc, C, onAutobeeChange, onDeviceSyncChange }) {
   const [autobee, setAutobee] = useState(false)
-  const [busy, setBusy] = useState(false)
+  const [deviceSync, setDeviceSync] = useState(false)
+  const [busy, setBusy] = useState(null) // the flag currently being written, or null
   const [err, setErr] = useState('')
 
   useEffect(() => {
     rpc.request(C.CMD_USERDATA_GET_SETTINGS)
-      .then((res) => setAutobee(!!unwrapSettings(res)?.experimentalAutobeeCatalogs))
+      .then((res) => {
+        const s = unwrapSettings(res)
+        setAutobee(!!s?.experimentalAutobeeCatalogs)
+        setDeviceSync(!!s?.experimentalDeviceSync)
+      })
       .catch(() => {})
   }, [])
 
-  const toggle = async () => {
-    const next = !autobee
-    setBusy(true); setErr('')
+  const toggle = async (flag, next, setLocal, onChange) => {
+    setBusy(flag); setErr('')
     try {
-      await rpc.request(C.CMD_USERDATA_SET_SETTINGS, { updates: { experimentalAutobeeCatalogs: next } })
-      setAutobee(next)
-      onAutobeeChange?.(next)
+      await rpc.request(C.CMD_USERDATA_SET_SETTINGS, { updates: { [flag]: next } })
+      setLocal(next)
+      onChange?.(next)
     } catch (e) { setErr(`save: ${e.message}`) }
-    finally { setBusy(false) }
+    finally { setBusy(null) }
   }
 
   return html`
@@ -3040,7 +3212,18 @@ function ExperimentalSection ({ rpc, C, onAutobeeChange }) {
           <div class="settings-subtle">Create app catalogs several people can co-edit, synced peer-to-peer with no server. Experimental — load or create them with <code>autobee://</code> keys in the Apps tab. Not yet pinned on relays, so a catalog is reachable only while a writer is online.</div>
         </div>
         <label class="login-scope${autobee ? ' on' : ''}">
-          <input type="checkbox" checked=${autobee} disabled=${busy} onChange=${toggle} />
+          <input type="checkbox" checked=${autobee} disabled=${busy === 'experimentalAutobeeCatalogs'}
+                 onChange=${() => toggle('experimentalAutobeeCatalogs', !autobee, setAutobee, onAutobeeChange)} />
+        </label>
+      </div>
+      <div class="settings-row">
+        <div>
+          <div class="settings-label">Device sync (encrypted bookmarks)</div>
+          <div class="settings-subtle">Sync your bookmarks across your own devices, encrypted end-to-end with no server or account. Once enabled, pair devices in the <strong>Device sync</strong> section below. Experimental — your synced data is readable only on devices that hold the pairing invite.</div>
+        </div>
+        <label class="login-scope${deviceSync ? ' on' : ''}">
+          <input type="checkbox" checked=${deviceSync} disabled=${busy === 'experimentalDeviceSync'}
+                 onChange=${() => toggle('experimentalDeviceSync', !deviceSync, setDeviceSync, onDeviceSyncChange)} />
         </label>
       </div>
     </div>
@@ -3056,6 +3239,9 @@ function Settings ({ rpc, C, status, storagePath, log }) {
   const [showRestore, setShowRestore] = useState(false)
   const [restoreInput, setRestoreInput] = useState('')
   const [restoreNotice, setRestoreNotice] = useState('')
+  // Whether the Device-sync section is shown — driven by the experimental flag,
+  // toggled live from the Experimental card below.
+  const [deviceSync, setDeviceSync] = useState(false)
   const CMD_GET_IDENTITY = C?.CMD_GET_IDENTITY ?? 31
   const CMD_IDENTITY_EXPORT_PHRASE = C?.CMD_IDENTITY_EXPORT_PHRASE ?? 70
   const CMD_IDENTITY_IMPORT_PHRASE = C?.CMD_IDENTITY_IMPORT_PHRASE ?? 71
@@ -3067,6 +3253,14 @@ function Settings ({ rpc, C, status, storagePath, log }) {
     rpc.request(CMD_GET_IDENTITY).then(setIdentity).catch((e) => setErr(e.message))
 
   useEffect(() => { refreshIdentity() }, [])
+
+  // Load the device-sync flag once so the section renders on first paint if the
+  // user already enabled it; the Experimental toggle keeps it in sync after.
+  useEffect(() => {
+    rpc.request(C.CMD_USERDATA_GET_SETTINGS)
+      .then((res) => setDeviceSync(!!unwrapSettings(res)?.experimentalDeviceSync))
+      .catch(() => {})
+  }, [])
 
   const revealPhrase = async () => {
     if (seedPhrase) { setSeedPhrase(null); return }
@@ -3251,7 +3445,13 @@ function Settings ({ rpc, C, status, storagePath, log }) {
 
       <h2>Experimental</h2>
       <p class="subtitle">Early features behind a flag. They may change, break, or be removed.</p>
-      <${ExperimentalSection} rpc=${rpc} C=${C} />
+      <${ExperimentalSection} rpc=${rpc} C=${C} onDeviceSyncChange=${setDeviceSync} />
+
+      ${deviceSync && html`
+        <h2>Device sync <span class="settings-subtle">(experimental)</span></h2>
+        <p class="subtitle">Your bookmarks, encrypted and synced across your own devices — no server, no account. Set up sync here, then pair your other devices with the invite.</p>
+        <${DeviceSync} rpc=${rpc} C=${C} />
+      `}
 
       <h2>Danger zone</h2>
       <div class="settings-card danger">

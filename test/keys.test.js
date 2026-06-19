@@ -3,7 +3,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   hexToBytes, bytesToHex, z32FromHex, hexFromZ32,
-  formatBytes, shortKey, normalizeUrl, parseCatalogRef, looksLikeName
+  formatBytes, shortKey, normalizeUrl, parseCatalogRef, looksLikeName,
+  parseSyncInvite, formatSyncInvite
 } from '../ui/lib/keys.js'
 
 // Real 32-byte drive keys used in the shell (DEFAULT_CATALOG_KEY / DEFAULT_URL).
@@ -99,4 +100,36 @@ test('looksLikeName accepts bare name tokens, rejects URLs/keys/domains', () => 
   assert.equal(looksLikeName(CATALOG_HEX), false)      // 64-hex drive key
   assert.equal(looksLikeName(z32FromHex(CATALOG_HEX)), false) // 52-char z-base-32 key
   assert.equal(looksLikeName(null), false)
+})
+
+test('parseSyncInvite accepts sync:// and bare key:encKey, rejects malformed', () => {
+  const KEY = CATALOG_HEX
+  const ENC = HOME_HEX
+
+  // Canonical sync:// form, with and without trailing slash + mixed case.
+  assert.deepEqual(parseSyncInvite(`sync://${KEY}:${ENC}`), { key: KEY, encKey: ENC })
+  assert.deepEqual(parseSyncInvite(`SYNC://${KEY}:${ENC}/`), { key: KEY, encKey: ENC })
+  assert.deepEqual(parseSyncInvite(`  sync://${KEY.toUpperCase()}:${ENC}  `), { key: KEY, encKey: ENC })
+
+  // Bare key:encKey (no scheme) is also accepted.
+  assert.deepEqual(parseSyncInvite(`${KEY}:${ENC}`), { key: KEY, encKey: ENC })
+
+  // Malformed → null.
+  assert.equal(parseSyncInvite(''), null)
+  assert.equal(parseSyncInvite('   '), null)
+  assert.equal(parseSyncInvite(`sync://${KEY}`), null)            // missing encKey half
+  assert.equal(parseSyncInvite(`sync://${KEY}:${ENC.slice(0, 63)}`), null) // wrong length
+  assert.equal(parseSyncInvite(`sync://${KEY}:${ENC}:extra`), null)
+  assert.equal(parseSyncInvite(`sync://nothex0000${KEY.slice(16)}:${ENC}`), null)
+})
+
+test('formatSyncInvite builds a sync:// invite and rejects non-64-hex halves', () => {
+  assert.equal(formatSyncInvite(CATALOG_HEX, HOME_HEX), `sync://${CATALOG_HEX}:${HOME_HEX}`)
+  assert.equal(formatSyncInvite(CATALOG_HEX.toUpperCase(), HOME_HEX), `sync://${CATALOG_HEX}:${HOME_HEX}`)
+  // Round-trips through the parser.
+  assert.deepEqual(parseSyncInvite(formatSyncInvite(CATALOG_HEX, HOME_HEX)), { key: CATALOG_HEX, encKey: HOME_HEX })
+  // Missing / malformed halves → '' (so a Copy button can be disabled).
+  assert.equal(formatSyncInvite('', HOME_HEX), '')
+  assert.equal(formatSyncInvite(CATALOG_HEX, 'short'), '')
+  assert.equal(formatSyncInvite(null, null), '')
 })
