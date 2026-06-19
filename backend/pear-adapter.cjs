@@ -55,11 +55,16 @@ function createPipePair () {
   return [a, b]
 }
 
-function bootBackend ({ storagePath }) {
+function bootBackend ({ storagePath, esmModules }) {
   const [uiSide, backendSide] = createPipePair()
 
   // Shim the BareKit global the backend expects.
   globalThis.BareKit = { IPC: backendSide }
+
+  // Stash ESM modules the root `index.js` loaded statically so the
+  // CJS backend can use them without paying Bare's CJS→ESM
+  // dynamic-import cost. See AnongptBuyer for the consumer.
+  if (esmModules) globalThis._pearbrowserEsmModules = esmModules
 
   // Backend reads `Bare.argv[0]` for its storage path.
   try {

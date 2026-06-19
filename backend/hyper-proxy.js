@@ -87,6 +87,60 @@ function isValidDriveKey (keyHex) {
 }
 
 // Escape HTML entities to prevent XSS
+/**
+ * Compute the base64 SHA-256 hash of the body of an inline-script
+ * shim string of the form `<script>BODY</script>` (the exact form
+ * PEAR_SWARM_V1_SHIM and PEAR_ANONGPT_SHIM use). The browser computes
+ * the CSP `'sha256-…'` hash over the literal text between the opening
+ * `>` of `<script>` and the closing `<` of `</script>`, so we strip
+ * the tags before hashing. Returns '' if the input doesn't look like
+ * an inline-script block (e.g. empty shim or someone passed a
+ * `<script src=…>` tag).
+ */
+function sha256ScriptBody (shimHtml) {
+  if (!shimHtml || typeof shimHtml !== 'string') return ''
+  const m = shimHtml.match(/^\s*<script\b[^>]*>([\s\S]*?)<\/script>\s*$/i)
+  if (!m) return ''
+  return crypto.createHash('sha256').update(m[1], 'utf8').digest('base64')
+}
+
+/**
+ * Modify a page's Content-Security-Policy meta tag to authorize the
+ * inline shim scripts we inject. We add `'sha256-…'` tokens to the
+ * `script-src` directive — narrowly authorizing the exact bytes we
+ * insert, without weakening the page's protection against XSS (no
+ * `'unsafe-inline'`).
+ *
+ * Three cases:
+ *   1. CSP has explicit `script-src` → append hashes to it.
+ *   2. CSP has `default-src` but no `script-src` → add a fresh
+ *      `script-src 'self' '<hashes>'` so hashes apply (CSP3 doesn't
+ *      let `'sha256-…'` tokens inherit from `default-src`).
+ *   3. CSP has neither → append `script-src 'self' '<hashes>'`.
+ *   4. No CSP meta tag in the document → no-op (page never set one).
+ *
+ * Idempotent: re-running with the same hash string yields the same
+ * policy.
+ */
+function injectCspShimHashes (html, hashesB64) {
+  if (!hashesB64 || hashesB64.length === 0) return html
+  const hashTokens = hashesB64.map((h) => `'sha256-${h}'`).join(' ')
+  // Match the meta CSP tag in either attribute order; allow single or
+  // double quotes around the content attribute value.
+  const re = /<meta\s+[^>]*?http-equiv\s*=\s*["']Content-Security-Policy["'][^>]*?content\s*=\s*(["'])([\s\S]*?)\1[^>]*>/i
+  return html.replace(re, (full, q, policy) => {
+    let newPolicy = policy
+    if (/script-src\b/i.test(newPolicy)) {
+      newPolicy = newPolicy.replace(/script-src([^;]*)/i, (m, rest) => `script-src${rest} ${hashTokens}`)
+    } else if (/default-src\b/i.test(newPolicy)) {
+      newPolicy = newPolicy.replace(/(default-src[^;]*)(;|$)/i, (m, ds, end) => `${ds}; script-src 'self' ${hashTokens}${end}`)
+    } else {
+      newPolicy = newPolicy + (newPolicy.endsWith(';') ? ' ' : '; ') + `script-src 'self' ${hashTokens}`
+    }
+    return full.replace(`${q}${policy}${q}`, `${q}${newPolicy}${q}`)
+  })
+}
+
 function escapeHtml (str) {
   if (typeof str !== 'string') return ''
   return str
@@ -122,6 +176,23 @@ class HyperProxy {
      * empty by default so older PearBrowsers gracefully omit it.
      */
     this._pearSwarmShim = ''
+    /**
+     * Page-side anonGPT shim, plus the gate key it's allowed to be
+     * injected for. The shim is only emitted into HTML responses when
+     * the loaded drive's hex key equals this._anongptDriveKey AND the
+     * drive's manifest.json declares the required privacy claims.
+     * See setAnongptShim() / setAnongptDriveKey() and the manifest
+     * cache below. Everything else gets only the swarm.v1 shim.
+     */
+    this._anongptShim = ''
+    this._anongptDriveKey = ''
+    // Cache of validated manifest results per drive key:
+    //   Map<driveKeyHex, { ok: boolean, reason?: string, checkedAt: number }>
+    // TTL is small because a publisher pushing a new release should
+    // see the gate re-check; we cache for 60s to avoid hammering the
+    // drive on every HTML response.
+    this._anongptManifestCache = new Map()
+    this._anongptManifestTtlMs = 60 * 1000
   }
 
   setHttpBridge (bridge) {
@@ -137,6 +208,172 @@ class HyperProxy {
    */
   setPearSwarmShim (shimHtml) {
     this._pearSwarmShim = String(shimHtml || '')
+    this._pearSwarmShimHash = this._pearSwarmShim ? sha256ScriptBody(this._pearSwarmShim) : ''
+  }
+
+  /**
+   * Set the page-side window.pear.anongpt shim string. Empty string
+   * disables the surface entirely (any drive — including the anonGPT
+   * drive — gets no anongpt API).
+   */
+  setAnongptShim (shimHtml) {
+    this._anongptShim = String(shimHtml || '')
+    this._anongptShimHash = this._anongptShim ? sha256ScriptBody(this._anongptShim) : ''
+  }
+
+  /**
+   * Set the single Hyperdrive hex key allowed to receive the anonGPT
+   * shim. See backend/constants.js ANONGPT_DRIVE_KEY. Any other drive
+   * will not see window.pear.anongpt regardless of what its
+   * manifest.json claims.
+   */
+  setAnongptDriveKey (driveKeyHex) {
+    this._anongptDriveKey = typeof driveKeyHex === 'string' ? driveKeyHex.toLowerCase() : ''
+  }
+
+  /**
+   * Returns true if the loaded drive is allowed to host the anongpt
+   * shim AND its manifest.json declares the four required privacy
+   * claims per anongpt/docs/spec/02-pearbrowser-dev-bridge.md §4. False
+   * otherwise — including when the gate key isn't set, the drive
+   * doesn't match, the manifest is missing, malformed, or doesn't
+   * declare the claims. Cached per-drive for _anongptManifestTtlMs.
+   *
+   * The validation is intentionally strict: a missing field is treated
+   * as a failed check, not as "default to allow". Privacy contract is
+   * fail-closed by default.
+   */
+  async _shouldInjectAnongptShim (driveKeyHex) {
+    if (!this._anongptShim) return false
+    if (!this._anongptDriveKey) return false
+    if (typeof driveKeyHex !== 'string') return false
+    if (driveKeyHex.toLowerCase() !== this._anongptDriveKey) return false
+
+    const cached = this._anongptManifestCache.get(driveKeyHex.toLowerCase())
+    if (cached && (Date.now() - cached.checkedAt) < this._anongptManifestTtlMs) {
+      return cached.ok
+    }
+
+    const result = await this._validateAnongptManifest(driveKeyHex)
+    this._anongptManifestCache.set(driveKeyHex.toLowerCase(), {
+      ok: result.ok,
+      reason: result.ok ? null : result.reason,
+      checkedAt: Date.now()
+    })
+    if (!result.ok) {
+      console.warn('[anongpt-gate] manifest gate FAILED for', driveKeyHex.slice(0, 12) + '…', '—', result.reason)
+    }
+    return result.ok
+  }
+
+  /**
+   * Read manifest.json from the drive and validate the four claims
+   * required by the privacy contract. The "pear.anongpt.infer claim"
+   * can be declared in either of two ways, both seen in practice:
+   *   (a) manifest.permissions includes 'pear.anongpt.infer'  ← anonGPT
+   *       publisher convention (treats the API as a permission scope)
+   *   (b) manifest.pear.anongpt.infer is truthy                ← nested
+   *       object form mentioned in the dev-bridge spec
+   * Either form is accepted; both express the same intent. The four
+   * privacy claims are checked exactly as the spec requires (no
+   * heuristics — a missing field is a failed check, not a default).
+   *
+   *   - permission declared (one of the two forms above)
+   *   - privacy.storesPrompts === false
+   *   - privacy.remoteHttpInference === 'forbidden'
+   *   - privacy.requiresLocalRuntime === true
+   *
+   * Returns { ok: true } on success, { ok: false, reason } otherwise.
+   */
+  async _validateAnongptManifest (driveKeyHex) {
+    let manifest
+    try {
+      const fetched = await this._fetchP2P(driveKeyHex, '/manifest.json')
+      if (!fetched || !fetched.content) {
+        return { ok: false, reason: 'manifest.json not reachable' }
+      }
+      manifest = JSON.parse(fetched.content.toString('utf-8'))
+    } catch (err) {
+      return { ok: false, reason: 'manifest.json parse error: ' + (err && err.message) }
+    }
+    if (!manifest || typeof manifest !== 'object') {
+      return { ok: false, reason: 'manifest.json not an object' }
+    }
+    const declaredViaPermissions = Array.isArray(manifest.permissions) &&
+      manifest.permissions.includes('pear.anongpt.infer')
+    const declaredViaNested = manifest.pear && manifest.pear.anongpt && manifest.pear.anongpt.infer
+    if (!declaredViaPermissions && !declaredViaNested) {
+      return {
+        ok: false,
+        reason: 'manifest.json does not declare pear.anongpt.infer (expected either ' +
+          '`permissions: ["pear.anongpt.infer", ...]` or `pear.anongpt.infer: true`)'
+      }
+    }
+    const privacy = manifest.privacy
+    if (!privacy || typeof privacy !== 'object') {
+      return { ok: false, reason: 'manifest.json missing `privacy` block' }
+    }
+    if (privacy.storesPrompts !== false) {
+      return { ok: false, reason: 'privacy.storesPrompts must be false (got ' + JSON.stringify(privacy.storesPrompts) + ')' }
+    }
+    if (privacy.remoteHttpInference !== 'forbidden') {
+      return { ok: false, reason: 'privacy.remoteHttpInference must be "forbidden" (got ' + JSON.stringify(privacy.remoteHttpInference) + ')' }
+    }
+    if (privacy.requiresLocalRuntime !== true) {
+      return { ok: false, reason: 'privacy.requiresLocalRuntime must be true (got ' + JSON.stringify(privacy.requiresLocalRuntime) + ')' }
+    }
+    return { ok: true }
+  }
+
+  /**
+   * Inject `<base>` + per-page `pear-api-token` meta + swarm.v1 shim
+   * (always) + anongpt shim (gated) into an HTML response body. Used by
+   * both the cache HIT and cache MISS paths so a reloaded page still
+   * gets a fresh token. The token is per-request, never cached.
+   *
+   * @param {Buffer|string} content   raw upstream HTML
+   * @param {string}        driveKeyHex
+   * @param {string}        reqPath   request URL path (used to choose
+   *                                  `/app/` vs `/hyper/` for <base>)
+   * @returns {Buffer}                response body with the head block injected
+   */
+  async _injectHtmlHead (content, driveKeyHex, reqPath) {
+    const html = (Buffer.isBuffer(content) ? content : Buffer.from(content)).toString('utf-8')
+    const prefix = reqPath.startsWith('/app/') ? '/app/' : '/hyper/'
+    const baseHref = `http://localhost:${this._port}${prefix}${driveKeyHex}/`
+    const apiToken = this.issueApiToken(driveKeyHex)
+    const includeAnongpt = await this._shouldInjectAnongptShim(driveKeyHex)
+    if (includeAnongpt) {
+      console.log('[anongpt-gate] injecting shim for', driveKeyHex.slice(0, 12) + '…')
+    }
+    const headInjection =
+      `<base href="${baseHref}">` +
+      `<meta name="pear-api-token" content="${apiToken}">` +
+      (this._pearSwarmShim || '') +
+      (includeAnongpt ? this._anongptShim : '')
+    let injected = html.includes('<head>')
+      ? html.replace('<head>', `<head>${headInjection}`)
+      : html.replace(/<html>/i, `<html><head>${headInjection}</head>`)
+
+    // Page may carry a strict CSP that forbids inline scripts (anonGPT
+    // ships `script-src 'self'` with no 'unsafe-inline' — its own
+    // scripts are hash-whitelisted in its page). Without help our
+    // shims would be in the HTML but never execute, and the page's
+    // feature detection for window.pear.* would report "private
+    // runtime unavailable" — exactly the failure mode the spec demands
+    // for missing runtimes. To make our injection visible to the page
+    // we add the shim hashes to the page's CSP `script-src` directive.
+    // We do NOT add 'unsafe-inline' (that would weaken the page's
+    // protection against XSS); we add only the exact hashes of the
+    // exact scripts we (the authorized runtime) inject.
+    const hashesToAuthorize = []
+    if (this._pearSwarmShim && this._pearSwarmShimHash) hashesToAuthorize.push(this._pearSwarmShimHash)
+    if (includeAnongpt && this._anongptShimHash) hashesToAuthorize.push(this._anongptShimHash)
+    if (hashesToAuthorize.length > 0) {
+      injected = injectCspShimHashes(injected, hashesToAuthorize)
+    }
+
+    return Buffer.from(injected)
   }
 
   get port () { return this._port }
@@ -268,6 +505,17 @@ class HyperProxy {
       if (cached) {
         res.setHeader('Content-Type', cached.contentType)
         res.setHeader('X-Cache', 'HIT')
+        // HTML responses must STILL get the per-page api-token + shim
+        // injection even when served from cache. The cache stores raw
+        // upstream content; the token is per-request and must not be
+        // cached (each page load gets a fresh token). Caching the post-
+        // injection HTML would leak tokens across requests, so we
+        // re-inject on every HIT instead.
+        if (cached.contentType.includes('text/html')) {
+          const injected = await this._injectHtmlHead(cached.content, driveKeyHex, path)
+          res.statusCode = 200
+          return res.end(injected)
+        }
         res.statusCode = 200
         return res.end(cached.content)
       }
@@ -295,35 +543,40 @@ class HyperProxy {
       // shim for HTML responses. Pages get the shim "for free" — no
       // <script src> required from the author. Token is also exposed in a
       // meta tag so the shim can read it without holding it in JS at
-      // construction time.
+      // construction time. The anonGPT shim is conditionally added when
+      // the gate passes. Logic lives in _injectHtmlHead() so cache HIT
+      // and cache MISS use the identical injection path.
       if (contentType.includes('text/html')) {
-        const html = content.toString('utf-8')
-        const prefix = path.startsWith('/app/') ? '/app/' : '/hyper/'
-        const baseHref = `http://localhost:${this._port}${prefix}${driveKeyHex}/`
-        const apiToken = this.issueApiToken(driveKeyHex)
-        const headInjection =
-          `<base href="${baseHref}">` +
-          `<meta name="pear-api-token" content="${apiToken}">` +
-          (this._pearSwarmShim || '')
-        const injected = html.includes('<head>')
-          ? html.replace('<head>', `<head>${headInjection}`)
-          : html.replace(/<html>/i, `<html><head>${headInjection}</head>`)
+        const injected = await this._injectHtmlHead(content, driveKeyHex, path)
         res.statusCode = 200
-        return res.end(Buffer.from(injected))
+        return res.end(injected)
       }
 
       // Range request support for streaming (video, audio, large files)
       res.setHeader('Accept-Ranges', 'bytes')
-      const rangeHeader = req.headers.range || req.headers['range']
+      const rangeHeader = req.headers.range
 
       if (rangeHeader) {
         const total = content.length
         const match = rangeHeader.match(/bytes=(\d*)-(\d*)/)
-        if (match) {
-          const start = match[1] ? parseInt(match[1]) : 0
-          const end = match[2] ? parseInt(match[2]) : total - 1
-          const chunkSize = end - start + 1
+        if (match && (match[1] || match[2])) {
+          // Clamp the requested range to the actual content bounds. Without
+          // this, an open-ended or oversized range (e.g. `bytes=0-999999`
+          // against a smaller file) sets a Content-Length larger than the
+          // bytes we actually send, and browsers stall the media stream.
+          let start = match[1] ? parseInt(match[1], 10) : 0
+          let end = match[2] ? parseInt(match[2], 10) : total - 1
+          if (Number.isNaN(start)) start = 0
+          if (Number.isNaN(end) || end > total - 1) end = total - 1
 
+          // Unsatisfiable range → 416 per RFC 7233.
+          if (start > end || start >= total) {
+            res.statusCode = 416
+            res.setHeader('Content-Range', `bytes */${total}`)
+            return res.end()
+          }
+
+          const chunkSize = end - start + 1
           res.setHeader('Content-Range', `bytes ${start}-${end}/${total}`)
           res.setHeader('Content-Length', chunkSize)
           res.statusCode = 206

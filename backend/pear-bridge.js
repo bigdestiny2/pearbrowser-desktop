@@ -652,4 +652,65 @@ const PEAR_SWARM_V1_SHIM = `<script>(function () {
   window.pear.swarm.v1 = swarmV1
 })();</script>`
 
-module.exports = { PearBridge, PEAR_SWARM_V1_SHIM }
+/**
+ * Page-side shim injected into HTML responses ONLY when the loaded
+ * Hyperdrive is the anonGPT drive AND its manifest.json declares the
+ * required privacy claims. See:
+ *   - backend/constants.js ANONGPT_DRIVE_KEY
+ *   - backend/hyper-proxy.js _shouldInjectAnongptShim()
+ *   - backend/anongpt-buyer.js
+ *   - anongpt/docs/spec/02-pearbrowser-dev-bridge.md
+ *
+ * The page-side surface is exactly one method — `infer({...})` — that
+ * fetches /api/anongpt/infer with the X-Pear-Token meta the proxy
+ * injects alongside this script. No generic DHT, no fs, no shell, no
+ * direct access to the seller transport. The privacy contract demands
+ * the page never receives buyer/seller private keys, so the entire
+ * crypto path lives on the worklet side.
+ *
+ * Page authors should always feature-detect:
+ *
+ *   if (window.pear?.anongpt?.infer) {
+ *     const r = await window.pear.anongpt.infer({
+ *       input, sellerPubkey, options: { maxTokens: 160 }, rateCard
+ *     })
+ *     if (!r.ok) { ... handle fail-closed ... }
+ *   }
+ */
+const PEAR_ANONGPT_SHIM = `<script>(function () {
+  if (window.pear && window.pear.anongpt && window.pear.anongpt.infer) return
+  function readToken () {
+    var m = document.querySelector('meta[name="pear-api-token"]')
+    return m ? m.content : ''
+  }
+  async function infer (req) {
+    var headers = {
+      'Content-Type': 'application/json',
+      'X-Pear-Token': readToken()
+    }
+    var res = await fetch('/api/anongpt/infer', {
+      method: 'POST',
+      headers: headers,
+      body: JSON.stringify(req || {})
+    })
+    var json = await res.json().catch(function () { return null })
+    if (!res.ok) {
+      // Surface the structured error to the page exactly as the
+      // worklet sent it. Do NOT throw — pages must distinguish
+      // "buyer not implemented" from "network error" without a
+      // try/catch around every call.
+      if (json && typeof json === 'object') return json
+      return {
+        ok: false,
+        code: 'http-error',
+        message: 'anongpt.infer: HTTP ' + res.status + ' ' + res.statusText
+      }
+    }
+    return json
+  }
+  if (!window.pear) window.pear = {}
+  if (!window.pear.anongpt) window.pear.anongpt = {}
+  window.pear.anongpt.infer = infer
+})();</script>`
+
+module.exports = { PearBridge, PEAR_SWARM_V1_SHIM, PEAR_ANONGPT_SHIM }

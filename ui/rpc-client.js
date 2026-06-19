@@ -20,6 +20,10 @@ export class RpcClient extends EventTarget {
   }
 
   request (cmd, data = {}, timeout = 30000) {
+    if (cmd === undefined || cmd === null) {
+      return Promise.reject(new Error('RPC command is missing. Renderer constants are out of sync with backend/constants.js.'))
+    }
+
     return new Promise((resolve, reject) => {
       const id = this._nextId++
       const timer = setTimeout(() => {

@@ -10,6 +10,7 @@
 // Browser
 const CMD_NAVIGATE = 1
 const CMD_GET_STATUS = 2
+const CMD_GET_DRIVE_INFO = 3
 
 // App Store
 const CMD_LOAD_CATALOG = 10
@@ -19,6 +20,8 @@ const CMD_UNINSTALL_APP = 12
 const CMD_LAUNCH_APP = 13
 const CMD_LIST_INSTALLED = 14
 const CMD_CHECK_UPDATES = 15
+const CMD_GET_CATALOG_APPS = 17  // aggregated apps across all loaded catalogs
+const CMD_UNLOAD_CATALOG = 18    // drop one catalog from the aggregated set
 
 // Site Builder
 const CMD_CREATE_SITE = 20
@@ -89,6 +92,14 @@ const CMD_SWARM_LIST_GRANTS = 121
 const CMD_SWARM_REVOKE_GRANT = 122
 const CMD_SWARM_REVOKE_ALL_FOR_APP = 123
 
+// Catalog authoring — your own publishable catalog
+const CMD_MYCATALOG_GET = 150
+const CMD_MYCATALOG_CREATE = 151
+const CMD_MYCATALOG_ADD_APP = 152
+const CMD_MYCATALOG_REMOVE_APP = 153
+const CMD_MYCATALOG_RENAME = 154
+const CMD_MYCATALOG_UPDATE_APP = 155
+
 // Pear Bridge (WebView → worklet via RN relay)
 const CMD_BRIDGE = 200
 
@@ -111,10 +122,31 @@ const EVT_LOGIN_REQUEST = 106
  *  Payload: { requestId, driveKey, appName, reason, topicHex, protocol } */
 const EVT_SWARM_REQUEST = 107
 
+// --- anonGPT bridge (Phase 0 plumbing — see backend/anongpt-buyer.js) ---
+
+/**
+ * The single Hyperdrive key allowed to receive the window.pear.anongpt
+ * shim. anonGPT is published as a Hyperdrive from the anongpt repo:
+ *   https://github.com/bigdestiny2/anongpt
+ *
+ * Privacy contract (see anongpt/docs/spec/01-privacy-by-design.md):
+ * the shim is injected ONLY when the loaded drive key matches this
+ * constant AND the drive's manifest.json declares the four required
+ * privacy claims (storesPrompts=false, remoteHttpInference=forbidden,
+ * requiresLocalRuntime=true, pear.anongpt.infer declared). Any other
+ * drive sees no anonGPT API and must fail closed if it depends on one.
+ *
+ * The key is hardcoded for the first cut. A future iteration will read
+ * it from a signed PearBrowser app-allowlist, or resolve it from the
+ * featured-apps catalog with a manifest-signature check.
+ */
+const ANONGPT_DRIVE_KEY = 'e3cf8b6fae6260608cbfcdf6b82d985c65f5ad1b9c85e777e296e7c521213abc'
+
 module.exports = {
-  CMD_NAVIGATE, CMD_GET_STATUS,
+  CMD_NAVIGATE, CMD_GET_STATUS, CMD_GET_DRIVE_INFO,
   CMD_LOAD_CATALOG, CMD_LOAD_CATALOG_BEE, CMD_INSTALL_APP, CMD_UNINSTALL_APP,
   CMD_LAUNCH_APP, CMD_LIST_INSTALLED, CMD_CHECK_UPDATES,
+  CMD_GET_CATALOG_APPS, CMD_UNLOAD_CATALOG,
   CMD_CREATE_SITE, CMD_UPDATE_SITE, CMD_PUBLISH_SITE,
   CMD_UNPUBLISH_SITE, CMD_LIST_SITES, CMD_DELETE_SITE, CMD_LOAD_TEMPLATE, CMD_GET_SITE_BLOCKS, CMD_LAUNCH_PEAR_LINK, CMD_RESET_APP,
   CMD_CLEAR_CACHE, CMD_GET_IDENTITY,
@@ -129,8 +161,11 @@ module.exports = {
   CMD_LOGIN_LIST_GRANTS, CMD_LOGIN_REVOKE_GRANT, CMD_LOGIN_REVOKE_ALL, CMD_LOGIN_RESOLVE,
   CMD_CONTACTS_LIST, CMD_CONTACTS_LOOKUP, CMD_CONTACTS_ADD, CMD_CONTACTS_UPDATE, CMD_CONTACTS_REMOVE,
   CMD_SWARM_RESOLVE, CMD_SWARM_LIST_GRANTS, CMD_SWARM_REVOKE_GRANT, CMD_SWARM_REVOKE_ALL_FOR_APP,
+  CMD_MYCATALOG_GET, CMD_MYCATALOG_CREATE, CMD_MYCATALOG_ADD_APP, CMD_MYCATALOG_REMOVE_APP,
+  CMD_MYCATALOG_RENAME, CMD_MYCATALOG_UPDATE_APP,
   CMD_BRIDGE,
   CMD_STOP,
   EVT_READY, EVT_PEER_COUNT, EVT_ERROR, EVT_INSTALL_PROGRESS, EVT_SITE_PUBLISHED, EVT_BOOT_PROGRESS,
   EVT_LOGIN_REQUEST, EVT_SWARM_REQUEST,
+  ANONGPT_DRIVE_KEY,
 }
