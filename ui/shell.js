@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { html } from 'htm/react'
 import { Logo, Wordmark } from './logo.js'
-import { z32FromHex, hexFromZ32, formatBytes, shortKey, normalizeUrl, parseCatalogRef } from './lib/keys.js'
+import { z32FromHex, hexFromZ32, formatBytes, shortKey, normalizeUrl, parseCatalogRef, looksLikeName } from './lib/keys.js'
 import {
   MAX_TAB_HISTORY, MAX_CLOSED_TABS,
   makeTab, cleanTabUrl, cleanTabTitle,
@@ -452,12 +452,49 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
   }, [active?.id, active?.displayUrl])
 
   const go = async (url, tabIdOverride, opts = {}) => {
-    const target = normalizeUrl(url)
-    if (!target) return
     const id = tabIdOverride || activeId
     const recordHistory = opts.recordHistory !== false
     const rememberVisit = opts.rememberVisit ?? recordHistory
-    updateTab(id, { status: `resolving ${target}…`, displayUrl: target })
+
+    // Naming Phase N1 — if the input is a bare name (e.g. "keet"), resolve it
+    // against the local petname store (Tier 0) + curated floor (Tier 3) BEFORE
+    // treating it as a URL. With the experimentalNaming flag off the backend
+    // answers null and we fall straight through to normalizeUrl, so navigation
+    // is byte-for-byte unchanged unless naming is enabled. `prov` (provenance)
+    // drives the honest URL-bar chip; we still navigate the REAL resolved
+    // target, so bookmark/copy/history all carry the actual destination.
+    let target = null
+    let prov = null
+    const raw = String(url ?? '').trim()
+    if (looksLikeName(raw)) {
+      try {
+        const { resolved } = await rpc.request(C.CMD_NAME_RESOLVE, { name: raw })
+        if (resolved && (resolved.link || resolved.key)) {
+          const link = resolved.link || `hyper://${resolved.key}/`
+          // A pear:// / file:// target is a full Pear-runtime app (Keet, PearPass,
+          // …) — launch it in its OWN window exactly as the Apps tab does
+          // (CMD_LAUNCH_PEAR_LINK), not through the in-tab web navigate path that
+          // serves /hyper/<key> as a page. The current tab stays put.
+          if (/^(?:pear|file):\/\//i.test(link)) {
+            updateTab(id, { status: `opening ${resolved.label || raw} · ${resolved.provenance}…` })
+            try {
+              await rpc.request(C.CMD_LAUNCH_PEAR_LINK, { link }, 60000)
+              updateTab(id, { status: '' })
+            } catch (err) {
+              updateTab(id, { status: `error: ${err.message}` })
+            }
+            return
+          }
+          // A browsable hyper:// target — navigate it in-tab below, with a chip.
+          target = link
+          prov = { provenance: resolved.provenance, label: resolved.label || raw, name: raw }
+        }
+      } catch { /* resolver unavailable / disabled — fall through to URL handling */ }
+    }
+    if (!target) target = normalizeUrl(url)
+    if (!target) return
+
+    updateTab(id, { status: `resolving ${prov ? prov.label : target}…`, displayUrl: target })
     try {
       const res = await rpc.request(C.CMD_NAVIGATE, { url: target })
       setTabs((prev) => prev.map((t) => {
@@ -479,10 +516,11 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
           histIdx,
           url: target,
           displayUrl: target,
-          title: target
+          title: prov ? prov.label : target,
+          nameProv: prov   // { provenance, label, name } or null — drives the URL-bar provenance chip
         }
       }))
-      if (rememberVisit) rpc.request(C.CMD_USERDATA_ADD_HISTORY, { url: target, title: target }).catch(() => {})
+      if (rememberVisit) rpc.request(C.CMD_USERDATA_ADD_HISTORY, { url: target, title: prov ? prov.label : target }).catch(() => {})
     } catch (err) {
       updateTab(id, { status: `error: ${err.message}` })
     }
@@ -831,6 +869,13 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
         `}
       </div>
       ${active?.status && html`<div class="browse-status">${active.status}</div>`}
+      ${active?.nameProv && html`
+        <div class=${`name-prov-chip name-prov-${active.nameProv.provenance}`}
+             title=${`“${active.nameProv.name}” resolved to ${active.displayUrl}`}>
+          <span class="name-prov-name">${active.nameProv.label}</span>
+          <span class="name-prov-tier">${active.nameProv.provenance === 'petname' ? 'your saved name' : 'curated'}</span>
+        </div>
+      `}
       <div class="browse-stage">
         ${tabs.map((t) => t.src
           ? html`<iframe
