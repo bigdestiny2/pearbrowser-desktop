@@ -115,10 +115,8 @@ function makeTab (initialUrl = '') {
 // --- About-this-site panel -----------------------------------------------
 //
 // Modal showing technical details about whatever drive is loaded in the
-// active tab — drive key (hex + z-base-32), bookmark state, scheme, path.
-// Live metadata (length, peer count, replicas) lands in a follow-up
-// commit once we wire CMD_DRIVE_INFO; for now we surface what's
-// derivable locally without a new RPC call.
+// active tab — drive key (hex + z-base-32), bookmark state, scheme,
+// path, and live drive/relay metadata from the backend.
 //
 // Triggered from the (i) button in the URL bar.
 
@@ -143,9 +141,52 @@ function parseDriveAddress (urlStr) {
   return { proto, raw, hex, z32: z32Form, path: u.pathname || '/', urlStr }
 }
 
+function aboutCount (n, singular, plural = singular + 's') {
+  const value = Number.isFinite(n) ? n : 0
+  return `${value} ${value === 1 ? singular : plural}`
+}
+
+function aboutPinStatus (info, err) {
+  if (err) return { tone: 'warn', text: `Live metadata unavailable: ${err}` }
+  if (!info) return { tone: 'pending', text: 'Checking live drive metadata…' }
+
+  const relay = info.relay || {}
+  if (!relay.available) {
+    return { tone: 'warn', text: 'HiveRelay client is unavailable; using pure P2P discovery.' }
+  }
+  if (relay.advertisedRelays > 0) {
+    return {
+      tone: 'ok',
+      text: `Pinned: advertised by ${aboutCount(relay.advertisedRelays, 'relay')}.`
+    }
+  }
+  if (relay.seedAcceptances > 0 && relay.durable) {
+    return {
+      tone: 'ok',
+      text: `Pinned by this client: ${aboutCount(relay.seedAcceptances, 'relay')} accepted and ${aboutCount(relay.activePeers, 'peer')} is replicating.`
+    }
+  }
+  if (relay.seedAcceptances > 0) {
+    return {
+      tone: 'warn',
+      text: `${aboutCount(relay.seedAcceptances, 'relay')} accepted the pin request; waiting for a live replication peer.`
+    }
+  }
+  if (relay.connectedRelays > 0) {
+    return {
+      tone: 'neutral',
+      text: `No pin signal for this drive from ${aboutCount(relay.connectedRelays, 'connected relay')}.`
+    }
+  }
+  return { tone: 'warn', text: 'No HiveRelay connections yet; discovery is currently pure P2P.' }
+}
+
 function AboutSite ({ rpc, C, url, onClose, onBookmarkToggle }) {
   const drive = parseDriveAddress(url)
+  const driveKey = drive?.hex || ''
   const [bookmarked, setBookmarked] = useState(null)
+  const [driveInfo, setDriveInfo] = useState(null)
+  const [driveInfoErr, setDriveInfoErr] = useState('')
   const [busy, setBusy] = useState(null)
   const [copyState, setCopyState] = useState({})
 
@@ -157,6 +198,40 @@ function AboutSite ({ rpc, C, url, onClose, onBookmarkToggle }) {
       setBookmarked(list.some((b) => b && b.url === url))
     }).catch(() => setBookmarked(false))
   }, [url, rpc, C])
+
+  // Live drive/relay metadata while the modal is open. The backend uses
+  // the same open Hyperdrive, Hyperswarm join, and HiveRelay client that
+  // page loading/publishing already use.
+  useEffect(() => {
+    if (!driveKey) {
+      setDriveInfo(null)
+      setDriveInfoErr('')
+      return
+    }
+
+    let cancelled = false
+    setDriveInfo(null)
+    setDriveInfoErr('')
+
+    const load = async () => {
+      try {
+        const res = await rpc.request(C.CMD_GET_DRIVE_INFO, { keyHex: driveKey }, 10000)
+        if (!cancelled) {
+          setDriveInfo(res)
+          setDriveInfoErr('')
+        }
+      } catch (err) {
+        if (!cancelled) setDriveInfoErr(err.message || 'unknown error')
+      }
+    }
+
+    load()
+    const timer = setInterval(load, 5000)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [driveKey, rpc, C])
 
   const copy = (key, text) => {
     try {
@@ -181,6 +256,8 @@ function AboutSite ({ rpc, C, url, onClose, onBookmarkToggle }) {
     } catch {}
     finally { setBusy(null) }
   }
+
+  const pin = aboutPinStatus(driveInfo, driveInfoErr)
 
   return html`
     <div class="modal-overlay" role="dialog" aria-modal="true"
@@ -235,6 +312,27 @@ function AboutSite ({ rpc, C, url, onClose, onBookmarkToggle }) {
           </div>
         `}
 
+        ${drive && drive.hex && html`
+          <div class="about-section-label">LIVE DRIVE</div>
+          <div class="about-meta-grid about-live-grid">
+            <div>
+              <div class="about-meta-label">Version</div>
+              <div class="about-meta-value">${driveInfo ? (driveInfo.version ?? '—') : '…'}</div>
+            </div>
+            <div>
+              <div class="about-meta-label">Peers</div>
+              <div class="about-meta-value" title=${driveInfo ? `${driveInfo.metadataPeerCount || 0} metadata · ${driveInfo.blobPeerCount || 0} blob` : ''}>
+                ${driveInfo ? (driveInfo.peerCount || 0) : '…'}
+              </div>
+            </div>
+            <div>
+              <div class="about-meta-label">Relays</div>
+              <div class="about-meta-value">${driveInfo ? (driveInfo.relay?.connectedRelays || 0) : '…'}</div>
+            </div>
+          </div>
+          <div class=${'about-pin-status ' + pin.tone}>${pin.text}</div>
+        `}
+
         <div class="about-section-label">YOUR LIBRARY</div>
         <div class="about-row about-bookmark-row">
           <div>
@@ -251,10 +349,12 @@ function AboutSite ({ rpc, C, url, onClose, onBookmarkToggle }) {
           </button>
         </div>
 
-        <div class="about-foot">
-          Live metadata (drive version, peer count, pinning relays)
-          coming in a near-future update.
-        </div>
+        ${driveInfo && html`
+          <div class="about-foot">
+            Updated ${new Date(driveInfo.updatedAt).toLocaleTimeString()} ·
+            ${driveInfo.relay?.hybridFetchEnabled ? 'hybrid relay fetch enabled' : 'pure P2P fetch'}
+          </div>
+        `}
       </div>
     </div>
   `
@@ -1000,9 +1100,50 @@ function Onboarding ({ rpc, C, onPickSite, onClose }) {
   `
 }
 
+// Catalog icons arrive as base64 data URIs from an untrusted Hyperdrive.
+// Only allow image data URIs (or http/https) into an <img src> so a hostile
+// catalog can't smuggle a javascript:/other scheme into the renderer.
+function safeIconSrc (src) {
+  if (typeof src !== 'string') return null
+  if (/^data:image\//i.test(src)) return src
+  if (/^https?:\/\//i.test(src)) return src
+  return null
+}
+
+// Normalize an app's category metadata to a string array. Catalogs in the
+// wild use either `categories: [...]` or a single `category: "..."`.
+function appCategories (app) {
+  if (Array.isArray(app.categories)) return app.categories.map((c) => String(c)).filter(Boolean)
+  if (app.category) return [String(app.category)]
+  return []
+}
+
+function unwrapSettings (res) {
+  return (res && typeof res.settings === 'object' && res.settings !== null) ? res.settings : (res || {})
+}
+
 function Apps ({ rpc, C, onLaunch }) {
   const [catalogKey, setCatalogKey] = useState('')
-  const [catalog, setCatalog] = useState(null)
+  // Cross-catalog store: PearBrowser keeps every catalog the user has
+  // added loaded at once and merges them into one searchable list. `apps`
+  // is the de-duplicated aggregate (each tagged with its source catalog);
+  // `loadedCatalogs` is the metadata behind the source-facet chips.
+  const [apps, setApps] = useState([])
+  const [loadedCatalogs, setLoadedCatalogs] = useState([])
+  // Discovery facets: free-text search, category, and source catalog;
+  // plus a map of appId → available newer version (from CMD_CHECK_UPDATES).
+  const [query, setQuery] = useState('')
+  const [category, setCategory] = useState('all')
+  const [source, setSource] = useState('all')
+  const [updates, setUpdates] = useState({})
+  // Catalog authoring: the user's own publishable catalog (or null).
+  const [myCatalog, setMyCatalog] = useState(null)
+  const [newCatalogName, setNewCatalogName] = useState('')
+  const [editingCatalogName, setEditingCatalogName] = useState(false)
+  const [catalogNameDraft, setCatalogNameDraft] = useState('')
+  const [editingAppId, setEditingAppId] = useState(null)
+  const [appDraft, setAppDraft] = useState(null)
+  const [copied, setCopied] = useState(false)
   // Recent catalog keys (loaded successfully at least once) — persisted
   // via user-data settings so they survive across launches.
   const [recentCatalogs, setRecentCatalogs] = useState([])
@@ -1077,17 +1218,215 @@ function Apps ({ rpc, C, onLaunch }) {
     }
   }
 
+  // Ask the backend which installed apps are behind the loaded catalog's
+  // version. Non-critical — a failure just means no update badges.
+  const refreshUpdates = async () => {
+    try {
+      const list = await rpc.request(C.CMD_CHECK_UPDATES)
+      const map = {}
+      for (const u of (Array.isArray(list) ? list : [])) {
+        if (u && u.id) map[u.id] = u.newVersion
+      }
+      setUpdates(map)
+    } catch {
+      // ignore — update detection is best-effort
+    }
+  }
+
+  // Re-install an installed app at its catalog's newer version. Re-running
+  // install re-syncs the drive and bumps the stored version, so the same
+  // path that installs an app also updates it.
+  const updateApp = async (id) => {
+    const catalogApp = apps.find((a) => a.id === id)
+    if (!catalogApp) { setErr(`update ${id}: not in any loaded catalog`); return }
+    await installApp(catalogApp)
+    await refreshUpdates()
+  }
+
+  const inMyCatalog = (id) => !!(myCatalog && id && Array.isArray(myCatalog.apps) && myCatalog.apps.some((a) => a.id === id || a.driveKey === id))
+  const canEditMyCatalog = !!(myCatalog && myCatalog.writable)
+
+  const copyKey = (k) => {
+    try {
+      navigator.clipboard.writeText(k)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch { /* clipboard unavailable */ }
+  }
+
+  // Create the user's own catalog, persist its key, and load it into the
+  // aggregated store so their picks show up alongside everyone else's.
+  const createMyCatalog = async () => {
+    setErr(''); setBusy('mycatalog')
+    try {
+      const res = await rpc.request(C.CMD_MYCATALOG_CREATE, { name: newCatalogName }, 60000)
+      setMyCatalog(res)
+      setNewCatalogName('')
+      rpc.request(C.CMD_USERDATA_SET_SETTINGS, { updates: { myCatalogKey: res.keyHex } }).catch(() => {})
+      await loadCatalog(res.keyHex)
+    } catch (e) {
+      setErr(`catalog create: ${e.message}`)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const addToMyCatalog = async (app) => {
+    if (!myCatalog) return
+    if (!myCatalog.writable) {
+      setErr('This catalog is not editable on this device.')
+      return
+    }
+    const id = app.id || app.driveKey
+    setErr(''); setBusy(`addcat:${id}`)
+    try {
+      const res = await rpc.request(C.CMD_MYCATALOG_ADD_APP, { keyHex: myCatalog.keyHex, app }, 60000)
+      setMyCatalog(res)
+      await refreshAggregate()
+      refreshUpdates()
+    } catch (e) {
+      setErr(`add to catalog: ${e.message}`)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const removeFromMyCatalog = async (id) => {
+    if (!myCatalog) return
+    if (!myCatalog.writable) {
+      setErr('This catalog is not editable on this device.')
+      return
+    }
+    setErr(''); setBusy(`rmcat:${id}`)
+    try {
+      const res = await rpc.request(C.CMD_MYCATALOG_REMOVE_APP, { keyHex: myCatalog.keyHex, id }, 60000)
+      setMyCatalog(res)
+      if (editingAppId === id) {
+        setEditingAppId(null)
+        setAppDraft(null)
+      }
+      await refreshAggregate()
+      refreshUpdates()
+    } catch (e) {
+      setErr(`remove from catalog: ${e.message}`)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const startRenameMyCatalog = () => {
+    if (!myCatalog) return
+    setCatalogNameDraft(myCatalog.name || 'My Catalog')
+    setEditingCatalogName(true)
+  }
+
+  const saveMyCatalogName = async () => {
+    if (!myCatalog) return
+    if (!myCatalog.writable) {
+      setErr('This catalog is not editable on this device.')
+      return
+    }
+    setErr(''); setBusy('renamecat')
+    try {
+      const res = await rpc.request(C.CMD_MYCATALOG_RENAME, {
+        keyHex: myCatalog.keyHex,
+        name: catalogNameDraft
+      }, 60000)
+      setMyCatalog(res)
+      setEditingCatalogName(false)
+      await refreshAggregate()
+      refreshUpdates()
+    } catch (e) {
+      setErr(`rename catalog: ${e.message}`)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const startEditMyCatalogApp = (app) => {
+    const id = app.id || app.driveKey
+    if (!id) return
+    setEditingAppId(id)
+    setAppDraft({
+      name: app.name || '',
+      description: app.description || '',
+      version: app.version || '',
+      author: app.author || '',
+      categories: appCategories(app).join(', ')
+    })
+  }
+
+  const updateAppDraft = (field, value) => {
+    setAppDraft((prev) => ({ ...(prev || {}), [field]: value }))
+  }
+
+  const cancelEditMyCatalogApp = () => {
+    setEditingAppId(null)
+    setAppDraft(null)
+  }
+
+  const saveMyCatalogApp = async (id) => {
+    if (!myCatalog || !appDraft) return
+    if (!myCatalog.writable) {
+      setErr('This catalog is not editable on this device.')
+      return
+    }
+    const categories = String(appDraft.categories || '')
+      .split(',')
+      .map((c) => c.trim())
+      .filter(Boolean)
+    setErr(''); setBusy(`editcat:${id}`)
+    try {
+      const res = await rpc.request(C.CMD_MYCATALOG_UPDATE_APP, {
+        keyHex: myCatalog.keyHex,
+        id,
+        app: {
+          name: appDraft.name,
+          description: appDraft.description,
+          version: appDraft.version,
+          author: appDraft.author,
+          categories
+        }
+      }, 60000)
+      setMyCatalog(res)
+      setEditingAppId(null)
+      setAppDraft(null)
+      await refreshAggregate()
+      refreshUpdates()
+    } catch (e) {
+      setErr(`edit app: ${e.message}`)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // Pull the aggregated app list + loaded-catalog metadata from the
+  // backend. The backend keeps every catalog open, so this is the single
+  // source of truth for the cross-catalog view.
+  const refreshAggregate = async () => {
+    try {
+      const res = await rpc.request(C.CMD_GET_CATALOG_APPS)
+      setApps(Array.isArray(res?.apps) ? res.apps : [])
+      setLoadedCatalogs(Array.isArray(res?.catalogs) ? res.catalogs : [])
+    } catch (e) {
+      setErr(`catalog: ${e.message}`)
+    }
+  }
+
+  // Add a catalog to the set (does not replace existing ones), persist it
+  // as recent, then re-aggregate.
   const loadCatalog = async (overrideKey) => {
     const key = (typeof overrideKey === 'string' ? overrideKey : catalogKey).trim()
     if (!key) return
-    setErr(''); setBusy('catalog'); setCatalog(null)
+    setErr(''); setBusy('catalog')
     try {
-      const data = await rpc.request(C.CMD_LOAD_CATALOG, { keyHex: key }, 60000)
-      setCatalog(data)
-      setCatalogKey(key)
+      await rpc.request(C.CMD_LOAD_CATALOG, { keyHex: key }, 60000)
+      setCatalogKey('')
+      await refreshAggregate()
+      refreshUpdates()
       // Pin as recent + persist for next launch.
       setRecentCatalogs((prev) => {
-        const next = [key, ...prev.filter((k) => k !== key)].slice(0, 5)
+        const next = [key, ...prev.filter((k) => k !== key)].slice(0, 8)
         rpc.request(C.CMD_USERDATA_SET_SETTINGS, {
           updates: { lastCatalogKey: key, recentCatalogs: next }
         }).catch(() => {})
@@ -1100,17 +1439,49 @@ function Apps ({ rpc, C, onLaunch }) {
     }
   }
 
-  // First mount: fetch installed list + recent catalogs, then auto-load
-  // the most recent catalog so the Apps tab isn't empty on every launch.
+  // Drop a catalog from the aggregated set. Also clears the source facet
+  // if it was pointing at the removed catalog, and forgets it as recent.
+  const unloadCatalog = async (key) => {
+    setErr('')
+    try {
+      await rpc.request(C.CMD_UNLOAD_CATALOG, { keyHex: key })
+      if (source === key) setSource('all')
+      await refreshAggregate()
+      setRecentCatalogs((prev) => {
+        const next = prev.filter((k) => k !== key && `bee:${k}` !== key)
+        rpc.request(C.CMD_USERDATA_SET_SETTINGS, { updates: { recentCatalogs: next } }).catch(() => {})
+        return next
+      })
+    } catch (e) {
+      setErr(`unload: ${e.message}`)
+    }
+  }
+
+  // First mount: fetch installed list, then load every known catalog so
+  // the aggregated store is populated, not just the most recent one.
   useEffect(() => {
     refreshInstalled()
     ;(async () => {
       try {
-        const settings = await rpc.request(C.CMD_USERDATA_GET_SETTINGS)
+        const settings = unwrapSettings(await rpc.request(C.CMD_USERDATA_GET_SETTINGS))
         const recent = Array.isArray(settings?.recentCatalogs) ? settings.recentCatalogs : []
+        // Back-compat: older builds persisted only a single lastCatalogKey.
         const last = settings?.lastCatalogKey
+        const myKey = typeof settings?.myCatalogKey === 'string' ? settings.myCatalogKey : null
+        const keys = [...new Set([...recent, ...(last ? [last] : []), ...(myKey ? [myKey] : [])])]
         if (recent.length) setRecentCatalogs(recent)
-        if (last) await loadCatalog(last)
+        if (myKey) {
+          rpc.request(C.CMD_MYCATALOG_GET, { keyHex: myKey }).then(setMyCatalog).catch(() => {})
+        }
+        if (keys.length) {
+          setBusy('catalog')
+          await Promise.allSettled(
+            keys.map((k) => rpc.request(C.CMD_LOAD_CATALOG, { keyHex: k }, 60000))
+          )
+          await refreshAggregate()
+          refreshUpdates()
+          setBusy(null)
+        }
       } catch {
         // user-data not ready yet — first-launch / boot races. The user
         // can still paste a key by hand below.
@@ -1158,6 +1529,87 @@ function Apps ({ rpc, C, onLaunch }) {
   }
 
   const isInstalled = (id) => installed.some((a) => a.id === id)
+
+  // Category facets across all loaded catalogs, plus the filtered view.
+  // Recomputed only when the aggregate or filters change.
+  const categories = useMemo(() => {
+    const set = new Set()
+    for (const a of apps) appCategories(a).forEach((c) => set.add(c))
+    return ['all', ...[...set].sort()]
+  }, [apps])
+
+  const filteredApps = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return apps.filter((a) => {
+      if (source !== 'all' && a.catalogKey !== source) return false
+      if (category !== 'all' && !appCategories(a).includes(category)) return false
+      if (!q) return true
+      return (a.name && a.name.toLowerCase().includes(q)) ||
+        (a.description && a.description.toLowerCase().includes(q)) ||
+        (a.author && String(a.author).toLowerCase().includes(q))
+    })
+  }, [apps, query, category, source])
+
+  const renderMyCatalogApp = (app) => {
+    const savedId = app.id || app.driveKey || app.name || 'untitled'
+    const editableId = app.id || app.driveKey
+    const editing = editingAppId === editableId && appDraft
+    const canSave = !!(appDraft && String(appDraft.name || '').trim())
+    return html`
+      <div class=${'app-card' + (editing ? ' editing' : '')} key=${savedId}>
+        <div class="app-icon app-icon-fallback">${(app.name || '?').charAt(0)}</div>
+        <div class="app-info">
+          ${editing
+            ? html`
+              <div class="catalog-edit-form">
+                <label>
+                  Name
+                  <input type="text" value=${appDraft.name} onInput=${(e) => updateAppDraft('name', e.target.value)} />
+                </label>
+                <label>
+                  Description
+                  <textarea rows="3" value=${appDraft.description} onInput=${(e) => updateAppDraft('description', e.target.value)}></textarea>
+                </label>
+                <div class="catalog-form-grid">
+                  <label>
+                    Version
+                    <input type="text" value=${appDraft.version} onInput=${(e) => updateAppDraft('version', e.target.value)} />
+                  </label>
+                  <label>
+                    Author
+                    <input type="text" value=${appDraft.author} onInput=${(e) => updateAppDraft('author', e.target.value)} />
+                  </label>
+                </div>
+                <label>
+                  Categories
+                  <input type="text" value=${appDraft.categories} onInput=${(e) => updateAppDraft('categories', e.target.value)} />
+                </label>
+              </div>
+            `
+            : html`
+              <div class="app-name">${app.name || app.id}</div>
+              <div class="app-desc">${app.description || ''}</div>
+              <div class="app-meta">${app.version ? 'v' + app.version : ''} ${app.author ? '· ' + app.author : ''}</div>
+            `}
+        </div>
+        <div class="app-actions">
+          ${editing
+            ? html`
+              <button class="btn primary" onClick=${() => saveMyCatalogApp(editableId)} disabled=${busy === `editcat:${editableId}` || !canSave}>
+                ${busy === `editcat:${editableId}` ? 'Saving…' : 'Save'}
+              </button>
+              <button class="btn subtle" onClick=${cancelEditMyCatalogApp} disabled=${busy === `editcat:${editableId}`}>Cancel</button>
+            `
+            : html`
+              ${canEditMyCatalog && editableId && html`
+                <button class="btn subtle" onClick=${() => startEditMyCatalogApp(app)} disabled=${busy === `rmcat:${editableId}`}>Edit</button>
+                <button class="btn subtle" onClick=${() => removeFromMyCatalog(editableId)} disabled=${busy === `rmcat:${editableId}`}>Remove</button>
+              `}
+            `}
+        </div>
+      </div>
+    `
+  }
 
   return html`
     <div class="apps">
@@ -1208,57 +1660,93 @@ function Apps ({ rpc, C, onLaunch }) {
           spellcheck="false"
         />
         <button class="btn primary" onClick=${() => loadCatalog()} disabled=${!catalogKey || busy === 'catalog'}>
-          ${busy === 'catalog' ? 'Loading…' : 'Load catalog'}
+          ${busy === 'catalog' ? 'Loading…' : 'Add catalog'}
         </button>
       </div>
 
-      ${recentCatalogs.length > 0 && html`
-        <div class="catalog-recent">
-          ${recentCatalogs.map((k) => html`
-            <button
-              class=${'catalog-chip' + (k === catalogKey ? ' active' : '')}
-              key=${k}
-              title=${k}
-              onClick=${() => loadCatalog(k)}
-              disabled=${busy === 'catalog'}
-            >${k.slice(0, 8)}…${k.slice(-4)}</button>
+      ${loadedCatalogs.length > 0 && html`
+        <div class="catalog-sources">
+          <button
+            class=${'catalog-chip' + (source === 'all' ? ' active' : '')}
+            onClick=${() => setSource('all')}
+          >All · ${apps.length}</button>
+          ${loadedCatalogs.map((cat) => html`
+            <span class="catalog-source" key=${cat.key}>
+              <button
+                class=${'catalog-chip' + (source === cat.key ? ' active' : '')}
+                title=${cat.key}
+                onClick=${() => setSource(cat.key)}
+              >${cat.name} · ${cat.count}</button>
+              <button class="catalog-source-x" title="Remove this catalog" onClick=${() => unloadCatalog(cat.key)}>×</button>
+            </span>
           `)}
         </div>
       `}
 
       ${err && html`<div class="apps-error">${err}</div>`}
 
-      ${busy === 'catalog' && !catalog && html`
+      ${busy === 'catalog' && apps.length === 0 && html`
         <div class="catalog-loading">
           <span class="spinner"></span>
-          <span>Loading catalog from peers…</span>
+          <span>Loading catalogs from peers…</span>
         </div>
       `}
 
-      ${autoLoadAttempted && !catalog && !busy && !err && html`
+      ${autoLoadAttempted && apps.length === 0 && !busy && !err && html`
         <div class="catalog-empty">
-          <strong>No catalog loaded.</strong>
+          <strong>No catalogs loaded.</strong>
           Paste a catalog drive key above, or use one of the featured Pear apps to launch directly.
-          The browser also remembers catalogs you've loaded before — they'll appear here next time.
+          The browser remembers catalogs you've loaded before — they'll reload here next time.
         </div>
       `}
 
-      ${catalog && html`
-        <h2>${catalog.name || 'Catalog'} · ${catalog.apps?.length ?? 0} apps</h2>
-        <div class="app-grid">
-          ${(catalog.apps ?? []).map((app) => html`
+      ${apps.length > 0 && html`
+        <h2>All apps · ${apps.length}${loadedCatalogs.length ? ` across ${loadedCatalogs.length} ${loadedCatalogs.length === 1 ? 'catalog' : 'catalogs'}` : ''}</h2>
+
+        <div class="catalog-filter">
+          <input
+            type="text"
+            class="catalog-search"
+            placeholder="Search apps by name, description, or author…"
+            value=${query}
+            onInput=${(e) => setQuery(e.target.value)}
+            spellcheck="false"
+          />
+          ${categories.length > 1 && html`
+            <div class="catalog-categories">
+              ${categories.map((c) => html`
+                <button
+                  class=${'catalog-chip' + (c === category ? ' active' : '')}
+                  key=${c}
+                  onClick=${() => setCategory(c)}
+                >${c === 'all' ? 'All' : c}</button>
+              `)}
+            </div>
+          `}
+        </div>
+
+        ${filteredApps.length === 0
+          ? html`<p class="placeholder">No apps match ${query ? `"${query}"` : 'this filter'}.</p>`
+          : html`<div class="app-grid">
+            ${filteredApps.map((app) => html`
             <div class="app-card" key=${app.id}>
-              ${app.iconData
-                ? html`<img src=${app.iconData} alt="" class="app-icon" />`
+              ${safeIconSrc(app.iconData)
+                ? html`<img src=${safeIconSrc(app.iconData)} alt="" class="app-icon" />`
                 : html`<div class="app-icon app-icon-fallback">${(app.name || '?').charAt(0)}</div>`}
               <div class="app-info">
-                <div class="app-name">${app.name}</div>
+                <div class="app-name">${app.name || app.id || 'Untitled app'}</div>
                 <div class="app-desc">${app.description || ''}</div>
                 <div class="app-meta">${app.version ? 'v' + app.version : ''} ${app.author ? '· ' + app.author : ''}</div>
+                ${app.catalogName && html`<div class="app-source-tag">${app.catalogName}</div>`}
               </div>
               <div class="app-actions">
                 ${isInstalled(app.id)
                   ? html`
+                    ${updates[app.id] && html`
+                      <button class="btn primary" onClick=${() => updateApp(app.id)} disabled=${busy === `install:${app.id}`}>
+                        ${busy === `install:${app.id}` ? 'Updating…' : `Update → v${updates[app.id]}`}
+                      </button>
+                    `}
                     <button class="btn" onClick=${() => launchApp(app)} disabled=${busy === `launch:${app.id}`}>Launch</button>
                     <button class="btn subtle" onClick=${() => uninstallApp(app)} disabled=${busy === `uninstall:${app.id}`}>Uninstall</button>
                   `
@@ -1267,11 +1755,79 @@ function Apps ({ rpc, C, onLaunch }) {
                       ${busy === `install:${app.id}` ? 'Installing…' : 'Install'}
                     </button>
                   `}
+                ${canEditMyCatalog && app.catalogKey !== myCatalog.keyHex && !inMyCatalog(app.id || app.driveKey) && html`
+                  <button class="btn subtle" title="Add to my catalog" onClick=${() => addToMyCatalog(app)} disabled=${busy === `addcat:${app.id || app.driveKey}`}>+ Catalog</button>
+                `}
               </div>
             </div>
           `)}
-        </div>
+          </div>`}
       `}
+
+      <h2>My Catalog</h2>
+      ${!myCatalog
+        ? html`
+          <div class="catalog-empty">
+            <strong>Publish your own catalog.</strong>
+            Create a catalog, add apps you want to share, then hand out its key — anyone can load it above to discover your picks. It's pinned to the relays, so it stays reachable even when you're offline.
+            <div class="catalog-loader" style=${{ marginTop: '10px' }}>
+              <input
+                type="text"
+                placeholder="Catalog name (e.g. My Picks)"
+                value=${newCatalogName}
+                onInput=${(e) => setNewCatalogName(e.target.value)}
+                onKeyDown=${(e) => e.key === 'Enter' && createMyCatalog()}
+                spellcheck="false"
+              />
+              <button class="btn primary" onClick=${createMyCatalog} disabled=${busy === 'mycatalog'}>
+                ${busy === 'mycatalog' ? 'Creating…' : 'Create catalog'}
+              </button>
+            </div>
+          </div>
+        `
+        : html`
+          <div class="mycatalog">
+            <div class="mycatalog-head">
+              <div class="mycatalog-title">
+                ${editingCatalogName
+                  ? html`
+                    <div class="mycatalog-title-edit">
+                      <input
+                        class="mycatalog-title-input"
+                        type="text"
+                        value=${catalogNameDraft}
+                        onInput=${(e) => setCatalogNameDraft(e.target.value)}
+                        onKeyDown=${(e) => {
+                          if (e.key === 'Enter') saveMyCatalogName()
+                          if (e.key === 'Escape') setEditingCatalogName(false)
+                        }}
+                        spellcheck="false"
+                        autoFocus
+                      />
+                      <button class="btn primary small" onClick=${saveMyCatalogName} disabled=${busy === 'renamecat' || !catalogNameDraft.trim()}>
+                        ${busy === 'renamecat' ? 'Saving…' : 'Save'}
+                      </button>
+                      <button class="btn subtle small" onClick=${() => setEditingCatalogName(false)} disabled=${busy === 'renamecat'}>Cancel</button>
+                    </div>
+                  `
+                  : html`
+                    <div class="mycatalog-title-row">
+                      <div class="app-name">${myCatalog.name}</div>
+                      ${canEditMyCatalog && html`<button class="btn subtle small" onClick=${startRenameMyCatalog}>Rename</button>`}
+                    </div>
+                  `}
+                <div class="app-meta">${myCatalog.apps.length} app${myCatalog.apps.length === 1 ? '' : 's'}${myCatalog.writable ? '' : ' · read-only on this device'}</div>
+              </div>
+              <button class="btn subtle" onClick=${() => copyKey(myCatalog.keyHex)}>${copied ? 'Copied!' : 'Copy share key'}</button>
+            </div>
+            <div class="mycatalog-key" title=${myCatalog.keyHex}>${myCatalog.keyHex}</div>
+            ${myCatalog.apps.length === 0
+              ? html`<p class="placeholder">${myCatalog.writable ? 'No apps yet. Use + Catalog on any app above to add it.' : 'This catalog has no saved apps.'}</p>`
+              : html`<div class="app-grid">
+                  ${myCatalog.apps.map(renderMyCatalogApp)}
+                </div>`}
+          </div>
+        `}
 
       <h2>Installed</h2>
       ${installed.length === 0
@@ -1282,11 +1838,19 @@ function Apps ({ rpc, C, onLaunch }) {
                 <div class="app-icon app-icon-fallback">${(app.name || '?').charAt(0)}</div>
                 <div class="app-info">
                   <div class="app-name">${app.name}</div>
-                  <div class="app-meta">v${app.version || '?'}</div>
+                  <div class="app-meta">v${app.version || '?'}${updates[app.id] ? ` · update available → v${updates[app.id]}` : ''}</div>
                 </div>
                 <div class="app-actions">
+                  ${updates[app.id] && html`
+                    <button class="btn primary" onClick=${() => updateApp(app.id)} disabled=${busy === `install:${app.id}`}>
+                      ${busy === `install:${app.id}` ? 'Updating…' : 'Update'}
+                    </button>
+                  `}
                   <button class="btn" onClick=${() => launchApp(app)} disabled=${busy === `launch:${app.id}`}>Launch</button>
                   <button class="btn subtle" onClick=${() => uninstallApp(app)} disabled=${busy === `uninstall:${app.id}`}>Uninstall</button>
+                  ${canEditMyCatalog && !inMyCatalog(app.id || app.driveKey) && html`
+                    <button class="btn subtle" title="Add to my catalog" onClick=${() => addToMyCatalog(app)} disabled=${busy === `addcat:${app.id || app.driveKey}`}>+ Catalog</button>
+                  `}
                 </div>
               </div>
             `)}
@@ -1780,9 +2344,15 @@ function Settings ({ rpc, C, status, storagePath, log }) {
   const [showRestore, setShowRestore] = useState(false)
   const [restoreInput, setRestoreInput] = useState('')
   const [restoreNotice, setRestoreNotice] = useState('')
+  const CMD_GET_IDENTITY = C?.CMD_GET_IDENTITY ?? 31
+  const CMD_IDENTITY_EXPORT_PHRASE = C?.CMD_IDENTITY_EXPORT_PHRASE ?? 70
+  const CMD_IDENTITY_IMPORT_PHRASE = C?.CMD_IDENTITY_IMPORT_PHRASE ?? 71
+  const CMD_IDENTITY_VALIDATE_PHRASE = C?.CMD_IDENTITY_VALIDATE_PHRASE ?? 73
+  const CMD_CLEAR_CACHE = C?.CMD_CLEAR_CACHE ?? 30
+  const CMD_RESET_APP = C?.CMD_RESET_APP ?? 29
 
   const refreshIdentity = () =>
-    rpc.request(C.CMD_GET_IDENTITY).then(setIdentity).catch((e) => setErr(e.message))
+    rpc.request(CMD_GET_IDENTITY).then(setIdentity).catch((e) => setErr(e.message))
 
   useEffect(() => { refreshIdentity() }, [])
 
@@ -1790,7 +2360,7 @@ function Settings ({ rpc, C, status, storagePath, log }) {
     if (seedPhrase) { setSeedPhrase(null); return }
     setErr(''); setBusy('reveal')
     try {
-      const res = await rpc.request(C.CMD_IDENTITY_EXPORT_PHRASE)
+      const res = await rpc.request(CMD_IDENTITY_EXPORT_PHRASE)
       setSeedPhrase(res.mnemonic)
     } catch (e) { setErr(e.message) }
     finally { setBusy(null) }
@@ -1803,7 +2373,7 @@ function Settings ({ rpc, C, status, storagePath, log }) {
     // Validate first so the user gets a clean error before we destroy anything.
     setBusy('restore-validate')
     try {
-      const v = await rpc.request(C.CMD_IDENTITY_VALIDATE_PHRASE, { mnemonic: phrase })
+      const v = await rpc.request(CMD_IDENTITY_VALIDATE_PHRASE, { mnemonic: phrase })
       if (!v?.valid) {
         setErr('That phrase is not a valid 12 or 24-word BIP-39 mnemonic.')
         setBusy(null)
@@ -1817,7 +2387,7 @@ function Settings ({ rpc, C, status, storagePath, log }) {
     }
     setBusy('restore-apply')
     try {
-      await rpc.request(C.CMD_IDENTITY_IMPORT_PHRASE, { mnemonic: phrase }, 30000)
+      await rpc.request(CMD_IDENTITY_IMPORT_PHRASE, { mnemonic: phrase }, 30000)
       setRestoreInput('')
       setShowRestore(false)
       setSeedPhrase(null)
@@ -1834,7 +2404,7 @@ function Settings ({ rpc, C, status, storagePath, log }) {
     if (!confirm('Clear all cached drives + proxy cache? Installed apps and your sites are NOT affected.')) return
     setErr(''); setBusy('cache')
     try {
-      const res = await rpc.request(C.CMD_CLEAR_CACHE)
+      const res = await rpc.request(CMD_CLEAR_CACHE)
       alert(`Cleared: ${res.message || res.cleared + ' items'}`)
     } catch (e) { setErr(e.message) }
     finally { setBusy(null) }
@@ -1845,7 +2415,7 @@ function Settings ({ rpc, C, status, storagePath, log }) {
     if (!confirm('Are you ABSOLUTELY sure? This cannot be undone.')) return
     setErr(''); setBusy('reset')
     try {
-      const res = await rpc.request(C.CMD_RESET_APP, {}, 60000)
+      const res = await rpc.request(CMD_RESET_APP, {}, 60000)
       alert(`Unseeded ${res.unseeded?.length ?? 0} site(s). App will now quit. Relaunch to start fresh.`)
     } catch (e) {
       setErr(e.message)
@@ -2308,7 +2878,8 @@ export function App ({ rpc, C, storagePath }) {
       // Decide whether to show the first-launch onboarding overlay.
       // Settings live in the user-data Hyperbee — once it's ready we
       // either show the onboarding (first launch) or skip it.
-      rpc.request(C.CMD_USERDATA_GET_SETTINGS).then((s) => {
+      rpc.request(C.CMD_USERDATA_GET_SETTINGS).then((res) => {
+        const s = unwrapSettings(res)
         setOnboardingState(s?.onboardingDone ? 'done' : 'show')
         // Session restore: rehydrate browse tabs from previous session.
         // We only restore the URL list — history/scroll/iframe-src are

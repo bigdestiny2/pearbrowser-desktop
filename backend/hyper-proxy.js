@@ -554,16 +554,29 @@ class HyperProxy {
 
       // Range request support for streaming (video, audio, large files)
       res.setHeader('Accept-Ranges', 'bytes')
-      const rangeHeader = req.headers.range || req.headers['range']
+      const rangeHeader = req.headers.range
 
       if (rangeHeader) {
         const total = content.length
         const match = rangeHeader.match(/bytes=(\d*)-(\d*)/)
-        if (match) {
-          const start = match[1] ? parseInt(match[1]) : 0
-          const end = match[2] ? parseInt(match[2]) : total - 1
-          const chunkSize = end - start + 1
+        if (match && (match[1] || match[2])) {
+          // Clamp the requested range to the actual content bounds. Without
+          // this, an open-ended or oversized range (e.g. `bytes=0-999999`
+          // against a smaller file) sets a Content-Length larger than the
+          // bytes we actually send, and browsers stall the media stream.
+          let start = match[1] ? parseInt(match[1], 10) : 0
+          let end = match[2] ? parseInt(match[2], 10) : total - 1
+          if (Number.isNaN(start)) start = 0
+          if (Number.isNaN(end) || end > total - 1) end = total - 1
 
+          // Unsatisfiable range → 416 per RFC 7233.
+          if (start > end || start >= total) {
+            res.statusCode = 416
+            res.setHeader('Content-Range', `bytes */${total}`)
+            return res.end()
+          }
+
+          const chunkSize = end - start + 1
           res.setHeader('Content-Range', `bytes ${start}-${end}/${total}`)
           res.setHeader('Content-Length', chunkSize)
           res.statusCode = 206
