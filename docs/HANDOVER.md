@@ -1,10 +1,11 @@
 # PearBrowser Desktop — P2P-Infra Handover (master)
 
-**Generated:** 2026-06-19 · **HEAD:** `fc7b620` · **Branch:** `feat/p2p-infra-naming` · **Version:** `0.4.5`
+**Generated:** 2026-06-19 · **HEAD:** `89ca728` · **Branch:** `feat/p2p-infra-naming` · **Version:** `0.4.5`
 **Scope:** the **P2P-infra build** (the four-track program in [`research/IMPLEMENTATION-PLAN.md`](./research/IMPLEMENTATION-PLAN.md)) **+ the live branch/worktree/stash map.**
 **Audience:** whoever picks up the infra program next — a fresh session, a teammate, or an AI agent.
-**Supersedes:** [`HANDOVER-v0.4.5.md`](./HANDOVER-v0.4.5.md) (a pre-reconciliation snapshot). The substantive
-delta since that doc: **Phase N1 is now COMPLETE on one branch** (the n1ui UI half was merged in — see §4).
+**Canonical handover set:** this file (master) + [`SEARCH-HANDOVER.md`](./SEARCH-HANDOVER.md) (search companion).
+The earlier `HANDOVER-v0.4.5.md` snapshot has been folded in here and removed. Since it: **Phase N1 is COMPLETE
+on one branch** (n1ui UI half merged — §4) and **device sync is fully committed** (UI `b26e4c3` — §2/§6).
 
 > ⚠️ **This worktree has multiple Claude sessions running on it at once.** During this handover,
 > concurrent sessions committed, stashed, and reset files, and authored other handover docs
@@ -44,7 +45,7 @@ shared substrate, so the tracks **reuse it, not rebuild it**:
 | **Nostr** | ⛔ **Not started** | no `backend/nostr*`/`secp256k1*` files | All of NOSTR0–8 gated on **`SPIKE-SCHNORR-BARE`** (Bare-loadable BIP-340). |
 | **Privacy-routing** | ⛔ **Not started** | no `backend/routing*` files | PRIV0 (metadata-min defaults) is cheap + default-on and can land early; PRIV1+ build the routing directory + single-hop. |
 | **Search** (substrate's origin) | ✅ Committed — phases 0–5 + 4 hardening rounds + UI search box/indexer | `b7addc7`, `826b04b`, `be9a7e9`…`b58c49d`, `0c53ed4`…`b2cc5bd` | See [`SEARCH-HANDOVER.md`](./SEARCH-HANDOVER.md) (concurrent) + [`P2P-SEARCH-RESEARCH.md`](./P2P-SEARCH-RESEARCH.md). |
-| **Device sync** (adjacent, not a plan track) | ⚠️ Backend committed; **UI in `stash@{0}`** | `3051373` (engine), `366f78e` (invite helpers) | Behind `experimentalDeviceSync`. See §6. |
+| **Device sync** (adjacent, not a plan track) | ✅ **Fully committed** (backend + UI) | `3051373` (engine), `366f78e` (invite helpers), `b26e4c3` (UI) | Behind `experimentalDeviceSync`. `DeviceSync` panel + toggle in `ui/shell.js`. |
 | **HiveRelay / schema-sheets index** | ✅ Committed through phase5 | `37ad282` + relay-* / `index-room-client.js` | Upstream contract: [`HIVERELAY-BACKBONE-HANDOVER.md`](./HIVERELAY-BACKBONE-HANDOVER.md). |
 | **Autobee collaborative catalogs** | ✅ Committed | `CMD_AUTOBEE_*` 160–165 | Behind `experimentalAutobeeCatalogs`. |
 
@@ -60,17 +61,19 @@ shared substrate, so the tracks **reuse it, not rebuild it**:
 103211c (N1 core)
 ├─ 637ef61 (N1 backend wiring + test/constants-mirror.test.js)
 │    └─ 366f78e ("test: add sync functions" — keys.js invite helpers)
-│         ├─ stash@{0}  device-sync UI (ui/shell.js +234, test/keys.test.js +35)   ← KEEP
-│         └─ fc7b620  ← MERGE (HEAD of feat/p2p-infra-naming) ─┐
-└─ 76af6ef (N1 UI half: shell.js resolver + chip, styles, keys.looksLikeName) ──────┘
-       └─ checked out in worktree  pearbrowser-desktop--n1ui  [feat/p2p-infra-naming-n1ui]
+│         └─ fc7b620  ← N1 MERGE ──┐
+└─ 76af6ef (N1 UI half: shell.js resolver + chip, styles, keys.looksLikeName) ──┘
+                                    └─ b26e4c3 (device-sync UI, recovered from stash@{0})
+                                         └─ f92f8f7 (master handover)
+                                              └─ 89ca728 (search handover)  ← HEAD
+   n1ui half also checked out in worktree  pearbrowser-desktop--n1ui  [feat/p2p-infra-naming-n1ui]
 ```
 
 | Branch / location | Tip | Role now |
 |---|---|---|
-| `feat/p2p-infra-naming` (this worktree) | `fc7b620` | **Canonical infra branch** (plan-designated). Carries full N1 + mirror guard + sync helpers. |
+| `feat/p2p-infra-naming` (this worktree) | `89ca728` | **Canonical infra branch** (plan-designated). Carries full N1 + mirror guard + device sync (UI `b26e4c3`) + handover docs. |
 | `feat/p2p-infra-naming-n1ui` (worktree `../pearbrowser-desktop--n1ui`) | `76af6ef` | **Now redundant** — its work is merged into the canonical branch. Safe to delete *once that worktree is idle* (`git worktree remove` then `git branch -d`). Can't be deleted while checked out. |
-| `feat/p2p-infra-impl` | search tip + stashes `{1,2,3}` | Older infra branch; superseded by what's committed here. |
+| `feat/p2p-infra-impl` | search tip + stashes `{0,1,2}` | Older infra branch; superseded by what's committed here. (Stashes renumbered after the device-sync `stash@{0}` was recovered + dropped.) |
 | `tag backup/pre-reconcile-366f78e` | `366f78e` | Safety net — the pre-merge tip, if the reconciliation needs unwinding. |
 
 ---
@@ -99,14 +102,14 @@ curated (Tier 3). Flag off ⇒ resolver returns null ⇒ navigation unchanged. T
 friendly name) is what gets bookmarked / copied / put in history.
 
 **Not done (deliberately deferred — irreversible / needs coordination):**
-- Dropping stashes (`stash@{0}` is **not** stale; `stash@{3}` is 501 lines — see §6).
+- Dropping the remaining `impl`-branch stashes (`stash@{2}` is 501 lines — see §6). *(The device-sync `stash@{0}` has since been recovered, committed `b26e4c3`, and dropped.)*
 - Deleting `feat/p2p-infra-naming-n1ui` (checked out in a live worktree).
 
 ---
 
 ## 5. Remaining reconciliation decisions (not yet executed)
 
-1. **Land the device-sync UI** — recover `stash@{0}` (§6), re-test, commit. Complete, verified work waiting to land.
+1. ~~**Land the device-sync UI**~~ ✅ **Done** — recovered from `stash@{0}`, re-merged onto N1, committed `b26e4c3` (159 tests + encrypted smoke pass); stash dropped.
 2. **Retire the n1ui worktree/branch** once it's idle: `git worktree remove ../pearbrowser-desktop--n1ui && git branch -d feat/p2p-infra-naming-n1ui`.
 3. **Branch hygiene** — `feat/p2p-infra-naming` now carries naming + sync + search + relay work. Consider splitting
    device sync into its own PR rather than bundling it under the naming branch.
@@ -116,25 +119,23 @@ friendly name) is what gets bookmarked / copied / put in history.
 
 ## 6. Stash inventory — corrected stale/not-stale assessment
 
-> The v0.4.5 doc and the "clear stale stashes" instruction over-broadly called these stale. They are **not all stale.**
+> The device-sync `stash@{0}` was recovered + committed (`b26e4c3`) and dropped; the three remaining
+> stashes are all on the **old `feat/p2p-infra-impl`** branch and renumbered to `{0,1,2}`. **Not all stale** —
+> verify before dropping.
 
 | Stash | Contents | Verdict |
 |---|---|---|
-| `stash@{0}` WIP on `feat/p2p-infra-naming` | device-sync **UI**: `ui/shell.js` +234, `test/keys.test.js` +35 | **KEEP — recover it.** Finished, previously-verified feature (the `DeviceSync` panel + `experimentalDeviceSync` toggle). |
-| `stash@{1}` On `feat/p2p-infra-impl` | `docs/research/00-overview.md` +7 | Likely stale (doc edits). Verify vs committed overview before drop. |
-| `stash@{2}` On `feat/p2p-infra-impl` | `index.js` +15 (root) | Likely stale ("set aside for infra loop"). Verify before drop. |
-| `stash@{3}` On `feat/p2p-infra-impl` | **501 lines**: `constants.js`/`index.js`/`boot.js`/`tabs.js`/`shell.js` ("schema-sheets/sync/run-app-in-tab") | **NOT obviously stale.** A large parked changeset — diff against HEAD and confirm full supersession **before** dropping, or you lose real work. |
+| `stash@{0}` On `feat/p2p-infra-impl` | `docs/research/00-overview.md` +7 | Likely stale (doc edits). Verify vs committed overview before drop. |
+| `stash@{1}` On `feat/p2p-infra-impl` | `index.js` +15 (root) | Likely stale ("set aside for infra loop"). Verify before drop. |
+| `stash@{2}` On `feat/p2p-infra-impl` | **501 lines**: `constants.js`/`index.js`/`boot.js`/`tabs.js`/`shell.js` ("schema-sheets/sync/run-app-in-tab") | **NOT obviously stale.** A large parked changeset — diff against HEAD and confirm full supersession **before** dropping, or you lose real work. |
 
-Recover the device-sync UI (only when no other session is mid-edit on `ui/shell.js`):
-```bash
-git stash show -p stash@{0}     # inspect
-git stash apply stash@{0}       # apply WITHOUT dropping (safer than pop)
-npm test && node scripts/browser-state-sync-smoke.js
-# if happy:  git add ui/shell.js test/keys.test.js && git commit
-```
+The device-sync UI that previously lived in a stash is **done** — recovered, re-merged onto the N1 work,
+committed `b26e4c3` (159 tests + `scripts/browser-state-sync-smoke.js` green), and the stash dropped.
 
-**Untracked docs (decide: commit vs local-only):** `HANDOVER-v0.4.5.md`, `SEARCH-HANDOVER.md`,
-`HIVERELAY-BACKBONE-RESPONSE.md`, `PEARBROWSER-APP-COMPAT-STANDARD.md`, `research/iroh-comparison.md`.
+**Untracked docs (decide: commit vs local-only):** `HIVERELAY-BACKBONE-RESPONSE.md`,
+`PEARBROWSER-APP-COMPAT-STANDARD.md`, `research/iroh-comparison.md`. *(The handover docs are now
+reconciled: this file + `SEARCH-HANDOVER.md` are the committed canonical set; the pre-reconciliation
+`HANDOVER-v0.4.5.md` was removed.)*
 
 ---
 
@@ -208,8 +209,7 @@ prefer `git stash apply` over `pop`; build risky UI changes in a separate worktr
 | [`research/IMPLEMENTATION-PLAN.md`](./research/IMPLEMENTATION-PLAN.md) | The phased four-track program (P0…PRIV4 + spikes); per-phase exit criteria |
 | [`research/00-overview.md`](./research/00-overview.md) | Thesis + L0→L4 dependency graph |
 | `research/{naming,payments,nostr-bridge,privacy-routing}.md` | Per-track design corpora |
-| [`HANDOVER-v0.4.5.md`](./HANDOVER-v0.4.5.md) | Pre-reconciliation snapshot (superseded by this doc) |
-| [`SEARCH-HANDOVER.md`](./SEARCH-HANDOVER.md) | Search-track handover (concurrent) |
+| [`SEARCH-HANDOVER.md`](./SEARCH-HANDOVER.md) | Search-track handover (the committed search companion to this doc) |
 | [`HIVERELAY-BACKBONE-HANDOVER.md`](./HIVERELAY-BACKBONE-HANDOVER.md) | Relay-operator handover (upstream dep) |
 | [`P2P-BROWSER-FEATURE-ROADMAP.md`](./P2P-BROWSER-FEATURE-ROADMAP.md) | Product roadmap |
 | [`AUTOBEE-RESEARCH.md`](./AUTOBEE-RESEARCH.md) | Autobase/Autobee notes (incl. the durability caveat the spikes test) |
