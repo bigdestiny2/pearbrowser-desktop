@@ -196,6 +196,16 @@ const ANONGPT_DRIVE_KEY = 'e3cf8b6fae6260608cbfcdf6b82d985c65f5ad1b9c85e777e296e
 // Production: add a fleet relay's `pubkey` here once it runs the index sidecar;
 // gateway + index room then resolve themselves over the DHT.
 const BOOTSTRAP_RELAYS = [
+  // Production EU relay (bern). pubkey-only is the preferred bootstrap: the
+  // client resolves bern's current gateway + index room from its signed DHT
+  // record (verified by hyperdht). gatewayUrl is the static HTTPS fallback;
+  // indexRoom is intentionally null here — it resolves from the DHT record.
+  {
+    pubkey: 'bc421fedea8a79607581da49210cd39fb5b08ce942b2a62884b831508c23d7ee',
+    gatewayUrl: 'https://relay-eu.p2phiverelay.xyz',
+    indexRoom: null
+  },
+  // Local dev relay (optional; harmless on machines without one running).
   { gatewayUrl: 'http://127.0.0.1:9100', indexRoom: null, pubkey: null }
 ]
 
