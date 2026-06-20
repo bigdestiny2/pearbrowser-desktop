@@ -9,7 +9,7 @@ dep. All gates below are real and unstarted unless noted.
 
 ## Run order (by fan-out × risk, not raw effort)
 
-1. **SPIKE-AUTOBEE-DURABILITY** (~1d) — biggest infra risk; a RED reshapes N5/PAY1/PAY6/NOSTR1.
+1. **SPIKE-AUTOBEE-DURABILITY** (~1d) — ✅ **GREEN / RESOLVED** (`test/spike-autobee-durability.test.js`). A fresh never-writer node re-serves the converged view byte-identical after all writers go offline, via a **blind** relay (no encryption key). N5/PAY1/PAY6/NOSTR1 are de-risked. Lesson: re-derive via the Autobase from a replica — do NOT pin the view core standalone.
 2. **SPIKE-SCHNORR-BARE** (~1d) — highest fan-out (all 9 Nostr phases + PAY3 + anonGPT receipts); proves the esbuild→CJS→Bare bundling path.
 3. **SPIKE-BINDING-COORDINATION** (~1d) — one-time canonical-shape gate for N2/PAY3/NOSTR2/PRIV1; must land before any track publishes bindings (free to cut now — no live bindings).
 4. **SEC0 seed-at-rest** (~2d) — gates real-user PAY2/NOSTR2/N2. **Crypto core + identity integration already built this session** (`1f8bf02`); only first-run migration + boot-unlock UX remain.
@@ -21,7 +21,9 @@ dep. All gates below are real and unstarted unless noted.
 
 ---
 
-## 1. SPIKE-AUTOBEE-DURABILITY  (~1d, no deps)
+## 1. SPIKE-AUTOBEE-DURABILITY  (~1d, no deps) — ✅ GREEN (resolved 2026-06-20)
+**Verdict:** GREEN. `test/spike-autobee-durability.test.js` (4 tests) proves: encrypted multi-writer convergence; a fresh never-writer node re-serves the converged view **byte-identical** after all writers offline; the relay can be **blind** (holds the opaque encrypted cores with NO key); and — the key lesson — the durable artifact is the AUTOBASE re-derived from a replica, NOT the standalone view core (opening it directly with the master key fails; Autobase derives per-core keys). So PAY1/N5/NOSTR1 consumers re-open the manager + replicate from the (blind) relay. No fallback needed.
+
 **Q:** Can an encrypted multi-writer Autobase's *view* be HiveRelay-pinned and re-served to a fresh never-writer node after ALL writers go offline, byte-identical?
 **Gates:** N5, PAY1, PAY6, NOSTR1, NOSTR2-mirror — every multi-writer ledger/registry.
 **Experiment** (`test/spike-autobee-durability.test.js`, offline, Node-only):
