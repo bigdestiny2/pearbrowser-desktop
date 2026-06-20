@@ -1649,7 +1649,14 @@ async function boot () {
   try { await profile.ready(); console.log('Profile ready') }
   catch (err) { console.error('Profile init failed:', err && err.message); profile = null }
 
-  contacts = new Contacts(store)
+  contacts = new Contacts(store, {
+    // Verify invite signatures against the contact's own root key. Fails
+    // closed: if identity is unavailable, a signed invite is refused.
+    verify: (payload, sigHex, pubHex) => {
+      if (!identity) throw new Error('identity unavailable for contact verify')
+      return identity.verify(payload, sigHex, pubHex)
+    }
+  })
   try { await contacts.ready(); console.log('Contacts ready') }
   catch (err) { console.error('Contacts init failed:', err && err.message); contacts = null }
 

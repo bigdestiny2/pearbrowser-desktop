@@ -7,7 +7,7 @@
  * `window.pear.contacts.list()`.
  *
  * Data layout:
- *   contact!<pubkey>   { displayName, addedAt, tags?, avatar?, notes? }
+ *   contact!<pubkey>   { displayName, addedAt, tags?, avatar?, notes?, signature?, verifiedAt? }
  *
  * Pubkeys are the OTHER user's ROOT pubkey (not their per-app sub-key).
  * Since each user's root pubkey is derived from their BIP-39 seed, it's
@@ -15,14 +15,25 @@
  */
 
 const Hyperbee = require('hyperbee')
-const crypto = require('bare-crypto')
 
 const MAX_CONTACTS = 10_000
 
 class Contacts {
-  constructor (store) {
+  /**
+   * @param {Corestore} store
+   * @param {object} [opts]
+   * @param {(payload:string, signatureHex:string, publicKeyHex:string)=>boolean} [opts.verify]
+   *        Ed25519 verifier (typically `identity.verify`). When present, an
+   *        invite that carries a `signature` is checked and the import is
+   *        REJECTED if it doesn't verify (fail closed). When absent, a signed
+   *        invite is refused rather than imported unverified.
+   * @param {()=>number} [opts.now] injectable clock (for deterministic tests)
+   */
+  constructor (store, opts = {}) {
     if (!store) throw new Error('Contacts requires a Corestore')
     this.store = store
+    this._verify = typeof opts.verify === 'function' ? opts.verify : null
+    this._now = typeof opts.now === 'function' ? opts.now : () => Date.now()
     this._bee = null
     this._ready = false
   }
@@ -68,18 +79,47 @@ class Contacts {
     return entry ? { pubkey: key, ...entry.value } : null
   }
 
-  async add ({ pubkey, displayName, avatar, tags, notes }) {
+  /**
+   * Add (or update) a contact. If `signature` is present it must be an ed25519
+   * signature by the contact's OWN root key (== `pubkey`) over the canonical
+   * message `pear.contact:<pubkey>:<displayName>`, proving the invite/QR wasn't
+   * tampered with in transit. Verification FAILS CLOSED: a signature that is
+   * malformed, unverifiable, or invalid rejects the import rather than silently
+   * downgrading to an unverified contact.
+   */
+  async add ({ pubkey, displayName, avatar, tags, notes, signature }) {
     this._requireReady()
     const key = this._validatePubkey(pubkey)
     const trimmedName = typeof displayName === 'string' ? displayName.trim().slice(0, 128) : ''
+
+    const hasSig = signature != null && signature !== ''
+    let verifiedAt = null
+    let storedSig = null
+    if (hasSig) {
+      if (typeof signature !== 'string' || !/^[0-9a-f]+$/i.test(signature)) {
+        throw new Error('contact invite signature malformed — expected hex')
+      }
+      if (!this._verify) {
+        throw new Error('contact invite carries a signature but no verifier is configured')
+      }
+      const message = `pear.contact:${key}:${trimmedName}`
+      let ok = false
+      try { ok = this._verify(message, signature, key) === true } catch (_) { ok = false }
+      if (!ok) throw new Error('contact invite signature invalid — refusing tampered invite')
+      verifiedAt = this._now()
+      storedSig = signature.toLowerCase()
+    }
+
     const existing = await this._bee.get('contact!' + key)
     const record = {
       displayName: trimmedName,
-      addedAt: existing ? existing.value.addedAt : Date.now(),
+      addedAt: existing ? existing.value.addedAt : this._now(),
       avatar: typeof avatar === 'string' ? avatar.slice(0, 1024) : null,
       tags: Array.isArray(tags) ? tags.map(String).slice(0, 16) : [],
       notes: typeof notes === 'string' ? notes.slice(0, 512) : null,
-      updatedAt: Date.now(),
+      signature: hasSig ? storedSig : (existing ? (existing.value.signature ?? null) : null),
+      verifiedAt: hasSig ? verifiedAt : (existing ? (existing.value.verifiedAt ?? null) : null),
+      updatedAt: this._now(),
     }
     // enforce cap
     const count = (await this.list({ limit: MAX_CONTACTS })).length
@@ -100,7 +140,11 @@ class Contacts {
       ...updates,
       pubkey: undefined,       // never allow overwriting key
       addedAt: existing.value.addedAt,
-      updatedAt: Date.now(),
+      // verification state is set only by add() after a real signature check;
+      // update() must never let a caller forge it.
+      signature: existing.value.signature ?? null,
+      verifiedAt: existing.value.verifiedAt ?? null,
+      updatedAt: this._now(),
     }
     delete next.pubkey
     await this._bee.put('contact!' + key, next)
