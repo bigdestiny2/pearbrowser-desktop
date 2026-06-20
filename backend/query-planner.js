@@ -11,9 +11,17 @@
 const sf = require('./search-federation.cjs')
 const fr = require('./search-frontier.cjs')
 const sc = require('./search-core.cjs')
+const ib = require('./identity-binding.cjs')
 const b4a = require('b4a')
 
 const JOIN_WINDOW_MS = 60_000
+// per-app signing domain for search postings (mirrors the PersonalIndex sign
+// hook + identity-binding-publisher.signDocSync).
+const DOC_NAMESPACE = 'lighthouse-doc-v2'
+// hard cap on per-doc signature verifications per query: a per-row verify of a
+// hostile peer's whole shard (~200k sigs ≈ 8s) is a DoS; 256 keeps the verify
+// pass interactive while covering the visible window.
+const MAX_VERIFIES_PER_WINDOW = 256
 
 // Live connection budget for first-party search fan-out. Wraps search-frontier's
 // PURE DEFAULT_BUDGET (maxFrontier/maxConnectsPerQuery/maxLiveSessions) with the
@@ -102,13 +110,51 @@ class QueryPlanner {
     return { selfRoot, contactRoots, graph }
   }
 
-  // Peer replication + per-doc-lazy verify land in Step 5. Until then this is a
-  // clean no-op: the frontier + budget are still planned (and unit-tested), but
-  // no network I/O happens, so a query degrades to local-only results.
-  async _fetchPeerSources (plan /*, query, ctx */) {
-    this._verifyBudgetExhausted = false
-    void plan
-    return []
+  // Verify one peer's matched docs against the peer's RESOLVED search key,
+  // turning survivors into ranking candidates. Per-doc-lazy + bounded: stop at
+  // the shared per-query verify budget; drop a peer after a single bad signature
+  // (junk/forging-peer DoS bound); an unresolvable peer is dropped without
+  // spending a verify. `hits`: [{ tf, rec }] where rec is the peer's d! record.
+  _verifyPeerHits (peerRoot, searchPubkey, hits, ctx) {
+    if (!searchPubkey) return []
+    const out = []
+    for (const { tf, rec } of (hits || [])) {
+      if (ctx.verifies >= MAX_VERIFIES_PER_WINDOW) { ctx.exhausted = true; break }
+      ctx.verifies++
+      if (!rec || !ib.verifyAppSig('search', sc.canonDocBytes(rec), rec.sig, searchPubkey, DOC_NAMESPACE)) break
+      out.push({
+        docId: rec.docId, driveKey: rec.driveKey, path: rec.path, title: rec.title,
+        tf: tf || 1, publishedAt: rec.publishedAt || 0, contentHash: rec.h || '', signerPubkey: searchPubkey,
+      })
+    }
+    return out
+  }
+
+  // Turn fetched + key-resolved peer data into verified mergeFederated sources,
+  // sharing ONE verify budget across all peers this query.
+  // peerData: [{ rootPubkey, searchPubkey, hits }].
+  _verifyPeerSources (peerData) {
+    const ctx = { verifies: 0, exhausted: false }
+    const sources = []
+    for (const peer of (peerData || [])) {
+      if (!peer || !peer.rootPubkey) continue
+      const candidates = this._verifyPeerHits(peer.rootPubkey, peer.searchPubkey, peer.hits, ctx)
+      if (candidates.length) sources.push({ rootPubkey: peer.rootPubkey, candidates })
+      if (ctx.exhausted) break
+    }
+    this._verifyBudgetExhausted = ctx.exhausted
+    return sources
+  }
+
+  // Step 5c replaces this with real peer replication: for each pull peer, resolve
+  // their index pointer over the DHT, replicate their index core, scan it for
+  // query hits, and resolve their search key via the binding publisher. Until
+  // then it returns no peers, so federation stays a clean no-op.
+  async _fetchPeerHits (/* plan, query, ctx */) { return [] }
+
+  async _fetchPeerSources (plan, query, ctx) {
+    const peerData = await this._fetchPeerHits(plan, query, ctx)
+    return this._verifyPeerSources(peerData)
   }
 
   // Federated query: hop-0 self candidates + trusted-peer candidates, deduped
