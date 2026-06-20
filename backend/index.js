@@ -1725,7 +1725,7 @@ async function boot () {
     try {
       const { QueryPlanner, SearchFanoutBudget } = require('./query-planner.js')
       queryPlanner = new QueryPlanner({
-        personalIndex, contacts, identity, swarm,
+        personalIndex, contacts, identity, swarm, store,
         budget: new SearchFanoutBudget(), bindingPublisher: identityBindingPublisher,
       })
       console.log('QueryPlanner ready')

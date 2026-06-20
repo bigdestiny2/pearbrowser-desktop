@@ -12,9 +12,14 @@ const sf = require('./search-federation.cjs')
 const fr = require('./search-frontier.cjs')
 const sc = require('./search-core.cjs')
 const ib = require('./identity-binding.cjs')
+const Hyperbee = require('hyperbee')
 const b4a = require('b4a')
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const JOIN_WINDOW_MS = 60_000
+// per-peer cap on how long we wait for a replicated index to sync before
+// scanning it, so a dead/slow peer can't stall the federated query.
+const PEER_FETCH_TIMEOUT_MS = 4000
 // per-app signing domain for search postings (mirrors the PersonalIndex sign
 // hook + identity-binding-publisher.signDocSync).
 const DOC_NAMESPACE = 'lighthouse-doc-v2'
@@ -84,12 +89,13 @@ class SearchFanoutBudget {
 }
 
 class QueryPlanner {
-  constructor ({ personalIndex, contacts, identity, swarm, budget, bindingPublisher, log } = {}) {
+  constructor ({ personalIndex, contacts, identity, swarm, store, budget, bindingPublisher, log } = {}) {
     if (!identity) throw new Error('QueryPlanner requires identity')
     this.personalIndex = personalIndex || null
     this.contacts = contacts || null
     this.identity = identity
     this.swarm = swarm || null
+    this.store = store || null
     this.budget = budget || new SearchFanoutBudget()
     this.bindingPublisher = bindingPublisher || null
     this.log = typeof log === 'function' ? log : () => {}
@@ -146,15 +152,37 @@ class QueryPlanner {
     return sources
   }
 
-  // Step 5c replaces this with real peer replication: for each pull peer, resolve
-  // their index pointer over the DHT, replicate their index core, scan it for
-  // query hits, and resolve their search key via the binding publisher. Until
-  // then it returns no peers, so federation stays a clean no-op.
-  async _fetchPeerHits (/* plan, query, ctx */) { return [] }
-
-  async _fetchPeerSources (plan, query, ctx) {
-    const peerData = await this._fetchPeerHits(plan, query, ctx)
-    return this._verifyPeerSources(peerData)
+  // Live peer fetch (Step 5c): for each frontier peer, resolve their binding
+  // (search key + index core key) from the DHT via their contact bindingKey,
+  // replicate their index core over the shared swarm, and scan it for query
+  // hits. Best-effort + fully graceful — a peer with no binding key, a failed
+  // resolve, or a sync timeout is skipped, so search degrades to local/partial.
+  // Returns [{ rootPubkey, searchPubkey, hits }] for the RowVerifier.
+  async _fetchPeerHits (peerRoots, query) {
+    if (!this.store || !this.swarm || !this.bindingPublisher || !this.contacts) return []
+    const out = []
+    for (const peerRoot of (peerRoots || [])) {
+      if (!this.budget.canConnect()) break
+      try {
+        const contact = await this.contacts.lookup(peerRoot).catch(() => null)
+        if (!contact || !contact.bindingKey) continue
+        const resolved = await this.bindingPublisher.resolve({ contactPubkey: peerRoot, dhtPubkey: contact.bindingKey })
+        if (!resolved || !resolved.searchPubkey || !resolved.indexKey) continue
+        const core = this.store.get({ key: b4a.from(resolved.indexKey, 'hex') })
+        await core.ready()
+        try { this.swarm.join(core.discoveryKey, { server: false, client: true }) } catch (_) { /* already joined */ }
+        this.budget.noteConnect(); this.budget.touch(peerRoot, core)
+        // bounded best-effort sync, then scan whatever blocks we have
+        await Promise.race([core.update({ wait: true }), sleep(PEER_FETCH_TIMEOUT_MS)]).catch(() => {})
+        const bee = new Hyperbee(core, { keyEncoding: 'utf-8', valueEncoding: 'json' })
+        await bee.ready()
+        const hits = await sc.searchSignedHits(bee, query)
+        if (hits.length) out.push({ rootPubkey: peerRoot, searchPubkey: resolved.searchPubkey, hits })
+      } catch (err) {
+        this.log('[search] peer fetch skipped ' + String(peerRoot).slice(0, 8) + ': ' + (err && err.message))
+      }
+    }
+    return out
   }
 
   // Federated query: hop-0 self candidates + trusted-peer candidates, deduped
@@ -166,12 +194,17 @@ class QueryPlanner {
 
     const selfCandidates = await sc.searchCandidates(this.personalIndex.bee, query, { tier: 'self', trustHop: 0 })
 
-    // plan the peer fan-out (frontier + budget). v1 performs no peer I/O.
+    // plan the peer fan-out (frontier + budget), then replicate + verify peers
     const queryTerms = sc.tokenize(query).map((t) => t.term)
     const frontier = fr.buildFrontier(contactRoots, graph, { digests: this._digestCache, warm: this.budget.warmRoots() })
     this.budget.beginQuery()
     const plan = fr.planFanout(frontier, queryTerms, this.budget.toBudgetArg())
-    const peerSources = await this._fetchPeerSources(plan, query, { now0, limit, graph })
+    // v1: peer digests aren't replicated yet, so the digest-first plan.pull is
+    // empty — fetch the frontier directly, still bounded by the connection
+    // budget. Digest-first gating activates once digests are wired.
+    const fetchRoots = (plan.pull.length ? plan.pull : frontier).map((f) => f.rootPubkey)
+    const peerData = await this._fetchPeerHits(fetchRoots, query)
+    const peerSources = this._verifyPeerSources(peerData)
 
     const sources = [{ rootPubkey: selfRoot, candidates: selfCandidates }, ...peerSources]
     const results = sf.mergeFederated(sources, graph, { now0, limit })
