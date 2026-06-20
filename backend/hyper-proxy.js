@@ -161,6 +161,10 @@ class HyperProxy {
     this._server = null
     this._port = 0
     this._stats = { relayHits: 0, p2pHits: 0, total: 0 }
+    // P2P-first relay race (privacy): wait this long for P2P before contacting
+    // the relay. _relayFirst=true is the kill-switch back to the parallel race.
+    this._relayGraceMs = 500
+    this._relayFirst = false
     this._inFlight = new Map() // key -> Promise
 
     // LRU content cache
@@ -675,27 +679,22 @@ class HyperProxy {
       resolvedPath = (filePath || '/') + 'index.html'
     }
 
-    // Start both fetches concurrently
-    const relayPromise = this._relay
-      ? this._relay.fetch(keyHex, resolvedPath).catch(() => null)
-      : Promise.resolve(null)
-
-    const p2pPromise = this._fetchP2P(keyHex, resolvedPath).catch(() => null)
-
-    // Race: first successful response wins
-    const result = await Promise.any([
-      relayPromise.then(r => r ? { ...r, source: 'relay' } : Promise.reject(new Error('relay: no content'))),
-      p2pPromise.then(r => r ? { ...r, source: 'p2p' } : Promise.reject(new Error('p2p: no content')))
-    ]).catch((err) => {
-      // Both relay and P2P failed
-      const reasons = err.errors ? err.errors.map(e => e.message).join(', ') : 'all sources unavailable'
-      this._onError(keyHex + resolvedPath, 'Hybrid fetch failed: ' + reasons)
-      return null
+    // P2P-FIRST (privacy): try P2P, only contact the relay if P2P misses or is
+    // slower than _relayGraceMs, so the relay never sees a fetch P2P could have
+    // served. _relayFirst restores the old parallel race.
+    const { p2pFirstFetch } = require('./p2p-first-fetch.js')
+    const { result } = await p2pFirstFetch({
+      fetchP2P: () => this._fetchP2P(keyHex, resolvedPath),
+      fetchRelay: this._relay ? () => this._relay.fetch(keyHex, resolvedPath) : null,
+      graceMs: this._relayGraceMs,
+      relayFirst: this._relayFirst,
     })
 
     if (result) {
       if (result.source === 'relay') this._stats.relayHits++
       else this._stats.p2pHits++
+    } else {
+      this._onError(keyHex + resolvedPath, 'Hybrid fetch failed: all sources unavailable')
     }
 
     return result
