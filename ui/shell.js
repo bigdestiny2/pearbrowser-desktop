@@ -2349,6 +2349,76 @@ function Apps ({ rpc, C, onLaunch }) {
   `
 }
 
+// Lighthouse Phase 2 — exchange contact invites (carrying each peer's binding
+// DHT key) so federated search can resolve + verify a peer's index. Share your
+// invite; paste a peer's. Their results are signature-verified before display.
+function TrustedPeers ({ rpc, C }) {
+  const [invite, setInvite] = useState(null)
+  const [peers, setPeers] = useState([])
+  const [addUrl, setAddUrl] = useState('')
+  const [msg, setMsg] = useState('')
+  const [copied, setCopied] = useState(false)
+
+  const load = async () => {
+    try {
+      setInvite(await rpc.request(C.CMD_CONTACTS_MY_INVITE))
+      const res = await rpc.request(C.CMD_CONTACTS_LIST, { limit: 200 })
+      setPeers(Array.isArray(res?.contacts) ? res.contacts : [])
+    } catch (e) { setMsg(e.message) }
+  }
+  useEffect(() => { load() }, [])
+
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(invite.url); setCopied(true); setTimeout(() => setCopied(false), 1500) } catch {}
+  }
+  const add = async () => {
+    const url = addUrl.trim()
+    if (!url) return
+    setMsg('')
+    try {
+      const res = await rpc.request(C.CMD_CONTACTS_ADD_INVITE, { url })
+      const c = res?.contact || {}
+      setAddUrl('')
+      setMsg(`Added ${c.displayName || (c.pubkey ? c.pubkey.slice(0, 12) + '…' : 'contact')}${c.bindingKey ? ' — searchable' : ''}`)
+      load()
+    } catch (e) { setMsg(`Couldn't add: ${e.message}`) }
+  }
+
+  return html`
+    <details class="trusted-peers">
+      <summary>Trusted peers for federated search (${peers.length})</summary>
+      <div class="tp-body">
+        <p class="subtitle">Share your invite so a peer can add you; paste theirs to search their content. Peer results are cryptographically verified before they're shown.</p>
+        ${invite && html`
+          <div class="tp-field">
+            <label>Your invite</label>
+            <div class="tp-row">
+              <input class="profile-input" readonly value=${invite.url} onClick=${(e) => e.target.select()} />
+              <button class="btn small" onClick=${copy}>${copied ? 'Copied' : 'Copy'}</button>
+            </div>
+          </div>`}
+        <div class="tp-field">
+          <label>Add a peer</label>
+          <div class="tp-row">
+            <input class="profile-input" placeholder="Paste a pear://contact invite…" value=${addUrl}
+                   onInput=${(e) => setAddUrl(e.target.value)} onKeyDown=${(e) => e.key === 'Enter' && add()} />
+            <button class="btn small primary" onClick=${add} disabled=${!addUrl.trim()}>Add</button>
+          </div>
+        </div>
+        ${msg && html`<div class="tp-msg">${msg}</div>`}
+        ${peers.length > 0 && html`
+          <ul class="tp-list">
+            ${peers.map((p) => html`
+              <li key=${p.pubkey}>
+                <span class="tp-name">${p.displayName || (p.pubkey.slice(0, 16) + '…')}</span>
+                ${p.verifiedAt ? html`<span class="src-badge followed">verified</span>` : html`<span class="src-badge other">unverified</span>`}
+                ${p.bindingKey ? html`<span class="src-badge self">searchable</span>` : ''}
+              </li>`)}
+          </ul>`}
+      </div>
+    </details>`
+}
+
 function Library ({ rpc, C, onBrowse }) {
   const [bookmarks, setBookmarks] = useState([])
   const [history, setHistory] = useState([])
@@ -2454,6 +2524,7 @@ function Library ({ rpc, C, onBrowse }) {
         <input type="checkbox" checked=${federated} onChange=${(e) => setFederated(e.target.checked)} />
         Include trusted peers${federating ? html` <span class="fed-status">· searching peers…</span>` : ''}
       </label>
+      <${TrustedPeers} rpc=${rpc} C=${C} />
       ${results !== null && (results.length === 0
         ? html`<p class="placeholder">No matches${indexed === 0 ? ' yet — browse some hyper:// pages first to build your index.' : '.'}</p>`
         : html`<div class="library-list">

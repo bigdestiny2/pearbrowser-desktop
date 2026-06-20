@@ -82,18 +82,22 @@ class Contacts {
   /**
    * Add (or update) a contact. If `signature` is present it must be an ed25519
    * signature by the contact's OWN root key (== `pubkey`) over the canonical
-   * message `pear.contact:<pubkey>:<displayName>`, proving the invite/QR wasn't
-   * tampered with in transit. Verification FAILS CLOSED: a signature that is
-   * malformed, unverifiable, or invalid rejects the import rather than silently
-   * downgrading to an unverified contact.
+   * message `pear.contact:<pubkey>:<displayName>` — or, when a binding key is
+   * supplied, `pear.contact:<pubkey>:<displayName>:<bindingKey>` — proving the
+   * invite wasn't tampered with (a swapped name OR binding key fails the check).
+   * Verification FAILS CLOSED. A `bindingKey` (which makes the contact a trusted
+   * federated-search peer) is stored ONLY when it arrived inside a verified
+   * signature; an unsigned/unverified binding key is dropped, so an attacker
+   * can't forge a pubkey↔index link the user never authenticated.
    */
   async add ({ pubkey, displayName, avatar, tags, notes, signature, bindingKey }) {
     this._requireReady()
     const key = this._validatePubkey(pubkey)
     const trimmedName = typeof displayName === 'string' ? displayName.trim().slice(0, 128) : ''
-    // the contact's lighthouse-binding DHT key (64-hex), exchanged in the invite.
-    // Lets federated search resolve their binding → search key + index core.
-    const bk = typeof bindingKey === 'string' && /^[0-9a-f]{64}$/i.test(bindingKey) ? bindingKey.toLowerCase() : null
+    // format-check only — TRUST comes from the verified signature below, which
+    // binds this exact key so a swapped bk fails verification rather than silently
+    // pointing federated search at an attacker-chosen DHT record.
+    const bkLower = typeof bindingKey === 'string' && /^[0-9a-f]{64}$/i.test(bindingKey) ? bindingKey.toLowerCase() : null
 
     const hasSig = signature != null && signature !== ''
     let verifiedAt = null
@@ -105,13 +109,21 @@ class Contacts {
       if (!this._verify) {
         throw new Error('contact invite carries a signature but no verifier is configured')
       }
-      const message = `pear.contact:${key}:${trimmedName}`
+      // the signature binds the binding key too (when present): swap either the
+      // name or the bk and this message no longer matches the signed bytes.
+      const message = bkLower
+        ? `pear.contact:${key}:${trimmedName}:${bkLower}`
+        : `pear.contact:${key}:${trimmedName}`
       let ok = false
       try { ok = this._verify(message, signature, key) === true } catch (_) { ok = false }
       if (!ok) throw new Error('contact invite signature invalid — refusing tampered invite')
       verifiedAt = this._now()
       storedSig = signature.toLowerCase()
     }
+
+    // a binding key is trusted for federated search ONLY if it rode in a VERIFIED
+    // signature (which bound it); otherwise it is dropped (fail safe).
+    const trustedBk = (verifiedAt && bkLower) ? bkLower : null
 
     const existing = await this._bee.get('contact!' + key)
     const record = {
@@ -122,7 +134,7 @@ class Contacts {
       notes: typeof notes === 'string' ? notes.slice(0, 512) : null,
       signature: hasSig ? storedSig : (existing ? (existing.value.signature ?? null) : null),
       verifiedAt: hasSig ? verifiedAt : (existing ? (existing.value.verifiedAt ?? null) : null),
-      bindingKey: bk || (existing ? (existing.value.bindingKey ?? null) : null),
+      bindingKey: trustedBk || (existing ? (existing.value.bindingKey ?? null) : null),
       updatedAt: this._now(),
     }
     // enforce cap

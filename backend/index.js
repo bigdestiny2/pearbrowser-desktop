@@ -1200,6 +1200,31 @@ rpc.handle(C.CMD_CONTACTS_ADD, async (input = {}) => {
   return { contact: await requireContacts().add(input) }
 })
 
+// Build our own shareable contact invite: pk + display name + a root signature
+// over `pear.contact:<pk>:<name>` (what add() verifies) + our lighthouse-binding
+// DHT key (bk), so whoever adds us can resolve our binding for federated search.
+rpc.handle(C.CMD_CONTACTS_MY_INVITE, async () => {
+  await whenReady()
+  const id = requireIdentity()
+  const rootHex = b4a.toString(id.getSigningKeypair().publicKey, 'hex')
+  let displayName = ''
+  try { displayName = String((await requireProfile().get('displayName')) || '').trim().slice(0, 128) } catch {}
+  const bindingKey = b4a.toString(id.getAppKeypair('lighthouse-binding').publicKey, 'hex')
+  // sign name AND binding key, so neither can be swapped in transit (add() binds both)
+  const sig = id.sign(`pear.contact:${rootHex}:${displayName}:${bindingKey}`).signature
+  const url = `pear://contact?pk=${rootHex}&name=${encodeURIComponent(displayName)}&sig=${sig}&bk=${bindingKey}`
+  return { url, pubkey: rootHex, displayName, bindingKey }
+})
+
+// Add a contact from a pasted invite URL. parseInviteURL extracts pk/name/sig/bk;
+// add() fail-closed verifies the signature (rejecting a tampered invite).
+rpc.handle(C.CMD_CONTACTS_ADD_INVITE, async ({ url } = {}) => {
+  await whenReady()
+  const parsed = Contacts.parseInviteURL(String(url || ''))
+  if (!parsed) throw new Error('not a valid contact invite URL')
+  return { contact: await requireContacts().add(parsed) }
+})
+
 rpc.handle(C.CMD_CONTACTS_UPDATE, async ({ pubkey, updates } = {}) => {
   return { contact: await requireContacts().update(pubkey, updates || {}) }
 })

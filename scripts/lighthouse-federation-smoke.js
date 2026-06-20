@@ -72,9 +72,10 @@ async function main () {
   const storeB = await tmpStore()
   let pubB
   const piB = await new PersonalIndex(storeB, { sign: (cd) => pubB.signDocSync(JSON.stringify(cd)) }).ready()
+  const contactA = { pubkey: idA.rootHex, bindingKey: published.dhtPubkey, verifiedAt: 1 }
   const contactsB = {
-    list: async () => [{ pubkey: idA.rootHex, bindingKey: published.dhtPubkey }],
-    lookup: async (pk) => (pk === idA.rootHex ? { pubkey: idA.rootHex, bindingKey: published.dhtPubkey } : null),
+    list: async () => [contactA],
+    lookup: async (pk) => (pk === idA.rootHex ? contactA : null),
   }
   pubB = await new IdentityBindingPublisher({ ib, identity: idB, personalIndex: piB, contacts: contactsB, dht }).ready()
 

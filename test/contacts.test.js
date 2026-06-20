@@ -49,6 +49,10 @@ function signMsg (message, sk) {
 function inviteMessage (pubHex, displayName) {
   return `pear.contact:${pubHex.toLowerCase()}:${displayName}`
 }
+// the bound form when an invite carries a binding key (federated-search peer)
+function inviteMessageBk (pubHex, displayName, bk) {
+  return `pear.contact:${pubHex.toLowerCase()}:${displayName}:${bk.toLowerCase()}`
+}
 
 async function withContacts (opts, fn) {
   const dir = await mkdtemp(join(tmpdir(), 'contacts-test-'))
@@ -162,18 +166,25 @@ test('update() cannot forge verification state', async () => {
   })
 })
 
-test('parseInviteURL extracts the binding key and add() persists it (for federated search)', async () => {
+test('a SIGNED invite binding key is stored + persisted; update() preserves it', async () => {
+  await withContacts({ verify }, async (contacts) => {
+    const { pubHex, sk } = newKeypair()
+    const bindingKey = 'cd'.repeat(32)
+    const signature = signMsg(inviteMessageBk(pubHex, 'Alice', bindingKey), sk)
+    const rec = await contacts.add({ pubkey: pubHex, displayName: 'Alice', bindingKey, signature })
+    assert.equal(rec.bindingKey, bindingKey)
+    assert.equal(rec.verifiedAt, NOW)
+    assert.equal((await contacts.lookup(pubHex)).bindingKey, bindingKey) // persisted
+    assert.equal((await contacts.update(pubHex, { displayName: 'Alice 2' })).bindingKey, bindingKey)
+  })
+})
+
+test('an UNSIGNED invite binding key is DROPPED (not a trusted federated peer)', async () => {
   await withContacts({ verify }, async (contacts) => {
     const { pubHex } = newKeypair()
-    const bindingKey = 'cd'.repeat(32)
-    const parsed = Contacts.parseInviteURL(`pear://contact?pk=${pubHex}&name=Alice&bk=${bindingKey}`)
-    assert.equal(parsed.bindingKey, bindingKey)
-    const rec = await contacts.add({ pubkey: pubHex, displayName: 'Alice', bindingKey: parsed.bindingKey })
-    assert.equal(rec.bindingKey, bindingKey)
-    assert.equal((await contacts.lookup(pubHex)).bindingKey, bindingKey) // persisted
-    // update() preserves it
-    const upd = await contacts.update(pubHex, { displayName: 'Alice 2' })
-    assert.equal(upd.bindingKey, bindingKey)
+    const rec = await contacts.add({ pubkey: pubHex, displayName: 'Alice', bindingKey: 'cd'.repeat(32) })
+    assert.equal(rec.bindingKey, null) // no verified signature → not trusted
+    assert.equal(rec.verifiedAt, null)
   })
 })
 
@@ -182,5 +193,41 @@ test('add() drops a malformed binding key (stored null, not trusted)', async () 
     const { pubHex } = newKeypair()
     const rec = await contacts.add({ pubkey: pubHex, displayName: 'Bob', bindingKey: 'not-hex' })
     assert.equal(rec.bindingKey, null)
+  })
+})
+
+test('a full signed invite URL (pk+name+sig+bk) round-trips through parse + add, verified', async () => {
+  await withContacts({ verify }, async (contacts) => {
+    const { pubHex, sk } = newKeypair()
+    const bindingKey = 'ef'.repeat(32)
+    const sig = signMsg(inviteMessageBk(pubHex, 'Carol', bindingKey), sk)
+    const url = `pear://contact?pk=${pubHex}&name=${encodeURIComponent('Carol')}&sig=${sig}&bk=${bindingKey}`
+    const parsed = Contacts.parseInviteURL(url)
+    assert.equal(parsed.bindingKey, bindingKey)
+    const rec = await contacts.add(parsed)
+    assert.equal(rec.displayName, 'Carol')
+    assert.equal(rec.bindingKey, bindingKey)
+    assert.equal(rec.verifiedAt, NOW)
+  })
+})
+
+test('a signed invite with a tampered name is rejected at add (invite integrity)', async () => {
+  await withContacts({ verify }, async (contacts) => {
+    const { pubHex, sk } = newKeypair()
+    const bindingKey = 'ef'.repeat(32)
+    const sig = signMsg(inviteMessageBk(pubHex, 'Carol', bindingKey), sk) // signed for "Carol"
+    const url = `pear://contact?pk=${pubHex}&name=Mallory&sig=${sig}&bk=${bindingKey}`
+    await assert.rejects(() => contacts.add(Contacts.parseInviteURL(url)), /signature invalid/)
+  })
+})
+
+test('a swapped binding key is rejected at add (bk is bound by the signature)', async () => {
+  await withContacts({ verify }, async (contacts) => {
+    const { pubHex, sk } = newKeypair()
+    const realBk = 'ef'.repeat(32)
+    const attackerBk = 'ab'.repeat(32)
+    const sig = signMsg(inviteMessageBk(pubHex, 'Carol', realBk), sk) // signed for realBk
+    const url = `pear://contact?pk=${pubHex}&name=Carol&sig=${sig}&bk=${attackerBk}` // bk swapped
+    await assert.rejects(() => contacts.add(Contacts.parseInviteURL(url)), /signature invalid/)
   })
 })

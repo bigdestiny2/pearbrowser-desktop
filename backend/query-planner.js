@@ -18,8 +18,9 @@ const b4a = require('b4a')
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const JOIN_WINDOW_MS = 60_000
 // per-peer cap on how long we wait for a replicated index to sync before
-// scanning it, so a dead/slow peer can't stall the federated query.
-const PEER_FETCH_TIMEOUT_MS = 4000
+// scanning it, so a dead/slow peer can't stall the federated query. Kept low
+// because it multiplies by maxConnectsPerQuery in the sequential fetch loop.
+const PEER_FETCH_TIMEOUT_MS = 3000
 // per-app signing domain for search postings (mirrors the PersonalIndex sign
 // hook + identity-binding-publisher.signDocSync).
 const DOC_NAMESPACE = 'lighthouse-doc-v2'
@@ -27,6 +28,9 @@ const DOC_NAMESPACE = 'lighthouse-doc-v2'
 // hostile peer's whole shard (~200k sigs ≈ 8s) is a DoS; 256 keeps the verify
 // pass interactive while covering the visible window.
 const MAX_VERIFIES_PER_WINDOW = 256
+// fairness: no single peer may consume the whole shared budget, so one trusted
+// contact with a huge index can't starve every other peer's results.
+const MAX_VERIFIES_PER_PEER = 128
 
 // Live connection budget for first-party search fan-out. Wraps search-frontier's
 // PURE DEFAULT_BUDGET (maxFrontier/maxConnectsPerQuery/maxLiveSessions) with the
@@ -124,9 +128,11 @@ class QueryPlanner {
   _verifyPeerHits (peerRoot, searchPubkey, hits, ctx) {
     if (!searchPubkey) return []
     const out = []
+    let perPeer = 0
     for (const { tf, rec } of (hits || [])) {
       if (ctx.verifies >= MAX_VERIFIES_PER_WINDOW) { ctx.exhausted = true; break }
-      ctx.verifies++
+      if (perPeer >= MAX_VERIFIES_PER_PEER) break // fairness: don't starve other peers
+      ctx.verifies++; perPeer++
       if (!rec || !ib.verifyAppSig('search', sc.canonDocBytes(rec), rec.sig, searchPubkey, DOC_NAMESPACE)) break
       out.push({
         docId: rec.docId, driveKey: rec.driveKey, path: rec.path, title: rec.title,
@@ -165,7 +171,10 @@ class QueryPlanner {
       if (!this.budget.canConnect()) break
       try {
         const contact = await this.contacts.lookup(peerRoot).catch(() => null)
-        if (!contact || !contact.bindingKey) continue
+        // only federate with a VERIFIED contact whose binding key we trust —
+        // contacts.add() already drops an unverified bindingKey, this is
+        // defense-in-depth at the consumption boundary.
+        if (!contact || !contact.bindingKey || !contact.verifiedAt) continue
         const resolved = await this.bindingPublisher.resolve({ contactPubkey: peerRoot, dhtPubkey: contact.bindingKey })
         if (!resolved || !resolved.searchPubkey || !resolved.indexKey) continue
         const core = this.store.get({ key: b4a.from(resolved.indexKey, 'hex') })
