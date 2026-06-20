@@ -140,6 +140,12 @@ const CMD_NAME_PETNAME_LIST = 251
 const CMD_NAME_PETNAME_SET = 252
 const CMD_NAME_PETNAME_REMOVE = 253
 
+// Lighthouse Phase 2 — IdentityBinding (root → rotatable search subkey) +
+// federated search. See backend/identity-binding-publisher.js + query-planner.js.
+const CMD_IDENTITY_BINDING_PUBLISH = 260  // publish/refresh our binding to DHT + meta
+const CMD_IDENTITY_BINDING_RESOLVE = 261  // resolve a contact's current search pubkey
+const CMD_SEARCH_FEDERATED = 262          // explicit federated trigger (v1 folds into CMD_SEARCH)
+
 // Pear Bridge (WebView → worklet via RN relay)
 const CMD_BRIDGE = 200
 
@@ -161,6 +167,10 @@ const EVT_LOGIN_REQUEST = 106
  *  (Tier C) topic and the worklet wants user consent before joining.
  *  Payload: { requestId, driveKey, appName, reason, topicHex, protocol } */
 const EVT_SWARM_REQUEST = 107
+
+// Lighthouse Phase 2 — federated search push results + binding lifecycle.
+const EVT_SEARCH_FEDERATED = 108           // { queryId, results, phase:'enriched', verifyBudgetExhausted }
+const EVT_IDENTITY_BINDING_PUBLISHED = 109 // { searchPubkey, version }
 
 // --- anonGPT bridge (Phase 0 plumbing — see backend/anongpt-buyer.js) ---
 
@@ -238,9 +248,11 @@ module.exports = {
   CMD_SYNC_STATUS, CMD_SYNC_CREATE, CMD_SYNC_JOIN, CMD_SYNC_ADD_WRITER,
   CMD_SYNC_GET_BOOKMARKS, CMD_SYNC_ADD_BOOKMARK, CMD_SYNC_REMOVE_BOOKMARK, CMD_SYNC_PUSH_LOCAL,
   CMD_NAME_RESOLVE, CMD_NAME_PETNAME_LIST, CMD_NAME_PETNAME_SET, CMD_NAME_PETNAME_REMOVE,
+  CMD_IDENTITY_BINDING_PUBLISH, CMD_IDENTITY_BINDING_RESOLVE, CMD_SEARCH_FEDERATED,
   CMD_BRIDGE,
   CMD_STOP,
   EVT_READY, EVT_PEER_COUNT, EVT_ERROR, EVT_INSTALL_PROGRESS, EVT_SITE_PUBLISHED, EVT_BOOT_PROGRESS,
   EVT_LOGIN_REQUEST, EVT_SWARM_REQUEST,
+  EVT_SEARCH_FEDERATED, EVT_IDENTITY_BINDING_PUBLISHED,
   ANONGPT_DRIVE_KEY,
 }

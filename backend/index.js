@@ -87,6 +87,7 @@ let userData = null
 let identity = null
 let profile = null
 let contacts = null
+let identityBindingPublisher = null // Lighthouse Phase 2 — root→search-key binding publish/resolve
 let names = null // naming Phase N1 — local petname store (names.cjs); null until ready
 let swarmBridge = null
 let swarmGrants = null
@@ -327,6 +328,25 @@ rpc.handle(C.CMD_SEARCH, async (data) => {
   const results = await personalIndex.search(String((data && data.query) || ''),
     { now0: Date.now(), limit: (data && data.limit) || 50 })
   return { results, stats: await personalIndex.stats() }
+})
+
+// Lighthouse Phase 2 — publish/refresh our IdentityBinding on demand (e.g. a
+// Settings "rotate search key" action), and resolve a contact's current search
+// pubkey from the DHT (verified against their Contacts-held root).
+rpc.handle(C.CMD_IDENTITY_BINDING_PUBLISH, async (data) => {
+  await whenReady()
+  if (!identityBindingPublisher) throw new Error('binding publisher unavailable')
+  return await identityBindingPublisher.publish({ rotate: !!(data && data.rotate) })
+})
+
+rpc.handle(C.CMD_IDENTITY_BINDING_RESOLVE, async (data) => {
+  await whenReady()
+  if (!identityBindingPublisher) throw new Error('binding publisher unavailable')
+  if (!data || !data.contactPubkey || !data.dhtPubkey) throw new Error('contactPubkey + dhtPubkey required')
+  const searchPubkey = await identityBindingPublisher.resolve({
+    contactPubkey: String(data.contactPubkey), dhtPubkey: String(data.dhtPubkey),
+  })
+  return { searchPubkey }
 })
 
 rpc.handle(C.CMD_SEARCH_INDEX, async (data) => {
@@ -1659,6 +1679,24 @@ async function boot () {
   })
   try { await contacts.ready(); console.log('Contacts ready') }
   catch (err) { console.error('Contacts init failed:', err && err.message); contacts = null }
+
+  // Lighthouse Phase 2 — publish our self-certifying IdentityBinding (root →
+  // rotatable search subkey) to the DHT + personal index, so trusted peers can
+  // resolve and verify our search postings. Best-effort; never blocks boot.
+  if (personalIndex && identity) {
+    try {
+      const { IdentityBindingPublisher } = require('./identity-binding-publisher.js')
+      identityBindingPublisher = await new IdentityBindingPublisher({
+        ib: require('./identity-binding.cjs'),
+        identity, personalIndex, contacts, dht: swarm && swarm.dht,
+      }).ready()
+      identityBindingPublisher.publish().catch((e) => console.error('[binding] publish failed:', e && e.message))
+      console.log('IdentityBindingPublisher ready')
+    } catch (err) {
+      console.error('IdentityBindingPublisher init failed:', err && err.message)
+      identityBindingPublisher = null
+    }
+  }
 
   // Naming Phase N1 — local petname store (crypto-free Hyperbee). Always
   // inited; the experimentalNaming flag only gates whether the resolver/
