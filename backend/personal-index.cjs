@@ -138,6 +138,17 @@ class PersonalIndex {
     return core && core.key ? core.key.toString('hex') : null
   }
 
+  // Inputs for a completeness anchor: the index core key, its current length, and
+  // the signed merkle tree hash (commits to the content AT that length, so a
+  // peer can detect truncation/fork against a previously-seen anchor).
+  async coreState () {
+    const core = this.bee && (this.bee.core || this.bee.feed)
+    if (!core || !core.key) return null
+    let treeHash = ''
+    try { treeHash = (await core.treeHash()).toString('hex') } catch (_) { /* pre-ready */ }
+    return { key: core.key.toString('hex'), length: core.length || 0, treeHash }
+  }
+
   async close () { try { if (this.bee) await this.bee.close() } catch {} }
 }
 

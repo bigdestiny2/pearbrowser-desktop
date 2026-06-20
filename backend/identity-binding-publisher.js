@@ -21,6 +21,7 @@
 
 const crypto = require('hypercore-crypto')
 const b4a = require('b4a')
+const cmp = require('./search-completeness.cjs')
 
 const SEARCH_KEY_META = 'searchkey'
 const BINDING_META = 'binding'
@@ -152,16 +153,32 @@ class IdentityBindingPublisher {
     // the SIGNED search key, so it's an availability concern, not a forgery one.
     const indexKey = typeof this.personalIndex.coreKeyHex === 'function' ? this.personalIndex.coreKeyHex() : null
 
+    // Completeness anchor (Lighthouse Layer 1): a ROOT-signed commitment to the
+    // index length + tree hash, so a trusted peer can detect a truncated or
+    // forked index even though every individual posting still verifies.
+    const anchor = await this._makeAnchor(rootHex, indexKey)
+    if (anchor) await this.personalIndex.putMeta('anchor', anchor)
+
     let dhtPubkey = null
     if (this.dht) {
       const dhtKp = this.identity.getAppKeypair(DHT_BINDING_NAMESPACE)
       dhtPubkey = b4a.toString(dhtKp.publicKey, 'hex')
-      const value = b4a.from(JSON.stringify({ ...binding, dhtPubkey, indexKey }), 'utf-8')
+      const value = b4a.from(JSON.stringify({ ...binding, dhtPubkey, indexKey, anchor }), 'utf-8')
       // REAL hyperdht signature: mutablePut(keyPair, value, { seq })
       await this.dht.mutablePut(dhtKp, value, { seq: version })
     }
     this.log('[binding] published v' + version + ' search=' + binding.searchPubkey.slice(0, 12) + '…')
-    return { searchPubkey: binding.searchPubkey, version, dhtPubkey, indexKey }
+    return { searchPubkey: binding.searchPubkey, version, dhtPubkey, indexKey, anchor }
+  }
+
+  async _makeAnchor (rootHex, indexKey) {
+    if (!indexKey || typeof this.personalIndex.coreState !== 'function') return null
+    const st = await this.personalIndex.coreState().catch(() => null)
+    if (!st || !st.key) return null
+    return cmp.makeAnchor(
+      { rootPubkey: rootHex, indexKey: st.key, length: st.length, treeHash: st.treeHash },
+      (m) => this._rootSign(m)
+    )
   }
 
   /**
@@ -186,7 +203,11 @@ class IdentityBindingPublisher {
     // authenticate against the Contacts-held root, NOT rec.rootPubkey
     const searchPubkey = this.ib.resolveSearchKey(contactPubkey, [rec], [])
     if (!searchPubkey) return null
-    return { searchPubkey, indexKey: typeof rec.indexKey === 'string' ? rec.indexKey : null }
+    return {
+      searchPubkey,
+      indexKey: typeof rec.indexKey === 'string' ? rec.indexKey : null,
+      anchor: rec.anchor && typeof rec.anchor === 'object' ? rec.anchor : null,
+    }
   }
 }
 

@@ -11,10 +11,12 @@ import crypto from 'hypercore-crypto'
 import b4a from 'b4a'
 import piMod from '../backend/personal-index.cjs'
 import ibMod from '../backend/identity-binding.cjs'
+import cmpMod from '../backend/search-completeness.cjs'
 import pubMod from '../backend/identity-binding-publisher.js'
 const { PersonalIndex } = piMod
 const { IdentityBindingPublisher } = pubMod
 const ib = ibMod
+const cmp = cmpMod
 
 const hex = (b) => b4a.toString(b, 'hex')
 
@@ -185,5 +187,19 @@ test('signDocSync signs a posting with the BOUND search key (peer-verifiable)', 
     const { sig, pubkey } = pub.signDocSync(payload)
     assert.equal(pubkey, binding.searchPubkey) // signed with the same key the binding advertises
     assert.equal(ib.verifyAppSig('search', payload, sig, pubkey, 'lighthouse-doc-v2'), true)
+  })
+})
+
+test('publish() emits a root-signed completeness anchor (stored + resolvable)', async () => {
+  await withPublisher(async ({ pub, identity, contacts, personalIndex }) => {
+    await personalIndex.indexDoc({ driveKey: 'd1', path: '/', title: 'T', body: 'hello world' })
+    contacts._add(identity.rootHex)
+    const res = await pub.publish()
+    assert.ok(res.anchor && res.anchor.kind === 'anchor')
+    assert.equal(res.anchor.indexKey, res.indexKey)
+    assert.equal(cmp.verifyAnchor(res.anchor, identity.rootHex), true) // root-signed
+    assert.equal((await personalIndex.getMeta('anchor', null)).length, res.anchor.length) // persisted
+    const got = await pub.resolve({ contactPubkey: identity.rootHex, dhtPubkey: res.dhtPubkey })
+    assert.ok(got.anchor && cmp.verifyAnchor(got.anchor, identity.rootHex)) // resolves from the DHT record
   })
 })

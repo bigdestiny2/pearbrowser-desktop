@@ -9,8 +9,9 @@ import b4a from 'b4a'
 import scMod from '../backend/search-core.cjs'
 import ibMod from '../backend/identity-binding.cjs'
 import sfMod from '../backend/search-federation.cjs'
+import cmpMod from '../backend/search-completeness.cjs'
 import qpMod from '../backend/query-planner.js'
-const sc = scMod; const ib = ibMod; const sf = sfMod
+const sc = scMod; const ib = ibMod; const sf = sfMod; const cmp = cmpMod
 const { QueryPlanner } = qpMod
 
 const hex = (b) => b4a.toString(b, 'hex')
@@ -91,6 +92,58 @@ test('the shared budget caps total verifies across many peers', () => {
   const total = sources.reduce((s, x) => s + x.candidates.length, 0)
   assert.equal(total, 256)                             // global ceiling = 128 + 128
   assert.equal(planner._verifyBudgetExhausted, true)
+})
+
+// --- completeness anchor gate (I10) -----------------------------------------
+
+function anchorFor (rootKp, { indexKey = 'aa'.repeat(32), length = 100, treeHash = 'bb'.repeat(32) } = {}) {
+  const rootHex = hex(rootKp.publicKey)
+  const sign = (m) => hex(crypto.sign(b4a.from(m, 'utf-8'), rootKp.secretKey))
+  return { anchor: cmp.makeAnchor({ rootPubkey: rootHex, indexKey, length, treeHash }, sign), rootHex }
+}
+
+test('anchor gate: a valid anchor passes and is cached', () => {
+  const planner = mkPlanner()
+  const { anchor, rootHex } = anchorFor(crypto.keyPair())
+  assert.equal(planner._checkPeerAnchor(rootHex, anchor), true)
+  assert.ok(planner._anchorCache.get(rootHex))
+})
+
+test('anchor gate: a missing anchor is allowed (cannot completeness-check)', () => {
+  assert.equal(mkPlanner()._checkPeerAnchor('aa'.repeat(32), null), true)
+})
+
+test('anchor gate: a forged anchor (signed by the wrong root) is rejected', () => {
+  const planner = mkPlanner()
+  const victim = crypto.keyPair(); const attacker = crypto.keyPair()
+  const sign = (m) => hex(crypto.sign(b4a.from(m, 'utf-8'), attacker.secretKey))
+  const forged = cmp.makeAnchor({ rootPubkey: hex(victim.publicKey), indexKey: 'aa'.repeat(32), length: 100, treeHash: 'bb'.repeat(32) }, sign)
+  assert.equal(planner._checkPeerAnchor(hex(victim.publicKey), forged), false)
+})
+
+test('anchor gate: a truncated re-publish (shorter signed length) is rejected', () => {
+  const planner = mkPlanner(); const kp = crypto.keyPair()
+  const a1 = anchorFor(kp, { length: 100 })
+  assert.equal(planner._checkPeerAnchor(a1.rootHex, a1.anchor), true)
+  const a2 = anchorFor(kp, { length: 50 }) // shorter → truncation attack
+  assert.equal(planner._checkPeerAnchor(a2.rootHex, a2.anchor), false)
+})
+
+test('anchor gate: a fork (same length, different tree hash) is rejected', () => {
+  const planner = mkPlanner(); const kp = crypto.keyPair()
+  const a1 = anchorFor(kp, { length: 100, treeHash: 'bb'.repeat(32) })
+  assert.equal(planner._checkPeerAnchor(a1.rootHex, a1.anchor), true)
+  const a2 = anchorFor(kp, { length: 100, treeHash: 'cc'.repeat(32) }) // equivocation
+  assert.equal(planner._checkPeerAnchor(a2.rootHex, a2.anchor), false)
+})
+
+test('anchor gate: legitimate growth advances the cache', () => {
+  const planner = mkPlanner(); const kp = crypto.keyPair()
+  const a1 = anchorFor(kp, { length: 100, treeHash: 'bb'.repeat(32) })
+  planner._checkPeerAnchor(a1.rootHex, a1.anchor)
+  const a2 = anchorFor(kp, { length: 200, treeHash: 'cc'.repeat(32) })
+  assert.equal(planner._checkPeerAnchor(a2.rootHex, a2.anchor), true)
+  assert.equal(planner._anchorCache.get(a2.rootHex).length, 200)
 })
 
 test('mergeFederated dedups self vs peer — the self copy (hop 0) wins', () => {

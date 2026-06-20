@@ -12,6 +12,7 @@ const sf = require('./search-federation.cjs')
 const fr = require('./search-frontier.cjs')
 const sc = require('./search-core.cjs')
 const ib = require('./identity-binding.cjs')
+const cmp = require('./search-completeness.cjs')
 const Hyperbee = require('hyperbee')
 const b4a = require('b4a')
 
@@ -104,7 +105,23 @@ class QueryPlanner {
     this.bindingPublisher = bindingPublisher || null
     this.log = typeof log === 'function' ? log : () => {}
     this._digestCache = new Map() // rootPubkey -> peer digest (populated in Step 5)
+    this._anchorCache = new Map() // rootPubkey -> last verified completeness anchor
     this._verifyBudgetExhausted = false
+  }
+
+  // Completeness Layer 1: a peer can serve valid-but-PARTIAL results. A ROOT-
+  // signed anchor commits to the index length + tree hash; verify it against the
+  // peer's root and reject a peer that equivocates — truncates (a shorter signed
+  // length than one we've seen) or forks (same length, different tree hash) —
+  // versus an anchor cached this session. An absent anchor is allowed (older
+  // publishers); it just can't be completeness-checked.
+  _checkPeerAnchor (peerRoot, anchor) {
+    if (!anchor) return true
+    if (!cmp.verifyAnchor(anchor, peerRoot)) return false // forged anchor → hostile peer
+    const prev = this._anchorCache.get(peerRoot)
+    if (prev && (cmp.isTruncation(prev, anchor) || cmp.isFork(prev, anchor))) return false
+    if (!prev || anchor.length >= prev.length) this._anchorCache.set(peerRoot, anchor)
+    return true
   }
 
   // Freeze the trust graph for this query: self at hop 0, direct contacts at
@@ -177,6 +194,8 @@ class QueryPlanner {
         if (!contact || !contact.bindingKey || !contact.verifiedAt) continue
         const resolved = await this.bindingPublisher.resolve({ contactPubkey: peerRoot, dhtPubkey: contact.bindingKey })
         if (!resolved || !resolved.searchPubkey || !resolved.indexKey) continue
+        // completeness gate: drop a peer whose anchor is forged or equivocates
+        if (!this._checkPeerAnchor(peerRoot, resolved.anchor)) continue
         const core = this.store.get({ key: b4a.from(resolved.indexKey, 'hex') })
         await core.ready()
         try { this.swarm.join(core.discoveryKey, { server: false, client: true }) } catch (_) { /* already joined */ }
