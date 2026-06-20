@@ -182,10 +182,13 @@ function rankCandidates (candidates, { now0 = 0, diversity = true } = {}) {
   return scored
 }
 
-// End-to-end query over a ready Hyperbee holding v2 records: tokenize → bounded
-// range-scan per term → AND-intersect by docId → fetch d! records → rank.
-// `tier`/`trustHop` describe the source (hop-0 self = {tier:'self', trustHop:0}).
-async function searchIndex (bee, query, { limit = 200, perTerm = 500, now0 = 0, tier = 'self', trustHop = 0 } = {}) {
+// Extract candidate rows (PRE-rank) for a query over a ready Hyperbee holding v2
+// records: tokenize → bounded range-scan per term → AND-intersect by docId →
+// hydrate d! records. The rank+slice is split out (searchIndex) so a federated
+// planner can pull raw candidates from many peer bees and rank them together
+// exactly once (search-federation.mergeFederated). `tier`/`trustHop` describe
+// the source (hop-0 self = {tier:'self', trustHop:0}).
+async function searchCandidates (bee, query, { perTerm = 500, tier = 'self', trustHop = 0 } = {}) {
   const qterms = tokenize(query).map((t) => t.term)
   if (qterms.length === 0) return []
   // gather per-term posting lists: docId → summed tf
@@ -218,6 +221,13 @@ async function searchIndex (bee, query, { limit = 200, perTerm = 500, now0 = 0, 
       contentHash: d.h || '', signerPubkey: d.signerPubkey || '',
     })
   }
+  return candidates
+}
+
+// End-to-end local query over a ready Hyperbee: candidates → deterministic rank.
+async function searchIndex (bee, query, { limit = 200, perTerm = 500, now0 = 0, tier = 'self', trustHop = 0 } = {}) {
+  const candidates = await searchCandidates(bee, query, { perTerm, tier, trustHop })
+  if (candidates.length === 0) return []
   const n = Math.max(0, Math.floor(Number(limit) || 0))
   return rankCandidates(candidates, { now0 }).slice(0, n)
 }
@@ -225,5 +235,5 @@ async function searchIndex (bee, query, { limit = 200, perTerm = 500, now0 = 0, 
 module.exports = {
   SCHEMA_VERSION, MAX_TERMS_PER_DOC, STOPWORDS, RANK,
   tokenize, docIdFor, invScore, postingKey, docKey, postingSetHash,
-  buildDocRecords, rankCandidates, searchIndex, fnvUnit, hashHex,
+  buildDocRecords, rankCandidates, searchCandidates, searchIndex, fnvUnit, hashHex,
 }
