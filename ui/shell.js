@@ -3280,6 +3280,7 @@ function DeviceSync ({ rpc, C }) {
 //   - experimentalDeviceSync       unlocks the Device sync panel below (and the
 //                                  CMD_SYNC_* handlers, gated by requireSync).
 function ExperimentalSection ({ rpc, C, onAutobeeChange, onDeviceSyncChange }) {
+  const [naming, setNaming] = useState(false)
   const [autobee, setAutobee] = useState(false)
   const [deviceSync, setDeviceSync] = useState(false)
   const [busy, setBusy] = useState(null) // the flag currently being written, or null
@@ -3289,6 +3290,7 @@ function ExperimentalSection ({ rpc, C, onAutobeeChange, onDeviceSyncChange }) {
     rpc.request(C.CMD_USERDATA_GET_SETTINGS)
       .then((res) => {
         const s = unwrapSettings(res)
+        setNaming(!!s?.experimentalNaming)
         setAutobee(!!s?.experimentalAutobeeCatalogs)
         setDeviceSync(!!s?.experimentalDeviceSync)
       })
@@ -3308,6 +3310,16 @@ function ExperimentalSection ({ rpc, C, onAutobeeChange, onDeviceSyncChange }) {
   return html`
     <div class="settings-card">
       ${err && html`<div class="apps-error">${err}</div>`}
+      <div class="settings-row">
+        <div>
+          <div class="settings-label">Names (petnames)</div>
+          <div class="settings-subtle">Type friendly names like <code>keet</code> in the address bar instead of 52-character keys. Resolves your own saved petnames plus a curated set of well-known names, fully local — a provenance chip shows how each name resolved. Experimental.</div>
+        </div>
+        <label class="login-scope${naming ? ' on' : ''}">
+          <input type="checkbox" checked=${naming} disabled=${busy === 'experimentalNaming'}
+                 onChange=${() => toggle('experimentalNaming', !naming, setNaming)} />
+        </label>
+      </div>
       <div class="settings-row">
         <div>
           <div class="settings-label">Collaborative catalogs (Autobee)</div>
