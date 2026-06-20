@@ -133,6 +133,10 @@ class CatalogManager {
    */
   async loadCatalogIndexRoom (link) {
     const { decodeIndexLink, IndexRoomClient } = require('./index-room-client')
+    // re-verify each relay-directory row against its own signed capability doc
+    // (the index room is an index, not an authority — Design Risk #5). The verify
+    // hook only fires for listRelayDirectory(); the app path here is unaffected.
+    const { verifyCapabilityDoc } = require('./capability-verify.cjs')
     const { keyHex } = decodeIndexLink(link)
     const cacheKey = `hiveindex:${keyHex}`
     if (this.catalogs.has(cacheKey)) return this.catalogs.get(cacheKey).data
@@ -142,7 +146,7 @@ class CatalogManager {
     if (this._pendingIndex.has(cacheKey)) return this._pendingIndex.get(cacheKey)
 
     const p = (async () => {
-      const irc = new IndexRoomClient(this.store, this.swarm)
+      const irc = new IndexRoomClient(this.store, this.swarm, { verify: verifyCapabilityDoc })
       await irc.open(link)
       const apps = await irc.listApps()
       const data = { version: 1, name: 'Relay Index', apps, writable: false, link: irc.link() }
