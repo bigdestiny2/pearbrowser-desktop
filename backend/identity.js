@@ -121,6 +121,12 @@ class Identity {
     this.file = path.join(storagePath, 'identity.json')
     this._entropy = null
     this._seed = null
+    // SEC0 — seed-at-rest encryption. When the on-disk seed is an encrypted vault
+    // the identity boots LOCKED (entropy unavailable until unlock(passphrase));
+    // _passphrase is held in memory so persist/rotate can re-encrypt.
+    this._passphrase = null
+    this._locked = false
+    this._encryptedVault = null
   }
 
   /**
@@ -132,6 +138,13 @@ class Identity {
     try {
       const raw = fs.readFileSync(this.file, 'utf-8')
       const data = JSON.parse(raw)
+      // SEC0: an encrypted-at-rest vault — boot LOCKED, never regenerate (that
+      // would destroy the user's seed). unlock(passphrase) loads it.
+      if (data && data.v === 2 && data.enc === 'argon2id-secretbox') {
+        this._encryptedVault = data
+        this._locked = true
+        return
+      }
       if (data && typeof data.entropy === 'string') {
         this._entropy = b4a.from(data.entropy, 'hex')
         if (this._entropy.length !== 16 && this._entropy.length !== 32) {
@@ -155,12 +168,50 @@ class Identity {
     try {
       if (!fs.existsSync(this.storagePath)) fs.mkdirSync(this.storagePath, { recursive: true })
     } catch (_) {}
-    const payload = {
-      version: 1,
-      entropy: b4a.toString(this._entropy, 'hex'),
-      createdAt: Date.now(),
+    let payload
+    if (this._passphrase) {
+      // SEC0: encrypt the seed at rest (argon2id + secretbox).
+      const sv = require('./seed-vault.cjs')
+      payload = { ...sv.encryptEntropy(this._entropy, this._passphrase), createdAt: Date.now() }
+    } else {
+      payload = { version: 1, entropy: b4a.toString(this._entropy, 'hex'), createdAt: Date.now() }
     }
     fs.writeFileSync(this.file, JSON.stringify(payload))
+  }
+
+  /** Is the on-disk seed encrypted (SEC0)? */
+  isEncryptedAtRest () { return !!this._passphrase || !!this._encryptedVault }
+
+  /** Is the identity locked (encrypted on disk, not yet unlocked this session)? */
+  isLocked () { return !!this._locked }
+
+  /**
+   * SEC0 — encrypt the seed at rest under `passphrase`. The seed must already be
+   * unlocked/loaded. Rewrites identity.json as an argon2id+secretbox vault and
+   * holds the passphrase in memory so rotate/save re-encrypt.
+   */
+  encryptSeedAtRest (passphrase) {
+    if (this._locked || !this._entropy) throw new Error('Identity must be unlocked to encrypt')
+    if (typeof passphrase !== 'string' || passphrase.length === 0) throw new Error('passphrase required')
+    this._passphrase = passphrase
+    this._persist()
+  }
+
+  /**
+   * Unlock an encrypted-at-rest identity with `passphrase`. Fails CLOSED (throws)
+   * on the wrong passphrase. No-op if already unlocked.
+   */
+  unlock (passphrase) {
+    if (!this._locked) return true
+    const sv = require('./seed-vault.cjs')
+    const entropy = sv.decryptEntropy(this._encryptedVault, passphrase)
+    if (entropy.length !== 16 && entropy.length !== 32) throw new Error('decrypted entropy has invalid length')
+    this._entropy = entropy
+    this._seed = entropyToSeed(entropy)
+    this._passphrase = passphrase
+    this._locked = false
+    this._encryptedVault = null
+    return true
   }
 
   /** Raw seed bytes (32 bytes). Pass into Corestore.namespace(seed). */
