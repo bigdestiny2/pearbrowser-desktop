@@ -252,6 +252,46 @@ class Identity {
   }
 
   /**
+   * Derive a deterministic ed25519 sub-keypair under the root seed for a domain
+   * `tag` + `input`:  subSeed = SHA-256(rootSeed || tag || input). Domain-
+   * separated so the SAME input under DIFFERENT tags (app / invoice / session)
+   * yields UNLINKABLE keys. Pure: same seed + tag + input ⇒ same keypair on every
+   * device, forever; the root secret never leaves the worklet.
+   */
+  _deriveSubkey (tag, input) {
+    if (!sodium) throw new Error('sodium-universal not available')
+    if (!this._seed) throw new Error('Identity not ready')
+    if (typeof input !== 'string' || input.length === 0) throw new Error('input must be a non-empty string')
+    const hash = crypto.createHash('sha256')
+    hash.update(this._seed)
+    hash.update(tag)
+    hash.update(input)
+    const subSeed = hash.digest()
+    const publicKey = b4a.alloc(sodium.crypto_sign_PUBLICKEYBYTES)
+    const secretKey = b4a.alloc(sodium.crypto_sign_SECRETKEYBYTES)
+    sodium.crypto_sign_seed_keypair(publicKey, secretKey, subSeed)
+    return { publicKey, secretKey }
+  }
+
+  /**
+   * Per-invoice keypair (Payments / Privacy-routing PRIV0). Deterministic from
+   * the sale nonce so buyer + seller can both re-derive it for the same sale, yet
+   * UNLINKABLE across invoices and from the root/app keys. Zero network cost.
+   */
+  getInvoiceKeypair (saleNonce) {
+    return { ...this._deriveSubkey('pear-invoice-v1:', String(saleNonce == null ? '' : saleNonce)), saleNonce }
+  }
+
+  /**
+   * Per-session keypair (Nostr / PRIV0). Deterministic from a session salt the
+   * caller picks at random — session isolation + unlinkability across sessions,
+   * recoverable within one.
+   */
+  getSessionKeypair (sessionSalt) {
+    return { ...this._deriveSubkey('pear-session-v1:', String(sessionSalt == null ? '' : sessionSalt)), sessionSalt }
+  }
+
+  /**
    * Sign with the per-app sub-key (not the root). Safe to expose to
    * pages — the root remains sealed inside the worklet.
    *
