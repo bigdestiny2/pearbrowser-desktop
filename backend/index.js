@@ -88,6 +88,7 @@ let identity = null
 let profile = null
 let contacts = null
 let identityBindingPublisher = null // Lighthouse Phase 2 — root→search-key binding publish/resolve
+let queryPlanner = null // Lighthouse Phase 2 — federated query orchestration (local-first + peer fan-out)
 let names = null // naming Phase N1 — local petname store (names.cjs); null until ready
 let swarmBridge = null
 let swarmGrants = null
@@ -322,12 +323,21 @@ rpc.handle(C.CMD_UNLOAD_CATALOG, async (data) => {
 // --- Lighthouse P2P search (Phase 0 — local self-search) ---
 // Query / feed the personal index. Querying is fully local (no network);
 // indexing is best-effort and never throws to the caller.
+// Local-first + optional background federate (Lighthouse Phase 2). handleSearch
+// (search-handler.js) returns local hop-0 results synchronously and, when
+// data.federated is set and a planner exists, pushes EVT_SEARCH_FEDERATED later
+// with the enriched trusted-peer set (queryId-correlated, stale-suppressed). The
+// reply shape is the old { results, stats } plus additive { phase, federating,
+// queryId } — so existing renderers keep working unchanged.
+const { createSearchHandler } = require('./search-handler.js')
+const handleSearch = createSearchHandler({
+  getPersonalIndex: () => personalIndex,
+  getQueryPlanner: () => queryPlanner,
+  emit: (payload) => rpc.event(C.EVT_SEARCH_FEDERATED, payload),
+})
 rpc.handle(C.CMD_SEARCH, async (data) => {
   await whenReady()
-  if (!personalIndex) return { results: [], stats: { docs: 0 } }
-  const results = await personalIndex.search(String((data && data.query) || ''),
-    { now0: Date.now(), limit: (data && data.limit) || 50 })
-  return { results, stats: await personalIndex.stats() }
+  return handleSearch(data)
 })
 
 // Lighthouse Phase 2 — publish/refresh our IdentityBinding on demand (e.g. a
@@ -1695,6 +1705,23 @@ async function boot () {
     } catch (err) {
       console.error('IdentityBindingPublisher init failed:', err && err.message)
       identityBindingPublisher = null
+    }
+  }
+
+  // Lighthouse Phase 2 — federated query planner (local-first + trusted-peer
+  // fan-out). Degrades to local-only search if it can't construct, matching the
+  // existing graceful-degradation pattern.
+  if (personalIndex && identity) {
+    try {
+      const { QueryPlanner, SearchFanoutBudget } = require('./query-planner.js')
+      queryPlanner = new QueryPlanner({
+        personalIndex, contacts, identity, swarm,
+        budget: new SearchFanoutBudget(), bindingPublisher: identityBindingPublisher,
+      })
+      console.log('QueryPlanner ready')
+    } catch (err) {
+      console.error('QueryPlanner init failed:', err && err.message)
+      queryPlanner = null
     }
   }
 
