@@ -96,6 +96,18 @@ function buildDocRecords (doc, sign) {
   return { docId, terms, records }
 }
 
+// The EXACT bytes buildDocRecords signed for a doc: the canonDoc (the d! record
+// minus sig + signerPubkey) in its original key order. Shared by the signer
+// (PersonalIndex sign hook) and the federated RowVerifier so a peer's posting
+// signature is checked over identical bytes — any tampering changes these bytes
+// and fails the check.
+function canonDocBytes (rec) {
+  return JSON.stringify({
+    v: rec.v, docId: rec.docId, driveKey: rec.driveKey, path: rec.path,
+    title: rec.title, terms: rec.terms, h: rec.h, publishedAt: rec.publishedAt,
+  })
+}
+
 // FNV-1a over a string → a deterministic [0,1) dither for exploration that
 // never reads a clock or RNG, so rankings are reproducible.
 function fnvUnit (str) {
@@ -235,5 +247,5 @@ async function searchIndex (bee, query, { limit = 200, perTerm = 500, now0 = 0, 
 module.exports = {
   SCHEMA_VERSION, MAX_TERMS_PER_DOC, STOPWORDS, RANK,
   tokenize, docIdFor, invScore, postingKey, docKey, postingSetHash,
-  buildDocRecords, rankCandidates, searchCandidates, searchIndex, fnvUnit, hashHex,
+  buildDocRecords, canonDocBytes, rankCandidates, searchCandidates, searchIndex, fnvUnit, hashHex,
 }

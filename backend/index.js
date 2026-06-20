@@ -1663,8 +1663,18 @@ async function boot () {
   // disables search gracefully instead of crashing boot.
   try {
     const { PersonalIndex } = require('./personal-index.cjs')
+    // Sign each posting with the BOUND (rotatable) search key via the binding
+    // publisher, so a trusted peer who resolves our search key can verify our
+    // postings (Lighthouse Phase 2). The publisher is created just below; this
+    // hook runs only when a page is indexed (post-boot), so it's set by then.
+    // Fallback to the seed-derived 'search' subkey if the publisher isn't up —
+    // those postings stay self-only (hop-0 isn't peer-verified) until re-indexed.
     const sign = (canonDoc) => {
-      const r = identity.signForApp('search', JSON.stringify(canonDoc), 'lighthouse-doc-v2')
+      const payload = JSON.stringify(canonDoc)
+      if (identityBindingPublisher) {
+        try { return identityBindingPublisher.signDocSync(payload) } catch (_) { /* fall through */ }
+      }
+      const r = identity.signForApp('search', payload, 'lighthouse-doc-v2')
       return { sig: r.signature, pubkey: r.publicKey }
     }
     personalIndex = await new PersonalIndex(store, { sign }).ready()

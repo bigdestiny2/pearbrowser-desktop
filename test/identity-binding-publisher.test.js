@@ -173,3 +173,14 @@ test('putMeta/getMeta round-trip and stay serialized against indexDoc', async ()
     assert.equal((await personalIndex.stats()).docs, 1) // meta!count not clobbered
   })
 })
+
+test('signDocSync signs a posting with the BOUND search key (peer-verifiable)', async () => {
+  await withPublisher(async ({ pub }) => {
+    await pub.publish() // ensures + binds the search key
+    const binding = await pub.getCurrentBinding()
+    const payload = JSON.stringify({ docId: 'abc', t: 'hello' })
+    const { sig, pubkey } = pub.signDocSync(payload)
+    assert.equal(pubkey, binding.searchPubkey) // signed with the same key the binding advertises
+    assert.equal(ib.verifyAppSig('search', payload, sig, pubkey, 'lighthouse-doc-v2'), true)
+  })
+})

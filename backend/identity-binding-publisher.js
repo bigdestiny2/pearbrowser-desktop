@@ -27,6 +27,9 @@ const BINDING_META = 'binding'
 const BINDING_VERSION_META = 'bindingVersion'
 // stable per-user key for the binding's DHT mutable record
 const DHT_BINDING_NAMESPACE = 'lighthouse-binding'
+// per-app signing domain for search postings (mirrors PersonalIndex sign hook
+// + identity-binding.verifyAppSig); a posting signed here verifies there.
+const DOC_NAMESPACE = 'lighthouse-doc-v2'
 
 class IdentityBindingPublisher {
   constructor ({ ib, identity, personalIndex, contacts, dht, log } = {}) {
@@ -39,10 +42,15 @@ class IdentityBindingPublisher {
     this.contacts = contacts || null
     this.dht = dht || null
     this.log = typeof log === 'function' ? log : () => {}
+    this._searchKp = null // cached bound search keypair (Buffers), loaded in ready()
   }
 
   async ready () {
     if (!this.personalIndex.bee) throw new Error('personalIndex not ready (no bee)')
+    // Eagerly load/create the rotatable search keypair so signDocSync() is
+    // available synchronously once boot completes (the PersonalIndex sign hook
+    // is synchronous and runs whenever a page is indexed).
+    this._searchKp = await this._ensureSearchKeypair()
     return this
   }
 
@@ -68,7 +76,28 @@ class IdentityBindingPublisher {
       publicKey: b4a.toString(kp.publicKey, 'hex'),
       secretKey: b4a.toString(kp.secretKey, 'hex'),
     })
+    this._searchKp = kp
     return kp
+  }
+
+  // Load the persisted search keypair, creating + persisting one on first use.
+  // Cached on this._searchKp so signDocSync() needs no await.
+  async _ensureSearchKeypair () {
+    if (this._searchKp) return this._searchKp
+    const loaded = await this._loadSearchKeypair()
+    this._searchKp = loaded || await this._createSearchKeypair()
+    return this._searchKp
+  }
+
+  // Sign a search-doc payload with the BOUND (rotatable) search key over the
+  // same domain-separated tag identity-binding.verifyAppSig checks, so a peer
+  // who resolved our search key can verify this posting. Synchronous: the key is
+  // preloaded in ready(); throws if not loaded so the caller can fall back.
+  signDocSync (payload) {
+    if (!this._searchKp) throw new Error('search keypair not loaded')
+    const msg = this.ib.appMessage('search', payload, DOC_NAMESPACE)
+    const sig = crypto.sign(msg, this._searchKp.secretKey)
+    return { sig: b4a.toString(sig, 'hex'), pubkey: b4a.toString(this._searchKp.publicKey, 'hex') }
   }
 
   async _currentVersion () { return this.personalIndex.getMeta(BINDING_VERSION_META, 0) }
@@ -85,7 +114,7 @@ class IdentityBindingPublisher {
    */
   async publish ({ rotate = false } = {}) {
     const rootHex = this._rootPubkeyHex()
-    let searchKp = await this._loadSearchKeypair()
+    let searchKp = this._searchKp || await this._ensureSearchKeypair()
     const current = await this.getCurrentBinding()
     const keyMatchesCurrent = searchKp && current &&
       current.searchPubkey === b4a.toString(searchKp.publicKey, 'hex')
