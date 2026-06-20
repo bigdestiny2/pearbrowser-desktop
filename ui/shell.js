@@ -2358,19 +2358,46 @@ function Library ({ rpc, C, onBrowse }) {
   const [results, setResults] = useState(null) // null = not searched yet
   const [indexed, setIndexed] = useState(0)
   const [searching, setSearching] = useState(false)
+  // Lighthouse Phase 2 — opt-in federated search across trusted peers. Local
+  // results paint immediately; the enriched peer set arrives via
+  // EVT_SEARCH_FEDERATED, correlated by queryId so a stale reply can't clobber a
+  // newer search.
+  const [federated, setFederated] = useState(false)
+  const [federating, setFederating] = useState(false)
+  const searchIdRef = useRef(0)
 
   const runSearch = async () => {
     const q = query.trim()
-    if (!q) { setResults(null); return }
+    if (!q) { setResults(null); setFederating(false); return }
     setSearching(true)
+    setFederating(false)
     try {
-      const res = await rpc.request(C.CMD_SEARCH, { query: q, limit: 50 })
+      const res = await rpc.request(C.CMD_SEARCH, { query: q, limit: 50, federated })
+      searchIdRef.current = res?.queryId || 0
       setResults(Array.isArray(res?.results) ? res.results : [])
       setIndexed(res?.stats?.docs || 0)
+      if (res?.federating) setFederating(true) // peer results arrive asynchronously
     } catch (e) { setErr(`search: ${e.message}`) }
     finally { setSearching(false) }
   }
   const resultUrl = (r) => `hyper://${r.driveKey}${r.path && r.path !== '/' ? r.path : '/'}`
+  const srcBadge = (r) => {
+    if (!r.tier || r.tier === 'self') return html`<span class="src-badge self">you</span>`
+    if (r.tier === 'followed') return html`<span class="src-badge followed">trusted · hop ${r.trustHop ?? 1}</span>`
+    return html`<span class="src-badge other">${r.tier}</span>`
+  }
+
+  // Enriched federated results push (Lighthouse Phase 2).
+  useEffect(() => {
+    const onFederated = (e) => {
+      const d = (e && e.detail) || {}
+      if (d.queryId !== searchIdRef.current) return // superseded by a newer query
+      if (Array.isArray(d.results)) setResults(d.results)
+      setFederating(false)
+    }
+    rpc.addEventListener(`event:${C.EVT_SEARCH_FEDERATED}`, onFederated)
+    return () => rpc.removeEventListener(`event:${C.EVT_SEARCH_FEDERATED}`, onFederated)
+  }, [])
 
   const refresh = async () => {
     try {
@@ -2423,13 +2450,17 @@ function Library ({ rpc, C, onBrowse }) {
         />
         <button class="btn primary" onClick=${runSearch} disabled=${searching || !query.trim()}>${searching ? 'Searching…' : 'Search'}</button>
       </div>
+      <label class="search-fed-toggle">
+        <input type="checkbox" checked=${federated} onChange=${(e) => setFederated(e.target.checked)} />
+        Include trusted peers${federating ? html` <span class="fed-status">· searching peers…</span>` : ''}
+      </label>
       ${results !== null && (results.length === 0
         ? html`<p class="placeholder">No matches${indexed === 0 ? ' yet — browse some hyper:// pages first to build your index.' : '.'}</p>`
         : html`<div class="library-list">
             ${results.map((r) => html`
               <div class="library-row" key=${r.docId || (r.driveKey + r.path)}>
                 <div class="library-row-main">
-                  <div class="library-title">${r.title || resultUrl(r)}</div>
+                  <div class="library-title">${r.title || resultUrl(r)}${federated ? srcBadge(r) : ''}</div>
                   <div class="library-url">${resultUrl(r)}</div>
                 </div>
                 <button class="btn small" onClick=${() => onBrowse(resultUrl(r))}>Open</button>
