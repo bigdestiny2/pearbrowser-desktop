@@ -12,11 +12,13 @@ import b4a from 'b4a'
 import piMod from '../backend/personal-index.cjs'
 import ibMod from '../backend/identity-binding.cjs'
 import cmpMod from '../backend/search-completeness.cjs'
+import dgMod from '../backend/search-digest.cjs'
 import pubMod from '../backend/identity-binding-publisher.js'
 const { PersonalIndex } = piMod
 const { IdentityBindingPublisher } = pubMod
 const ib = ibMod
 const cmp = cmpMod
+const dg = dgMod
 
 const hex = (b) => b4a.toString(b, 'hex')
 
@@ -201,5 +203,18 @@ test('publish() emits a root-signed completeness anchor (stored + resolvable)', 
     assert.equal((await personalIndex.getMeta('anchor', null)).length, res.anchor.length) // persisted
     const got = await pub.resolve({ contactPubkey: identity.rootHex, dhtPubkey: res.dhtPubkey })
     assert.ok(got.anchor && cmp.verifyAnchor(got.anchor, identity.rootHex)) // resolves from the DHT record
+  })
+})
+
+test('publish() emits a digest whose head reflects the index (digest-first gating)', async () => {
+  await withPublisher(async ({ pub, identity, contacts, personalIndex }) => {
+    await personalIndex.indexDoc({ driveKey: 'd1', path: '/', title: 'T', body: 'encrypted chat' })
+    contacts._add(identity.rootHex)
+    const res = await pub.publish()
+    assert.ok(res.digest && Array.isArray(res.digest.topTerms))
+    assert.equal(dg.digestWorthPulling(res.digest, ['chat']), true)
+    assert.equal(dg.digestWorthPulling(res.digest, ['nope']), false)
+    const got = await pub.resolve({ contactPubkey: identity.rootHex, dhtPubkey: res.dhtPubkey })
+    assert.ok(got.digest && dg.digestWorthPulling(got.digest, ['chat'])) // resolves from the DHT record
   })
 })

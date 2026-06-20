@@ -13,6 +13,7 @@ const fr = require('./search-frontier.cjs')
 const sc = require('./search-core.cjs')
 const ib = require('./identity-binding.cjs')
 const cmp = require('./search-completeness.cjs')
+const dg = require('./search-digest.cjs')
 const Hyperbee = require('hyperbee')
 const b4a = require('b4a')
 
@@ -183,6 +184,7 @@ class QueryPlanner {
   // Returns [{ rootPubkey, searchPubkey, hits }] for the RowVerifier.
   async _fetchPeerHits (peerRoots, query) {
     if (!this.store || !this.swarm || !this.bindingPublisher || !this.contacts) return []
+    const queryTerms = sc.tokenize(query).map((t) => t.term)
     const out = []
     for (const peerRoot of (peerRoots || [])) {
       if (!this.budget.canConnect()) break
@@ -196,6 +198,11 @@ class QueryPlanner {
         if (!resolved || !resolved.searchPubkey || !resolved.indexKey) continue
         // completeness gate: drop a peer whose anchor is forged or equivocates
         if (!this._checkPeerAnchor(peerRoot, resolved.anchor)) continue
+        // digest-first: skip the (expensive) index replication when the peer's
+        // cheap digest advertises NONE of the query terms. _digestCache lets a
+        // later query reuse it without re-resolving.
+        if (resolved.digest) this._digestCache.set(peerRoot, resolved.digest)
+        if (resolved.digest && !dg.digestWorthPulling(resolved.digest, queryTerms)) continue
         const core = this.store.get({ key: b4a.from(resolved.indexKey, 'hex') })
         await core.ready()
         try { this.swarm.join(core.discoveryKey, { server: false, client: true }) } catch (_) { /* already joined */ }

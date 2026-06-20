@@ -11,6 +11,7 @@
 
 const Hyperbee = require('hyperbee')
 const sc = require('./search-core.cjs')
+const dg = require('./search-digest.cjs')
 
 const DEFAULT_NAME = 'pearbrowser-searchindex-v1'
 const DEFAULT_MAX_DOCS = 20000
@@ -147,6 +148,29 @@ class PersonalIndex {
     let treeHash = ''
     try { treeHash = (await core.treeHash()).toString('hex') } catch (_) { /* pre-ready */ }
     return { key: core.key.toString('hex'), length: core.length || 0, treeHash }
+  }
+
+  // Build the cheap digest (docId Bloom + top-term head) a contact replicates by
+  // default, so a peer can decide whether to pull our full shard for a query
+  // WITHOUT downloading the (tens-of-MB) index. Scans the index — runs at publish
+  // time, never per query.
+  async buildDigest (opts = {}) {
+    const docIds = []
+    for await (const e of this.bee.createReadStream({ gte: 'd!', lt: 'd!~' })) docIds.push(e.key.slice(2))
+    // term document-frequency from the t! postings (grouped by term in key order)
+    const df = new Map()
+    let curTerm = null
+    let seen = null
+    for await (const e of this.bee.createReadStream({ gte: 't!', lt: 't!~' })) {
+      const parts = e.key.split('!') // t!<term>!<invScore>!<docId>
+      const term = parts[1]
+      const docId = parts[parts.length - 1]
+      if (term !== curTerm) { curTerm = term; seen = new Set(); df.set(term, 0) }
+      if (!seen.has(docId)) { seen.add(docId); df.set(term, (df.get(term) || 0) + 1) }
+    }
+    const termDf = []
+    for (const [term, d] of df) termDf.push({ term, df: d })
+    return dg.buildDigest(docIds, termDf, opts)
   }
 
   async close () { try { if (this.bee) await this.bee.close() } catch {} }

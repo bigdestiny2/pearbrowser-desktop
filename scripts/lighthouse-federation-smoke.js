@@ -62,10 +62,11 @@ async function main () {
   let pubA
   const piA = await new PersonalIndex(storeA, { sign: (cd) => pubA.signDocSync(JSON.stringify(cd)) }).ready()
   pubA = await new IdentityBindingPublisher({ ib, identity: idA, personalIndex: piA, contacts: null, dht }).ready()
-  const published = await pubA.publish()
+  // index BEFORE publishing so the completeness anchor + digest reflect the docs
   await piA.indexDoc({ driveKey: 'd1', path: '/', title: 'Keet', body: 'encrypted peer to peer chat' })
   await piA.indexDoc({ driveKey: 'd2', path: '/', title: 'Recipes', body: 'how to bake bread at home' })
-  console.log('  · A published binding  search=' + published.searchPubkey.slice(0, 12) + '…  index=' + published.indexKey.slice(0, 12) + '…')
+  const published = await pubA.publish()
+  console.log('  · A published binding  search=' + published.searchPubkey.slice(0, 12) + '…  index=' + published.indexKey.slice(0, 12) + '…  digest-terms=' + (published.digest ? published.digest.topTerms.length : 0))
 
   // --- Node B: has A as a contact (with A's binding DHT key) --------------
   const idB = fakeIdentity()

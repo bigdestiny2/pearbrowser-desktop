@@ -13,9 +13,11 @@ import crypto from 'hypercore-crypto'
 import b4a from 'b4a'
 import scMod from '../backend/search-core.cjs'
 import ibMod from '../backend/identity-binding.cjs'
+import dgMod from '../backend/search-digest.cjs'
 import piMod from '../backend/personal-index.cjs'
 const sc = scMod
 const ib = ibMod
+const dg = dgMod
 const { PersonalIndex } = piMod
 
 const hex = (b) => b4a.toString(b, 'hex')
@@ -78,6 +80,26 @@ test('searchSignedHits returns peer-verifiable signed records from a real index'
     assert.ok(tf > 0)
     assert.equal(rec.signerPubkey, hex(kp.publicKey))
     assert.equal(ib.verifyAppSig('search', sc.canonDocBytes(rec), rec.sig, rec.signerPubkey, DOC_NS), true)
+  } finally {
+    await idx.close(); await store.close(); await rm(dir, { recursive: true, force: true })
+  }
+})
+
+// digest-first gating (I9): the cheap digest head must reflect indexed terms so a
+// peer can decide whether to pull the full index.
+test('PersonalIndex.buildDigest head matches indexed terms (digest-first gating)', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'digest-'))
+  const store = new Corestore(dir)
+  await store.ready()
+  const idx = await new PersonalIndex(store, { sign: signerFor(crypto.keyPair()) }).ready()
+  try {
+    await idx.indexDoc({ driveKey: 'd1', path: '/', title: 'Keet', body: 'encrypted peer to peer chat' })
+    await idx.indexDoc({ driveKey: 'd2', path: '/', title: 'Recipes', body: 'bake fresh bread' })
+    const digest = await idx.buildDigest()
+    assert.ok(digest && Array.isArray(digest.topTerms))
+    assert.equal(dg.digestWorthPulling(digest, ['chat']), true) // indexed → worth pulling
+    assert.equal(dg.digestWorthPulling(digest, ['bread']), true)
+    assert.equal(dg.digestWorthPulling(digest, ['nonexistentxyz']), false) // miss → skip the pull
   } finally {
     await idx.close(); await store.close(); await rm(dir, { recursive: true, force: true })
   }
