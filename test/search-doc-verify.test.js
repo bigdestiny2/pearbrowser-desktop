@@ -5,12 +5,18 @@
 // integrity foundation the federated RowVerifier (Step 5b) builds on.
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import Corestore from 'corestore'
 import crypto from 'hypercore-crypto'
 import b4a from 'b4a'
 import scMod from '../backend/search-core.cjs'
 import ibMod from '../backend/identity-binding.cjs'
+import piMod from '../backend/personal-index.cjs'
 const sc = scMod
 const ib = ibMod
+const { PersonalIndex } = piMod
 
 const hex = (b) => b4a.toString(b, 'hex')
 const DOC_NS = 'lighthouse-doc-v2'
@@ -53,4 +59,26 @@ test('a posting verified against the wrong pubkey fails (impersonation)', () => 
     { driveKey: 'd1', path: '/', title: 'X', body: 'one two three' }, signerFor(real))
   const dRec = dRecOf(records)
   assert.equal(ib.verifyAppSig('search', sc.canonDocBytes(dRec), dRec.sig, hex(attacker.publicKey), DOC_NS), false)
+})
+
+// the bridge from scan → verify: searchSignedHits yields exactly the signed d!
+// records the RowVerifier checks (Step 5c — what a peer pulls from a replica).
+test('searchSignedHits returns peer-verifiable signed records from a real index', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'signed-hits-'))
+  const store = new Corestore(dir)
+  await store.ready()
+  const kp = crypto.keyPair()
+  const idx = await new PersonalIndex(store, { sign: signerFor(kp) }).ready()
+  try {
+    await idx.indexDoc({ driveKey: 'd1', path: '/', title: 'Keet', body: 'encrypted peer chat' })
+    await idx.indexDoc({ driveKey: 'd2', path: '/', title: 'Recipes', body: 'bake bread' })
+    const hits = await sc.searchSignedHits(idx.bee, 'chat')
+    assert.equal(hits.length, 1)
+    const { tf, rec } = hits[0]
+    assert.ok(tf > 0)
+    assert.equal(rec.signerPubkey, hex(kp.publicKey))
+    assert.equal(ib.verifyAppSig('search', sc.canonDocBytes(rec), rec.sig, rec.signerPubkey, DOC_NS), true)
+  } finally {
+    await idx.close(); await store.close(); await rm(dir, { recursive: true, force: true })
+  }
 })

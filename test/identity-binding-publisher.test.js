@@ -100,6 +100,8 @@ test('publish() writes a DHT mutable record resolvable to the same key', async (
     const rec = JSON.parse(b4a.toString(got.value, 'utf-8'))
     assert.equal(rec.kind, 'binding')
     assert.equal(rec.searchPubkey, res.searchPubkey)
+    assert.equal(rec.indexKey, res.indexKey) // index core key advertised in the wrapper
+    assert.match(res.indexKey, /^[0-9a-f]{64}$/)
   })
 })
 
@@ -133,7 +135,8 @@ test('resolve() returns a known contact\'s current search key (full publish→DH
     contacts._add(identity.rootHex) // treat self as a known contact
     const res = await pub.publish()
     const got = await pub.resolve({ contactPubkey: identity.rootHex, dhtPubkey: res.dhtPubkey })
-    assert.equal(got, res.searchPubkey)
+    assert.equal(got.searchPubkey, res.searchPubkey)
+    assert.equal(got.indexKey, res.indexKey) // index core key resolves too (for replication)
   })
 })
 

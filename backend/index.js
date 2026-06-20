@@ -353,10 +353,10 @@ rpc.handle(C.CMD_IDENTITY_BINDING_RESOLVE, async (data) => {
   await whenReady()
   if (!identityBindingPublisher) throw new Error('binding publisher unavailable')
   if (!data || !data.contactPubkey || !data.dhtPubkey) throw new Error('contactPubkey + dhtPubkey required')
-  const searchPubkey = await identityBindingPublisher.resolve({
+  const resolved = await identityBindingPublisher.resolve({
     contactPubkey: String(data.contactPubkey), dhtPubkey: String(data.dhtPubkey),
   })
-  return { searchPubkey }
+  return resolved || { searchPubkey: null, indexKey: null }
 })
 
 rpc.handle(C.CMD_SEARCH_INDEX, async (data) => {

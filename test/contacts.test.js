@@ -161,3 +161,26 @@ test('update() cannot forge verification state', async () => {
     assert.equal(updated.signature, null)
   })
 })
+
+test('parseInviteURL extracts the binding key and add() persists it (for federated search)', async () => {
+  await withContacts({ verify }, async (contacts) => {
+    const { pubHex } = newKeypair()
+    const bindingKey = 'cd'.repeat(32)
+    const parsed = Contacts.parseInviteURL(`pear://contact?pk=${pubHex}&name=Alice&bk=${bindingKey}`)
+    assert.equal(parsed.bindingKey, bindingKey)
+    const rec = await contacts.add({ pubkey: pubHex, displayName: 'Alice', bindingKey: parsed.bindingKey })
+    assert.equal(rec.bindingKey, bindingKey)
+    assert.equal((await contacts.lookup(pubHex)).bindingKey, bindingKey) // persisted
+    // update() preserves it
+    const upd = await contacts.update(pubHex, { displayName: 'Alice 2' })
+    assert.equal(upd.bindingKey, bindingKey)
+  })
+})
+
+test('add() drops a malformed binding key (stored null, not trusted)', async () => {
+  await withContacts({ verify }, async (contacts) => {
+    const { pubHex } = newKeypair()
+    const rec = await contacts.add({ pubkey: pubHex, displayName: 'Bob', bindingKey: 'not-hex' })
+    assert.equal(rec.bindingKey, null)
+  })
+})

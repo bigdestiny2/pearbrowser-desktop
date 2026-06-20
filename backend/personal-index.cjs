@@ -131,6 +131,13 @@ class PersonalIndex {
     return { docs: await this._meta('count', 0), name: this.name }
   }
 
+  // Hex of the underlying hypercore key — what a trusted peer replicates to read
+  // this index (advertised in the IdentityBinding so contacts can find it).
+  coreKeyHex () {
+    const core = this.bee && (this.bee.core || this.bee.feed)
+    return core && core.key ? core.key.toString('hex') : null
+  }
+
   async close () { try { if (this.bee) await this.bee.close() } catch {} }
 }
 

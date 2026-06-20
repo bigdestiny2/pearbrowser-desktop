@@ -146,16 +146,22 @@ class IdentityBindingPublisher {
       await this.personalIndex.putMeta(BINDING_VERSION_META, version)
     }
 
+    // the index core a peer replicates to read our postings. It rides in the
+    // UNSIGNED wrapper (not the signed binding): a swapped indexKey at worst
+    // points at an empty/wrong index — its postings still must verify against
+    // the SIGNED search key, so it's an availability concern, not a forgery one.
+    const indexKey = typeof this.personalIndex.coreKeyHex === 'function' ? this.personalIndex.coreKeyHex() : null
+
     let dhtPubkey = null
     if (this.dht) {
       const dhtKp = this.identity.getAppKeypair(DHT_BINDING_NAMESPACE)
       dhtPubkey = b4a.toString(dhtKp.publicKey, 'hex')
-      const value = b4a.from(JSON.stringify({ ...binding, dhtPubkey }), 'utf-8')
+      const value = b4a.from(JSON.stringify({ ...binding, dhtPubkey, indexKey }), 'utf-8')
       // REAL hyperdht signature: mutablePut(keyPair, value, { seq })
       await this.dht.mutablePut(dhtKp, value, { seq: version })
     }
     this.log('[binding] published v' + version + ' search=' + binding.searchPubkey.slice(0, 12) + '…')
-    return { searchPubkey: binding.searchPubkey, version, dhtPubkey }
+    return { searchPubkey: binding.searchPubkey, version, dhtPubkey, indexKey }
   }
 
   /**
@@ -178,7 +184,9 @@ class IdentityBindingPublisher {
     let rec
     try { rec = JSON.parse(b4a.toString(res.value, 'utf-8')) } catch { return null }
     // authenticate against the Contacts-held root, NOT rec.rootPubkey
-    return this.ib.resolveSearchKey(contactPubkey, [rec], [])
+    const searchPubkey = this.ib.resolveSearchKey(contactPubkey, [rec], [])
+    if (!searchPubkey) return null
+    return { searchPubkey, indexKey: typeof rec.indexKey === 'string' ? rec.indexKey : null }
   }
 }
 

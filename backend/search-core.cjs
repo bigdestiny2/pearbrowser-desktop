@@ -200,10 +200,14 @@ function rankCandidates (candidates, { now0 = 0, diversity = true } = {}) {
 // planner can pull raw candidates from many peer bees and rank them together
 // exactly once (search-federation.mergeFederated). `tier`/`trustHop` describe
 // the source (hop-0 self = {tier:'self', trustHop:0}).
-async function searchCandidates (bee, query, { perTerm = 500, tier = 'self', trustHop = 0 } = {}) {
+// Scan a ready v2 Hyperbee for query hits: tokenize → bounded range-scan per
+// term → AND-intersect by docId → hydrate the d! record. Returns
+// [{ docId, tf, rec }] in intersection order (rec is the full signed d! record,
+// or null if missing). Shared by searchCandidates (local rank) and
+// searchSignedHits (federated verify).
+async function scanHits (bee, query, { perTerm = 500 } = {}) {
   const qterms = tokenize(query).map((t) => t.term)
   if (qterms.length === 0) return []
-  // gather per-term posting lists: docId → summed tf
   const lists = []
   for (const term of qterms) {
     const m = new Map()
@@ -214,7 +218,6 @@ async function searchCandidates (bee, query, { perTerm = 500, tier = 'self', tru
     }
     lists.push(m)
   }
-  // AND intersection over the smallest list first
   lists.sort((a, b) => a.size - b.size)
   let hits = lists[0]
   for (let i = 1; i < lists.length; i++) {
@@ -222,18 +225,35 @@ async function searchCandidates (bee, query, { perTerm = 500, tier = 'self', tru
     for (const [d, tf] of hits) if (lists[i].has(d)) next.set(d, tf + lists[i].get(d))
     hits = next
   }
-  // hydrate doc records + assemble candidates
-  const candidates = []
+  const out = []
   for (const [docId, tf] of hits) {
     const rec = await bee.get(docKey(docId)).catch(() => null)
-    const d = rec && rec.value ? rec.value : { docId, driveKey: '', path: '/', title: docId }
-    candidates.push({
+    out.push({ docId, tf, rec: rec && rec.value ? rec.value : null })
+  }
+  return out
+}
+
+async function searchCandidates (bee, query, { perTerm = 500, tier = 'self', trustHop = 0 } = {}) {
+  const hits = await scanHits(bee, query, { perTerm })
+  return hits.map(({ docId, tf, rec }) => {
+    const d = rec || { docId, driveKey: '', path: '/', title: docId }
+    return {
       docId, driveKey: d.driveKey, path: d.path, title: d.title, tf,
       publishedAt: d.publishedAt || 0, tier, trustHop, endorsers: 0,
       contentHash: d.h || '', signerPubkey: d.signerPubkey || '',
-    })
-  }
-  return candidates
+    }
+  })
+}
+
+// Query hits as SIGNED rows for federated verification: [{ tf, rec }] where rec
+// is the peer's full d! record (with sig + signerPubkey). Rows without a record
+// are dropped (nothing to verify). The RowVerifier checks each rec against the
+// peer's resolved search key before it can rank.
+async function searchSignedHits (bee, query, { perTerm = 500 } = {}) {
+  const hits = await scanHits(bee, query, { perTerm })
+  const out = []
+  for (const { tf, rec } of hits) if (rec) out.push({ tf, rec })
+  return out
 }
 
 // End-to-end local query over a ready Hyperbee: candidates → deterministic rank.
@@ -247,5 +267,6 @@ async function searchIndex (bee, query, { limit = 200, perTerm = 500, now0 = 0, 
 module.exports = {
   SCHEMA_VERSION, MAX_TERMS_PER_DOC, STOPWORDS, RANK,
   tokenize, docIdFor, invScore, postingKey, docKey, postingSetHash,
-  buildDocRecords, canonDocBytes, rankCandidates, searchCandidates, searchIndex, fnvUnit, hashHex,
+  buildDocRecords, canonDocBytes, rankCandidates,
+  scanHits, searchCandidates, searchSignedHits, searchIndex, fnvUnit, hashHex,
 }

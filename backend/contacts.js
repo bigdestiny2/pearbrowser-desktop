@@ -7,7 +7,7 @@
  * `window.pear.contacts.list()`.
  *
  * Data layout:
- *   contact!<pubkey>   { displayName, addedAt, tags?, avatar?, notes?, signature?, verifiedAt? }
+ *   contact!<pubkey>   { displayName, addedAt, tags?, avatar?, notes?, signature?, verifiedAt?, bindingKey? }
  *
  * Pubkeys are the OTHER user's ROOT pubkey (not their per-app sub-key).
  * Since each user's root pubkey is derived from their BIP-39 seed, it's
@@ -87,10 +87,13 @@ class Contacts {
    * malformed, unverifiable, or invalid rejects the import rather than silently
    * downgrading to an unverified contact.
    */
-  async add ({ pubkey, displayName, avatar, tags, notes, signature }) {
+  async add ({ pubkey, displayName, avatar, tags, notes, signature, bindingKey }) {
     this._requireReady()
     const key = this._validatePubkey(pubkey)
     const trimmedName = typeof displayName === 'string' ? displayName.trim().slice(0, 128) : ''
+    // the contact's lighthouse-binding DHT key (64-hex), exchanged in the invite.
+    // Lets federated search resolve their binding → search key + index core.
+    const bk = typeof bindingKey === 'string' && /^[0-9a-f]{64}$/i.test(bindingKey) ? bindingKey.toLowerCase() : null
 
     const hasSig = signature != null && signature !== ''
     let verifiedAt = null
@@ -119,6 +122,7 @@ class Contacts {
       notes: typeof notes === 'string' ? notes.slice(0, 512) : null,
       signature: hasSig ? storedSig : (existing ? (existing.value.signature ?? null) : null),
       verifiedAt: hasSig ? verifiedAt : (existing ? (existing.value.verifiedAt ?? null) : null),
+      bindingKey: bk || (existing ? (existing.value.bindingKey ?? null) : null),
       updatedAt: this._now(),
     }
     // enforce cap
@@ -144,6 +148,7 @@ class Contacts {
       // update() must never let a caller forge it.
       signature: existing.value.signature ?? null,
       verifiedAt: existing.value.verifiedAt ?? null,
+      bindingKey: existing.value.bindingKey ?? null,
       updatedAt: this._now(),
     }
     delete next.pubkey
@@ -172,8 +177,9 @@ class Contacts {
       const pk = u.searchParams.get('pk')
       const name = u.searchParams.get('name') || ''
       const sig = u.searchParams.get('sig')
+      const bk = u.searchParams.get('bk') // lighthouse-binding DHT key (optional)
       if (!pk || !/^[0-9a-f]{64}$/i.test(pk)) return null
-      return { pubkey: pk.toLowerCase(), displayName: name, signature: sig }
+      return { pubkey: pk.toLowerCase(), displayName: name, signature: sig, bindingKey: bk || null }
     } catch {
       return null
     }
