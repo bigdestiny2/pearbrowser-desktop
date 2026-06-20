@@ -47,6 +47,13 @@ class PersonalIndex {
     return e && e.value != null ? e.value : dflt
   }
 
+  // Public meta read/write for sidecar records (e.g. the IdentityBinding under
+  // meta!binding). putMeta routes through _serialize so a binding write can't
+  // interleave with indexDoc()'s read-modify-write of meta!count/seq and lose
+  // an update; getMeta is a plain read.
+  async putMeta (key, val) { return this._serialize(() => this.bee.put('meta!' + key, val)) }
+  async getMeta (key, dflt) { return this._meta(key, dflt) }
+
   // Index (or re-index) one document. Re-indexing the same (driveKey,path)
   // refreshes its recency and replaces stale postings. Returns the docId, or
   // null if the page had no indexable terms. Serialized against other mutations.
