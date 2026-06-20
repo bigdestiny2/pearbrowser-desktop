@@ -10,7 +10,7 @@ dep. All gates below are real and unstarted unless noted.
 ## Run order (by fan-out × risk, not raw effort)
 
 1. **SPIKE-AUTOBEE-DURABILITY** (~1d) — ✅ **GREEN / RESOLVED** (`test/spike-autobee-durability.test.js`). A fresh never-writer node re-serves the converged view byte-identical after all writers go offline, via a **blind** relay (no encryption key). N5/PAY1/PAY6/NOSTR1 are de-risked. Lesson: re-derive via the Autobase from a replica — do NOT pin the view core standalone.
-2. **SPIKE-SCHNORR-BARE** (~1d) — highest fan-out (all 9 Nostr phases + PAY3 + anonGPT receipts); proves the esbuild→CJS→Bare bundling path.
+2. **SPIKE-SCHNORR-BARE** (~1d) — ✅ **GREEN / RESOLVED** (`backend/secp256k1-bundle.cjs` + `test/nostr-events-ops.test.js`). A self-contained CJS bundle of BIP-340 Schnorr loads via `require()` (zero node-builtin requires → Bare-loadable), matches official BIP-340 vector #1, and signs/verifies NIP-01 events. All of Nostr + anonGPT receipts are unblocked.
 3. **SPIKE-BINDING-COORDINATION** (~1d) — one-time canonical-shape gate for N2/PAY3/NOSTR2/PRIV1; must land before any track publishes bindings (free to cut now — no live bindings).
 4. **SEC0 seed-at-rest** (~2d) — gates real-user PAY2/NOSTR2/N2. **Crypto core + identity integration already built this session** (`1f8bf02`); only first-run migration + boot-unlock UX remain.
 5. **SPIKE-LN** (~3d) — gates PAY-Lightning + NOSTR8 only; runs after SCHNORR-BARE proves bundling.
@@ -34,7 +34,9 @@ dep. All gates below are real and unstarted unless noted.
 **GREEN:** all 5 assertions pass → the view core IS the durable artifact; N5/PAY1/PAY6/NOSTR1 proceed.
 **RED fallback:** pin Hyperdrive-shaped view snapshots (+1–2d/consumer), or defer multi-writer registries to single-writer-only. Program doesn't stall.
 
-## 2. SPIKE-SCHNORR-BARE  (~1d)
+## 2. SPIKE-SCHNORR-BARE  (~1d) — ✅ GREEN (resolved 2026-06-20)
+**Verdict:** GREEN. `backend/secp256k1-bundle.cjs` (esbuild → CJS via `scripts/build-secp256k1-bundle.sh`, the sheets-bundle pattern) bundles `@noble/secp256k1` v3 + `@noble/hashes` v2 (now declared deps) and exposes BIP-340 `schnorr*` + `nip01*` + `sha256Hex`. `test/nostr-events-ops.test.js` (5 tests) proves: loads via `require()`; **self-contained pure JS (no node-builtin require → Bare-loadable)**; deterministic sig matches **official BIP-340 vector #1**; NIP-01 id serialization + sign/verify, content-bound, tamper-rejecting. **Caveat:** @noble v3 needs the hash fns injected (done in the entry); non-deterministic signing uses the global `crypto.getRandomValues` — under Bare pass an explicit `auxRand` (`bare-crypto.randomBytes`); verify needs no randomness. → NOSTR0 wires this into identity.js; NOSTR1–8 + anonGPT 1b proceed.
+
 **Q:** Can a vendored CJS bundle exposing BIP-340 Schnorr sign/verify LOAD + run under Bare (dynamic `import()` is broken there)?
 **Gates:** ALL of Nostr (NOSTR0–8) + PAY3 + anonGPT Phase 1b receipt verification.
 **Experiment:** promote `@noble/secp256k1` + `@noble/hashes` from transitive → declared deps; build `backend/secp256k1-bundle.cjs` via esbuild→CJS wrapper (the `sheets-bundle.cjs` pattern); `test/nostr-events-ops.test.js` = BIP-340 known-answer vectors (≥10) + NIP-01 `id` serialization round-trip, under `node --test` AND a Bare-load check.

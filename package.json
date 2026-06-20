@@ -42,6 +42,8 @@
     }
   },
   "dependencies": {
+    "@noble/hashes": "^2.2.0",
+    "@noble/secp256k1": "^3.1.0",
     "autobase": "^7.27.3",
     "b4a": "^1.8.0",
     "bare-crypto": "^1.13.4",
