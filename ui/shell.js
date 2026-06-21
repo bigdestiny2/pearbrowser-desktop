@@ -401,7 +401,7 @@ function AboutSite ({ rpc, C, url, onClose, onBookmarkToggle }) {
             ${bookmarked === null
               ? html`<span class="settings-subtle">Checking…</span>`
               : bookmarked
-                ? html`<span style="color:#ff9500">★ Bookmarked</span>`
+                ? html`<span style=${{ color: '#ff9500' }}>★ Bookmarked</span>`
                 : html`<span class="settings-subtle">Not in your bookmarks</span>`}
           </div>
           <button class="btn ${bookmarked ? 'subtle' : 'primary'}"
@@ -2525,7 +2525,7 @@ function Library ({ rpc, C, onBrowse }) {
 
       <h2>Search your P2P content</h2>
       <p class="subtitle">Full-text search over everything you've browsed, fully local — no query ever leaves your device.${indexed ? ` ${indexed} page(s) indexed.` : ''}</p>
-      <div class="urlbar" style="margin-bottom:12px">
+      <div class="urlbar" style=${{ marginBottom: '12px' }}>
         <input
           type="text"
           class="url-input"
@@ -3931,6 +3931,83 @@ function SiteEditor ({ site, rpc, C, onBack, onBrowse }) {
   `
 }
 
+// Lighthouse federated search, as a reusable widget (Library + P2P Sites tabs).
+// Local results paint instantly via CMD_SEARCH; the opt-in trusted-peer set
+// arrives over EVT_SEARCH_FEDERATED, correlated by queryId so a stale reply
+// can't clobber a newer search.
+function FederatedSearch ({ rpc, C, onBrowse, placeholder }) {
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState(null) // null = not searched yet
+  const [indexed, setIndexed] = useState(0)
+  const [searching, setSearching] = useState(false)
+  const [federated, setFederated] = useState(false)
+  const [federating, setFederating] = useState(false)
+  const [err, setErr] = useState('')
+  const searchIdRef = useRef(0)
+
+  const runSearch = async () => {
+    const q = query.trim()
+    if (!q) { setResults(null); setFederating(false); return }
+    setSearching(true); setFederating(false)
+    try {
+      const res = await rpc.request(C.CMD_SEARCH, { query: q, limit: 50, federated })
+      searchIdRef.current = res?.queryId || 0
+      setResults(Array.isArray(res?.results) ? res.results : [])
+      setIndexed(res?.stats?.docs || 0)
+      if (res?.federating) setFederating(true)
+    } catch (e) { setErr(`search: ${e.message}`) }
+    finally { setSearching(false) }
+  }
+  const resultUrl = (r) => `hyper://${r.driveKey}${r.path && r.path !== '/' ? r.path : '/'}`
+  const srcBadge = (r) => {
+    if (!r.tier || r.tier === 'self') return html`<span class="src-badge self">you</span>`
+    if (r.tier === 'followed') return html`<span class="src-badge followed">trusted · hop ${r.trustHop ?? 1}</span>`
+    return html`<span class="src-badge other">${r.tier}</span>`
+  }
+  useEffect(() => {
+    const onFederated = (e) => {
+      const d = (e && e.detail) || {}
+      if (d.queryId !== searchIdRef.current) return
+      if (Array.isArray(d.results)) setResults(d.results)
+      setFederating(false)
+    }
+    rpc.addEventListener(`event:${C.EVT_SEARCH_FEDERATED}`, onFederated)
+    return () => rpc.removeEventListener(`event:${C.EVT_SEARCH_FEDERATED}`, onFederated)
+  }, [])
+
+  return html`
+    <div class="fed-search">
+      ${err && html`<div class="apps-error">${err}</div>`}
+      <div class="urlbar" style=${{ marginBottom: '10px' }}>
+        <input type="text" class="url-input"
+          placeholder=${placeholder || "Search the peer-to-peer web…"}
+          value=${query}
+          onInput=${(e) => setQuery(e.target.value)}
+          onKeyDown=${(e) => e.key === 'Enter' && runSearch()} />
+        <button class="btn primary" onClick=${runSearch} disabled=${searching || !query.trim()}>${searching ? 'Searching…' : 'Search'}</button>
+      </div>
+      <label class="search-fed-toggle">
+        <input type="checkbox" checked=${federated} onChange=${(e) => setFederated(e.target.checked)} />
+        Include trusted peers${federating ? html` <span class="fed-status">· searching peers…</span>` : ''}
+      </label>
+      ${indexed ? html`<span class="search-indexed" style=${{ marginLeft: '10px', opacity: 0.6, fontSize: '12px' }}>${indexed} page(s) indexed</span>` : ''}
+      ${results !== null && (results.length === 0
+        ? html`<p class="placeholder">No matches${indexed === 0 ? ' yet — browse some hyper:// pages first to build your index.' : '.'}</p>`
+        : html`<div class="library-list">
+            ${results.map((r) => html`
+              <div class="library-row" key=${r.docId || (r.driveKey + r.path)}>
+                <div class="library-row-main">
+                  <div class="library-title">${r.title || resultUrl(r)}${federated ? srcBadge(r) : ''}</div>
+                  <div class="library-url">${resultUrl(r)}</div>
+                </div>
+                <button class="btn small" onClick=${() => onBrowse(resultUrl(r))}>Open</button>
+              </div>
+            `)}
+          </div>`)}
+    </div>
+  `
+}
+
 function Sites ({ rpc, C, onBrowse }) {
   const [sites, setSites] = useState([])
   const [editing, setEditing] = useState(null)
@@ -3950,7 +4027,18 @@ function Sites ({ rpc, C, onBrowse }) {
     }
   }
 
-  useEffect(() => { refresh() }, [])
+  // Published P2P sites from the catalogue (hyperdrive sites pinned on the
+  // relay network) — anything with a real 64-hex driveKey is a browsable site.
+  const [discovered, setDiscovered] = useState([])
+  const loadDiscovered = async () => {
+    try {
+      const res = await rpc.request(C.CMD_GET_CATALOG_APPS)
+      const apps = Array.isArray(res) ? res : (res?.apps ?? [])
+      setDiscovered(apps.filter((a) => a && typeof a.driveKey === 'string' && /^[0-9a-f]{64}$/i.test(a.driveKey)))
+    } catch (e) { /* discovery is best-effort */ }
+  }
+
+  useEffect(() => { refresh(); loadDiscovered() }, [])
 
   const createSite = async () => {
     if (busy === 'create') return
@@ -3989,8 +4077,34 @@ function Sites ({ rpc, C, onBrowse }) {
 
   return html`
     <div class="sites">
-      <h1>Sites</h1>
-      <p class="subtitle">Browse P2P sites or create your own — published to the HiveRelay network for 24/7 availability.</p>
+      <h1>P2P Sites</h1>
+      <p class="subtitle">Search the peer-to-peer web, browse published sites, or create your own — all served 24/7 on the HiveRelay network.</p>
+
+      <h2>Search the P2P web</h2>
+      <${FederatedSearch} rpc=${rpc} C=${C} onBrowse=${onBrowse} placeholder="Search the peer-to-peer web…" />
+
+      <h2>Published sites${discovered.length ? ` (${discovered.length})` : ''}</h2>
+      <p class="subtitle">Live hyper:// sites pinned on the relay network — open any one in a tab.</p>
+      ${discovered.length === 0
+        ? html`<p class="placeholder">Loading published sites…</p>`
+        : html`<div class="app-grid">
+            ${discovered.map((s) => html`
+              <div class="app-card" key=${s.driveKey}>
+                <div class="app-icon app-icon-fallback">${(s.name || '?').charAt(0)}</div>
+                <div class="app-info">
+                  <div class="app-name">${s.name}</div>
+                  <div class="app-meta">${s.description || ('hyper://' + s.driveKey.slice(0, 10) + '…')}</div>
+                </div>
+                <div class="app-actions">
+                  <button class="btn primary" onClick=${() => onBrowse('hyper://' + s.driveKey + '/')}>Open</button>
+                  <button class="btn subtle" onClick=${() => copyText('hyper://' + s.driveKey + '/')}>📋 Copy</button>
+                </div>
+              </div>
+            `)}
+          </div>`}
+
+      <h2>Your sites</h2>
+      <p class="subtitle">Create and publish your own P2P site — auto-pinned to HiveRelay for 24/7 availability.</p>
       <div class="catalog-loader">
         <input
           class="site-name-field"
