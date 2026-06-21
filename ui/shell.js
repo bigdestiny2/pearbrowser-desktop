@@ -903,18 +903,37 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
               sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-pointer-lock"
             ></iframe>`
           : t.id === activeId
-            ? html`<div class="browse-welcome" key=${t.id}>
-                <div class="browse-welcome-inner">
-                  <div class="browse-welcome-logo">🍐</div>
-                  <h2>The peer-to-peer web starts here</h2>
-                  <p>Paste any <code>hyper://</code> URL above — hex or z-base-32 — and PearBrowser fetches it directly from its peers. No DNS, no servers, no CDN.</p>
-                  <div class="browse-welcome-actions">
-                    <button class="btn primary" onClick=${() => go(DEFAULT_URL)}>Try the PearBrowser site</button>
-                    <button class="btn subtle" onClick=${() => { inputRef.current?.focus(); inputRef.current?.select?.() }}>Focus the URL bar</button>
-                  </div>
-                  <div class="browse-welcome-tip">Tip: <code>⌘T</code> opens a new tab, <code>⌘⇧T</code> reopens one, <code>⌘W</code> closes one, <code>⌘L</code> jumps to the URL bar, <code>⌘1</code>–<code>⌘9</code> switches between tabs.</div>
-                </div>
-              </div>`
+            ? (t.url
+                // A tab with an address but no loaded content yet is mid-fetch —
+                // show a loading state, NOT the welcome/clickthrough (the default
+                // landing tab opens straight into the PearBrowser site).
+                ? html`<div class="browse-welcome" key=${t.id}>
+                    <div class="browse-welcome-inner">
+                      <div class="browse-welcome-logo">🍐</div>
+                      ${(t.status && /^error/i.test(t.status))
+                        ? html`<h2>Couldn't load this page</h2>
+                            <p>${String(t.status).replace(/^error:\s*/i, '')}</p>`
+                        : html`<h2>Loading…</h2>
+                            <p>Fetching <code>${t.url}</code> directly from its peers — first load of a cold drive can take a moment.</p>`}
+                      <div class="browse-welcome-actions">
+                        <button class="btn primary" onClick=${() => go(t.url, t.id)}>${(t.status && /^error/i.test(t.status)) ? 'Retry' : 'Reload'}</button>
+                        <button class="btn subtle" onClick=${() => { inputRef.current?.focus(); inputRef.current?.select?.() }}>Edit URL</button>
+                      </div>
+                    </div>
+                  </div>`
+                // A truly blank tab (⌘T) gets the welcome + quick actions.
+                : html`<div class="browse-welcome" key=${t.id}>
+                    <div class="browse-welcome-inner">
+                      <div class="browse-welcome-logo">🍐</div>
+                      <h2>The peer-to-peer web starts here</h2>
+                      <p>Paste any <code>hyper://</code> URL above — hex or z-base-32 — and PearBrowser fetches it directly from its peers. No DNS, no servers, no CDN.</p>
+                      <div class="browse-welcome-actions">
+                        <button class="btn primary" onClick=${() => go(DEFAULT_URL)}>Open the PearBrowser site</button>
+                        <button class="btn subtle" onClick=${() => { inputRef.current?.focus(); inputRef.current?.select?.() }}>Focus the URL bar</button>
+                      </div>
+                      <div class="browse-welcome-tip">Tip: <code>⌘T</code> opens a new tab, <code>⌘⇧T</code> reopens one, <code>⌘W</code> closes one, <code>⌘L</code> jumps to the URL bar, <code>⌘1</code>–<code>⌘9</code> switches between tabs.</div>
+                    </div>
+                  </div>`)
             : null
         )}
       </div>
@@ -1638,6 +1657,17 @@ function Apps ({ rpc, C, onLaunch }) {
     }
   }
 
+  // A static hyperdrive site (driveKey, no pear-request link) "runs" by opening
+  // in a Browse tab — its HTML renders directly. (pear-request hypersites use
+  // runInTab; standalone apps open in their own window via launchFeaturedApp.)
+  const openSite = (app) => {
+    if (!app || !app.driveKey) return
+    setErr(''); setLaunched('')
+    onLaunch?.('hyper://' + app.driveKey + '/')
+    setLaunched(`Opened ${app.name}.`)
+    setTimeout(() => setLaunched(''), 3500)
+  }
+
   const refreshInstalled = async () => {
     try {
       const list = await rpc.request(C.CMD_LIST_INSTALLED)
@@ -2202,13 +2232,15 @@ function Apps ({ rpc, C, onLaunch }) {
                 <div class="app-desc">${app.description || ''}</div>
                 <div class="app-meta">
                   ${app.version ? 'v' + app.version : ''} ${app.author ? '· ' + app.author : ''}
-                  ${app.type === 'hypersite' ? html`<span style=${{ marginLeft: '6px', opacity: 0.75 }}>· runs in a tab</span>` : (app.link && !app.driveKey ? html`<span style=${{ marginLeft: '6px', opacity: 0.75 }}>· opens in a window</span>` : '')}
+                  ${app.type === 'hypersite' ? html`<span style=${{ marginLeft: '6px', opacity: 0.75 }}>· ${app.driveKey && !app.link ? 'opens in a tab' : 'runs in a tab'}</span>` : (app.link && !app.driveKey ? html`<span style=${{ marginLeft: '6px', opacity: 0.75 }}>· opens in a window</span>` : '')}
                 </div>
                 ${app.catalogName && html`<div class="app-source-tag">${app.catalogName}</div>`}
               </div>
               <div class="app-actions">
                 ${app.type === 'hypersite'
-                  ? html`<button class="btn primary" onClick=${() => runInTab(app)} disabled=${busy === 'run-in-tab'} title="Run headless — UI streams into a tab">Run in tab</button>`
+                  ? (app.driveKey && !app.link
+                      ? html`<button class="btn primary" onClick=${() => openSite(app)} title="Open this P2P site in a tab">Open</button>`
+                      : html`<button class="btn primary" onClick=${() => runInTab(app)} disabled=${busy === 'run-in-tab'} title="Run headless — UI streams into a tab">Run in tab</button>`)
                   : (app.link && !app.driveKey)
                     ? html`<button class="btn primary" onClick=${() => launchFeaturedApp(app)} disabled=${busy === 'pear-link'} title="Full app — opens in its own window">Open</button>`
                     : (isInstalled(app.id)
@@ -2366,7 +2398,9 @@ function Apps ({ rpc, C, onLaunch }) {
             </div>
             <div style=${{ display: 'flex', gap: '8px' }}>
               ${detailApp.type === 'hypersite'
-                ? html`<button class="btn primary" onClick=${() => { runInTab(detailApp); setDetailApp(null) }}>Run in tab</button>`
+                ? (detailApp.driveKey && !detailApp.link
+                    ? html`<button class="btn primary" onClick=${() => { openSite(detailApp); setDetailApp(null) }}>Open</button>`
+                    : html`<button class="btn primary" onClick=${() => { runInTab(detailApp); setDetailApp(null) }}>Run in tab</button>`)
                 : (detailApp.link && !detailApp.driveKey)
                   ? html`<button class="btn primary" onClick=${() => { launchFeaturedApp(detailApp); setDetailApp(null) }}>Open</button>`
                   : (isInstalled(detailApp.id)
@@ -3206,14 +3240,15 @@ function NostrFeedSection ({ rpc, C }) {
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const [federated, setFederated] = useState(false) // include trusted contacts' notes
 
   const load = async () => {
     try {
-      const res = await rpc.request(C.CMD_NOSTR_QUERY, { filter: { kinds: [1], limit: 50 } })
+      const res = await rpc.request(C.CMD_NOSTR_QUERY, { filter: { kinds: [1], limit: 50 }, federated })
       setEvents(Array.isArray(res?.events) ? res.events : [])
     } catch (e) { setErr(e.message) }
   }
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() }, [federated])
 
   const post = async () => {
     const content = draft.trim()
