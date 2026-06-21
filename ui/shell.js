@@ -2026,6 +2026,10 @@ function Apps ({ rpc, C, onLaunch }) {
   const filteredApps = useMemo(() => {
     const q = query.trim().toLowerCase()
     const matched = apps.filter((a) => {
+      // Apps page = runnable apps only. A `link` (launchable pear://|file:// app,
+      // or a pear-request hypersite) means runnable; pure static sites (driveKey,
+      // no link) live on the P2P Sites tab, not here.
+      if (!a || !a.link) return false
       if (source !== 'all' && a.catalogKey !== source) return false
       if (category !== 'all' && !appCategories(a).includes(category)) return false
       if (!q) return true
@@ -2038,7 +2042,7 @@ function Apps ({ rpc, C, onLaunch }) {
   }, [apps, query, category, source])
 
   // Total unique-app count (deduped, ignoring search/category) for the headers.
-  const uniqueAppCount = useMemo(() => dedupeApps(apps).length, [apps])
+  const uniqueAppCount = useMemo(() => dedupeApps(apps.filter((a) => a && a.link)).length, [apps])
 
   const renderMyCatalogApp = (app) => {
     const savedId = app.id || app.driveKey || app.name || 'untitled'
@@ -2237,27 +2241,12 @@ function Apps ({ rpc, C, onLaunch }) {
                 ${app.catalogName && html`<div class="app-source-tag">${app.catalogName}</div>`}
               </div>
               <div class="app-actions">
+                ${app.driveKey && /^[0-9a-f]{64}$/i.test(app.driveKey)
+                  ? html`<button class="btn subtle" onClick=${() => openSite(app)} title="Open this app's P2P page in a tab">Open page</button>`
+                  : ''}
                 ${app.type === 'hypersite'
-                  ? (app.driveKey && !app.link
-                      ? html`<button class="btn primary" onClick=${() => openSite(app)} title="Open this P2P site in a tab">Open</button>`
-                      : html`<button class="btn primary" onClick=${() => runInTab(app)} disabled=${busy === 'run-in-tab'} title="Run headless — UI streams into a tab">Run in tab</button>`)
-                  : (app.link && !app.driveKey)
-                    ? html`<button class="btn primary" onClick=${() => launchFeaturedApp(app)} disabled=${busy === 'pear-link'} title="Full app — opens in its own window">Open</button>`
-                    : (isInstalled(app.id)
-                      ? html`
-                        ${updates[app.id] && html`
-                          <button class="btn primary" onClick=${() => updateApp(app.id)} disabled=${busy === `install:${app.id}`}>
-                            ${busy === `install:${app.id}` ? 'Updating…' : `Update → v${updates[app.id]}`}
-                          </button>
-                        `}
-                        <button class="btn" onClick=${() => launchApp(app)} disabled=${busy === `launch:${app.id}`}>Launch</button>
-                        <button class="btn subtle" onClick=${() => uninstallApp(app)} disabled=${busy === `uninstall:${app.id}`}>Uninstall</button>
-                      `
-                      : html`
-                        <button class="btn primary" onClick=${() => installApp(app)} disabled=${busy === `install:${app.id}`}>
-                          ${busy === `install:${app.id}` ? 'Installing…' : 'Install'}
-                        </button>
-                      `)}
+                  ? html`<button class="btn primary" onClick=${() => runInTab(app)} disabled=${busy === 'run-in-tab'} title="Run headless — the app's UI streams into a tab">Run app</button>`
+                  : html`<button class="btn primary" onClick=${() => launchFeaturedApp(app)} disabled=${busy === 'pear-link'} title="Open the app in its own window">Run app</button>`}
                 ${canEditMyCatalog && app.catalogKey !== myCatalog.keyHex && !inMyCatalog(app.id || app.driveKey) && html`
                   <button class="btn subtle" title="Add to my catalog" onClick=${() => addToMyCatalog(app)} disabled=${busy === `addcat:${app.id || app.driveKey}`}>+ Catalog</button>
                 `}
@@ -3276,13 +3265,24 @@ function NostrFeedSection ({ rpc, C }) {
         <button class="btn small primary" onClick=${post} disabled=${busy || !draft.trim()}>${busy ? 'Posting…' : 'Post'}</button>
       </div>
       ${err && html`<div class="tp-msg">${err}</div>`}
+      <div class="settings-row">
+        <label class="login-scope${federated ? ' on' : ''}">
+          <input type="checkbox" checked=${federated} onChange=${() => setFederated((v) => !v)} />
+          Include trusted contacts' notes
+        </label>
+      </div>
       <div class="nostr-feed">
         ${events.length === 0
           ? html`<div class="settings-subtle">No notes yet — post one above. Each is signed with your Nostr key and stored in your local event log.</div>`
           : events.map((ev) => html`
             <div class="nostr-note" key=${ev.id}>
               <div class="nostr-note-content">${ev.content}</div>
-              <div class="settings-subtle">kind ${ev.kind} · ${when(ev.created_at)}</div>
+              <div class="settings-subtle">
+                ${ev._via
+                  ? html`<span class="src-badge followed">from ${ev._via}</span>`
+                  : html`<span class="src-badge self">you</span>`}
+                kind ${ev.kind} · ${when(ev.created_at)}
+              </div>
             </div>`)}
       </div>
     </div>
@@ -3788,7 +3788,7 @@ function Settings ({ rpc, C, status, storagePath, log }) {
       <${NostrIdentitySection} rpc=${rpc} C=${C} />
 
       <h2>Nostr feed</h2>
-      <p class="subtitle">Post NIP-01 notes signed with your Nostr key, stored in your own local event log. (Sharing them to relays/contacts comes in a later phase.)</p>
+      <p class="subtitle">Post NIP-01 notes signed with your Nostr key. Toggle "Include trusted contacts" to also see notes a verified contact authored with their attested Nostr key, replicated peer-to-peer.</p>
       <${NostrFeedSection} rpc=${rpc} C=${C} />
 
       <h2>Name registry</h2>

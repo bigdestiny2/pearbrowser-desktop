@@ -57,27 +57,17 @@ module.exports = {
       verification: 'author-signed'
     },
     {
-      // Pear POS landing site — published Hyperdrive, seeded on HiveRelay, runs
-      // in a tab (hypersite). Re-publish with `npm run publish:site` to update.
+      // Pear POS — ONE app entry with BOTH a browsable landing page (driveKey,
+      // pinned on HiveRelay) and a launchable native register (link). On the Apps
+      // page this shows "Open page" (hyper://b776f15f…/) + "Run app" (pear://e1uchyxc…).
       name: 'Pear POS',
       driveKey: 'b776f15f3e6860ecf6d923853c295350e55b708772e67d7124899b96aecfcd43',
-      type: 'hypersite',
+      link: 'pear://e1uchyxceqgybdeab44ks7har9pu9fw6y5ehtjjs19dhowajtcmo',
+      type: 'standalone',
       author: 'Pear POS',
       categories: ['business', 'commerce', 'featured'],
       description: 'Peer-to-peer, offline-first point of sale — AI scanning, self-custodial USD₮ & Bitcoin, multi-terminal sync. $0 forever.',
       verification: 'relay-listed'
-    },
-    {
-      // Launchable Pear POS register (standalone window). Replace the link with
-      // the real pear:// key from `pear release` (PEAR-RELEASE.md) to launch it;
-      // until then it appears in the Apps catalogue but cannot open.
-      name: 'Pear POS (App)',
-      link: 'pear://REPLACE_WITH_STAGED_KEY',
-      type: 'standalone',
-      author: 'Pear POS',
-      categories: ['business', 'commerce', 'productivity'],
-      description: 'The native Pear POS register — full P2P sync, AI product scanning, and self-custodial crypto payments.',
-      verification: 'author-signed'
     },
     {
       // PearBrowser landing site — published Hyperdrive, seeded on HiveRelay, runs

@@ -5,6 +5,11 @@
 
 const MAX_CONTENT = 64 * 1024 // 64 KB content cap
 const MAX_TAGS = 2000
+// Aggregate cap on the whole serialized event (content + ALL tag bytes + overhead).
+// content/tag-COUNT caps alone let a hostile author pad 2000 tags with huge string
+// values; this bounds the total a contact can make you replicate (Phase 3). Size is
+// content-derived (not wall-clock), so it stays deterministic in the reducer.
+const MAX_EVENT_BYTES = 128 * 1024
 
 const OP_ADD_EVENT = 'nostr.event.add'
 const HEX64 = /^[0-9a-f]{64}$/
@@ -26,6 +31,7 @@ function isWellFormedEvent (ev) {
     for (const x of t) if (typeof x !== 'string') return false
   }
   if (typeof ev.content !== 'string' || ev.content.length > MAX_CONTENT) return false
+  try { if (JSON.stringify(ev).length > MAX_EVENT_BYTES) return false } catch { return false }
   return true
 }
 
@@ -39,4 +45,4 @@ function validateOp (op) {
   return { ok: true, retain: true }
 }
 
-module.exports = { OP_ADD_EVENT, MAX_CONTENT, MAX_TAGS, addEventOp, isWellFormedEvent, validateOp }
+module.exports = { OP_ADD_EVENT, MAX_CONTENT, MAX_TAGS, MAX_EVENT_BYTES, addEventOp, isWellFormedEvent, validateOp }

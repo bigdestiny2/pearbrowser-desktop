@@ -96,6 +96,7 @@ let queryPlanner = null // Lighthouse Phase 2 — federated query orchestration 
 let names = null // naming Phase N1 — local petname store (names.cjs); null until ready
 let nameRegistry = null // naming Phase N5 — multi-writer Autobase name registry; null until first use
 let federatedNameResolver = null // naming Phase N5 — resolve contacts' names across their registries
+let federatedNostrFeed = null // NOSTR Phase 3 — surface contacts' attested events in the feed
 let swarmBridge = null
 let swarmGrants = null
 /** Map<requestId, { resolve, reject, timer }> for login() ceremonies. */
@@ -1365,6 +1366,35 @@ async function openContactRegistry (keyHex, contactRoot) {
   return reg
 }
 
+// Read-only, cached, replicating views of CONTACTS' Nostr event stores (Phase 3).
+// Same discipline as openContactRegistry: own substore per store, keyed by contact
+// root, close/leave on key-rotate, cap + LRU-evict.
+const _contactEventStores = new Map() // contactRoot hex -> { keyHex, store }
+async function _closeContactEventStore (entry) {
+  try { if (entry.store.discoveryKey && swarm) swarm.leave(entry.store.discoveryKey) } catch {}
+  try { await entry.store.close() } catch {}
+}
+async function openContactEventStore (keyHex, contactRoot) {
+  if (typeof keyHex !== 'string' || !/^[0-9a-f]{64}$/i.test(keyHex)) return null
+  const rootKey = (typeof contactRoot === 'string' && contactRoot) ? contactRoot.toLowerCase() : keyHex
+  const cached = _contactEventStores.get(rootKey)
+  if (cached) {
+    if (cached.keyHex === keyHex) return cached.store
+    _contactEventStores.delete(rootKey)
+    await _closeContactEventStore(cached)
+  }
+  while (_contactEventStores.size >= MAX_CONTACT_REGISTRIES) {
+    const oldestKey = _contactEventStores.keys().next().value
+    const oldest = _contactEventStores.get(oldestKey)
+    _contactEventStores.delete(oldestKey)
+    await _closeContactEventStore(oldest)
+  }
+  const es = await new NostrEventStore(store, { bootstrap: keyHex, encryptionKey: null, storeNamespace: 'eab-nostr-events-c-' + keyHex }).ready()
+  if (es.discoveryKey && swarm) swarm.join(es.discoveryKey, { server: false, client: true })
+  _contactEventStores.set(rootKey, { keyHex, store: es })
+  return es
+}
+
 // Resolve a typed word against the local petname store (Tier 0, wins) + the
 // curated NAME_ALIASES floor (Tier 3). Never throws for the disabled/unknown
 // case — returns { resolved: null } so the UI falls through to plain URL
@@ -1568,7 +1598,10 @@ rpc.handle(C.CMD_NOSTR_GET_IDENTITY, async () => {
 })
 rpc.handle(C.CMD_NOSTR_BIND, async () => {
   await whenReady()
-  return requireNostrIdentity().bind()
+  const state = await requireNostrIdentity().bind()
+  // re-advertise our (now-linked) nostr-bind so contacts can author-verify our notes
+  if (identityBindingPublisher) identityBindingPublisher.publish().catch(() => {})
+  return state
 })
 rpc.handle(C.CMD_NOSTR_REVOKE, async () => {
   await whenReady()
@@ -1600,6 +1633,8 @@ async function _ensureNostrEventStoreImpl ({ create = false } = {}) {
   await requireUserData().setSettings({ nostrEventKey: es.key })
   nostrEventStore = es
   if (nostrEventStore.discoveryKey && swarm) swarm.join(nostrEventStore.discoveryKey, { server: true, client: true })
+  // advertise the event-store key on our binding so contacts can replicate our feed
+  if (identityBindingPublisher) identityBindingPublisher.publish().catch(() => {})
   return nostrEventStore
 }
 
@@ -1615,7 +1650,11 @@ rpc.handle(C.CMD_NOSTR_PUBLISH, async ({ kind, content, tags, created_at } = {})
   const safeTags = Array.isArray(tags)
     ? tags.filter((t) => Array.isArray(t) && t.every((x) => typeof x === 'string')).slice(0, 2000)
     : []
-  const ts = Number.isInteger(created_at) && created_at > 0 ? created_at : Math.floor(Date.now() / 1000)
+  const nowSec = Math.floor(Date.now() / 1000)
+  const ts = Number.isInteger(created_at) && created_at > 0 ? created_at : nowSec
+  // reject a future-dated note (anti-spam: keeps your own + contacts' feeds honest
+  // once events become contact-replicable; the reducer itself stays clock-free)
+  if (ts > nowSec + 900) throw new Error('created_at is too far in the future')
   const ev = id.nostrSignEvent({ kind, created_at: ts, tags: safeTags, content })
   const { verifyEvent } = require('./nostr-events-apply.cjs')
   if (!verifyEvent(ev).ok) throw new Error('event failed NIP-01 validation (content/tags too large?)')
@@ -1624,13 +1663,24 @@ rpc.handle(C.CMD_NOSTR_PUBLISH, async ({ kind, content, tags, created_at } = {})
   return { ok: true, event: ev }
 })
 
-rpc.handle(C.CMD_NOSTR_QUERY, async ({ filter } = {}) => {
+// Query your own feed; with { federated:true }, also merge TRUSTED contacts'
+// attested events (each tagged `_via` with the source contact). Best-effort: a
+// corrupt store / a slow contact degrades to fewer events, never an RPC reject.
+const MAX_FEED_EVENTS = 500
+rpc.handle(C.CMD_NOSTR_QUERY, async ({ filter, federated } = {}) => {
   await whenReady()
-  const es = await ensureNostrEventStore({ create: false })
-  if (!es) return { events: [] }
-  const all = await es.listEvents()
   const { queryEvents } = require('./nostr-query.cjs')
-  return { events: queryEvents(all, filter || {}) }
+  let own = []
+  try { const es = await ensureNostrEventStore({ create: false }); if (es) own = (await es.listEvents()).map((ev) => ({ ...ev, _via: null })) } catch {}
+  let contactEvents = []
+  if (federated && federatedNostrFeed) {
+    try { contactEvents = await federatedNostrFeed.events() } catch {}
+  }
+  const byId = new Map()
+  for (const ev of own) byId.set(ev.id, ev) // own wins on id collision
+  for (const ev of contactEvents) if (!byId.has(ev.id)) byId.set(ev.id, ev)
+  const cap = Math.min((filter && Number.isInteger(filter.limit) && filter.limit > 0) ? filter.limit : MAX_FEED_EVENTS, MAX_FEED_EVENTS)
+  return { events: queryEvents([...byId.values()], { ...(filter || {}), limit: cap }) }
 })
 
 
@@ -1687,7 +1737,17 @@ async function ensureBrowseDrive (keyHex) {
 
   const drive = new Hyperdrive(store, Buffer.from(keyHex, 'hex'))
   await drive.ready()
-  swarm.join(drive.discoveryKey, { server: false, client: true })
+  // Tell Hypercore that peer discovery is in progress so {wait:true} reads BLOCK
+  // until a peer is actually found, instead of returning empty / timing out on a
+  // cold drive. Without this, the proxy's drive.update (8s) + drive.get (15s) wait
+  // out their timeouts with nobody to ask → multi-minute "Loading" stall / bogus
+  // directory-listing fallback. verify-pin is fast for exactly this reason.
+  const donePeers = drive.findingPeers()
+  const discovery = swarm.join(drive.discoveryKey, { server: false, client: true })
+  discovery.flushed().then(donePeers, donePeers)
+  // Prefetch the entrypoint so the block the proxy will request is already in
+  // flight — overlaps DHT discovery with the block fetch (best-effort).
+  drive.get('/index.html', { wait: true }).catch(() => {})
   browseDrives.set(keyHex, {
     drive,
     lastAccess: Date.now()
@@ -2060,6 +2120,10 @@ async function boot () {
         identity, personalIndex, contacts, dht: swarm && swarm.dht,
         // advertise our name-registry key (if created) so contacts can resolve our names
         getNameRegKey: async () => { try { return (await requireUserData().getSettings()).nameRegKey || null } catch { return null } },
+        // Nostr Phase 3: advertise our event-store key + our LINKED nostr-bind so
+        // contacts can replicate + author-verify our notes.
+        getNostrEventKey: async () => { try { return (await requireUserData().getSettings()).nostrEventKey || null } catch { return null } },
+        getNostrBind: async () => { try { const st = nostrBindingStore ? await nostrBindingStore.getState() : null; return (st && st.linked) ? st.binding : null } catch { return null } },
       }).ready()
       identityBindingPublisher.publish().catch((e) => console.error('[binding] publish failed:', e && e.message))
       console.log('IdentityBindingPublisher ready')
@@ -2084,6 +2148,20 @@ async function boot () {
     } catch (err) {
       console.error('FederatedNameResolver init failed:', err && err.message)
       federatedNameResolver = null
+    }
+
+    // NOSTR Phase 3 — surface TRUSTED contacts' attested events in the feed.
+    try {
+      const { FederatedNostrFeed } = require('./federated-nostr-feed.cjs')
+      federatedNostrFeed = new FederatedNostrFeed({
+        listContacts: () => requireContacts().list({ limit: 200 }),
+        resolveBinding: (args) => identityBindingPublisher.resolve(args),
+        openEventStore: (keyHex, contactRoot) => openContactEventStore(keyHex, contactRoot),
+      })
+      console.log('FederatedNostrFeed ready')
+    } catch (err) {
+      console.error('FederatedNostrFeed init failed:', err && err.message)
+      federatedNostrFeed = null
     }
   }
 
@@ -2328,6 +2406,8 @@ async function shutdown () {
   for (const entry of _contactRegistries.values()) { try { await entry.reg.close() } catch {} }
   _contactRegistries.clear()
   if (nostrEventStore) { try { await nostrEventStore.close() } catch {} nostrEventStore = null }
+  for (const entry of _contactEventStores.values()) { try { await entry.store.close() } catch {} }
+  _contactEventStores.clear()
   for (const [keyHex, entry] of browseDrives) {
     unregisterHiveRelayDrive(keyHex, entry.drive)
     try { await entry.drive.close() } catch {}

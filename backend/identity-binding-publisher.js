@@ -33,7 +33,7 @@ const DHT_BINDING_NAMESPACE = 'lighthouse-binding'
 const DOC_NAMESPACE = 'lighthouse-doc-v2'
 
 class IdentityBindingPublisher {
-  constructor ({ ib, identity, personalIndex, contacts, dht, log, getNameRegKey } = {}) {
+  constructor ({ ib, identity, personalIndex, contacts, dht, log, getNameRegKey, getNostrEventKey, getNostrBind } = {}) {
     if (!ib) throw new Error('IdentityBindingPublisher requires ib (identity-binding.cjs)')
     if (!identity) throw new Error('IdentityBindingPublisher requires identity')
     if (!personalIndex) throw new Error('IdentityBindingPublisher requires personalIndex')
@@ -46,6 +46,11 @@ class IdentityBindingPublisher {
     // N5 federation: an async getter for the user's name-registry bootstrap key,
     // advertised alongside the search binding so contacts resolve it for free.
     this.getNameRegKey = typeof getNameRegKey === 'function' ? getNameRegKey : null
+    // Nostr Phase 3 federation: the user's event-store bootstrap key + their
+    // current (linked) nostr-bind record, so a contact can replicate the event
+    // log AND verify which secp256k1 author key is attested to this root.
+    this.getNostrEventKey = typeof getNostrEventKey === 'function' ? getNostrEventKey : null
+    this.getNostrBind = typeof getNostrBind === 'function' ? getNostrBind : null
     this._searchKp = null // cached bound search keypair (Buffers), loaded in ready()
   }
 
@@ -172,12 +177,15 @@ class IdentityBindingPublisher {
     // N5 federation: the user's name-registry bootstrap key (so a contact who
     // resolves this binding can replicate + resolve the user's name claims).
     const nameRegKey = this.getNameRegKey ? await this.getNameRegKey().catch(() => null) : null
+    // Nostr Phase 3: the user's event-store key + linked nostr-bind record.
+    const nostrEventKey = this.getNostrEventKey ? await this.getNostrEventKey().catch(() => null) : null
+    const nostrBind = this.getNostrBind ? await this.getNostrBind().catch(() => null) : null
 
     let dhtPubkey = null
     if (this.dht) {
       const dhtKp = this.identity.getAppKeypair(DHT_BINDING_NAMESPACE)
       dhtPubkey = b4a.toString(dhtKp.publicKey, 'hex')
-      const value = b4a.from(JSON.stringify({ ...binding, dhtPubkey, indexKey, anchor, digest, nameRegKey }), 'utf-8')
+      const value = b4a.from(JSON.stringify({ ...binding, dhtPubkey, indexKey, anchor, digest, nameRegKey, nostrEventKey, nostrBind }), 'utf-8')
       // REAL hyperdht signature: mutablePut(keyPair, value, { seq })
       await this.dht.mutablePut(dhtKp, value, { seq: version })
     }
@@ -223,6 +231,10 @@ class IdentityBindingPublisher {
       anchor: rec.anchor && typeof rec.anchor === 'object' ? rec.anchor : null,
       digest: rec.digest && typeof rec.digest === 'object' ? rec.digest : null,
       nameRegKey: (typeof rec.nameRegKey === 'string' && /^[0-9a-f]{64}$/i.test(rec.nameRegKey)) ? rec.nameRegKey.toLowerCase() : null,
+      nostrEventKey: (typeof rec.nostrEventKey === 'string' && /^[0-9a-f]{64}$/i.test(rec.nostrEventKey)) ? rec.nostrEventKey.toLowerCase() : null,
+      // the nostr-bind record is re-verified against the contact's root by the
+      // consumer (resolveNostrBind), so passing it through untrusted is safe.
+      nostrBind: (rec.nostrBind && typeof rec.nostrBind === 'object') ? rec.nostrBind : null,
     }
   }
 }
