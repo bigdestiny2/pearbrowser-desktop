@@ -34,26 +34,34 @@ function verifyOpAuthenticity (op) {
   const normalized = normalize(op.name)
   if (!normalized) return null
   const sk = skeleton(op.name)
-  const canon = ops.canon(op.type, { normalized, target: op.target, owner: op.owner, version: op.version })
+  const canon = ops.canon(op.type, { name: op.name, normalized, target: op.target, owner: op.owner, version: op.version })
   if (!ed25519Verify(canon, op.sig, op.owner)) return null
   return { normalized, skeleton: sk }
 }
 
 const NOOP = { write: null }
 
-// ctx: { current: entry|null, skelOwner: entry|null, normalized, skeleton }
-// entry: { name, normalized, skeleton, target, owner, version, status }
+// ctx: { current: entry|null, skelRec: {owner, names}|null, normalized, skeleton }
+// entry:   { name, normalized, skeleton, target, owner, version, status }
+// skelRec: the reservation for this skeleton — { owner, names:[...] } of ALL its
+//   non-released holders (always one owner, since a different owner is rejected at
+//   claim). Present ⇔ blocked. decide only needs its owner; the caller maintains
+//   the holder set (skelAdd on claim, skelRemove on release, kept on revoke).
 function decide (ctx, op) {
-  const { current, skelOwner, normalized, skeleton: sk } = ctx
+  const { current, skelRec, normalized, skeleton: sk } = ctx
   if (op.type === ops.CLAIM) {
     // first-claim-wins: an active or revoked (tombstoned) name is NOT re-claimable.
     if (current && current.status !== 'released') return NOOP
-    // homograph defense: a different owner can't claim a name whose confusable
-    // skeleton is already held by a non-released entry (active or tombstoned).
-    if (skelOwner && skelOwner.status !== 'released' && skelOwner.owner !== op.owner) return NOOP
+    // homograph defense: a DIFFERENT owner can't claim a name whose confusable
+    // skeleton is reserved (held by any non-released entry — active or tombstoned).
+    if (skelRec && skelRec.owner !== op.owner) return NOOP
+    // version is monotonic across the name's whole lifecycle (NEVER reset on a
+    // re-claim after release), so a replayed stale high-version rotate can't
+    // resurrect an old target once the name is re-claimed.
+    const version = (current ? current.version : 0) + 1
     return {
-      write: { name: op.name, normalized, skeleton: sk, target: op.target, owner: op.owner, version: 1, status: 'active' },
-      skelSet: true,
+      write: { name: op.name, normalized, skeleton: sk, target: op.target, owner: op.owner, version, status: 'active' },
+      skelAdd: true,
     }
   }
   if (op.type === ops.ROTATE) {
@@ -63,31 +71,41 @@ function decide (ctx, op) {
   }
   if (op.type === ops.RELEASE) {
     if (!current || current.status !== 'active' || current.owner !== op.owner) return NOOP
-    return { write: { ...current, status: 'released' }, skelDel: true }
+    return { write: { ...current, status: 'released' }, skelRemove: true }
   }
   if (op.type === ops.REVOKE) {
     if (!current || current.status !== 'active' || current.owner !== op.owner) return NOOP
-    return { write: { ...current, status: 'revoked' } } // tombstone; skeleton stays blocked
+    return { write: { ...current, status: 'revoked' } } // tombstone; stays in skel set
   }
   return NOOP
 }
 
 // Pure reference reducer over a linearized op list → { names, skels } Maps.
+// skels is set-valued: skeleton -> { owner, set:Set<normalized> } of its non-
+// released holders, so releasing ONE confusable variant cannot free a skeleton
+// another still-active/tombstoned variant depends on (the homograph bypass).
 function applyView (opList) {
   const names = new Map() // normalized -> entry
-  const skels = new Map() // skeleton -> normalized (which name holds this skeleton)
+  const skels = new Map() // skeleton -> { owner, set:Set<normalized> }
   for (const op of opList || []) {
     const auth = verifyOpAuthenticity(op)
     if (!auth) continue
     const { normalized, skeleton: sk } = auth
     const current = names.get(normalized) || null
-    const skelNorm = skels.get(sk)
-    const skelOwner = (skelNorm && skelNorm !== normalized) ? (names.get(skelNorm) || null) : null
-    const d = decide({ current, skelOwner, normalized, skeleton: sk }, op)
+    const skelRec = skels.get(sk) || null
+    const d = decide({ current, skelRec, normalized, skeleton: sk }, op)
     if (!d.write) continue
     names.set(normalized, d.write)
-    if (d.skelSet) skels.set(sk, normalized)
-    if (d.skelDel && skels.get(sk) === normalized) skels.delete(sk)
+    if (d.skelAdd) {
+      const rec = skels.get(sk) || { owner: op.owner, set: new Set() }
+      rec.owner = op.owner
+      rec.set.add(normalized)
+      skels.set(sk, rec)
+    }
+    if (d.skelRemove) {
+      const rec = skels.get(sk)
+      if (rec) { rec.set.delete(normalized); if (rec.set.size === 0) skels.delete(sk) }
+    }
   }
   return { names, skels }
 }

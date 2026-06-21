@@ -21,19 +21,23 @@ class NameRegistry {
       const { normalized, skeleton: sk } = auth
       const curRec = await view.get('name!' + normalized).catch(() => null)
       const current = curRec ? curRec.value : null
-      let skelOwner = null
-      const skelRec = await view.get('skel!' + sk).catch(() => null)
-      if (skelRec && skelRec.value && skelRec.value !== normalized) {
-        const so = await view.get('name!' + skelRec.value).catch(() => null)
-        skelOwner = so ? so.value : null
-      }
-      const d = decide({ current, skelOwner, normalized, skeleton: sk }, op)
+      // skelRec: { owner, names:[...] } of all non-released holders of this skeleton
+      // (set-valued, so a sibling-variant release can't free a still-held skeleton).
+      const skelRecRec = await view.get('skel!' + sk).catch(() => null)
+      const skelRec = skelRecRec ? skelRecRec.value : null
+      const d = decide({ current, skelRec, normalized, skeleton: sk }, op)
       if (!d.write) return
       await view.put('name!' + normalized, d.write)
-      if (d.skelSet) await view.put('skel!' + sk, normalized)
-      if (d.skelDel) {
-        const s = await view.get('skel!' + sk).catch(() => null)
-        if (s && s.value === normalized) await view.del('skel!' + sk)
+      if (d.skelAdd) {
+        const rec = skelRec || { owner: op.owner, names: [] }
+        rec.owner = op.owner
+        if (!rec.names.includes(normalized)) rec.names.push(normalized)
+        await view.put('skel!' + sk, rec)
+      }
+      if (d.skelRemove && skelRec) {
+        const remaining = skelRec.names.filter((n) => n !== normalized)
+        if (remaining.length === 0) await view.del('skel!' + sk)
+        else { skelRec.names = remaining; await view.put('skel!' + sk, skelRec) }
       }
     }
     this.mgr = createEncryptedAutobaseManager(store, { ...opts, applyOp, viewName: 'name-registry' })
@@ -65,11 +69,14 @@ class NameRegistry {
     return (v && v.status === 'active') ? { name: v.name, normalized, target: v.target, owner: v.owner, version: v.version } : null
   }
 
-  // All currently-active names.
+  // All currently-active names. Upper bound is 'name"' (the byte 0x22 right after
+  // the '!' separator 0x21), a TRUE prefix range — 'name!~' (0x7E) would silently
+  // drop every name!<normalized> whose first byte sorts above '~', i.e. all
+  // non-ASCII (i18n / emoji) names.
   async list () {
     await this.mgr.update()
     const out = []
-    for await (const e of this.mgr.view.createReadStream({ gte: 'name!', lt: 'name!~' })) {
+    for await (const e of this.mgr.view.createReadStream({ gte: 'name!', lt: 'name"' })) {
       if (e.value && e.value.status === 'active') out.push(e.value)
     }
     return out

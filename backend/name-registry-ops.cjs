@@ -27,11 +27,13 @@ const HEX128 = /^[0-9a-f]{128}$/i
 const MAX_NAME = 253
 
 // Canonical signed bytes (sorted keys, NO clock — ordering is the Autobase's
-// linear order, never a forgeable timestamp). target/version are '' / 0 for the
-// ops that don't carry them, so sign and verify build identical bytes.
-function canon (type, { normalized, target, owner, version }) {
-  const body = { n: normalized, o: owner, t: target || '', v: version || 0 }
-  return TAG[type] + JSON.stringify(body, ['n', 'o', 't', 'v'])
+// linear order, never a forgeable timestamp). The RAW display name `d` is signed
+// too (not just the normalized form), so a writer can't tamper the presentation
+// label while keeping a valid signature. target/version are '' / 0 for the ops
+// that don't carry them, so sign and verify build identical bytes.
+function canon (type, { name, normalized, target, owner, version }) {
+  const body = { d: name, n: normalized, o: owner, t: target || '', v: version || 0 }
+  return TAG[type] + JSON.stringify(body, ['d', 'n', 'o', 't', 'v'])
 }
 
 function isWellFormedOp (op) {
@@ -50,19 +52,19 @@ function isWellFormedOp (op) {
 // owner is the controlling ed25519 pubkey; target is what the name resolves to.
 function claimOp ({ name, target, owner }, ownerSign) {
   const normalized = normalize(name)
-  return { type: CLAIM, name, normalized, skeleton: skeleton(name), target, owner, version: 1, sig: ownerSign(canon(CLAIM, { normalized, target, owner, version: 1 })) }
+  return { type: CLAIM, name, normalized, skeleton: skeleton(name), target, owner, version: 1, sig: ownerSign(canon(CLAIM, { name, normalized, target, owner, version: 1 })) }
 }
 function rotateOp ({ name, target, owner, version }, ownerSign) {
   const normalized = normalize(name)
-  return { type: ROTATE, name, normalized, skeleton: skeleton(name), target, owner, version, sig: ownerSign(canon(ROTATE, { normalized, target, owner, version })) }
+  return { type: ROTATE, name, normalized, skeleton: skeleton(name), target, owner, version, sig: ownerSign(canon(ROTATE, { name, normalized, target, owner, version })) }
 }
 function releaseOp ({ name, owner }, ownerSign) {
   const normalized = normalize(name)
-  return { type: RELEASE, name, normalized, skeleton: skeleton(name), owner, sig: ownerSign(canon(RELEASE, { normalized, owner })) }
+  return { type: RELEASE, name, normalized, skeleton: skeleton(name), owner, sig: ownerSign(canon(RELEASE, { name, normalized, owner })) }
 }
 function revokeOp ({ name, owner }, ownerSign) {
   const normalized = normalize(name)
-  return { type: REVOKE, name, normalized, skeleton: skeleton(name), owner, sig: ownerSign(canon(REVOKE, { normalized, owner })) }
+  return { type: REVOKE, name, normalized, skeleton: skeleton(name), owner, sig: ownerSign(canon(REVOKE, { name, normalized, owner })) }
 }
 
 module.exports = {

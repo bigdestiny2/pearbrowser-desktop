@@ -15,6 +15,7 @@ const signer = (kp) => (msg) => hex(crypto.sign(b4a.from(msg, 'utf-8'), kp.secre
 const owner = (kp) => hex(kp.publicKey)
 const TARGET_A = 'aa'.repeat(32)
 const TARGET_B = 'bb'.repeat(32)
+const TARGET_C = 'cc'.repeat(32)
 // a confusable squat of "paypal": latin p, CYRILLIC а (U+0430), y, p, cyr а, l →
 // skeleton folds to "paypal" but its normalized form differs.
 const PAYPAL_SQUAT = 'pаypаl'
@@ -122,6 +123,84 @@ test('normalization: case/width variants are the same name', () => {
     ops.claimOp({ name: 'ALICE', target: TARGET_B, owner: owner(b) }, signer(b)),
   ])
   assert.equal(resolve(view, 'alice').owner, owner(a)) // second claim is the same name → loses
+})
+
+// --- regressions from the N5 adversarial review -----------------------------
+
+test('homograph fix: releasing one confusable variant does NOT free a still-held skeleton', () => {
+  const a = crypto.keyPair(); const b = crypto.keyPair()
+  const view = applyView([
+    ops.claimOp({ name: 'paypal', target: TARGET_A, owner: owner(a) }, signer(a)),
+    ops.claimOp({ name: PAYPAL_SQUAT, target: TARGET_A, owner: owner(a) }, signer(a)), // same owner variant
+    ops.releaseOp({ name: PAYPAL_SQUAT, owner: owner(a) }, signer(a)), // release the variant
+    ops.claimOp({ name: PAYPAL_SQUAT, target: TARGET_B, owner: owner(b) }, signer(b)), // attacker squat
+  ])
+  assert.equal(resolve(view, 'paypal').owner, owner(a)) // original still A's
+  assert.equal(resolve(view, PAYPAL_SQUAT), null) // squat STILL rejected (skeleton stays A's)
+})
+
+test('homograph fix (symmetric): releasing the original keeps the skeleton blocked while a variant is held', () => {
+  const a = crypto.keyPair(); const b = crypto.keyPair()
+  const view = applyView([
+    ops.claimOp({ name: 'paypal', target: TARGET_A, owner: owner(a) }, signer(a)),
+    ops.claimOp({ name: PAYPAL_SQUAT, target: TARGET_A, owner: owner(a) }, signer(a)),
+    ops.releaseOp({ name: 'paypal', owner: owner(a) }, signer(a)), // release the original
+    ops.claimOp({ name: 'paypal', target: TARGET_B, owner: owner(b) }, signer(b)), // B grabs the freed exact name
+  ])
+  assert.equal(resolve(view, PAYPAL_SQUAT).owner, owner(a)) // variant still A's
+  assert.equal(resolve(view, 'paypal'), null) // B blocked — the skeleton is still A's via the variant
+})
+
+test('homograph fix: releasing ALL variants frees the skeleton for another owner', () => {
+  const a = crypto.keyPair(); const b = crypto.keyPair()
+  const view = applyView([
+    ops.claimOp({ name: 'paypal', target: TARGET_A, owner: owner(a) }, signer(a)),
+    ops.claimOp({ name: PAYPAL_SQUAT, target: TARGET_A, owner: owner(a) }, signer(a)),
+    ops.releaseOp({ name: PAYPAL_SQUAT, owner: owner(a) }, signer(a)),
+    ops.releaseOp({ name: 'paypal', owner: owner(a) }, signer(a)),
+    ops.claimOp({ name: PAYPAL_SQUAT, target: TARGET_B, owner: owner(b) }, signer(b)),
+  ])
+  assert.equal(resolve(view, PAYPAL_SQUAT).owner, owner(b)) // skeleton fully freed → B
+})
+
+test('rotate-replay: a stale high-version rotate cannot resurrect after release + re-claim', () => {
+  const a = crypto.keyPair()
+  const claim1 = ops.claimOp({ name: 'site', target: TARGET_A, owner: owner(a) }, signer(a))
+  const rot5 = ops.rotateOp({ name: 'site', target: TARGET_B, owner: owner(a), version: 5 }, signer(a))
+  const rel = ops.releaseOp({ name: 'site', owner: owner(a) }, signer(a))
+  const reclaim = ops.claimOp({ name: 'site', target: TARGET_C, owner: owner(a) }, signer(a))
+  // replay the OLD v5 rotate (→ TARGET_B) AFTER the re-claim: version is monotonic
+  // across the lifecycle, so the re-claim's effective version is > 5 → replay rejected.
+  const view = applyView([claim1, rot5, rel, reclaim, rot5])
+  const r = resolve(view, 'site')
+  assert.equal(r.target, TARGET_C) // re-claim target holds; stale rotate ignored
+  assert.ok(r.version > 5) // version never reset to 1 on re-claim
+})
+
+test('invisible filler codepoints are stripped — a filler-injected name is the same name', () => {
+  const a = crypto.keyPair(); const b = crypto.keyPair()
+  const view = applyView([
+    ops.claimOp({ name: 'wallet', target: TARGET_A, owner: owner(a) }, signer(a)),
+    ops.claimOp({ name: 'walᅠlet', target: TARGET_B, owner: owner(b) }, signer(b)), // Hangul filler
+  ])
+  assert.equal(resolve(view, 'wallet').owner, owner(a)) // filler stripped → same name → B loses
+})
+
+test('Cyrillic н (now folding to n) is caught as a homograph squat', () => {
+  const a = crypto.keyPair(); const b = crypto.keyPair()
+  const view = applyView([
+    ops.claimOp({ name: 'noah', target: TARGET_A, owner: owner(a) }, signer(a)),
+    ops.claimOp({ name: 'нoah', target: TARGET_B, owner: owner(b) }, signer(b)), // Cyrillic н + 'oah'
+  ])
+  assert.equal(resolve(view, 'noah').owner, owner(a))
+  assert.equal(resolve(view, 'нoah'), null) // skeleton folds to 'noah' → rejected
+})
+
+test('the display name is signed: tampering it (same normalized) drops the op', () => {
+  const a = crypto.keyPair()
+  const good = ops.claimOp({ name: 'alice', target: TARGET_A, owner: owner(a) }, signer(a))
+  const tampered = { ...good, name: 'Alice' } // normalizes to 'alice' but the signed display differs
+  assert.equal(resolve(applyView([tampered]), 'alice'), null)
 })
 
 test('no clock can resurrect or reorder: an injected timestamp is ignored', () => {

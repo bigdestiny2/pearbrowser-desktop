@@ -91,4 +91,33 @@ test('DURABILITY: a claim survives all writers going offline (fresh node re-serv
   } finally { uw2(); await P.close(); await C.close(); await p.store.close(); await c.store.close() }
 })
 
+const PAYPAL_SQUAT = 'pаypаl' // latin p, Cyrillic а ×2 — skeleton folds to 'paypal'
+
+test('store parity: releasing a sibling confusable keeps the skeleton blocked (homograph fix)', async () => {
+  const ka = crypto.keyPair(); const kb = crypto.keyPair()
+  const s = await newStore()
+  const R = await new NameRegistry(s.store, { encryptionKey: ENC, namespace: 'nr' }).ready()
+  try {
+    await R.claim({ name: 'paypal', target: TARGET_A, owner: owner(ka) }, signer(ka))
+    await R.claim({ name: PAYPAL_SQUAT, target: TARGET_A, owner: owner(ka) }, signer(ka)) // same-owner variant
+    await R.release({ name: PAYPAL_SQUAT, owner: owner(ka) }, signer(ka))
+    await R.claim({ name: PAYPAL_SQUAT, target: TARGET_B, owner: owner(kb) }, signer(kb)) // attacker squat
+    assert.equal((await R.resolve('paypal')).owner, owner(ka)) // original still held
+    assert.equal(await R.resolve(PAYPAL_SQUAT), null) // squat rejected in the LIVE store too
+  } finally { await R.close(); await s.store.close() }
+})
+
+test('store list() includes non-ASCII (i18n) names — range-bound fix', async () => {
+  const ka = crypto.keyPair()
+  const s = await newStore()
+  const R = await new NameRegistry(s.store, { encryptionKey: ENC, namespace: 'nr' }).ready()
+  try {
+    await R.claim({ name: 'ascii', target: TARGET_A, owner: owner(ka) }, signer(ka))
+    await R.claim({ name: '日本語', target: TARGET_B, owner: owner(ka) }, signer(ka)) // sorts above '~'
+    const list = await R.list()
+    assert.equal(list.length, 2) // the non-ASCII name is NOT silently dropped
+    assert.ok((await R.resolve('日本語')) != null)
+  } finally { await R.close(); await s.store.close() }
+})
+
 test.after(async () => { for (const d of tmps) { try { await rm(d, { recursive: true, force: true }) } catch {} } })
