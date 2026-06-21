@@ -11,7 +11,9 @@ import Corestore from 'corestore'
 import crypto from 'hypercore-crypto'
 import b4a from 'b4a'
 import storeMod from '../backend/name-registry-store.cjs'
+import resolveMod from '../backend/resolve-name.cjs'
 const { NameRegistry } = storeMod
+const { resolveName } = resolveMod
 
 const ENC = b4a.alloc(32, 0x4e)
 const hex = (x) => b4a.toString(x, 'hex')
@@ -117,6 +119,23 @@ test('store list() includes non-ASCII (i18n) names — range-bound fix', async (
     const list = await R.list()
     assert.equal(list.length, 2) // the non-ASCII name is NOT silently dropped
     assert.ok((await R.resolve('日本語')) != null)
+  } finally { await R.close(); await s.store.close() }
+})
+
+test('end-to-end: claim → activeMap → resolveName (the CMD_NAME_RESOLVE path)', async () => {
+  const ka = crypto.keyPair()
+  const s = await newStore()
+  const R = await new NameRegistry(s.store, { encryptionKey: ENC, namespace: 'nr' }).ready()
+  try {
+    await R.claim({ name: 'Alice', target: TARGET_A, owner: owner(ka) }, signer(ka))
+    const registry = await R.activeMap() // what the backend injects into the resolver
+    // a typed bare name resolves through the registry tier to a navigable key
+    const r = resolveName('alice', { petnames: {}, registry })
+    assert.equal(r.provenance, 'registry')
+    assert.equal(r.key, TARGET_A) // → go() builds hyper://<target>/
+    // a petname still wins over the registry (tier order preserved end-to-end)
+    const pet = resolveName('alice', { petnames: { alice: { key: TARGET_B } }, registry })
+    assert.equal(pet.provenance, 'petname')
   } finally { await R.close(); await s.store.close() }
 })
 

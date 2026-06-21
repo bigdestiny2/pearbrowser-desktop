@@ -47,6 +47,7 @@ class NameRegistry {
   get key () { return this.mgr.key }
   get writable () { return this.mgr.writable }
   get localKey () { return this.mgr.localKey }
+  get discoveryKey () { return this.mgr.discoveryKey }
 
   // Append a pre-signed op (built with the name-registry-ops builders + the
   // owner's signer). The store never holds a key — signing stays with the caller.
@@ -67,6 +68,14 @@ class NameRegistry {
     const e = await this.mgr.view.get('name!' + normalized).catch(() => null)
     const v = e && e.value
     return (v && v.status === 'active') ? { name: v.name, normalized, target: v.target, owner: v.owner, version: v.version } : null
+  }
+
+  // Active names as a resolver-ready map { [normalized]: { target, owner, version } }
+  // — the registry tier injected into resolveName (mirrors Names.petnameMap()).
+  async activeMap () {
+    const out = {}
+    for (const e of await this.list()) out[e.normalized] = { target: e.target, owner: e.owner, version: e.version, label: e.name }
+    return out
   }
 
   // All currently-active names. Upper bound is 'name"' (the byte 0x22 right after

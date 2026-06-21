@@ -13,11 +13,13 @@ const { lookupAlias } = require('./name-aliases.cjs')
  * @param {object} ctx
  *   @param {object} ctx.petnames  { [normalizedName]: { key?, link?, label? } }
  *                                 the user's own saved aliases (Tier 0)
+ *   @param {object} ctx.registry  { [normalizedName]: { target, owner?, version?, label? } }
+ *                                 the multi-writer N5 name registry (Tier 2)
  *   @param {boolean} ctx.aliases  include the curated bootstrap floor (default true)
  * @returns {null | { name, key, link, label, provenance }}  provenance ∈
- *   'petname' | 'curated' (later: 'contact' | 'room').
+ *   'petname' | 'registry' | 'curated' (later: 'contact').
  */
-function resolveName (rawName, { petnames = {}, aliases = true } = {}) {
+function resolveName (rawName, { petnames = {}, registry = {}, aliases = true } = {}) {
   const n = normalize(rawName)
   if (!n) return null
 
@@ -25,6 +27,13 @@ function resolveName (rawName, { petnames = {}, aliases = true } = {}) {
   const pet = petnames[n]
   if (pet && (pet.key || pet.link)) {
     return { name: n, key: pet.key || null, link: pet.link || null, label: pet.label || rawName, provenance: 'petname' }
+  }
+
+  // Tier 2 — multi-writer name registry (N5). An owner-signed first-claim, durable
+  // across writers. Beats the static curated floor; yields to the user's own petname.
+  const reg = registry[n]
+  if (reg && reg.target) {
+    return { name: n, key: reg.target, link: null, label: reg.label || rawName, provenance: 'registry' }
   }
 
   // Tier 3 — curated bootstrap floor. Lowest authority; overridden by anything above.

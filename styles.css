@@ -253,8 +253,14 @@ p { color: #8b949e; margin-bottom: 12px; }
 /* Tier-0 petname — the user's own saved alias (highest authority). */
 .name-prov-chip.name-prov-petname { border-color: rgba(46,160,67,0.5); }
 .name-prov-chip.name-prov-petname .name-prov-tier { color: #3fb950; }
+/* Tier-2 multi-writer name registry (owner-signed first-claim; above curated). */
+.name-prov-chip.name-prov-registry { border-color: rgba(163,113,247,0.5); }
+.name-prov-chip.name-prov-registry .name-prov-tier { color: #a371f7; }
 /* Tier-3 curated bootstrap floor (lowest authority; overridden by anything above). */
 .name-prov-chip.name-prov-curated .name-prov-tier { color: #58a6ff; }
+
+/* Name-registry Settings panel rows. */
+.namereg-list { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
 
 .browse-empty {
   flex: 1;

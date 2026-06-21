@@ -4,8 +4,18 @@ import assert from 'node:assert/strict'
 import {
   hexToBytes, bytesToHex, z32FromHex, hexFromZ32,
   formatBytes, shortKey, normalizeUrl, parseCatalogRef, looksLikeName,
-  parseSyncInvite, formatSyncInvite
+  parseSyncInvite, formatSyncInvite, parsePearname
 } from '../ui/lib/keys.js'
+
+test('parsePearname strips the scheme and gates well-formedness', () => {
+  assert.equal(parsePearname('pearname://alice'), 'alice')
+  assert.equal(parsePearname('pearname://alice/'), 'alice') // trailing slash trimmed
+  assert.equal(parsePearname('PEARNAME://Bob'), 'Bob') // scheme case-insensitive; name preserved for backend normalize
+  assert.equal(parsePearname('alice'), 'alice') // bare name accepted
+  assert.equal(parsePearname('pearname://'), null) // empty
+  assert.equal(parsePearname('pearname://has space'), null) // whitespace rejected
+  assert.equal(parsePearname('pearname://a/b'), null) // interior slash rejected (not a bare name)
+})
 
 // Real 32-byte drive keys used in the shell (DEFAULT_CATALOG_KEY / DEFAULT_URL).
 const CATALOG_HEX = '0c35d12fd9b1115dd2d1fb1cd1751817c9173d3196ac7c62ae37d023340dcb75'

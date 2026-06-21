@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { html } from 'htm/react'
 import { Logo, Wordmark } from './logo.js'
-import { z32FromHex, hexFromZ32, formatBytes, shortKey, normalizeUrl, parseCatalogRef, looksLikeName, parseSyncInvite, formatSyncInvite } from './lib/keys.js'
+import { z32FromHex, hexFromZ32, formatBytes, shortKey, normalizeUrl, parseCatalogRef, looksLikeName, parseSyncInvite, formatSyncInvite, parsePearname } from './lib/keys.js'
 import {
   MAX_TAB_HISTORY, MAX_CLOSED_TABS,
   makeTab, cleanTabUrl, cleanTabTitle,
@@ -478,9 +478,13 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
     let target = null
     let prov = null
     const raw = String(url ?? '').trim()
-    if (looksLikeName(raw)) {
+    // A pearname://<name> URL resolves through the registry exactly like a typed
+    // bare word — strip the scheme so both share the CMD_NAME_RESOLVE branch.
+    const pearname = /^pearname:\/\//i.test(raw) ? parsePearname(raw) : null
+    const nameQuery = pearname || (looksLikeName(raw) ? raw : null)
+    if (nameQuery) {
       try {
-        const { resolved } = await rpc.request(C.CMD_NAME_RESOLVE, { name: raw })
+        const { resolved } = await rpc.request(C.CMD_NAME_RESOLVE, { name: nameQuery })
         if (resolved && (resolved.link || resolved.key)) {
           const link = resolved.link || `hyper://${resolved.key}/`
           // A pear:// / file:// target is a full Pear-runtime app (Keet, PearPass,
@@ -488,7 +492,7 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
           // (CMD_LAUNCH_PEAR_LINK), not through the in-tab web navigate path that
           // serves /hyper/<key> as a page. The current tab stays put.
           if (/^(?:pear|file):\/\//i.test(link)) {
-            updateTab(id, { status: `opening ${resolved.label || raw} · ${resolved.provenance}…` })
+            updateTab(id, { status: `opening ${resolved.label || nameQuery} · ${resolved.provenance}…` })
             try {
               await rpc.request(C.CMD_LAUNCH_PEAR_LINK, { link }, 60000)
               updateTab(id, { status: '' })
@@ -499,7 +503,7 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
           }
           // A browsable hyper:// target — navigate it in-tab below, with a chip.
           target = link
-          prov = { provenance: resolved.provenance, label: resolved.label || raw, name: raw }
+          prov = { provenance: resolved.provenance, label: resolved.label || nameQuery, name: nameQuery }
         }
       } catch { /* resolver unavailable / disabled — fall through to URL handling */ }
     }
@@ -885,7 +889,7 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
         <div class=${`name-prov-chip name-prov-${active.nameProv.provenance}`}
              title=${`“${active.nameProv.name}” resolved to ${active.displayUrl}`}>
           <span class="name-prov-name">${active.nameProv.label}</span>
-          <span class="name-prov-tier">${active.nameProv.provenance === 'petname' ? 'your saved name' : 'curated'}</span>
+          <span class="name-prov-tier">${active.nameProv.provenance === 'petname' ? 'your saved name' : active.nameProv.provenance === 'registry' ? 'name registry' : 'curated'}</span>
         </div>
       `}
       <div class="browse-stage">
@@ -3178,6 +3182,86 @@ function NostrIdentitySection ({ rpc, C }) {
   `
 }
 
+// --- Name registry (Phase N5) — claim memorable names → drive keys ----------
+// Owner-signed, multi-writer, first-claim-wins with a confusable/homograph guard.
+// One form claims a new name or updates (rotates) one you already own; each name
+// is shareable as pearname://<name> and resolves in the URL bar.
+function NameRegistrySection ({ rpc, C }) {
+  const [list, setList] = useState([])
+  const [status, setStatus] = useState(null)
+  const [name, setName] = useState('')
+  const [target, setTarget] = useState('')
+  const [busy, setBusy] = useState(null)
+  const [err, setErr] = useState('')
+  const [copied, setCopied] = useState('')
+
+  const load = async () => {
+    try {
+      const st = await rpc.request(C.CMD_NAMEREG_STATUS)
+      setStatus(st)
+      if (st.created) { const r = await rpc.request(C.CMD_NAMEREG_LIST); setList(Array.isArray(r?.names) ? r.names : []) }
+      else setList([])
+    } catch (e) { setErr(e.message) }
+  }
+  useEffect(() => { load() }, [])
+
+  const submit = async () => {
+    const n = name.trim()
+    const t = target.trim().toLowerCase()
+    const owned = list.find((e) => e.normalized === n.toLowerCase() || (e.name || '').toLowerCase() === n.toLowerCase())
+    setBusy('submit'); setErr('')
+    try {
+      await rpc.request(owned ? C.CMD_NAMEREG_ROTATE : C.CMD_NAMEREG_CLAIM, { name: n, target: t })
+      setName(''); setTarget(''); await load()
+    } catch (e) { setErr(e.message) } finally { setBusy(null) }
+  }
+  const act = async (cmd, n) => {
+    setBusy(n + cmd); setErr('')
+    try { await rpc.request(cmd, { name: n }); await load() }
+    catch (e) { setErr(e.message) } finally { setBusy(null) }
+  }
+  const copyPearname = async (n) => {
+    try { await navigator.clipboard.writeText('pearname://' + n); setCopied(n); setTimeout(() => setCopied(''), 1500) } catch {}
+  }
+
+  const targetValid = /^[0-9a-f]{64}$/i.test(target.trim())
+  return html`
+    <div class="settings-card">
+      ${status && !status.enabled
+        ? html`<div class="settings-subtle">Turn on “Names” in Experimental (below) to claim registry names.</div>`
+        : html`
+        <div class="settings-row">
+          <div>
+            <div class="settings-label">Claim or update a name</div>
+            <div class="settings-subtle">A memorable name → a drive key. First claim wins; confusable look-alikes are rejected. Re-submitting a name you own updates its target.</div>
+          </div>
+        </div>
+        <div class="tp-row">
+          <input class="profile-input" placeholder="name (e.g. alice)" value=${name} onInput=${(e) => setName(e.target.value)} />
+          <input class="profile-input" placeholder="target drive key (64-hex)" value=${target} onInput=${(e) => setTarget(e.target.value)} />
+          <button class="btn small primary" onClick=${submit} disabled=${busy != null || !name.trim() || !targetValid}>${busy === 'submit' ? 'Saving…' : 'Save'}</button>
+        </div>
+        ${list.length > 0 && html`<div class="namereg-list">
+          ${list.map((e) => html`
+            <div class="settings-row" key=${e.normalized}>
+              <div>
+                <div class="settings-label">${e.name} <span class="src-badge self">pearname://${e.normalized}</span></div>
+                <div class="settings-subtle">→ ${shortKey(e.target)} · v${e.version}</div>
+              </div>
+              <div>
+                <button class="btn small" onClick=${() => copyPearname(e.normalized)}>${copied === e.normalized ? 'Copied' : 'Copy'}</button>
+                <button class="btn small" onClick=${() => act(C.CMD_NAMEREG_RELEASE, e.normalized)} disabled=${busy != null}>Release</button>
+                <button class="btn subtle danger" onClick=${() => act(C.CMD_NAMEREG_REVOKE, e.normalized)} disabled=${busy != null}>Revoke</button>
+              </div>
+            </div>`)}
+        </div>`}
+        ${status && status.created && list.length === 0 && html`<div class="settings-subtle">No names yet — claim one above.</div>`}
+      `}
+      ${err && html`<div class="tp-msg">${err}</div>`}
+    </div>
+  `
+}
+
 // --- Multi-device bookmark sync (encrypted) — Settings panel ---------------
 //
 // Surfaces the CMD_SYNC_* backend (Rollout Phase 4). Rendered only when the
@@ -3595,6 +3679,10 @@ function Settings ({ rpc, C, status, storagePath, log }) {
       <h2>Nostr identity</h2>
       <p class="subtitle">A portable Nostr key (npub), linked to your pear identity by a mutual, revocable attestation. "Linked (attested)" is a trust assertion the two keys mutually signed — never proof of the same person.</p>
       <${NostrIdentitySection} rpc=${rpc} C=${C} />
+
+      <h2>Name registry</h2>
+      <p class="subtitle">Claim memorable names that resolve to your drives — type the name (or pearname://name) in the URL bar. Owner-signed, durable across devices, first-claim-wins with a homograph guard.</p>
+      <${NameRegistrySection} rpc=${rpc} C=${C} />
 
       <h2>HiveRelay Network</h2>
       <div class="settings-card">

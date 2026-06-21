@@ -41,6 +41,7 @@ const { Profile } = require('./profile.js')
 const { Contacts } = require('./contacts.js')
 const { Names } = require('./names.cjs')
 const { resolveName } = require('./resolve-name.cjs')
+const { NameRegistry } = require('./name-registry-store.cjs')
 const { SwarmBridge } = require('./swarm-bridge.js')
 const { SwarmGrants } = require('./swarm-grants.js')
 const C = require('./constants.js')
@@ -91,6 +92,7 @@ let identityBindingPublisher = null // Lighthouse Phase 2 — root→search-key 
 let nostrBindingStore = null // NOSTR2 Phase 1 — local cross-curve binding state (npub + epoch)
 let queryPlanner = null // Lighthouse Phase 2 — federated query orchestration (local-first + peer fan-out)
 let names = null // naming Phase N1 — local petname store (names.cjs); null until ready
+let nameRegistry = null // naming Phase N5 — multi-writer Autobase name registry; null until first use
 let swarmBridge = null
 let swarmGrants = null
 /** Map<requestId, { resolve, reject, timer }> for login() ceremonies. */
@@ -1256,6 +1258,45 @@ async function requireNaming () {
   }
 }
 
+// The owner identity for the user's name claims: their stable ROOT ed25519 key.
+// ownerSign signs the registry's domain-tagged canonical bytes (NOT page-supplied
+// bytes — the canon is built backend-side in name-registry-ops), so a claim can
+// never be coerced into signing attacker-chosen content. Mirrors the publisher's
+// _rootSign / _rootPubkeyHex (identity-binding-publisher.js).
+function nameRegSigner () {
+  const id = requireIdentity()
+  return {
+    owner: b4a.toString(id.getSigningKeypair().publicKey, 'hex'),
+    ownerSign: (msg) => id.sign(msg).signature,
+  }
+}
+
+// Open the user's OWN name registry, minting it on first claim. Mirrors
+// ensureBrowserSync: mint under a throwaway namespace, persist the key + a fresh
+// encryption key, then always reopen by bootstrap (so the per-user Autobase has a
+// stable identity on the shared Corestore). Returns the live registry or null.
+async function ensureNameRegistry ({ create = false } = {}) {
+  const s = await requireUserData().getSettings()
+  const key = (typeof s.nameRegKey === 'string' && /^[0-9a-f]{64}$/i.test(s.nameRegKey)) ? s.nameRegKey : null
+  const enc = (typeof s.nameRegEncKey === 'string' && /^[0-9a-f]{64}$/i.test(s.nameRegEncKey)) ? s.nameRegEncKey : null
+  if (key && enc) {
+    if (nameRegistry && nameRegistry.key === key) return nameRegistry
+    if (nameRegistry) { try { await nameRegistry.close() } catch {} nameRegistry = null }
+    nameRegistry = await new NameRegistry(store, { bootstrap: key, encryptionKey: enc }).ready()
+    if (nameRegistry.discoveryKey && swarm) swarm.join(nameRegistry.discoveryKey, { server: true, client: true })
+    return nameRegistry
+  }
+  if (!create) return null
+  const encKey = require('crypto').randomBytes(32).toString('hex')
+  const mint = await new NameRegistry(store, { bootstrap: null, encryptionKey: encKey, namespace: 'namereg-mint-' + Date.now() }).ready()
+  const mintedKey = mint.key
+  await mint.close()
+  await requireUserData().setSettings({ nameRegKey: mintedKey, nameRegEncKey: encKey })
+  nameRegistry = await new NameRegistry(store, { bootstrap: mintedKey, encryptionKey: encKey }).ready()
+  if (nameRegistry.discoveryKey && swarm) swarm.join(nameRegistry.discoveryKey, { server: true, client: true })
+  return nameRegistry
+}
+
 // Resolve a typed word against the local petname store (Tier 0, wins) + the
 // curated NAME_ALIASES floor (Tier 3). Never throws for the disabled/unknown
 // case — returns { resolved: null } so the UI falls through to plain URL
@@ -1264,10 +1305,15 @@ rpc.handle(C.CMD_NAME_RESOLVE, async ({ name } = {}) => {
   await whenReady()
   if (!(await isNamingEnabled())) return { resolved: null, enabled: false }
   const petnames = names ? await names.petnameMap() : {}
+  // Tier 2 — the multi-writer registry (reopened if the user has one; never
+  // minted by a read). Best-effort: a registry failure must not break petname/
+  // curated resolution.
+  let registry = {}
+  try { const reg = await ensureNameRegistry({ create: false }); if (reg) registry = await reg.activeMap() } catch {}
   // `enabled` reflects the FULL feature: false if the petname store failed to
   // open even though the flag is on (curated aliases still resolve store-free,
   // so `resolved` may be non-null while `enabled` is false).
-  return { resolved: resolveName(name, { petnames, aliases: true }), enabled: !!names }
+  return { resolved: resolveName(name, { petnames, registry, aliases: true }), enabled: !!names }
 })
 
 rpc.handle(C.CMD_NAME_PETNAME_LIST, async ({ limit } = {}) => {
@@ -1286,6 +1332,75 @@ rpc.handle(C.CMD_NAME_PETNAME_REMOVE, async ({ name } = {}) => {
   await whenReady()
   await requireNaming()
   await requireNames().removePetname(name)
+  return { ok: true }
+})
+
+// --- Name registry (Phase N5) — owner-signed multi-writer claims --------------
+// Claims auto-create the user's own registry; the owner is their root identity,
+// signed backend-side (the page supplies only name+target, never signable bytes).
+function requireNameRegistryCreated () {
+  if (!nameRegistry) throw new Error('No name registry yet — claim a name to create one.')
+  return nameRegistry
+}
+
+rpc.handle(C.CMD_NAMEREG_STATUS, async () => {
+  await whenReady()
+  if (!(await isNamingEnabled())) return { enabled: false, created: false }
+  const reg = await ensureNameRegistry({ create: false })
+  if (!reg) return { enabled: true, created: false }
+  const { owner } = nameRegSigner()
+  return { enabled: true, created: true, key: reg.key, owner, writable: reg.writable, writerKey: reg.localKey }
+})
+
+rpc.handle(C.CMD_NAMEREG_LIST, async () => {
+  await whenReady()
+  if (!(await isNamingEnabled())) return { names: [] }
+  const reg = await ensureNameRegistry({ create: false })
+  return { names: reg ? await reg.list() : [] }
+})
+
+rpc.handle(C.CMD_NAMEREG_RESOLVE, async ({ name } = {}) => {
+  await whenReady()
+  if (!(await isNamingEnabled())) return { resolved: null }
+  const reg = await ensureNameRegistry({ create: false })
+  return { resolved: reg ? await reg.resolve(name) : null }
+})
+
+rpc.handle(C.CMD_NAMEREG_CLAIM, async ({ name, target } = {}) => {
+  await whenReady(); await requireNaming()
+  if (typeof name !== 'string' || !name.trim()) throw new Error('name required')
+  if (typeof target !== 'string' || !/^[0-9a-f]{64}$/i.test(target)) throw new Error('target must be a 64-hex drive key')
+  const reg = await ensureNameRegistry({ create: true })
+  const { owner, ownerSign } = nameRegSigner()
+  await reg.claim({ name, target: target.toLowerCase(), owner }, ownerSign)
+  return { ok: true, resolved: await reg.resolve(name) }
+})
+
+rpc.handle(C.CMD_NAMEREG_ROTATE, async ({ name, target } = {}) => {
+  await whenReady(); await requireNaming()
+  if (typeof target !== 'string' || !/^[0-9a-f]{64}$/i.test(target)) throw new Error('target must be a 64-hex drive key')
+  const reg = requireNameRegistryCreated()
+  const cur = await reg.resolve(name)
+  if (!cur) throw new Error('You don\'t hold that name (claim it first).')
+  const { owner, ownerSign } = nameRegSigner()
+  if (cur.owner !== owner) throw new Error('You don\'t own that name.')
+  await reg.rotate({ name, target: target.toLowerCase(), owner, version: cur.version + 1 }, ownerSign)
+  return { ok: true, resolved: await reg.resolve(name) }
+})
+
+rpc.handle(C.CMD_NAMEREG_RELEASE, async ({ name } = {}) => {
+  await whenReady(); await requireNaming()
+  const reg = requireNameRegistryCreated()
+  const { owner, ownerSign } = nameRegSigner()
+  await reg.release({ name, owner }, ownerSign)
+  return { ok: true }
+})
+
+rpc.handle(C.CMD_NAMEREG_REVOKE, async ({ name } = {}) => {
+  await whenReady(); await requireNaming()
+  const reg = requireNameRegistryCreated()
+  const { owner, ownerSign } = nameRegSigner()
+  await reg.revoke({ name, owner }, ownerSign)
   return { ok: true }
 })
 
@@ -2004,6 +2119,7 @@ async function shutdown () {
   if (catalogManager) { try { await catalogManager.close() } catch {} catalogManager = null }
   if (personalIndex) { try { await personalIndex.close() } catch {} personalIndex = null }
   if (browserSync) { try { await browserSync.close() } catch {} browserSync = null }
+  if (nameRegistry) { try { await nameRegistry.close() } catch {} nameRegistry = null }
   for (const [keyHex, entry] of browseDrives) {
     unregisterHiveRelayDrive(keyHex, entry.drive)
     try { await entry.drive.close() } catch {}

@@ -41,3 +41,29 @@ test('miss → null; aliases:false disables the floor', () => {
   assert.equal(resolveName('keet', { petnames: {}, aliases: false }), null)   // no curated floor
   assert.equal(resolveName('', { petnames: {} }), null)
 })
+
+// --- Tier 2: the N5 name registry --------------------------------------------
+
+const TKEY = 'aa'.repeat(32)
+
+test('registry tier resolves a claimed name (target → key, provenance registry)', () => {
+  const registry = { alice: { target: TKEY, owner: 'bb'.repeat(32), version: 1, label: 'alice' } }
+  const r = resolveName('alice', { petnames: {}, registry })
+  assert.equal(r.provenance, 'registry')
+  assert.equal(r.key, TKEY)
+  assert.equal(r.link, null)
+  assert.equal(r.label, 'alice')
+})
+
+test('a user petname OUTRANKS the registry; the registry OUTRANKS the curated floor', () => {
+  const registry = { keet: { target: TKEY } }
+  // registry beats curated for 'keet' (curated alias exists for keet)
+  assert.equal(resolveName('keet', { petnames: {}, registry }).provenance, 'registry')
+  // a petname beats the registry
+  const petnames = { keet: { key: KEY, label: 'My Keet' } }
+  assert.equal(resolveName('keet', { petnames, registry }).provenance, 'petname')
+})
+
+test('registry entry without a target is ignored (falls through)', () => {
+  assert.equal(resolveName('ghost', { petnames: {}, registry: { ghost: { owner: 'cc'.repeat(32) } } }), null)
+})

@@ -142,6 +142,17 @@ const CMD_NAME_PETNAME_LIST = 251
 const CMD_NAME_PETNAME_SET = 252
 const CMD_NAME_PETNAME_REMOVE = 253
 
+// Naming Phase N5 — multi-writer name registry (owner-signed claim/rotate/release/
+// revoke; first-claim-wins + homograph policy). Durable Autobase; gated behind
+// experimentalNaming. Request/response (no EVT). 254 stays reserved for N3/N4.
+const CMD_NAMEREG_CLAIM = 264
+const CMD_NAMEREG_ROTATE = 265
+const CMD_NAMEREG_RELEASE = 266
+const CMD_NAMEREG_REVOKE = 267
+const CMD_NAMEREG_LIST = 268
+const CMD_NAMEREG_RESOLVE = 269
+const CMD_NAMEREG_STATUS = 270
+
 // Lighthouse Phase 2 — IdentityBinding (root → rotatable search subkey) +
 // federated search. See backend/identity-binding-publisher.js + query-planner.js.
 const CMD_IDENTITY_BINDING_PUBLISH = 260  // publish/refresh our binding to DHT + meta
@@ -257,6 +268,8 @@ module.exports = {
   CMD_SYNC_STATUS, CMD_SYNC_CREATE, CMD_SYNC_JOIN, CMD_SYNC_ADD_WRITER,
   CMD_SYNC_GET_BOOKMARKS, CMD_SYNC_ADD_BOOKMARK, CMD_SYNC_REMOVE_BOOKMARK, CMD_SYNC_PUSH_LOCAL,
   CMD_NAME_RESOLVE, CMD_NAME_PETNAME_LIST, CMD_NAME_PETNAME_SET, CMD_NAME_PETNAME_REMOVE,
+  CMD_NAMEREG_CLAIM, CMD_NAMEREG_ROTATE, CMD_NAMEREG_RELEASE, CMD_NAMEREG_REVOKE,
+  CMD_NAMEREG_LIST, CMD_NAMEREG_RESOLVE, CMD_NAMEREG_STATUS,
   CMD_IDENTITY_BINDING_PUBLISH, CMD_IDENTITY_BINDING_RESOLVE, CMD_SEARCH_FEDERATED,
   CMD_NOSTR_GET_IDENTITY, CMD_NOSTR_BIND, CMD_NOSTR_REVOKE,
   CMD_BRIDGE,

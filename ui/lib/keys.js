@@ -181,3 +181,12 @@ export function formatSyncInvite (key, encKey) {
   if (!/^[0-9a-f]{64}$/.test(k) || !/^[0-9a-f]{64}$/.test(e)) return ''
   return `sync://${k}:${e}`
 }
+
+// Parse a `pearname://<name>` URL → the bare registry name (or null). Only a
+// loose well-formedness gate — the backend name-normalize.cjs does the
+// authoritative NFKC + confusable folding; this just strips the scheme so go()
+// can resolve it via CMD_NAME_RESOLVE like a typed bare name. MAX_NAME=253.
+export function parsePearname (raw) {
+  const s = String(raw || '').trim().replace(/^pearname:\/\//i, '').replace(/\/+$/, '')
+  return /^[^\s/]{1,253}$/.test(s) ? s : null
+}
