@@ -606,6 +606,24 @@ rpc.handle(C.CMD_GET_SITE_BLOCKS, async (data) => {
   return await siteManager.getSiteBlocks(data.siteId)
 })
 
+// Resolve a published app/site icon for display: fetch the declared iconRef (a
+// path inside the drive) or a well-known icon path, inline as a data URI. This
+// wires the desktop icon-fetch for the sheets/index-room/seed catalogue path
+// (previously only the legacy catalog.json path inlined icons — see PBACS
+// §"Icon resolution"). Best-effort + cached; null → the UI shows a letter glyph.
+rpc.handle(C.CMD_GET_APP_ICON, async ({ driveKey, iconRef } = {}) => {
+  return { iconData: await resolveAppIcon(driveKey, iconRef) }
+})
+
+// Upload/set the icon for one of YOUR sites — writes /icon.<ext> into the site's
+// drive (peers replicate it; no re-publish needed for an already-seeded drive).
+rpc.handle(C.CMD_SET_SITE_ICON, async ({ siteId, dataUrl } = {}) => {
+  if (!siteManager) throw new Error('site manager not available')
+  const res = await siteManager.setIcon(siteId, dataUrl)
+  if (res && res.keyHex) for (const k of [..._iconCache.keys()]) if (k.startsWith(res.keyHex + '|')) _iconCache.delete(k)
+  return res
+})
+
 rpc.handle(C.CMD_RESET_APP, async () => {
   // Safely tear down: (1) unseed every pinned site so the publisher
   // keypair still matches, (2) shutdown managers, (3) wipe storage,
@@ -1637,6 +1655,48 @@ async function getDriveForProxy (keyHex) {
   }
   // Load on demand
   return await ensureBrowseDrive(keyHex)
+}
+
+// --- App/site icon resolution (CMD_GET_APP_ICON) ---------------------------
+const ICON_WELL_KNOWN = ['/icon.svg', '/icon.png', '/icon.jpg', '/icon.jpeg', '/icon.webp', '/favicon.svg', '/favicon.png', '/favicon.ico', '/logo.svg', '/logo.png']
+const ICON_MIME = { svg: 'image/svg+xml', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', ico: 'image/x-icon', gif: 'image/gif' }
+const MAX_ICON_BYTES = 512 * 1024
+const ICON_TTL_MS = 10 * 60 * 1000      // cache a FOUND icon a while
+const ICON_NULL_TTL_MS = 45 * 1000      // retry a MISSING icon soon (drive may still be replicating)
+const _iconCache = new Map() // 'driveKey|iconRef' -> { iconData, ts }
+
+function _iconMime (path) {
+  const ext = String(path).split('.').pop().toLowerCase()
+  return ICON_MIME[ext] || 'image/png'
+}
+
+// Open the drive by key and return the first available icon as a data: URI,
+// trying the declared iconRef first, then well-known paths. Fail-soft to null.
+async function resolveAppIcon (driveKey, iconRef) {
+  if (typeof driveKey !== 'string' || !/^[0-9a-f]{64}$/i.test(driveKey)) return null
+  const cacheKey = driveKey + '|' + (typeof iconRef === 'string' ? iconRef : '')
+  const hit = _iconCache.get(cacheKey)
+  if (hit && (Date.now() - hit.ts) < (hit.iconData ? ICON_TTL_MS : ICON_NULL_TTL_MS)) return hit.iconData
+  let iconData = null
+  try {
+    const drive = await getDriveForProxy(driveKey)
+    if (drive) {
+      const candidates = []
+      if (typeof iconRef === 'string' && iconRef && iconRef.length <= 512) {
+        candidates.push(iconRef.startsWith('/') ? iconRef : '/' + iconRef)
+      }
+      for (const p of ICON_WELL_KNOWN) if (!candidates.includes(p)) candidates.push(p)
+      for (const p of candidates) {
+        const buf = await drive.get(p).catch(() => null)
+        if (buf && buf.length && buf.length <= MAX_ICON_BYTES) {
+          iconData = 'data:' + _iconMime(p) + ';base64,' + Buffer.from(buf).toString('base64')
+          break
+        }
+      }
+    }
+  } catch (_) { iconData = null }
+  _iconCache.set(cacheKey, { iconData, ts: Date.now() })
+  return iconData
 }
 
 function driveKeyFromUrl (url) {

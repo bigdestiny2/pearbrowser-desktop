@@ -118,15 +118,20 @@ async function main () {
   assert(idsA.includes('pearpass') && idsA.includes('hiveworm'), 'both concurrent upserts must survive')
 
   // --- Restart determinism: reopen A's store from disk -------------------
-  await A.close()
-  const A2 = await new AutobeeCatalogManager(await reopen(), { bootstrap: A.key, namespace: 'smoke' }).ready()
+  // The manager now namespaces its Autobase substore, so A.close() frees only
+  // that substore and leaves storeA open — close storeA before reopening a fresh
+  // Corestore on the same dir (two Corestores on one dir would otherwise overlap).
+  unwire()
+  await A.close(); await storeA.close()
+  const storeA2 = await reopen()
+  const A2 = await new AutobeeCatalogManager(storeA2, { bootstrap: A.key, namespace: 'smoke' }).ready()
   const reopened = await A2.catalog()
   console.log('  · A reopened from disk →', reopened.apps.map((x) => x.id).sort().join(', '))
   assert(JSON.stringify(reopened.apps.map((x) => x.id).sort()) === JSON.stringify(idsA),
     'reopened view must match pre-restart view (op log rebuilds same view)')
 
-  unwire()
-  await B.close(); await A2.close()
+  await B.close(); await storeB.close()
+  await A2.close(); await storeA2.close()
 
   await createPatternScenario()
 
@@ -148,11 +153,15 @@ async function createPatternScenario () {
   const dir = await mkdtemp(join(tmpdir(), 'autobee-smoke-create-'))
   tmps.push(dir)
 
-  const mint = await new AutobeeCatalogManager(new Corestore(dir), { bootstrap: null, namespace: 'mint' }).ready()
+  // mint.close() now frees only the manager's namespaced substore (not the whole
+  // Corestore), so close the mint store before reopening a fresh one on the dir.
+  const mintStore = new Corestore(dir)
+  const mint = await new AutobeeCatalogManager(mintStore, { bootstrap: null, namespace: 'mint' }).ready()
   const keyHex = mint.key
-  await mint.close()
+  await mint.close(); await mintStore.close()
 
-  const owner = await new AutobeeCatalogManager(new Corestore(dir), { bootstrap: keyHex }).ready()
+  const ownerStore = new Corestore(dir)
+  const owner = await new AutobeeCatalogManager(ownerStore, { bootstrap: keyHex }).ready()
   assert(owner.writable, 'owner reopened by key must be writable')
   await owner.rename('My Picks')
   await owner.upsertApp({ id: 'app1', name: 'App One', driveKey: 'd'.repeat(64) })
@@ -160,7 +169,7 @@ async function createPatternScenario () {
   console.log('  · created → name:', cat.name, '| apps:', cat.apps.map((a) => a.id).join(','), '| writable:', cat.writable)
   assert(cat.name === 'My Picks' && cat.apps.length === 1 && cat.writable,
     'created catalog must be writable with the rename + app applied')
-  await owner.close()
+  await owner.close(); await ownerStore.close()
 }
 
 main()

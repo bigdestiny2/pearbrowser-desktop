@@ -59,7 +59,19 @@ class BrowserStateSync {
       }
     }
     if (this.encryptionKey) handlers.encryptionKey = this.encryptionKey
-    this.base = new Autobase(this.store, this.bootstrap, handlers)
+    // CRITICAL: give the Autobase its OWN namespaced substore rather than the raw
+    // store. base.close() runs store.close(); on the shared ROOT Corestore that
+    // tears down Hyperdrive/UserData/Names/replication for the WHOLE app (a single
+    // consumer's close kills everything — verified by the shared-store regression
+    // test). A namespace session's close() frees only its own cores, leaving the
+    // root alive. The namespace MUST be a FIXED string (there is exactly ONE sync
+    // base per store), NOT keyed by `_ns`: the CMD_SYNC_CREATE mint runs with
+    // bootstrap=null and reopen-by-key runs with `_ns`=key, so an `_ns`-keyed
+    // substore would split mint and reopen apart. A fixed substore keeps the mint's
+    // writer core where reopen-by-key looks (mirrors N5's ensureNameRegistry).
+    const baseStore = typeof this.store.namespace === 'function'
+      ? this.store.namespace('bss-browser-state') : this.store
+    this.base = new Autobase(baseStore, this.bootstrap, handlers)
     await this.base.ready()
     return this
   }

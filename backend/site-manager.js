@@ -85,6 +85,35 @@ class SiteManager {
   }
 
   /**
+   * Set the site's icon from a base64 image data URL — writes /icon.<ext> into
+   * the drive (peers replicate the new block; an already-seeded site needs no
+   * re-publish). Replaces any prior icon.* so resolution is unambiguous. The
+   * browser fetches it via CMD_GET_APP_ICON's well-known-path resolver.
+   */
+  async setIcon (siteId, dataUrl) {
+    const site = this.sites.get(siteId)
+    if (!site) throw new Error('Site not found: ' + siteId)
+    const m = /^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=]+)$/i.exec(String(dataUrl || '').trim())
+    if (!m) throw new Error('Icon must be a base64 image data URL')
+    const mime = m[1].toLowerCase()
+    const ext = mime === 'image/svg+xml' ? 'svg'
+      : mime === 'image/png' ? 'png'
+        : mime === 'image/jpeg' ? 'jpg'
+          : mime === 'image/webp' ? 'webp'
+            : mime === 'image/x-icon' ? 'ico' : null
+    if (!ext) throw new Error('Unsupported icon type: ' + mime + ' (use SVG, PNG, JPEG, or WebP)')
+    const buf = Buffer.from(m[2], 'base64')
+    if (!buf.length) throw new Error('Empty icon')
+    if (buf.length > 512 * 1024) throw new Error('Icon too large (max 512KB)')
+    for (const e of ['svg', 'png', 'jpg', 'jpeg', 'webp', 'ico']) {
+      if (e !== ext) await site.drive.del('/icon.' + e).catch(() => {})
+    }
+    const path = '/icon.' + ext
+    await site.drive.put(path, buf)
+    return { ok: true, path, keyHex: site.keyHex || (site.drive.key && site.drive.key.toString('hex')) }
+  }
+
+  /**
    * Publish a site (start swarming so peers can access it)
    */
   async publishSite (siteId) {

@@ -1296,6 +1296,24 @@ function safeIconSrc (src) {
   return null
 }
 
+// Render an app/site icon: use any catalogue-inlined iconData, else lazily fetch
+// it from the drive (CMD_GET_APP_ICON tries the declared iconRef + well-known
+// paths like /icon.svg, /icon.png, /favicon.*). Falls back to a letter glyph.
+function AppIcon ({ rpc, C, driveKey, iconRef, iconData, name }) {
+  const [src, setSrc] = useState(safeIconSrc(iconData))
+  useEffect(() => {
+    if (src || !driveKey || !/^[0-9a-f]{64}$/i.test(driveKey) || !(C && C.CMD_GET_APP_ICON)) return
+    let alive = true
+    rpc.request(C.CMD_GET_APP_ICON, { driveKey, iconRef })
+      .then((res) => { const s = safeIconSrc(res && res.iconData); if (alive && s) setSrc(s) })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [driveKey, iconRef])
+  return src
+    ? html`<img src=${src} alt="" class="app-icon" />`
+    : html`<div class="app-icon app-icon-fallback">${(name || '?').charAt(0)}</div>`
+}
+
 // Normalize an app's category metadata to a string array. Catalogs in the
 // wild use either `categories: [...]` or a single `category: "..."`.
 function appCategories (app) {
@@ -1999,7 +2017,7 @@ function Apps ({ rpc, C, onLaunch }) {
     const canSave = !!(appDraft && String(appDraft.name || '').trim())
     return html`
       <div class=${'app-card' + (editing ? ' editing' : '')} key=${savedId}>
-        <div class="app-icon app-icon-fallback">${(app.name || '?').charAt(0)}</div>
+        <${AppIcon} rpc=${rpc} C=${C} driveKey=${app.driveKey} iconRef=${app.icon} iconData=${app.iconData} name=${app.name} />
         <div class="app-info">
           ${editing
             ? html`
@@ -2174,9 +2192,7 @@ function Apps ({ rpc, C, onLaunch }) {
           : html`<div class="app-grid">
             ${filteredApps.map((app) => html`
             <div class="app-card" key=${app.id}>
-              ${safeIconSrc(app.iconData)
-                ? html`<img src=${safeIconSrc(app.iconData)} alt="" class="app-icon" />`
-                : html`<div class="app-icon app-icon-fallback">${(app.name || '?').charAt(0)}</div>`}
+              <${AppIcon} rpc=${rpc} C=${C} driveKey=${app.driveKey} iconRef=${app.icon} iconData=${app.iconData} name=${app.name} />
               <div class="app-info" onClick=${() => setDetailApp(app)} style=${{ cursor: 'pointer' }} title="View details">
                 <div class="app-name">
                   ${app.name || app.id || 'Untitled app'}
@@ -2290,7 +2306,7 @@ function Apps ({ rpc, C, onLaunch }) {
         : html`<div class="app-grid">
             ${installed.map((app) => html`
               <div class="app-card" key=${app.id}>
-                <div class="app-icon app-icon-fallback">${(app.name || '?').charAt(0)}</div>
+                <${AppIcon} rpc=${rpc} C=${C} driveKey=${app.driveKey} iconRef=${app.icon} iconData=${app.iconData} name=${app.name} />
                 <div class="app-info">
                   <div class="app-name">${app.name}</div>
                   <div class="app-meta">v${app.version || '?'}${updates[app.id] ? ` · update available → v${updates[app.id]}` : ''}</div>
@@ -3865,12 +3881,36 @@ function SiteEditor ({ site, rpc, C, onBack, onBrowse }) {
     }
   }
 
+  // Upload a site icon — read as a data URL and write /icon.<ext> into the drive
+  // (peers replicate it; already-published sites need no re-publish). Shows in
+  // the browser's app/site listings via CMD_GET_APP_ICON.
+  const [iconOk, setIconOk] = useState(false)
+  const uploadIcon = (e) => {
+    const file = e.target.files && e.target.files[0]
+    if (!file) return
+    if (file.size > 512 * 1024) { setErr('icon: too large (max 512KB)'); e.target.value = ''; return }
+    const reader = new FileReader()
+    reader.onload = async () => {
+      setErr(''); setIconOk(false); setBusy('icon')
+      try {
+        await rpc.request(C.CMD_SET_SITE_ICON, { siteId: site.siteId, dataUrl: reader.result })
+        setIconOk(true); setTimeout(() => setIconOk(false), 2500)
+      } catch (err) { setErr(`icon: ${err.message}`) }
+      finally { setBusy(null); if (e.target) e.target.value = '' }
+    }
+    reader.readAsDataURL(file)
+  }
+
   return html`
     <div class="site-editor">
       <div class="site-editor-bar">
         <button class="btn subtle" onClick=${onBack}>← Sites</button>
         <input class="site-name-input" type="text" placeholder="Site name" value=${name} onInput=${(e) => setName(e.target.value)} />
         <div class="spacer"></div>
+        <label class="btn subtle" title="Upload a site icon (SVG/PNG/JPEG/WebP, ≤512KB) — shows in the browser's site list">
+          ${busy === 'icon' ? 'Uploading…' : (iconOk ? '✓ Icon set' : '🖼 Icon')}
+          <input type="file" accept="image/svg+xml,image/png,image/jpeg,image/webp" style=${{ display: 'none' }} onChange=${uploadIcon} />
+        </label>
         <button class="btn" onClick=${save} disabled=${busy === 'save'} title="Write block changes to the drive — peers see updates live">${busy === 'save' ? 'Saving…' : 'Save'}</button>
         ${meta.published
           ? html`<button class="btn subtle" onClick=${unpublish} disabled=${busy === 'unpublish'}>${busy === 'unpublish' ? 'Unpublishing…' : 'Unpublish'}</button>`
@@ -4090,7 +4130,7 @@ function Sites ({ rpc, C, onBrowse }) {
         : html`<div class="app-grid">
             ${discovered.map((s) => html`
               <div class="app-card" key=${s.driveKey}>
-                <div class="app-icon app-icon-fallback">${(s.name || '?').charAt(0)}</div>
+                <${AppIcon} rpc=${rpc} C=${C} driveKey=${s.driveKey} iconRef=${s.icon} iconData=${s.iconData} name=${s.name} />
                 <div class="app-info">
                   <div class="app-name">${s.name}</div>
                   <div class="app-meta">${s.description || ('hyper://' + s.driveKey.slice(0, 10) + '…')}</div>
@@ -4123,7 +4163,7 @@ function Sites ({ rpc, C, onBrowse }) {
         : html`<div class="app-grid">
             ${sites.map((site) => html`
               <div class="app-card" key=${site.siteId}>
-                <div class="app-icon app-icon-fallback">${(site.name || '?').charAt(0)}</div>
+                <${AppIcon} rpc=${rpc} C=${C} driveKey=${site.keyHex} name=${site.name} />
                 <div class="app-info">
                   <div class="app-name">${site.name}</div>
                   <div class="app-meta">${site.published ? 'published · ' + (site.keyHex?.slice(0, 8) ?? '') + '…' : 'draft'}</div>

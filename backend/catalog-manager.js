@@ -323,9 +323,12 @@ class CatalogManager {
 
   async createAutobeeCatalog (name) {
     const Manager = this._autobeeManagerClass()
-    // Mint the autobase key under a throwaway namespace, then reopen by key so
-    // create / load / join all share the deterministic key-derived view
-    // namespace. Reopen-by-key stays writable (verified by the smoke).
+    // Mint the autobase key under a UNIQUE throwaway namespace so each created
+    // catalog gets its own distinct writer core (and key) on the shared store,
+    // then reopen by key. The manager namespaces its Autobase substore by this
+    // `_ns`, so mint.close() frees only the mint substore — never the shared root
+    // Corestore. Reopen-by-key recovers the minted writer core (cores are openable
+    // by key across substores), so it stays writable — verified by the smoke.
     const mintNs = 'autobee-mint-' + Date.now() + '-' + Math.random().toString(36).slice(2)
     const mint = new Manager(this.store, { bootstrap: null, namespace: mintNs })
     await mint.ready()

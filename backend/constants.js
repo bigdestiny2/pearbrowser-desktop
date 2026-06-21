@@ -47,6 +47,10 @@ const CMD_RESET_APP = 29
 const CMD_CLEAR_CACHE = 30
 const CMD_RUN_APP_IN_TAB = 201 // run a pear-request app headless, streamed into a browser tab
 const CMD_GET_IDENTITY = 31
+// App/site icons — resolve a published drive's icon (iconRef or a well-known
+// path) to a data URI for display; upload/set the icon for your own site.
+const CMD_GET_APP_ICON = 32   // { driveKey, iconRef? } -> { iconData|null }
+const CMD_SET_SITE_ICON = 33  // { siteId, dataUrl } -> { ok, path }
 
 // Relay configuration (Phase 0 ticket 2 — remove hardcoded relay)
 const CMD_GET_RELAYS = 40
@@ -248,7 +252,7 @@ module.exports = {
   CMD_SEARCH, CMD_SEARCH_INDEX,
   CMD_CREATE_SITE, CMD_UPDATE_SITE, CMD_PUBLISH_SITE,
   CMD_UNPUBLISH_SITE, CMD_LIST_SITES, CMD_DELETE_SITE, CMD_LOAD_TEMPLATE, CMD_GET_SITE_BLOCKS, CMD_LAUNCH_PEAR_LINK, CMD_RESET_APP,
-  CMD_CLEAR_CACHE, CMD_RUN_APP_IN_TAB, CMD_GET_IDENTITY,
+  CMD_CLEAR_CACHE, CMD_RUN_APP_IN_TAB, CMD_GET_IDENTITY, CMD_GET_APP_ICON, CMD_SET_SITE_ICON,
   CMD_GET_RELAYS, CMD_SET_RELAYS, CMD_SET_RELAY_ENABLED,
   CMD_USERDATA_LIST_BOOKMARKS, CMD_USERDATA_ADD_BOOKMARK, CMD_USERDATA_REMOVE_BOOKMARK,
   CMD_USERDATA_LIST_HISTORY, CMD_USERDATA_ADD_HISTORY, CMD_USERDATA_CLEAR_HISTORY,

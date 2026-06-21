@@ -57,7 +57,15 @@ class PearBridge {
     const localWriter = this.store.get({ name: `pear-app-${appId}-writer` })
     await localWriter.ready()
 
-    const base = new Autobase(this.store, null, {
+    // CRITICAL: give each sync group its OWN namespaced substore (keyed by the
+    // already-validated appId) rather than the raw store. base.close() runs
+    // store.close(); on the shared ROOT Corestore that tears down Hyperdrive/
+    // UserData/Names/replication for the WHOLE app. A namespace session's close()
+    // frees only that group's cores. A per-appId substore also stops two sync
+    // groups from colliding on the same Autobase local writer core on one store.
+    const baseStore = typeof this.store.namespace === 'function'
+      ? this.store.namespace(`pear-bridge-${appId}`) : this.store
+    const base = new Autobase(baseStore, null, {
       apply: applyFn || this._defaultApply,
       open: (store) => new Hyperbee(store.get({ name: `pear-app-${appId}-view` }), {
         keyEncoding: 'utf-8',
@@ -92,7 +100,11 @@ class PearBridge {
     }
     const bootstrapKey = Buffer.from(inviteKeyHex, 'hex')
 
-    const base = new Autobase(this.store, bootstrapKey, {
+    // Per-appId substore — see createSyncGroup: keeps each group's cores out of
+    // the raw root store so close() can't tear the whole app's storage down.
+    const baseStore = typeof this.store.namespace === 'function'
+      ? this.store.namespace(`pear-bridge-${appId}`) : this.store
+    const base = new Autobase(baseStore, bootstrapKey, {
       apply: applyFn || this._defaultApply,
       open: (store) => new Hyperbee(store.get({ name: `pear-app-${appId}-view` }), {
         keyEncoding: 'utf-8',
@@ -490,6 +502,12 @@ class PearBridge {
     for (const [, group] of this._syncGroups) {
       try { await this.swarm.leave(group.topic) } catch (err) {
         console.error('Failed to leave topic:', err.message)
+      }
+      // Close each group's Autobase to free its cores. Safe now that every base
+      // owns a namespaced substore: base.close() closes only that session, never
+      // the shared root Corestore (Hyperdrive/UserData/Names/replication).
+      try { if (group.base) await group.base.close() } catch (err) {
+        console.error('Failed to close sync group base:', err.message)
       }
     }
     this._syncGroups.clear()

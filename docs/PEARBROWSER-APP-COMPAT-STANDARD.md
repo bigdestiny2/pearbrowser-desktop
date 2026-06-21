@@ -386,9 +386,16 @@ Hardcoding loopback port/origin/dkey; capturing the token once / persisting it; 
 - **PB-DISCOVERYCATALOGUE-21 (SHOULD, both).** Publish one canonical record satisfying the **strictest** reader (sheets `APPS_SCHEMA` with explicit `type`), even for a single channel — all sources merge into one DTO.
 - **PB-DISCOVERYCATALOGUE-22 (MAY, desktop — advisory only).** `categories:['featured']` is **not** a curated/trusted signal and is **not read for placement** — featured surfacing is a hardcoded `FEATURED_APPS` array in the UI, independent of `categories` (which only build filter chips). Treat it as a soft, unenforced label.
 
-### Icon resolution (corrected)
+### Icon resolution (IMPLEMENTED)
 
-- **PB-DISCOVERYCATALOGUE-9 / PB-MANIFEST-13 (SHOULD, both — desktop sheets caveat).** **Correction:** a drive-hosted icon referenced via `iconRef` on the desktop **sheets** path does **not** currently render — the desktop UI renders only `app.iconData`, which is populated **only** on the legacy Hyperdrive `catalog.json` path (which base64-inlines a drive file). The sheets path maps `iconRef`→`app.icon` but never fetches/inlines it. On **mobile**, the relay fetches the drive `icon` and inlines it (works). Do not inline a real PNG as a `data:` URI in `iconRef` (300-char cap). Until the sheets-path icon fetch is wired (**PROPOSED**), expect a letter-glyph fallback on desktop for sheets-row apps.
+**How to give your app/site an icon in the browser: put an icon file in your drive.** When a card renders, the desktop fetches the icon from your live drive over the network and inlines it; if none is found it shows a letter-glyph fallback. This works for **every** catalogue source (sheets room, index room, dev seed, and the legacy `catalog.json` path) — the previous "desktop sheets icon doesn't render" gap is now closed (`backend/index.js` `resolveAppIcon` + `CMD_GET_APP_ICON`, rendered by the `AppIcon` component).
+
+- **PB-ICON-1 (SHOULD, both).** Ship an icon **file in your drive root**. The desktop resolver tries, in order: your declared `iconRef` (if any), then the well-known paths `/icon.svg`, `/icon.png`, `/icon.jpg`, `/icon.jpeg`, `/icon.webp`, `/favicon.svg`, `/favicon.png`, `/favicon.ico`, `/logo.svg`, `/logo.png`. The first one that exists wins. **You do not need a catalogue field** — just include the file. Declaring `iconRef` (a drive path, ≤300 chars) is an optional hint that's tried first.
+- **PB-ICON-2 (SHOULD, both).** Recommended: a **square SVG** (crisp at every size, tiny) or a **128–256px PNG**. Hard cap **512 KB**; larger files are ignored (letter-glyph fallback). Allowed MIME: SVG, PNG, JPEG, WebP, ICO.
+- **PB-ICON-3 (MUST, both).** **Keep your drive online/seeded** — the icon is fetched from your live drive (or a HiveRelay that has pinned it). An offline, never-pinned drive shows the letter fallback. (See PB-DISCOVERYCATALOGUE-12.) Resolved icons are cached ~10 min per drive.
+- **PB-ICON-4 (MAY, both).** Do **not** inline a real raster as a `data:` URI in `iconRef` (300-char cap). Inline SVG favicons in your page `<head>` are **not** used for the listing — ship a real `/icon.svg` (or `/favicon.png`) file.
+- **In-app upload (your own builder sites).** In PearBrowser's site editor (P2P Sites → your site → **🖼 Icon**), upload an image; it is written to `/icon.<ext>` in your site's drive (no re-publish needed for an already-seeded site).
+- **Mobile** unchanged: the relay fetches the drive `icon`/`manifest.json:icon` and inlines it.
 
 ### Canonical catalogue registration record (Tier A)
 

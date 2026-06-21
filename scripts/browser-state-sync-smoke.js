@@ -95,14 +95,20 @@ async function main () {
   assert(leaked.length === 0, 'a device without the encryption key must not read bookmarks')
 
   // --- Restart determinism: reopen A by key + key ------------------------
+  // Close the bases AND the underlying stores: BrowserStateSync now namespaces
+  // its Autobase substore, so sync.close() frees only that substore and leaves
+  // the root Corestore open — the on-disk reopen needs the store fully closed
+  // first (two Corestores on one dir would otherwise overlap).
   unwireB(); unwireC()
   await A.close(); await B.close(); await C.close()
-  const A2 = await new BrowserStateSync(new Corestore(tmps[0]), { bootstrap: A.key, encryptionKey: ENC, namespace: 'devA' }).ready()
+  await storeA.close(); await storeB.close(); await storeC.close()
+  const storeA2 = new Corestore(tmps[0])
+  const A2 = await new BrowserStateSync(storeA2, { bootstrap: A.key, encryptionKey: ENC, namespace: 'devA' }).ready()
   const reopened = urls(await A2.state())
   console.log('  · A reopened from disk:', reopened.join(', '), '| writable:', A2.writable)
   assert(JSON.stringify(reopened) === JSON.stringify(finalA), 'reopened view must match (op log rebuilds same view)')
   assert(A2.writable, 'reopened owner must stay writable')
-  await A2.close()
+  await A2.close(); await storeA2.close()
 
   console.log('\n✅ PASS — encrypted sync converges, key-gated, restart deterministic')
 }

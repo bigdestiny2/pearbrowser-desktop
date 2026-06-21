@@ -29,7 +29,20 @@ class AutobeeCatalogManager {
 
   async ready () {
     const ns = this._ns
-    this.base = new Autobase(this.store, this.bootstrap, {
+    // CRITICAL: give the Autobase its OWN namespaced substore rather than the raw
+    // store. base.close() runs store.close(); on the shared ROOT Corestore that
+    // tears down Hyperdrive/UserData/Names/replication for the WHOLE app (a single
+    // consumer's close kills everything — verified by the shared-store regression
+    // test). A namespace session's close() frees only its own cores. Unlike the
+    // single-instance sync/name-registry bases, a store can hold MANY catalogs at
+    // once (one per key — see catalog-manager `_ensureAutobeeManager`), so the
+    // substore is keyed by `_ns` (the bootstrap key on load/join/reopen) to keep
+    // each catalog's cores isolated. The owner-create mint uses a unique throwaway
+    // `_ns`; reopen-by-key recovers the minted writer core (openable by key across
+    // substores), so create stays writable — verified by the catalog smoke.
+    const baseStore = typeof this.store.namespace === 'function'
+      ? this.store.namespace('acat-' + ns) : this.store
+    this.base = new Autobase(baseStore, this.bootstrap, {
       valueEncoding: 'json',
       open: (store) => new Hyperbee(store.get({ name: `autobee-catalog-${ns}-view` }), {
         extension: false, keyEncoding: 'utf-8', valueEncoding: 'json'
