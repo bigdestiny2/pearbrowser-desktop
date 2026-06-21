@@ -38,10 +38,14 @@ function createEncryptedAutobaseManager (store, opts = {}) {
   // shared ROOT Corestore that would tear down Hyperdrive/UserData/Names/
   // replication for the WHOLE app (a single consumer's close kills everything).
   // A namespace session's close() frees only its own cores, leaving the root
-  // alive. A distinct viewName per consumer also prevents cross-consumer core
-  // collisions on one shared store. The namespace MUST wrap the store passed to
-  // new Autobase — opts.namespace alone (used only for the view name) does not.
-  const baseStore = typeof store.namespace === 'function' ? store.namespace('eab-' + viewName) : store
+  // alive. The substore id must be UNIQUE per base on a node that opens several
+  // (e.g. your own name registry + every contact's), so callers that open
+  // multiple bases with the same viewName pass an explicit storeNamespace (e.g.
+  // keyed by the bootstrap). Default keys by viewName for single-base consumers.
+  // The namespace MUST wrap the store passed to new Autobase — opts.namespace
+  // (used only for the view name) does not.
+  const subNs = opts.storeNamespace || ('eab-' + viewName)
+  const baseStore = typeof store.namespace === 'function' ? store.namespace(subNs) : store
   let base = null
 
   const handlers = {

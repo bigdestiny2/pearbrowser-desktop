@@ -256,6 +256,9 @@ p { color: #8b949e; margin-bottom: 12px; }
 /* Tier-2 multi-writer name registry (owner-signed first-claim; above curated). */
 .name-prov-chip.name-prov-registry { border-color: rgba(163,113,247,0.5); }
 .name-prov-chip.name-prov-registry .name-prov-tier { color: #a371f7; }
+/* Tier-2b a trusted contact's name registry (cross-user federation). */
+.name-prov-chip.name-prov-contact { border-color: rgba(219,109,40,0.5); }
+.name-prov-chip.name-prov-contact .name-prov-tier { color: #db6d28; }
 /* Tier-3 curated bootstrap floor (lowest authority; overridden by anything above). */
 .name-prov-chip.name-prov-curated .name-prov-tier { color: #58a6ff; }
 

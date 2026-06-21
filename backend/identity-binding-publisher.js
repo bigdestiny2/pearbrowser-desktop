@@ -33,7 +33,7 @@ const DHT_BINDING_NAMESPACE = 'lighthouse-binding'
 const DOC_NAMESPACE = 'lighthouse-doc-v2'
 
 class IdentityBindingPublisher {
-  constructor ({ ib, identity, personalIndex, contacts, dht, log } = {}) {
+  constructor ({ ib, identity, personalIndex, contacts, dht, log, getNameRegKey } = {}) {
     if (!ib) throw new Error('IdentityBindingPublisher requires ib (identity-binding.cjs)')
     if (!identity) throw new Error('IdentityBindingPublisher requires identity')
     if (!personalIndex) throw new Error('IdentityBindingPublisher requires personalIndex')
@@ -43,6 +43,9 @@ class IdentityBindingPublisher {
     this.contacts = contacts || null
     this.dht = dht || null
     this.log = typeof log === 'function' ? log : () => {}
+    // N5 federation: an async getter for the user's name-registry bootstrap key,
+    // advertised alongside the search binding so contacts resolve it for free.
+    this.getNameRegKey = typeof getNameRegKey === 'function' ? getNameRegKey : null
     this._searchKp = null // cached bound search keypair (Buffers), loaded in ready()
   }
 
@@ -166,11 +169,15 @@ class IdentityBindingPublisher {
       : null
     if (digest) await this.personalIndex.putMeta('digest', digest)
 
+    // N5 federation: the user's name-registry bootstrap key (so a contact who
+    // resolves this binding can replicate + resolve the user's name claims).
+    const nameRegKey = this.getNameRegKey ? await this.getNameRegKey().catch(() => null) : null
+
     let dhtPubkey = null
     if (this.dht) {
       const dhtKp = this.identity.getAppKeypair(DHT_BINDING_NAMESPACE)
       dhtPubkey = b4a.toString(dhtKp.publicKey, 'hex')
-      const value = b4a.from(JSON.stringify({ ...binding, dhtPubkey, indexKey, anchor, digest }), 'utf-8')
+      const value = b4a.from(JSON.stringify({ ...binding, dhtPubkey, indexKey, anchor, digest, nameRegKey }), 'utf-8')
       // REAL hyperdht signature: mutablePut(keyPair, value, { seq })
       await this.dht.mutablePut(dhtKp, value, { seq: version })
     }
@@ -215,6 +222,7 @@ class IdentityBindingPublisher {
       indexKey: typeof rec.indexKey === 'string' ? rec.indexKey : null,
       anchor: rec.anchor && typeof rec.anchor === 'object' ? rec.anchor : null,
       digest: rec.digest && typeof rec.digest === 'object' ? rec.digest : null,
+      nameRegKey: (typeof rec.nameRegKey === 'string' && /^[0-9a-f]{64}$/i.test(rec.nameRegKey)) ? rec.nameRegKey.toLowerCase() : null,
     }
   }
 }

@@ -40,7 +40,9 @@ class NameRegistry {
         else { skelRec.names = remaining; await view.put('skel!' + sk, skelRec) }
       }
     }
-    this.mgr = createEncryptedAutobaseManager(store, { ...opts, applyOp, viewName: 'name-registry' })
+    // storeNamespace must be UNIQUE per registry on a node that opens several
+    // (your own + each contact's, for federation) — default isolates the own one.
+    this.mgr = createEncryptedAutobaseManager(store, { ...opts, applyOp, viewName: 'name-registry', storeNamespace: opts.storeNamespace || 'eab-name-registry-self' })
   }
 
   async ready () { await this.mgr.ready(); return this }

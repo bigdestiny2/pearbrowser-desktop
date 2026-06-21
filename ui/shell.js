@@ -503,7 +503,7 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
           }
           // A browsable hyper:// target — navigate it in-tab below, with a chip.
           target = link
-          prov = { provenance: resolved.provenance, label: resolved.label || nameQuery, name: nameQuery }
+          prov = { provenance: resolved.provenance, label: resolved.label || nameQuery, name: nameQuery, source: resolved.source || null }
         }
       } catch { /* resolver unavailable / disabled — fall through to URL handling */ }
     }
@@ -889,7 +889,7 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
         <div class=${`name-prov-chip name-prov-${active.nameProv.provenance}`}
              title=${`“${active.nameProv.name}” resolved to ${active.displayUrl}`}>
           <span class="name-prov-name">${active.nameProv.label}</span>
-          <span class="name-prov-tier">${active.nameProv.provenance === 'petname' ? 'your saved name' : active.nameProv.provenance === 'registry' ? 'name registry' : 'curated'}</span>
+          <span class="name-prov-tier">${active.nameProv.provenance === 'petname' ? 'your saved name' : active.nameProv.provenance === 'registry' ? 'name registry' : active.nameProv.provenance === 'contact' ? `from ${active.nameProv.source || 'a contact'}` : 'curated'}</span>
         </div>
       `}
       <div class="browse-stage">

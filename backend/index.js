@@ -93,6 +93,7 @@ let nostrBindingStore = null // NOSTR2 Phase 1 — local cross-curve binding sta
 let queryPlanner = null // Lighthouse Phase 2 — federated query orchestration (local-first + peer fan-out)
 let names = null // naming Phase N1 — local petname store (names.cjs); null until ready
 let nameRegistry = null // naming Phase N5 — multi-writer Autobase name registry; null until first use
+let federatedNameResolver = null // naming Phase N5 — resolve contacts' names across their registries
 let swarmBridge = null
 let swarmGrants = null
 /** Map<requestId, { resolve, reject, timer }> for login() ceremonies. */
@@ -853,10 +854,11 @@ rpc.handle(C.CMD_SYNC_CREATE, async () => {
   }
   const { BrowserStateSync } = require('./browser-state-sync.cjs')
   const encKey = require('crypto').randomBytes(32).toString('hex')
-  // Mint the autobase key under a throwaway namespace, then reopen by key so
-  // create/reopen share the deterministic key-derived namespace (and stay
-  // writable — verified by the smoke).
-  const mint = await new BrowserStateSync(store, { bootstrap: null, encryptionKey: encKey, namespace: 'bss-mint-' + Date.now() }).ready()
+  // Mint the autobase key, then reopen by key (mirrors ensureNameRegistry). The
+  // store is namespaced inside BrowserStateSync by a FIXED substore, so mint and
+  // reopen-by-key share that substore (reopen stays writable) and mint.close()
+  // frees only the sync substore — never the shared root Corestore.
+  const mint = await new BrowserStateSync(store, { bootstrap: null, encryptionKey: encKey }).ready()
   const key = mint.key
   await mint.close()
   await requireUserData().setSettings({ syncKey: key, syncEncKey: encKey })
@@ -1278,26 +1280,39 @@ function nameRegSigner () {
 async function ensureNameRegistry ({ create = false } = {}) {
   const s = await requireUserData().getSettings()
   const key = (typeof s.nameRegKey === 'string' && /^[0-9a-f]{64}$/i.test(s.nameRegKey)) ? s.nameRegKey : null
-  const enc = (typeof s.nameRegEncKey === 'string' && /^[0-9a-f]{64}$/i.test(s.nameRegEncKey)) ? s.nameRegEncKey : null
-  if (key && enc) {
+  if (key) {
     if (nameRegistry && nameRegistry.key === key) return nameRegistry
     if (nameRegistry) { try { await nameRegistry.close() } catch {} nameRegistry = null }
-    nameRegistry = await new NameRegistry(store, { bootstrap: key, encryptionKey: enc }).ready()
+    nameRegistry = await new NameRegistry(store, { bootstrap: key, encryptionKey: null }).ready()
     if (nameRegistry.discoveryKey && swarm) swarm.join(nameRegistry.discoveryKey, { server: true, client: true })
     return nameRegistry
   }
   if (!create) return null
-  const encKey = require('crypto').randomBytes(32).toString('hex')
-  // Mint the autobase key, then reopen by key (mirrors ensureBrowserSync). The
-  // store is namespaced inside the helper, so mint.close() frees only the
-  // registry's substore — never the shared root Corestore.
-  const mint = await new NameRegistry(store, { bootstrap: null, encryptionKey: encKey }).ready()
-  const mintedKey = mint.key
-  await mint.close()
-  await requireUserData().setSettings({ nameRegKey: mintedKey, nameRegEncKey: encKey })
-  nameRegistry = await new NameRegistry(store, { bootstrap: mintedKey, encryptionKey: encKey }).ready()
+  // Create the user's registry ONCE and KEEP it (no close-then-reopen on the
+  // shared store). UNENCRYPTED so trusted contacts can replicate + resolve the
+  // user's PUBLIC name claims — integrity is the per-claim owner signature, not
+  // secrecy. Anyone the user shares the key with (their contacts) can resolve it.
+  const reg = await new NameRegistry(store, { bootstrap: null, encryptionKey: null }).ready()
+  await requireUserData().setSettings({ nameRegKey: reg.key })
+  nameRegistry = reg
   if (nameRegistry.discoveryKey && swarm) swarm.join(nameRegistry.discoveryKey, { server: true, client: true })
+  // Advertise the registry key on our self-certifying binding so contacts can
+  // discover + replicate it (best-effort; rides the lighthouse-binding rail).
+  if (identityBindingPublisher) identityBindingPublisher.publish().catch(() => {})
   return nameRegistry
+}
+
+// Read-only, cached, replicating views of CONTACTS' registries (federation). Each
+// gets its OWN substore (keyed by bootstrap) so they never collide with the user's
+// own registry or each other on the shared store.
+const _contactRegistries = new Map() // nameRegKey hex -> NameRegistry
+async function openContactRegistry (keyHex) {
+  if (typeof keyHex !== 'string' || !/^[0-9a-f]{64}$/i.test(keyHex)) return null
+  if (_contactRegistries.has(keyHex)) return _contactRegistries.get(keyHex)
+  const reg = await new NameRegistry(store, { bootstrap: keyHex, encryptionKey: null, storeNamespace: 'eab-name-registry-c-' + keyHex }).ready()
+  if (reg.discoveryKey && swarm) swarm.join(reg.discoveryKey, { server: false, client: true })
+  _contactRegistries.set(keyHex, reg)
+  return reg
 }
 
 // Resolve a typed word against the local petname store (Tier 0, wins) + the
@@ -1308,15 +1323,22 @@ rpc.handle(C.CMD_NAME_RESOLVE, async ({ name } = {}) => {
   await whenReady()
   if (!(await isNamingEnabled())) return { resolved: null, enabled: false }
   const petnames = names ? await names.petnameMap() : {}
-  // Tier 2 — the multi-writer registry (reopened if the user has one; never
-  // minted by a read). Best-effort: a registry failure must not break petname/
-  // curated resolution.
+  // Tier 2a — the user's OWN registry (reopened if it exists; never minted by a
+  // read). Best-effort: a registry failure must not break petname/curated.
   let registry = {}
   try { const reg = await ensureNameRegistry({ create: false }); if (reg) registry = await reg.activeMap() } catch {}
-  // `enabled` reflects the FULL feature: false if the petname store failed to
-  // open even though the flag is on (curated aliases still resolve store-free,
-  // so `resolved` may be non-null while `enabled` is false).
-  return { resolved: resolveName(name, { petnames, registry, aliases: true }), enabled: !!names }
+  // Resolve highest tiers first WITHOUT the curated floor: petname (0) + own
+  // registry (2a). If those miss, try federation (2b) before falling to curated.
+  let resolved = resolveName(name, { petnames, registry, aliases: false })
+  if (!resolved && federatedNameResolver) {
+    // Tier 2b — trusted contacts' registries (cross-user federation).
+    let fed = null
+    try { fed = await federatedNameResolver.resolve(name) } catch {}
+    if (fed) resolved = { name: fed.name, key: fed.key, link: null, label: fed.name, provenance: 'contact', source: fed.source, candidates: fed.candidates }
+  }
+  // Tier 3 — curated bootstrap floor (lowest authority).
+  if (!resolved) resolved = resolveName(name, { aliases: true })
+  return { resolved, enabled: !!names }
 })
 
 rpc.handle(C.CMD_NAME_PETNAME_LIST, async ({ limit } = {}) => {
@@ -1886,12 +1908,32 @@ async function boot () {
       identityBindingPublisher = await new IdentityBindingPublisher({
         ib: require('./identity-binding.cjs'),
         identity, personalIndex, contacts, dht: swarm && swarm.dht,
+        // advertise our name-registry key (if created) so contacts can resolve our names
+        getNameRegKey: async () => { try { return (await requireUserData().getSettings()).nameRegKey || null } catch { return null } },
       }).ready()
       identityBindingPublisher.publish().catch((e) => console.error('[binding] publish failed:', e && e.message))
       console.log('IdentityBindingPublisher ready')
     } catch (err) {
       console.error('IdentityBindingPublisher init failed:', err && err.message)
       identityBindingPublisher = null
+    }
+  }
+
+  // N5 federation — resolve a typed name across TRUSTED contacts' registries.
+  // Needs contacts (the trust frontier) + the binding publisher (to find each
+  // contact's advertised registry key) + openContactRegistry (to replicate it).
+  if (contacts && identityBindingPublisher) {
+    try {
+      const { FederatedNameResolver } = require('./federated-name-resolver.cjs')
+      federatedNameResolver = new FederatedNameResolver({
+        listContacts: () => requireContacts().list({ limit: 200 }),
+        resolveBinding: (args) => identityBindingPublisher.resolve(args),
+        openRegistry: (keyHex) => openContactRegistry(keyHex),
+      })
+      console.log('FederatedNameResolver ready')
+    } catch (err) {
+      console.error('FederatedNameResolver init failed:', err && err.message)
+      federatedNameResolver = null
     }
   }
 
@@ -2133,6 +2175,8 @@ async function shutdown () {
   if (personalIndex) { try { await personalIndex.close() } catch {} personalIndex = null }
   if (browserSync) { try { await browserSync.close() } catch {} browserSync = null }
   if (nameRegistry) { try { await nameRegistry.close() } catch {} nameRegistry = null }
+  for (const reg of _contactRegistries.values()) { try { await reg.close() } catch {} }
+  _contactRegistries.clear()
   for (const [keyHex, entry] of browseDrives) {
     unregisterHiveRelayDrive(keyHex, entry.drive)
     try { await entry.drive.close() } catch {}
