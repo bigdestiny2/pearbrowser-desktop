@@ -118,7 +118,7 @@ const TAB_META = {
 // and `efd7b0c6c38d…` keys have been unseeded; this is the live one.
 // To update: open the same site in the desktop's Sites editor and
 // republish — block-source lives at /.blocks.json inside the drive.
-const DEFAULT_URL = 'hyper://2d6c2be92f07e10ed5a4b07b5c1286a56f0c1220c79ad3c3293b069f8c946763/'
+const DEFAULT_URL = 'hyper://1868916a7a282ff0f211b11b536e9642828c32d3a817a254e1ef7e602709e25d/'
 
 // Default catalog drive — auto-loads on first Apps-tab visit when the
 // user has not yet pinned a catalog of their own. Curated entry point
@@ -3198,6 +3198,62 @@ function NostrIdentitySection ({ rpc, C }) {
   `
 }
 
+// --- Nostr feed (Phase 2) — author + read your own NIP-01 notes -------------
+// Compose kind:1 notes signed with your Nostr key and stored in your local event
+// log (CMD_NOSTR_PUBLISH); the list is your own store queried via CMD_NOSTR_QUERY.
+function NostrFeedSection ({ rpc, C }) {
+  const [events, setEvents] = useState([])
+  const [draft, setDraft] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  const load = async () => {
+    try {
+      const res = await rpc.request(C.CMD_NOSTR_QUERY, { filter: { kinds: [1], limit: 50 } })
+      setEvents(Array.isArray(res?.events) ? res.events : [])
+    } catch (e) { setErr(e.message) }
+  }
+  useEffect(() => { load() }, [])
+
+  const post = async () => {
+    const content = draft.trim()
+    if (!content) return
+    setBusy(true); setErr('')
+    try {
+      await rpc.request(C.CMD_NOSTR_PUBLISH, { kind: 1, content })
+      setDraft(''); await load()
+    } catch (e) { setErr(e.message) } finally { setBusy(false) }
+  }
+  const when = (ts) => {
+    const d = Date.now() / 1000 - ts
+    if (d < 60) return 'just now'
+    if (d < 3600) return Math.floor(d / 60) + 'm'
+    if (d < 86400) return Math.floor(d / 3600) + 'h'
+    return Math.floor(d / 86400) + 'd'
+  }
+
+  return html`
+    <div class="settings-card">
+      <div class="tp-field">
+        <label>Post a note</label>
+        <textarea class="profile-input" rows="2" placeholder="What's happening?" value=${draft}
+                  onInput=${(e) => setDraft(e.target.value)}></textarea>
+        <button class="btn small primary" onClick=${post} disabled=${busy || !draft.trim()}>${busy ? 'Posting…' : 'Post'}</button>
+      </div>
+      ${err && html`<div class="tp-msg">${err}</div>`}
+      <div class="nostr-feed">
+        ${events.length === 0
+          ? html`<div class="settings-subtle">No notes yet — post one above. Each is signed with your Nostr key and stored in your local event log.</div>`
+          : events.map((ev) => html`
+            <div class="nostr-note" key=${ev.id}>
+              <div class="nostr-note-content">${ev.content}</div>
+              <div class="settings-subtle">kind ${ev.kind} · ${when(ev.created_at)}</div>
+            </div>`)}
+      </div>
+    </div>
+  `
+}
+
 // --- Name registry (Phase N5) — claim memorable names → drive keys ----------
 // Owner-signed, multi-writer, first-claim-wins with a confusable/homograph guard.
 // One form claims a new name or updates (rotates) one you already own; each name
@@ -3695,6 +3751,10 @@ function Settings ({ rpc, C, status, storagePath, log }) {
       <h2>Nostr identity</h2>
       <p class="subtitle">A portable Nostr key (npub), linked to your pear identity by a mutual, revocable attestation. "Linked (attested)" is a trust assertion the two keys mutually signed — never proof of the same person.</p>
       <${NostrIdentitySection} rpc=${rpc} C=${C} />
+
+      <h2>Nostr feed</h2>
+      <p class="subtitle">Post NIP-01 notes signed with your Nostr key, stored in your own local event log. (Sharing them to relays/contacts comes in a later phase.)</p>
+      <${NostrFeedSection} rpc=${rpc} C=${C} />
 
       <h2>Name registry</h2>
       <p class="subtitle">Claim memorable names that resolve to your drives — type the name (or pearname://name) in the URL bar. Owner-signed, durable across devices, first-claim-wins with a homograph guard.</p>

@@ -42,6 +42,7 @@ const { Contacts } = require('./contacts.js')
 const { Names } = require('./names.cjs')
 const { resolveName } = require('./resolve-name.cjs')
 const { NameRegistry } = require('./name-registry-store.cjs')
+const { NostrEventStore } = require('./nostr-events-store.cjs')
 const { SwarmBridge } = require('./swarm-bridge.js')
 const { SwarmGrants } = require('./swarm-grants.js')
 const C = require('./constants.js')
@@ -90,6 +91,7 @@ let profile = null
 let contacts = null
 let identityBindingPublisher = null // Lighthouse Phase 2 — root→search-key binding publish/resolve
 let nostrBindingStore = null // NOSTR2 Phase 1 — local cross-curve binding state (npub + epoch)
+let nostrEventStore = null // NOSTR Phase 2 — the user's own NIP-01 event log; null until first publish
 let queryPlanner = null // Lighthouse Phase 2 — federated query orchestration (local-first + peer fan-out)
 let names = null // naming Phase N1 — local petname store (names.cjs); null until ready
 let nameRegistry = null // naming Phase N5 — multi-writer Autobase name registry; null until first use
@@ -1573,6 +1575,64 @@ rpc.handle(C.CMD_NOSTR_REVOKE, async () => {
   return requireNostrIdentity().revoke()
 })
 
+// --- Nostr event store (Phase 2) — author + read your own NIP-01 events --------
+// The user's OWN event log: UNENCRYPTED + create-and-keep (public, signature-
+// integrity, contact-replicable in a later phase), serialized so two concurrent
+// first publishes can't double-mint. Mirrors ensureNameRegistry.
+let _nostrEvChain = Promise.resolve()
+function ensureNostrEventStore (opts = {}) {
+  const run = _nostrEvChain.then(() => _ensureNostrEventStoreImpl(opts), () => _ensureNostrEventStoreImpl(opts))
+  _nostrEvChain = run.then(() => {}, () => {})
+  return run
+}
+async function _ensureNostrEventStoreImpl ({ create = false } = {}) {
+  const s = await requireUserData().getSettings()
+  const key = (typeof s.nostrEventKey === 'string' && /^[0-9a-f]{64}$/i.test(s.nostrEventKey)) ? s.nostrEventKey : null
+  if (key) {
+    if (nostrEventStore && nostrEventStore.key === key) return nostrEventStore
+    if (nostrEventStore) { try { await nostrEventStore.close() } catch {} nostrEventStore = null }
+    nostrEventStore = await new NostrEventStore(store, { bootstrap: key, encryptionKey: null }).ready()
+    if (nostrEventStore.discoveryKey && swarm) swarm.join(nostrEventStore.discoveryKey, { server: true, client: true })
+    return nostrEventStore
+  }
+  if (!create) return null
+  const es = await new NostrEventStore(store, { bootstrap: null, encryptionKey: null }).ready()
+  await requireUserData().setSettings({ nostrEventKey: es.key })
+  nostrEventStore = es
+  if (nostrEventStore.discoveryKey && swarm) swarm.join(nostrEventStore.discoveryKey, { server: true, client: true })
+  return nostrEventStore
+}
+
+// Sign a NIP-01 event with the user's Nostr key (trusted chrome only — the page-
+// facing signer with a kind-whitelist is a later phase) and store it. created_at
+// is the event's claimed wall-clock (part of the signed content + NIP-01); the
+// store's reducer never orders by it.
+rpc.handle(C.CMD_NOSTR_PUBLISH, async ({ kind, content, tags, created_at } = {}) => {
+  await whenReady()
+  const id = requireIdentity()
+  if (!Number.isInteger(kind) || kind < 0) throw new Error('kind must be a non-negative integer')
+  if (typeof content !== 'string') throw new Error('content must be a string')
+  const safeTags = Array.isArray(tags)
+    ? tags.filter((t) => Array.isArray(t) && t.every((x) => typeof x === 'string')).slice(0, 2000)
+    : []
+  const ts = Number.isInteger(created_at) && created_at > 0 ? created_at : Math.floor(Date.now() / 1000)
+  const ev = id.nostrSignEvent({ kind, created_at: ts, tags: safeTags, content })
+  const { verifyEvent } = require('./nostr-events-apply.cjs')
+  if (!verifyEvent(ev).ok) throw new Error('event failed NIP-01 validation (content/tags too large?)')
+  const es = await ensureNostrEventStore({ create: true })
+  await es.addEvent(ev)
+  return { ok: true, event: ev }
+})
+
+rpc.handle(C.CMD_NOSTR_QUERY, async ({ filter } = {}) => {
+  await whenReady()
+  const es = await ensureNostrEventStore({ create: false })
+  if (!es) return { events: [] }
+  const all = await es.listEvents()
+  const { queryEvents } = require('./nostr-query.cjs')
+  return { events: queryEvents(all, filter || {}) }
+})
+
 
 // Also enrich the existing CMD_GET_IDENTITY response with mnemonic hint
 // (without exposing the phrase itself) so the UI can show identity status.
@@ -2267,6 +2327,7 @@ async function shutdown () {
   if (nameRegistry) { try { await nameRegistry.close() } catch {} nameRegistry = null }
   for (const entry of _contactRegistries.values()) { try { await entry.reg.close() } catch {} }
   _contactRegistries.clear()
+  if (nostrEventStore) { try { await nostrEventStore.close() } catch {} nostrEventStore = null }
   for (const [keyHex, entry] of browseDrives) {
     unregisterHiveRelayDrive(keyHex, entry.drive)
     try { await entry.drive.close() } catch {}

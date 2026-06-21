@@ -168,6 +168,9 @@ const CMD_SEARCH_FEDERATED = 262          // explicit federated trigger (v1 fold
 const CMD_NOSTR_GET_IDENTITY = 188 // { nostrPubkey, npub, epoch, linked, binding }
 const CMD_NOSTR_BIND = 189         // mint+persist the binding at epoch+1 → state
 const CMD_NOSTR_REVOKE = 190       // root-signed revoke of the current epoch → state
+// Phase 2 — local event store: author + read your own NIP-01 events.
+const CMD_NOSTR_PUBLISH = 191      // { kind, content, tags? } → sign + store → { event }
+const CMD_NOSTR_QUERY = 192        // { filter } → { events } (NIP-01 filter over your store)
 
 // Pear Bridge (WebView → worklet via RN relay)
 const CMD_BRIDGE = 200
@@ -276,6 +279,7 @@ module.exports = {
   CMD_NAMEREG_LIST, CMD_NAMEREG_RESOLVE, CMD_NAMEREG_STATUS,
   CMD_IDENTITY_BINDING_PUBLISH, CMD_IDENTITY_BINDING_RESOLVE, CMD_SEARCH_FEDERATED,
   CMD_NOSTR_GET_IDENTITY, CMD_NOSTR_BIND, CMD_NOSTR_REVOKE,
+  CMD_NOSTR_PUBLISH, CMD_NOSTR_QUERY,
   CMD_BRIDGE,
   CMD_STOP,
   EVT_READY, EVT_PEER_COUNT, EVT_ERROR, EVT_INSTALL_PROGRESS, EVT_SITE_PUBLISHED, EVT_BOOT_PROGRESS,

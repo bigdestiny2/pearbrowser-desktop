@@ -27,6 +27,7 @@ class NostrEventStore {
   get key () { return this.mgr.key }
   get writable () { return this.mgr.writable }
   get localKey () { return this.mgr.localKey }
+  get discoveryKey () { return this.mgr.discoveryKey }
 
   async addEvent (event) { await this.mgr.append(addEventOp(event)) }
   async addWriter (writerKeyHex) { await this.mgr.addWriter(writerKeyHex) }
