@@ -55,6 +55,64 @@ module.exports = {
       categories: ['utilities', 'demo'],
       description: 'A pear-request htmx app — runs headless in a tab, no separate window.',
       verification: 'author-signed'
+    },
+    {
+      // Pear POS landing site — published Hyperdrive, seeded on HiveRelay, runs
+      // in a tab (hypersite). Re-publish with `npm run publish:site` to update.
+      name: 'Pear POS',
+      driveKey: 'b776f15f3e6860ecf6d923853c295350e55b708772e67d7124899b96aecfcd43',
+      type: 'hypersite',
+      author: 'Pear POS',
+      categories: ['business', 'commerce', 'featured'],
+      description: 'Peer-to-peer, offline-first point of sale — AI scanning, self-custodial USD₮ & Bitcoin, multi-terminal sync. $0 forever.',
+      verification: 'relay-listed'
+    },
+    {
+      // Launchable Pear POS register (standalone window). Replace the link with
+      // the real pear:// key from `pear release` (PEAR-RELEASE.md) to launch it;
+      // until then it appears in the Apps catalogue but cannot open.
+      name: 'Pear POS (App)',
+      link: 'pear://REPLACE_WITH_STAGED_KEY',
+      type: 'standalone',
+      author: 'Pear POS',
+      categories: ['business', 'commerce', 'productivity'],
+      description: 'The native Pear POS register — full P2P sync, AI product scanning, and self-custodial crypto payments.',
+      verification: 'author-signed'
+    },
+    {
+      // PearBrowser landing site — published Hyperdrive, seeded on HiveRelay, runs
+      // in a tab (hypersite). Re-publish: node scripts/publish-and-pin.js
+      // ../../03-sites/p2p-sites/pearbrowser --name pearbrowser-home --key 1868916a…
+      // --storage ../../03-sites/pearbrowser-publishers/seed-pearbrowser
+      name: 'PearBrowser',
+      driveKey: '1868916a7a282ff0f211b11b536e9642828c32d3a817a254e1ef7e602709e25d',
+      type: 'hypersite',
+      author: 'bigdestiny2',
+      categories: ['browser', 'featured'],
+      description: 'The browser for the peer-to-peer web — browse hyper://, install Pear apps, publish sites pinned 24/7, and search through people you trust with Lighthouse.',
+      verification: 'relay-listed'
+    },
+    {
+      // HiveRelay landing site. Re-publish: --name p2phiverelay --key 9f2b34aa…
+      // --storage ../../03-sites/pearbrowser-publishers/seed-hiverelay
+      name: 'HiveRelay',
+      driveKey: '9f2b34aad8cd1a681d5f07d8a76768f0dc92a5008251d02a8600eb0751ad6b5f',
+      type: 'hypersite',
+      author: 'bigdestiny2',
+      categories: ['infrastructure', 'featured'],
+      description: 'The always-on, blind seed backbone for P2P apps — your Hyperdrive stays online after you close your laptop, and the operator never sees your data.',
+      verification: 'relay-listed'
+    },
+    {
+      // P2P Builders landing site. Re-publish: --name p2pbuilders --key 8545ce29…
+      // --storage ../../03-sites/pearbrowser-publishers/seed-p2pbuilders
+      name: 'P2P Builders',
+      driveKey: '8545ce29bedf22d3c6ff682684b626947e4b71e98d874931df7a1d00b70db5b7',
+      type: 'hypersite',
+      author: 'bigdestiny2',
+      categories: ['community'],
+      description: 'Where the people building peer-to-peer hang out — a permissionless, server-less board and the front door to the whole Pear ecosystem of real apps.',
+      verification: 'relay-listed'
     }
   ]
 }
