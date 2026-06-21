@@ -27,7 +27,44 @@ function loadSchemaSheets () {
   return _SchemaSheets
 }
 
-const INDEX_SCHEMAS = ['relay-directory', 'app-manifest', 'verification', 'pin-registry']
+const INDEX_SCHEMAS = ['relay-directory', 'app-manifest', 'verification', 'pin-registry', 'nostr-event']
+
+// Lazy-loaded NIP-01 verifier (pulls in the secp256k1 bundle) — only when nostr
+// events are actually read, so the catalogue path stays free of nostr crypto.
+let _verifyEvent = null
+function loadVerifyEvent () {
+  if (!_verifyEvent) _verifyEvent = require('./nostr-events-apply.cjs').verifyEvent
+  return _verifyEvent
+}
+
+// nostr-event row → the NIP-01 event. The event may be the row json directly
+// (flat) or nested under `.event`; returns null for a corrupt row.
+function nostrRowToEvent (row) {
+  if (!row || typeof row.json !== 'object' || row.json === null) return null
+  const j = row.json
+  const ev = (j.event && typeof j.event === 'object') ? j.event : j
+  return (ev && typeof ev === 'object') ? ev : null
+}
+
+// nostr-event rows → verified NIP-01 events. Re-verify EVERY event (well-formed +
+// id-commits-to-content + BIP-340 schnorr) and DROP the rest — the same verify-
+// and-drop discipline as listRelayDirectory: a relay/peer is an index, never an
+// authority, so it can only serve events, never forge them. The trust-frontier
+// gate (is the author attested by a verified contact?) is a SEPARATE concern,
+// applied by the consumer via nostr-ingest.partitionByTrust.
+function verifyNostrRows (rows) {
+  const verifyEvent = loadVerifyEvent()
+  const events = []
+  const dropped = []
+  for (const r of rows || []) {
+    const ev = nostrRowToEvent(r)
+    if (!ev) { dropped.push({ reason: 'malformed row' }); continue }
+    const v = verifyEvent(ev)
+    if (v.ok) events.push(ev)
+    else dropped.push({ id: ev.id, reason: v.reason })
+  }
+  return { events, dropped }
+}
 
 // A hiveindex:// link wraps the same z32 a sheets link does (key32 public —
 // the index room never ships an encryption key). Strip the scheme, then reuse
@@ -146,6 +183,13 @@ class IndexRoomClient {
     return rows.map(manifestRowToApp).filter(Boolean).slice(0, MAX_SHEETS_ROWS)
   }
 
+  // nostr-event rows → verified events (verify-and-drop). The caller applies the
+  // trust-frontier gate (nostr-ingest.partitionByTrust) to split feed vs quarantine.
+  async listNostrEvents (jmespath) {
+    const rows = await this._list('nostr-event', jmespath)
+    return verifyNostrRows(rows).events
+  }
+
   async listVerifications (jmespath) {
     const rows = await this._list('verification', jmespath)
     return rows.map(r => r.json).filter(Boolean)
@@ -160,4 +204,4 @@ class IndexRoomClient {
   async close () { try { if (this.sheets) await this.sheets.close() } catch {} }
 }
 
-module.exports = { IndexRoomClient, INDEX_SCHEMAS, manifestRowToApp, decodeIndexLink }
+module.exports = { IndexRoomClient, INDEX_SCHEMAS, manifestRowToApp, decodeIndexLink, nostrRowToEvent, verifyNostrRows }
