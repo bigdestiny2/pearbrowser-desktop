@@ -398,6 +398,18 @@ class Identity {
     return require('./nostr-bind.cjs').verifyNostrBind(bind, expectedRootPubkey)
   }
 
+  /** NOSTR2 — mint a ROOT-signed revocation of the binding at `epoch` (you can
+   *  unilaterally unlink from your pear side; revoke-wins by epoch). Root-signed
+   *  only — no nostr counter-signature needed to unlink. */
+  makeNostrRevocation (epoch) {
+    const nb = require('./nostr-bind.cjs')
+    const rootPubkey = b4a.toString(this.getSigningKeypair().publicKey, 'hex')
+    return nb.makeNostrRevoke(
+      { rootPubkey, nostrPubkey: this.getNostrPublicKey(), epoch },
+      (msg) => this.sign(msg).signature
+    )
+  }
+
   /**
    * Sign with the per-app sub-key (not the root). Safe to expose to
    * pages — the root remains sealed inside the worklet.

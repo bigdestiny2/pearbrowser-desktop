@@ -148,6 +148,12 @@ const CMD_IDENTITY_BINDING_PUBLISH = 260  // publish/refresh our binding to DHT 
 const CMD_IDENTITY_BINDING_RESOLVE = 261  // resolve a contact's current search pubkey
 const CMD_SEARCH_FEDERATED = 262          // explicit federated trigger (v1 folds into CMD_SEARCH)
 
+// Nostr bridge Phase 1 — npub + cross-curve identity binding (NOSTR0-2).
+// See docs/research/nostr-bridge.md. Request/response only (no EVT in Phase 1).
+const CMD_NOSTR_GET_IDENTITY = 188 // { nostrPubkey, npub, epoch, linked, binding }
+const CMD_NOSTR_BIND = 189         // mint+persist the binding at epoch+1 → state
+const CMD_NOSTR_REVOKE = 190       // root-signed revoke of the current epoch → state
+
 // Pear Bridge (WebView → worklet via RN relay)
 const CMD_BRIDGE = 200
 
@@ -252,6 +258,7 @@ module.exports = {
   CMD_SYNC_GET_BOOKMARKS, CMD_SYNC_ADD_BOOKMARK, CMD_SYNC_REMOVE_BOOKMARK, CMD_SYNC_PUSH_LOCAL,
   CMD_NAME_RESOLVE, CMD_NAME_PETNAME_LIST, CMD_NAME_PETNAME_SET, CMD_NAME_PETNAME_REMOVE,
   CMD_IDENTITY_BINDING_PUBLISH, CMD_IDENTITY_BINDING_RESOLVE, CMD_SEARCH_FEDERATED,
+  CMD_NOSTR_GET_IDENTITY, CMD_NOSTR_BIND, CMD_NOSTR_REVOKE,
   CMD_BRIDGE,
   CMD_STOP,
   EVT_READY, EVT_PEER_COUNT, EVT_ERROR, EVT_INSTALL_PROGRESS, EVT_SITE_PUBLISHED, EVT_BOOT_PROGRESS,

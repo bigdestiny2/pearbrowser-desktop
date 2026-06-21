@@ -88,6 +88,7 @@ let identity = null
 let profile = null
 let contacts = null
 let identityBindingPublisher = null // Lighthouse Phase 2 — root→search-key binding publish/resolve
+let nostrBindingStore = null // NOSTR2 Phase 1 — local cross-curve binding state (npub + epoch)
 let queryPlanner = null // Lighthouse Phase 2 — federated query orchestration (local-first + peer fan-out)
 let names = null // naming Phase N1 — local petname store (names.cjs); null until ready
 let swarmBridge = null
@@ -1352,6 +1353,29 @@ rpc.handle(C.CMD_CONTACTS_REMOVE, async ({ pubkey } = {}) => {
 })
 
 
+// --- Nostr identity (Phase 1) — npub + cross-curve binding (NOSTR0-2) -------
+// GET_IDENTITY/BIND/REVOKE take NO page-controlled payload: the signed canonical
+// bytes are built backend-side (identity.makeNostrBinding/makeNostrRevocation),
+// so a page can trigger a bind/revoke but can never get the root key to sign
+// attacker-chosen bytes (threat #10). The nsec never leaves the worklet.
+function requireNostrIdentity () {
+  if (!nostrBindingStore) throw new Error('Nostr identity not available — worklet still booting')
+  return nostrBindingStore
+}
+rpc.handle(C.CMD_NOSTR_GET_IDENTITY, async () => {
+  await whenReady()
+  return requireNostrIdentity().getState()
+})
+rpc.handle(C.CMD_NOSTR_BIND, async () => {
+  await whenReady()
+  return requireNostrIdentity().bind()
+})
+rpc.handle(C.CMD_NOSTR_REVOKE, async () => {
+  await whenReady()
+  return requireNostrIdentity().revoke()
+})
+
+
 // Also enrich the existing CMD_GET_IDENTITY response with mnemonic hint
 // (without exposing the phrase itself) so the UI can show identity status.
 
@@ -1740,6 +1764,19 @@ async function boot () {
     } catch (err) {
       console.error('IdentityBindingPublisher init failed:', err && err.message)
       identityBindingPublisher = null
+    }
+  }
+
+  // NOSTR2 Phase 1 — local cross-curve binding state (npub + attested epoch),
+  // persisted in the PersonalIndex meta namespace. Best-effort; never blocks boot.
+  if (personalIndex && identity) {
+    try {
+      const { NostrBindingStore } = require('./nostr-binding-store.cjs')
+      nostrBindingStore = await new NostrBindingStore({ identity, personalIndex }).ready()
+      console.log('NostrBindingStore ready')
+    } catch (err) {
+      console.error('NostrBindingStore init failed:', err && err.message)
+      nostrBindingStore = null
     }
   }
 

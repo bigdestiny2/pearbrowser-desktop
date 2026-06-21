@@ -70,6 +70,18 @@ const FEATURED_APPS = [
     initial: 'A',
     gradient: 'linear-gradient(135deg, #22d3ee, #6366f1)'
   },
+  // Paste — local-first, E2E-encrypted notes & clipboard sync. A full Pear
+  // app: opens in its own window. Landing page (hyper://25a06bb3…) is in the
+  // default catalog as its homepage.
+  {
+    id: 'pearpaste',
+    name: 'Paste',
+    type: 'standalone',
+    tagline: 'Local-first, end-to-end encrypted notes & clipboard sync for your own devices — no account, no cloud.',
+    link: 'pear://u6oyh38gcn3ouk6wnzpoetzpeg7gs1w5s9f5aw5quocr1eubsoiy',
+    initial: '📋',
+    gradient: 'linear-gradient(135deg, #4ade80, #22d3ee)'
+  },
   // pear-request htmx apps that render HEADLESS in a tab (no window): the tab's
   // XMLHttpRequest is hooked to a streamx talking to a worker. Pattern from
   // Drache93's Pear Browser; our run-in-tab bridge in backend/tab-runtime.js.
@@ -3107,6 +3119,65 @@ function RelaysSection ({ rpc, C }) {
   `
 }
 
+// --- Nostr identity (Phase 1) — npub + cross-curve binding (NOSTR0-2) -------
+// Mirrors the ProfileSection/TrustedPeers load-copy-mutate idiom. All three
+// CMD_NOSTR_* are request/response (no page payload reaches a signer). The
+// wording is "linked (attested)", never "verified" — it's a trust assertion.
+function NostrIdentitySection ({ rpc, C }) {
+  const [state, setState] = useState(null)
+  const [busy, setBusy] = useState(null)
+  const [err, setErr] = useState('')
+  const [copied, setCopied] = useState(false)
+
+  const load = async () => {
+    try { setState(await rpc.request(C.CMD_NOSTR_GET_IDENTITY)) }
+    catch (e) { setErr(e.message) }
+  }
+  useEffect(() => { load() }, [])
+
+  const copy = async () => {
+    if (!state?.npub) return
+    try { await navigator.clipboard.writeText(state.npub); setCopied(true); setTimeout(() => setCopied(false), 1500) } catch {}
+  }
+  const run = async (cmd, flag) => {
+    setBusy(flag); setErr('')
+    try { setState(await rpc.request(cmd)) }
+    catch (e) { setErr(e.message) }
+    finally { setBusy(null) }
+  }
+
+  const npub = state?.npub || ''
+  const short = npub ? npub.slice(0, 14) + '…' + npub.slice(-6) : '—'
+  const linked = !!state?.linked
+  const epoch = state?.epoch || 0
+
+  return html`
+    <div class="settings-card">
+      <div class="settings-row">
+        <div>
+          <div class="settings-label">Your Nostr key</div>
+          <div class="settings-subtle">${state ? short : 'Loading…'}</div>
+        </div>
+        <button class="btn small" onClick=${copy} disabled=${!npub}>${copied ? 'Copied' : 'Copy npub'}</button>
+      </div>
+      <div class="settings-row">
+        <div>
+          <div class="settings-label">Link status</div>
+          <div class="settings-subtle">
+            ${linked
+              ? html`<span class="src-badge self">linked (attested) · epoch ${epoch}</span> Your pear root and this Nostr key are mutually signed.`
+              : html`<span class="src-badge other">not linked</span> Mint a mutual attestation binding your pear root ↔ Nostr key.`}
+          </div>
+        </div>
+        ${linked
+          ? html`<button class="btn subtle danger" onClick=${() => run(C.CMD_NOSTR_REVOKE, 'revoke')} disabled=${busy != null}>${busy === 'revoke' ? 'Revoking…' : 'Revoke'}</button>`
+          : html`<button class="btn primary" onClick=${() => run(C.CMD_NOSTR_BIND, 'bind')} disabled=${busy != null}>${busy === 'bind' ? 'Linking…' : 'Link (attest)'}</button>`}
+      </div>
+      ${err && html`<div class="tp-msg">${err}</div>`}
+    </div>
+  `
+}
+
 // --- Multi-device bookmark sync (encrypted) — Settings panel ---------------
 //
 // Surfaces the CMD_SYNC_* backend (Rollout Phase 4). Rendered only when the
@@ -3520,6 +3591,10 @@ function Settings ({ rpc, C, status, storagePath, log }) {
       <h2>Relays</h2>
       <p class="subtitle">HiveRelay endpoints used for fast first-paint and persistence. Hybrid mode falls back to pure P2P if a relay is down.</p>
       <${RelaysSection} rpc=${rpc} C=${C} />
+
+      <h2>Nostr identity</h2>
+      <p class="subtitle">A portable Nostr key (npub), linked to your pear identity by a mutual, revocable attestation. "Linked (attested)" is a trust assertion the two keys mutually signed — never proof of the same person.</p>
+      <${NostrIdentitySection} rpc=${rpc} C=${C} />
 
       <h2>HiveRelay Network</h2>
       <div class="settings-card">
