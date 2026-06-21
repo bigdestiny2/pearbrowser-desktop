@@ -13,8 +13,14 @@ secp.hashes.sha256 = sha256
 secp.hashes.hmacSha256 = (key, msg) => hmac(sha256, key, msg)
 
 const ENC = new TextEncoder()
+// Strict hex → bytes. Reject odd-length or non-hex input by THROWING rather than
+// silently coercing invalid nibbles to 0 via parseInt(NaN) (which would truncate
+// a bad signature to zero/short bytes instead of failing). Callers that verify
+// (schnorrVerify) try-catch this into a clean fail-closed `false`; signing paths
+// rightly throw on a malformed key. Defense-in-depth from the NOSTR2 review.
 function h2b (hex) {
   const s = String(hex)
+  if (s.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(s)) throw new Error('invalid hex input')
   const out = new Uint8Array(s.length >> 1)
   for (let i = 0; i < out.length; i++) out[i] = parseInt(s.substr(i * 2, 2), 16)
   return out

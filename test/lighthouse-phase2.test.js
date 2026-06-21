@@ -79,11 +79,12 @@ test('resolveSearchKey rotates to the highest non-revoked version', () => {
 
 test('resolveSearchKey breaks equal-version equivocation deterministically', () => {
   const root = crypto.keyPair(); const rootHex = hex(root.publicKey)
-  const bA = ib.makeBinding({ rootPubkey: rootHex, searchPubkey: 'aaa', purpose: 'search', version: 2 }, signer(root))
-  const bB = ib.makeBinding({ rootPubkey: rootHex, searchPubkey: 'bbb', purpose: 'search', version: 2 }, signer(root))
+  const skA = 'aa'.repeat(32); const skB = 'bb'.repeat(32) // real 64-hex; skA < skB
+  const bA = ib.makeBinding({ rootPubkey: rootHex, searchPubkey: skA, purpose: 'search', version: 2 }, signer(root))
+  const bB = ib.makeBinding({ rootPubkey: rootHex, searchPubkey: skB, purpose: 'search', version: 2 }, signer(root))
   // same resolution regardless of array order; smaller searchPubkey wins
   assert.equal(ib.resolveSearchKey(rootHex, [bA, bB], []), ib.resolveSearchKey(rootHex, [bB, bA], []))
-  assert.equal(ib.resolveSearchKey(rootHex, [bB, bA], []), 'aaa')
+  assert.equal(ib.resolveSearchKey(rootHex, [bB, bA], []), skA)
 })
 
 test('verifyBinding rejects a non-integer (string) version and non-string searchPubkey', () => {

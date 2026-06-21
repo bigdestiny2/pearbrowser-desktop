@@ -15,6 +15,7 @@ const b4a = require('b4a')
 const BIND_TAG = 'pear.nostr-bind.v1:'
 const REVOKE_TAG = 'pear.nostr-bind.revoke.v1:'
 const HEX64 = /^[0-9a-f]{64}$/i
+const HEX128 = /^[0-9a-f]{128}$/i // ed25519 + schnorr sigs are both 64 bytes
 
 // canonical bytes both curves sign (sorted keys, no clock)
 function canonBind (rootPubkey, nostrPubkey, epoch) {
@@ -46,7 +47,11 @@ function verifyNostrBind (bind, expectedRootPubkey) {
   if (!bind || bind.kind !== 'nostr-bind') return false
   if (!Number.isInteger(bind.epoch) || bind.epoch < 1) return false
   if (typeof bind.nostrPubkey !== 'string' || !HEX64.test(bind.nostrPubkey)) return false
-  if (typeof bind.rootPubkey !== 'string' || bind.rootPubkey !== expectedRootPubkey) return false
+  if (typeof bind.rootPubkey !== 'string' || !HEX64.test(bind.rootPubkey) || bind.rootPubkey !== expectedRootPubkey) return false
+  // validate sig FORMAT before verify (explicit fail-closed; don't lean on the
+  // verifier's try-catch to absorb malformed hex) — NOSTR2 review hardening.
+  if (typeof bind.rootSig !== 'string' || !HEX128.test(bind.rootSig)) return false
+  if (typeof bind.nostrSig !== 'string' || !HEX128.test(bind.nostrSig)) return false
   const canon = canonBind(bind.rootPubkey, bind.nostrPubkey, bind.epoch)
   if (!ed25519Verify(canon, bind.rootSig, expectedRootPubkey)) return false // root attests
   return secp.schnorrVerify(bind.nostrSig, secp.sha256Hex(canon), bind.nostrPubkey) // nostr attests
@@ -61,7 +66,8 @@ function verifyNostrRevoke (rev, expectedRootPubkey) {
   if (!rev || rev.kind !== 'nostr-revoke') return false
   if (!Number.isInteger(rev.epoch) || rev.epoch < 1) return false
   if (typeof rev.nostrPubkey !== 'string' || !HEX64.test(rev.nostrPubkey)) return false
-  if (rev.rootPubkey !== expectedRootPubkey) return false
+  if (typeof rev.rootPubkey !== 'string' || !HEX64.test(rev.rootPubkey) || rev.rootPubkey !== expectedRootPubkey) return false
+  if (typeof rev.rootSig !== 'string' || !HEX128.test(rev.rootSig)) return false
   return ed25519Verify(canonRevoke(rev.rootPubkey, rev.nostrPubkey, rev.epoch), rev.rootSig, expectedRootPubkey)
 }
 

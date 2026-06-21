@@ -72,6 +72,15 @@ test('resolveNostrBind: highest epoch wins, revoke-wins, forged revoke ignored',
   assert.equal(nb.resolveNostrBind(rootHex, [b1, b2], [fakeRev]), npk('22'.repeat(32)))
 })
 
+test('malformed hex fields are rejected explicitly (not coerced) — NOSTR2 review hardening', () => {
+  const root = crypto.keyPair(); const rootHex = hex(root.publicKey)
+  const bind = mkBind(root, '11'.repeat(32))
+  // non-hex / wrong-length pubkeys and sigs fail closed at the format gate
+  assert.equal(nb.verifyNostrBind({ ...bind, rootPubkey: 'z'.repeat(64) }, 'z'.repeat(64)), false)
+  assert.equal(nb.verifyNostrBind({ ...bind, nostrSig: 'zz' }, rootHex), false) // short/non-hex sig
+  assert.equal(nb.verifyNostrBind({ ...bind, rootSig: bind.rootSig.slice(0, -1) }, rootHex), false) // odd length
+})
+
 test('makeNostrBind requires a positive integer epoch', () => {
   const root = crypto.keyPair()
   assert.throws(() => nb.makeNostrBind({ rootPubkey: hex(root.publicKey), nostrPubkey: npk('11'.repeat(32)), epoch: 0 }, rootSigner(root), nostrSigner('11'.repeat(32))), /epoch/)

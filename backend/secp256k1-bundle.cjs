@@ -973,6 +973,7 @@ hashes.hmacSha256 = (key, msg) => hmac(sha256, key, msg);
 var ENC = new TextEncoder();
 function h2b(hex) {
   const s = String(hex);
+  if (s.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(s)) throw new Error("invalid hex input");
   const out = new Uint8Array(s.length >> 1);
   for (let i = 0; i < out.length; i++) out[i] = parseInt(s.substr(i * 2, 2), 16);
   return out;

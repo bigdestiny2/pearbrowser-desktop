@@ -16,6 +16,9 @@
 const crypto = require('hypercore-crypto')
 const b4a = require('b4a')
 
+const HEX64 = /^[0-9a-f]{64}$/i // ed25519 root + sub-key pubkeys
+const HEX128 = /^[0-9a-f]{128}$/i // ed25519 signatures
+
 // --- per-app signature domain (mirrors identity.js signForApp exactly) -------
 
 function appTag (appId, namespace = '') {
@@ -96,10 +99,14 @@ function verifyBinding (binding, expectedRootPubkey, expectedPurpose) {
   // make resolveSearchKey's `<` tie-break number-vs-string (false both ways) →
   // array-order-dependent resolution (the equivocation split-view), and a null
   // "winner" collides with the no-key sentinel.
-  if (typeof binding.searchPubkey !== 'string' || !binding.searchPubkey) return false
+  // searchPubkey must be a 64-hex pubkey (not just any string): an arbitrary
+  // string like 'aaa' has no key behind it, and explicit format validation makes
+  // a verification failure unambiguously "wrong signer", never "malformed hex".
+  if (typeof binding.searchPubkey !== 'string' || !HEX64.test(binding.searchPubkey)) return false
   // purpose must be a string AND match — cross-purpose replay defense.
   if (typeof binding.purpose !== 'string' || binding.purpose !== expectedPurpose) return false
-  if (binding.rootPubkey !== expectedRootPubkey) return false
+  if (typeof binding.rootPubkey !== 'string' || !HEX64.test(binding.rootPubkey) || binding.rootPubkey !== expectedRootPubkey) return false
+  if (typeof binding.sig !== 'string' || !HEX128.test(binding.sig)) return false
   try {
     return crypto.verify(b4a.from(canonBinding(binding.rootPubkey, binding.searchPubkey, binding.purpose, binding.version), 'utf-8'),
       b4a.from(binding.sig, 'hex'), b4a.from(expectedRootPubkey, 'hex'))
@@ -109,9 +116,10 @@ function verifyBinding (binding, expectedRootPubkey, expectedPurpose) {
 function verifyRevocation (rev, expectedRootPubkey, expectedPurpose) {
   if (!rev || rev.kind !== 'revoke') return false
   if (!Number.isInteger(rev.version) || rev.version < 1) return false
-  if (typeof rev.searchPubkey !== 'string' || !rev.searchPubkey) return false
+  if (typeof rev.searchPubkey !== 'string' || !HEX64.test(rev.searchPubkey)) return false
   if (typeof rev.purpose !== 'string' || rev.purpose !== expectedPurpose) return false
-  if (rev.rootPubkey !== expectedRootPubkey) return false
+  if (typeof rev.rootPubkey !== 'string' || !HEX64.test(rev.rootPubkey) || rev.rootPubkey !== expectedRootPubkey) return false
+  if (typeof rev.sig !== 'string' || !HEX128.test(rev.sig)) return false
   try {
     return crypto.verify(b4a.from(canonRevoke(rev.rootPubkey, rev.searchPubkey, rev.purpose, rev.version), 'utf-8'),
       b4a.from(rev.sig, 'hex'), b4a.from(expectedRootPubkey, 'hex'))
