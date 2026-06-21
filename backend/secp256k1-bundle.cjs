@@ -970,7 +970,19 @@ var hmac = /* @__PURE__ */ (() => {
 // backend/secp256k1-entry.mjs
 hashes.sha256 = sha256;
 hashes.hmacSha256 = (key, msg) => hmac(sha256, key, msg);
-var ENC = new TextEncoder();
+function utf8(str) {
+  const out = [];
+  for (let i = 0; i < str.length; i++) {
+    let c = str.charCodeAt(i);
+    if (c < 128) out.push(c);
+    else if (c < 2048) out.push(192 | c >> 6, 128 | c & 63);
+    else if (c >= 55296 && c <= 56319) {
+      c = 65536 + ((c & 1023) << 10) + (str.charCodeAt(++i) & 1023);
+      out.push(240 | c >> 18, 128 | c >> 12 & 63, 128 | c >> 6 & 63, 128 | c & 63);
+    } else out.push(224 | c >> 12, 128 | c >> 6 & 63, 128 | c & 63);
+  }
+  return new Uint8Array(out);
+}
 function h2b(hex) {
   const s = String(hex);
   if (s.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(s)) throw new Error("invalid hex input");
@@ -997,7 +1009,7 @@ function schnorrVerify(sigHex, msg32Hex, pkHex) {
   }
 }
 function sha256Hex(bytesOrUtf8) {
-  return b2h(sha256(typeof bytesOrUtf8 === "string" ? ENC.encode(bytesOrUtf8) : bytesOrUtf8));
+  return b2h(sha256(typeof bytesOrUtf8 === "string" ? utf8(bytesOrUtf8) : bytesOrUtf8));
 }
 function nip01Serialize(ev) {
   return JSON.stringify([0, ev.pubkey, ev.created_at, ev.kind, ev.tags || [], ev.content]);

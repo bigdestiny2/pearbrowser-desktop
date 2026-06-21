@@ -12,7 +12,23 @@ import { hmac } from '@noble/hashes/hmac.js'
 secp.hashes.sha256 = sha256
 secp.hashes.hmacSha256 = (key, msg) => hmac(sha256, key, msg)
 
-const ENC = new TextEncoder()
+// UTF-8 encode WITHOUT TextEncoder — that's a browser/Node global but NOT defined
+// in the Bare runtime, where this bundle actually runs (TextEncoder-not-defined
+// crashed NostrBindingStore at boot). Dependency-free, byte-identical to
+// TextEncoder for the canonical NIP-01 / binding strings we hash.
+function utf8 (str) {
+  const out = []
+  for (let i = 0; i < str.length; i++) {
+    let c = str.charCodeAt(i)
+    if (c < 0x80) out.push(c)
+    else if (c < 0x800) out.push(0xc0 | (c >> 6), 0x80 | (c & 0x3f))
+    else if (c >= 0xd800 && c <= 0xdbff) { // high surrogate → combine with low
+      c = 0x10000 + ((c & 0x3ff) << 10) + (str.charCodeAt(++i) & 0x3ff)
+      out.push(0xf0 | (c >> 18), 0x80 | ((c >> 12) & 0x3f), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f))
+    } else out.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f))
+  }
+  return new Uint8Array(out)
+}
 // Strict hex → bytes. Reject odd-length or non-hex input by THROWING rather than
 // silently coercing invalid nibbles to 0 via parseInt(NaN) (which would truncate
 // a bad signature to zero/short bytes instead of failing). Callers that verify
@@ -40,7 +56,7 @@ export function schnorrVerify (sigHex, msg32Hex, pkHex) {
   try { return secp.schnorr.verify(h2b(sigHex), h2b(msg32Hex), h2b(pkHex)) } catch { return false }
 }
 export function sha256Hex (bytesOrUtf8) {
-  return b2h(sha256(typeof bytesOrUtf8 === 'string' ? ENC.encode(bytesOrUtf8) : bytesOrUtf8))
+  return b2h(sha256(typeof bytesOrUtf8 === 'string' ? utf8(bytesOrUtf8) : bytesOrUtf8))
 }
 
 // --- NIP-01 event id + sign/verify ---
