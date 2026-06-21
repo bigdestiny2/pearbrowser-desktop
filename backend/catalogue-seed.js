@@ -30,12 +30,15 @@ module.exports = {
       verification: 'relay-listed'
     },
     {
+      // HiveWorm runs as a hyper:// app: its frontend is served from a pinned
+      // Hyperdrive and the perpetual world syncs over the injected window.pear.swarm.v1.
+      // 'Run app' browses the drive (where swarm.v1 is injected) — no separate window.
       name: 'HiveWorm',
-      link: 'pear://d1xbkcpcbi1xa8dexp49rsendra5r67w3qh5a9k8t44oemm4k16y',
+      link: 'hyper://e3f910d11e70044afe361b1cecfb5cfb3c4f61f600cc81c2365ba0e6f58c8d4d/',
       type: 'standalone',
       author: 'HiveWorm',
       categories: ['games'],
-      description: 'Perpetual P2P life-sim — runs as a Pear app via swarm.v1.',
+      description: 'Perpetual P2P life-sim — a shared world that syncs directly between players over Hyperswarm. No server.',
       verification: 'unverified'
     },
     {
@@ -46,15 +49,6 @@ module.exports = {
       categories: ['ai', 'featured'],
       description: 'Private P2P AI chat — pay-per-inference from a HiveMind seller, with signed receipts.',
       verification: 'relay-listed'
-    },
-    {
-      name: 'Headless Demo',
-      link: 'file:///Users/localllm/Desktop/pear-request-demo',
-      type: 'hypersite',
-      author: 'pearbrowser',
-      categories: ['utilities', 'demo'],
-      description: 'A pear-request htmx app — runs headless in a tab, no separate window.',
-      verification: 'author-signed'
     },
     {
       // Pear POS — ONE app entry with BOTH a browsable landing page (driveKey,
@@ -133,6 +127,17 @@ module.exports = {
       categories: ['commerce', 'productivity'],
       description: 'Offline-capable, signed-Hypercore event ticketing — Lightning, Cashu, and Stripe.',
       verification: 'relay-listed'
+    },
+    {
+      // PearPoker — runnable P2P poker app. Drive/project key 850929ab… resolved
+      // from the pear:// link via `pear info`. (author/verification: confirm.)
+      name: 'PearPoker',
+      link: 'pear://owr1ukamxhxm1j67p8dkhbm46n1d9qoh7igd8ag9f36x6dzjrjwy',
+      type: 'standalone',
+      author: 'PearPoker',
+      categories: ['games'],
+      description: 'Peer-to-peer poker — play directly between players over Hyperswarm. No server, no house, no rake.',
+      verification: 'unverified'
     }
   ]
 }
