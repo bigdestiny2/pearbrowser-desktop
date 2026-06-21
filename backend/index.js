@@ -1277,7 +1277,17 @@ function nameRegSigner () {
 // ensureBrowserSync: mint under a throwaway namespace, persist the key + a fresh
 // encryption key, then always reopen by bootstrap (so the per-user Autobase has a
 // stable identity on the shared Corestore). Returns the live registry or null.
-async function ensureNameRegistry ({ create = false } = {}) {
+// Serialize ensureNameRegistry so two concurrent first-time claims can't both
+// enter the create branch (which would double-mint + race setSettings, orphaning
+// one base). The second caller awaits the first, then sees the persisted key and
+// reopens the same registry. Mirrors PersonalIndex._serialize.
+let _nameRegChain = Promise.resolve()
+function ensureNameRegistry (opts = {}) {
+  const run = _nameRegChain.then(() => _ensureNameRegistryImpl(opts), () => _ensureNameRegistryImpl(opts))
+  _nameRegChain = run.then(() => {}, () => {}) // the lock never rejects
+  return run
+}
+async function _ensureNameRegistryImpl ({ create = false } = {}) {
   const s = await requireUserData().getSettings()
   const key = (typeof s.nameRegKey === 'string' && /^[0-9a-f]{64}$/i.test(s.nameRegKey)) ? s.nameRegKey : null
   if (key) {
@@ -1304,14 +1314,34 @@ async function ensureNameRegistry ({ create = false } = {}) {
 
 // Read-only, cached, replicating views of CONTACTS' registries (federation). Each
 // gets its OWN substore (keyed by bootstrap) so they never collide with the user's
-// own registry or each other on the shared store.
-const _contactRegistries = new Map() // nameRegKey hex -> NameRegistry
-async function openContactRegistry (keyHex) {
+// own registry or each other on the shared store. Keyed by the CONTACT root (one
+// registry per contact): when a contact rotates their advertised key we tear down
+// the stale base + leave its swarm topic, and the map is capped + LRU-evicted, so
+// a verified contact churning their key can't leak unbounded substores/topics.
+const MAX_CONTACT_REGISTRIES = 128
+const _contactRegistries = new Map() // contactRoot hex -> { keyHex, reg }
+async function _closeContactReg (entry) {
+  try { if (entry.reg.discoveryKey && swarm) swarm.leave(entry.reg.discoveryKey) } catch {}
+  try { await entry.reg.close() } catch {}
+}
+async function openContactRegistry (keyHex, contactRoot) {
   if (typeof keyHex !== 'string' || !/^[0-9a-f]{64}$/i.test(keyHex)) return null
-  if (_contactRegistries.has(keyHex)) return _contactRegistries.get(keyHex)
+  const rootKey = (typeof contactRoot === 'string' && contactRoot) ? contactRoot.toLowerCase() : keyHex
+  const cached = _contactRegistries.get(rootKey)
+  if (cached) {
+    if (cached.keyHex === keyHex) return cached.reg
+    _contactRegistries.delete(rootKey) // contact rotated their key — drop the stale base
+    await _closeContactReg(cached)
+  }
+  while (_contactRegistries.size >= MAX_CONTACT_REGISTRIES) { // bound + LRU-evict (insertion order)
+    const oldestKey = _contactRegistries.keys().next().value
+    const oldest = _contactRegistries.get(oldestKey)
+    _contactRegistries.delete(oldestKey)
+    await _closeContactReg(oldest)
+  }
   const reg = await new NameRegistry(store, { bootstrap: keyHex, encryptionKey: null, storeNamespace: 'eab-name-registry-c-' + keyHex }).ready()
   if (reg.discoveryKey && swarm) swarm.join(reg.discoveryKey, { server: false, client: true })
-  _contactRegistries.set(keyHex, reg)
+  _contactRegistries.set(rootKey, { keyHex, reg })
   return reg
 }
 
@@ -1928,7 +1958,7 @@ async function boot () {
       federatedNameResolver = new FederatedNameResolver({
         listContacts: () => requireContacts().list({ limit: 200 }),
         resolveBinding: (args) => identityBindingPublisher.resolve(args),
-        openRegistry: (keyHex) => openContactRegistry(keyHex),
+        openRegistry: (keyHex, contactRoot) => openContactRegistry(keyHex, contactRoot),
       })
       console.log('FederatedNameResolver ready')
     } catch (err) {
@@ -2175,7 +2205,7 @@ async function shutdown () {
   if (personalIndex) { try { await personalIndex.close() } catch {} personalIndex = null }
   if (browserSync) { try { await browserSync.close() } catch {} browserSync = null }
   if (nameRegistry) { try { await nameRegistry.close() } catch {} nameRegistry = null }
-  for (const reg of _contactRegistries.values()) { try { await reg.close() } catch {} }
+  for (const entry of _contactRegistries.values()) { try { await entry.reg.close() } catch {} }
   _contactRegistries.clear()
   for (const [keyHex, entry] of browseDrives) {
     unregisterHiveRelayDrive(keyHex, entry.drive)

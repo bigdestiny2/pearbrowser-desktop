@@ -25,6 +25,10 @@ const TAG = {
 const HEX64 = /^[0-9a-f]{64}$/i
 const HEX128 = /^[0-9a-f]{128}$/i
 const MAX_NAME = 253
+// Total serialized op cap (defense-in-depth vs a writer bloating the log — a real
+// op is ~700 bytes: name≤253 + normalized/skeleton + a few 64-hex fields). Mirrors
+// MAX_OP_BYTES in browser-state-ops / autobee-catalog-ops. Oversized → dropped on apply.
+const MAX_OP_BYTES = 4096
 
 // Canonical signed bytes (sorted keys, NO clock — ordering is the Autobase's
 // linear order, never a forgeable timestamp). The RAW display name `d` is signed
@@ -45,6 +49,9 @@ function isWellFormedOp (op) {
     if (typeof op.target !== 'string' || !HEX64.test(op.target)) return false
     if (!Number.isInteger(op.version) || op.version < 1) return false
   }
+  // Drop a bloated op (e.g. a hostile writer padding extra fields) so it never
+  // materializes into the view a contact replicates.
+  try { if (JSON.stringify(op).length > MAX_OP_BYTES) return false } catch { return false }
   return true
 }
 
@@ -68,6 +75,6 @@ function revokeOp ({ name, owner }, ownerSign) {
 }
 
 module.exports = {
-  CLAIM, ROTATE, RELEASE, REVOKE, OP_TYPES, MAX_NAME,
+  CLAIM, ROTATE, RELEASE, REVOKE, OP_TYPES, MAX_NAME, MAX_OP_BYTES,
   canon, isWellFormedOp, claimOp, rotateOp, releaseOp, revokeOp,
 }

@@ -100,6 +100,25 @@ test('conflict: two contacts claim the same name → deterministic winner + ambi
   assert.equal(res.candidates, 2) // ambiguity surfaced for the UI
 })
 
+test('a hung contact times out and does not block a fast one (parallel + per-step timeout)', async () => {
+  const fast = K('11'); const slow = K('22') // fast < slow
+  const r = new FederatedNameResolver({
+    listContacts: async () => [
+      { pubkey: slow, displayName: 'Slow', verifiedAt: 1, bindingKey: K('b2') },
+      { pubkey: fast, displayName: 'Fast', verifiedAt: 1, bindingKey: K('b1') },
+    ],
+    // the slow contact's binding lookup never resolves; the fast one returns at once
+    resolveBinding: async ({ contactPubkey }) => (contactPubkey === slow ? new Promise(() => {}) : { nameRegKey: K('c1') }),
+    openRegistry: async () => fakeReg({ alice: { target: K('d1'), owner: fast, version: 1 } }),
+    stepTimeoutMs: 150,
+  })
+  const t0 = Date.now()
+  const res = await r.resolve('alice')
+  const elapsed = Date.now() - t0
+  assert.equal(res.contactPubkey, fast) // the fast contact still resolves
+  assert.ok(elapsed < 1500, `bounded by the per-step timeout, not the hung contact (was ${elapsed}ms)`)
+})
+
 test('end-to-end: B resolves A\'s real claim over wire() replication', async () => {
   const tmps = []
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms))

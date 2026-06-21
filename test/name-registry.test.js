@@ -196,6 +196,14 @@ test('Cyrillic н (now folding to n) is caught as a homograph squat', () => {
   assert.equal(resolve(view, 'нoah'), null) // skeleton folds to 'noah' → rejected
 })
 
+test('an oversized op (bloated extra field) is dropped by the byte cap', () => {
+  const a = crypto.keyPair()
+  const good = ops.claimOp({ name: 'big', target: TARGET_A, owner: owner(a) }, signer(a))
+  const bloated = { ...good, junk: 'x'.repeat(5000) } // > MAX_OP_BYTES
+  assert.equal(resolve(applyView([bloated]), 'big'), null) // dropped at apply
+  assert.equal(resolve(applyView([good]), 'big').owner, owner(a)) // the un-bloated op is fine
+})
+
 test('the display name is signed: tampering it (same normalized) drops the op', () => {
   const a = crypto.keyPair()
   const good = ops.claimOp({ name: 'alice', target: TARGET_A, owner: owner(a) }, signer(a))
