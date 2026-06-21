@@ -1,10 +1,14 @@
 /**
- * Dev catalogue seed data.
+ * Dev catalogue seed data — GENERATED FILE, do not edit by hand.
+ *
+ * Source of truth: 03-sites/pearbrowser-publishers/catalog-source/catalog.json
+ * Regenerate:      node scripts/gen-catalogue-seed.mjs
  *
  * Until the HiveRelay publishes a canonical schema-sheets catalogue room, the
- * backend seeds one locally on boot (see ensureDevCatalogue in index.js) so the
- * Apps store is populated end-to-end from the real schema-sheets read path.
- * Replace with the relay's z32 link (loadCatalogSheets) once it exists.
+ * backend seeds one locally on boot (ensureDevCatalogue in index.js) so the Apps
+ * store is populated end-to-end offline. The desktop ALSO loads the live Hyperbee
+ * catalog (DEFAULT_CATALOG_KEY in ui/shell.js, same source); dedupeApps() collapses
+ * the two by driveKey/link, so each app appears once.
  *
  * Each entry is one `apps` row (validated against APPS_SCHEMA): name + type
  * required, driveKey OR link, type ∈ {standalone (window), hypersite (run-in-tab)}.
@@ -12,135 +16,170 @@
 module.exports = {
   SEED_APPS: [
     {
-      name: 'Keet',
-      link: 'pear://oeeoz3w6fjjt7bym3ndpa6hhicm8f8naxyk11z4iypeoupn6jzpo',
-      type: 'standalone',
-      author: 'Holepunch',
-      categories: ['chat', 'communication', 'featured'],
-      description: 'End-to-end encrypted P2P chat, voice, and video calls.',
-      verification: 'relay-listed'
+      "name": "PearBrowser Desktop",
+      "type": "standalone",
+      "driveKey": "1868916a7a282ff0f211b11b536e9642828c32d3a817a254e1ef7e602709e25d",
+      "link": "pear://tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty",
+      "author": "bigdestiny2",
+      "categories": [
+        "browser",
+        "tools",
+        "p2p"
+      ],
+      "description": "P2P browser, decentralized app store, and site publisher. macOS / Windows / Linux. Talks to peers directly over Hyperswarm. Pinned 24/7 on HiveRelay.",
+      "version": "0.4.5",
+      "verification": "relay-listed"
     },
     {
-      name: 'PearPass',
-      link: 'pear://tywsat7gz8m65ejx4zjn3773pbdc4j8m66tukis8dgzekraymtzo',
-      type: 'standalone',
-      author: 'Tether',
-      categories: ['security', 'utilities', 'featured'],
-      description: 'Peer-to-peer password manager — synced across devices without a cloud.',
-      verification: 'relay-listed'
+      "name": "HiveRelay",
+      "type": "hypersite",
+      "driveKey": "9f2b34aad8cd1a681d5f07d8a76768f0dc92a5008251d02a8600eb0751ad6b5f",
+      "author": "bigdestiny2",
+      "categories": [
+        "infrastructure",
+        "site"
+      ],
+      "description": "Always-on relay infrastructure for the Pear and Hyperswarm ecosystem. Blind peering, NAT traversal, HTTP gateway. Apache-2.0.",
+      "version": "0.16.3",
+      "verification": "relay-listed"
     },
     {
-      // HiveWorm runs as a hyper:// app: its frontend is served from a pinned
-      // Hyperdrive and the perpetual world syncs over the injected window.pear.swarm.v1.
-      // 'Run app' browses the drive (where swarm.v1 is injected) — no separate window.
-      name: 'HiveWorm',
-      link: 'hyper://e3f910d11e70044afe361b1cecfb5cfb3c4f61f600cc81c2365ba0e6f58c8d4d/',
-      type: 'standalone',
-      author: 'HiveWorm',
-      categories: ['games'],
-      description: 'Perpetual P2P life-sim — a shared world that syncs directly between players over Hyperswarm. No server.',
-      verification: 'unverified'
+      "name": "P2P Builders",
+      "type": "hypersite",
+      "driveKey": "8545ce29bedf22d3c6ff682684b626947e4b71e98d874931df7a1d00b70db5b7",
+      "author": "bigdestiny2",
+      "categories": [
+        "community",
+        "site"
+      ],
+      "description": "Permissionless peer-to-peer hacker news for anons who build P2P. Runs in your terminal — no servers, no accounts.",
+      "version": "1.0.0",
+      "verification": "relay-listed"
     },
     {
-      name: 'anonGPT',
-      link: 'pear://rpzh3fsgg38kfir9nmae7x3o8ubofddzzixr5js4mxd6a6drb6wo',
-      type: 'standalone',
-      author: 'anonGPT',
-      categories: ['ai', 'featured'],
-      description: 'Private P2P AI chat — pay-per-inference from a HiveMind seller, with signed receipts.',
-      verification: 'relay-listed'
+      "name": "Pear Dealroom",
+      "type": "standalone",
+      "driveKey": "0724aabf2ad6394983f91c6b24ebd417cb3d25addcf29c98eb246c512dc77f90",
+      "link": "pear://7octu5dimjye8rn68raehwuetk5mttzt4zxh6yjw1eqktn49bq7o",
+      "author": "defidon",
+      "categories": [
+        "productivity",
+        "security"
+      ],
+      "description": "Zero-infrastructure P2P virtual data room for M&A and due diligence. End-to-end encrypted documents, a signed tamper-evident audit trail, and cryptographic access tiers — no cloud, no server, no vendor. Built on Holepunch.",
+      "version": "1.0.0",
+      "verification": "relay-listed"
     },
     {
-      // Pear POS — ONE app entry with BOTH a browsable landing page (driveKey,
-      // pinned on HiveRelay) and a launchable native register (link). On the Apps
-      // page this shows "Open page" (hyper://b776f15f…/) + "Run app" (pear://e1uchyxc…).
-      name: 'Pear POS',
-      driveKey: 'b776f15f3e6860ecf6d923853c295350e55b708772e67d7124899b96aecfcd43',
-      link: 'pear://e1uchyxceqgybdeab44ks7har9pu9fw6y5ehtjjs19dhowajtcmo',
-      type: 'standalone',
-      author: 'Pear POS',
-      categories: ['business', 'commerce', 'featured'],
-      description: 'Peer-to-peer, offline-first point of sale — AI scanning, self-custodial USD₮ & Bitcoin, multi-terminal sync. $0 forever.',
-      verification: 'relay-listed'
+      "name": "Paste",
+      "type": "standalone",
+      "link": "pear://u6oyh38gcn3ouk6wnzpoetzpeg7gs1w5s9f5aw5quocr1eubsoiy",
+      "author": "defidon",
+      "categories": [
+        "productivity",
+        "security",
+        "tools"
+      ],
+      "description": "Local-first, end-to-end encrypted notes & clipboard sync for your own devices. No account, no hosted database, no plaintext replication — built on Pear, Holepunch, Hypercore, Hyperbee, Autobase and Hyperswarm. Tap-to-decrypt rows keep secrets sealed until you reveal them. Desktop (macOS / Windows / Linux) + Expo mobile.",
+      "version": "0.1.0",
+      "verification": "relay-listed"
     },
     {
-      // PearBrowser landing site — published Hyperdrive, seeded on HiveRelay, runs
-      // in a tab (hypersite). Re-publish: node scripts/publish-and-pin.js
-      // ../../03-sites/p2p-sites/pearbrowser --name pearbrowser-home --key 1868916a…
-      // --storage ../../03-sites/pearbrowser-publishers/seed-pearbrowser
-      name: 'PearBrowser',
-      driveKey: '1868916a7a282ff0f211b11b536e9642828c32d3a817a254e1ef7e602709e25d',
-      type: 'hypersite',
-      author: 'bigdestiny2',
-      categories: ['browser', 'featured'],
-      description: 'The browser for the peer-to-peer web — browse hyper://, install Pear apps, publish sites pinned 24/7, and search through people you trust with Lighthouse.',
-      verification: 'relay-listed'
+      "name": "PearPoker",
+      "type": "standalone",
+      "driveKey": "850929ab0b7f1eb927dd69c6ae057af0a43fba1ced4c33e0df2e7cff0ee92268",
+      "link": "pear://owr1ukamxhxm1j67p8dkhbm46n1d9qoh7igd8ag9f36x6dzjrjwy",
+      "author": "bigdestiny2",
+      "categories": [
+        "games",
+        "social",
+        "p2p"
+      ],
+      "description": "Peer-to-peer poker — play directly between players over Hyperswarm. No server, no house, no rake.",
+      "version": "1.0.0",
+      "verification": "relay-listed"
     },
     {
-      // HiveRelay landing site. Re-publish: --name p2phiverelay --key 9f2b34aa…
-      // --storage ../../03-sites/pearbrowser-publishers/seed-hiverelay
-      name: 'HiveRelay',
-      driveKey: '9f2b34aad8cd1a681d5f07d8a76768f0dc92a5008251d02a8600eb0751ad6b5f',
-      type: 'hypersite',
-      author: 'bigdestiny2',
-      categories: ['infrastructure', 'featured'],
-      description: 'The always-on, blind seed backbone for P2P apps — your Hyperdrive stays online after you close your laptop, and the operator never sees your data.',
-      verification: 'relay-listed'
+      "name": "Keet",
+      "type": "standalone",
+      "link": "pear://oeeoz3w6fjjt7bym3ndpa6hhicm8f8naxyk11z4iypeoupn6jzpo",
+      "author": "Holepunch",
+      "categories": [
+        "chat",
+        "communication",
+        "featured"
+      ],
+      "description": "End-to-end encrypted P2P chat, voice, and video calls.",
+      "version": "1.0.0",
+      "verification": "relay-listed"
     },
     {
-      // P2P Builders landing site. Re-publish: --name p2pbuilders --key 8545ce29…
-      // --storage ../../03-sites/pearbrowser-publishers/seed-p2pbuilders
-      name: 'P2P Builders',
-      driveKey: '8545ce29bedf22d3c6ff682684b626947e4b71e98d874931df7a1d00b70db5b7',
-      type: 'hypersite',
-      author: 'bigdestiny2',
-      categories: ['community'],
-      description: 'Where the people building peer-to-peer hang out — a permissionless, server-less board and the front door to the whole Pear ecosystem of real apps.',
-      verification: 'relay-listed'
+      "name": "PearPass",
+      "type": "standalone",
+      "link": "pear://tywsat7gz8m65ejx4zjn3773pbdc4j8m66tukis8dgzekraymtzo",
+      "author": "Tether",
+      "categories": [
+        "security",
+        "utilities",
+        "featured"
+      ],
+      "description": "Peer-to-peer password manager — synced across devices without a cloud.",
+      "version": "1.0.0",
+      "verification": "relay-listed"
     },
     {
-      // Paste (pearpaste) landing — published Hyperdrive, pinned on HiveRelay.
-      name: 'Paste',
-      driveKey: '25a06bb3dddec8138e9eda606cc4a11e9ebbe47815fd5d22064b30cff752bb5b',
-      type: 'hypersite',
-      author: 'defidon',
-      categories: ['productivity', 'security'],
-      description: 'Local-first, end-to-end encrypted notes & clipboard sync for your own devices — no account, no server, no plaintext replication.',
-      verification: 'relay-listed'
+      "name": "HiveWorm",
+      "type": "standalone",
+      "link": "hyper://e3f910d11e70044afe361b1cecfb5cfb3c4f61f600cc81c2365ba0e6f58c8d4d/",
+      "author": "HiveWorm",
+      "categories": [
+        "games"
+      ],
+      "description": "Perpetual P2P life-sim — a shared world that syncs directly between players over Hyperswarm. No server.",
+      "version": "1.0.0",
+      "verification": "unverified"
     },
     {
-      // Pear Dealroom landing — published Hyperdrive, pinned on HiveRelay.
-      name: 'Pear Dealroom',
-      driveKey: '0724aabf2ad6394983f91c6b24ebd417cb3d25addcf29c98eb246c512dc77f90',
-      type: 'hypersite',
-      author: 'defidon',
-      categories: ['productivity', 'security'],
-      description: 'Zero-infrastructure E2EE virtual data room for M&A — a signed tamper-evident audit trail and cryptographic access tiers, no cloud.',
-      verification: 'relay-listed'
+      "name": "anonGPT",
+      "type": "standalone",
+      "link": "pear://rpzh3fsgg38kfir9nmae7x3o8ubofddzzixr5js4mxd6a6drb6wo",
+      "author": "anonGPT",
+      "categories": [
+        "ai",
+        "featured"
+      ],
+      "description": "Private P2P AI chat — pay-per-inference from a HiveMind seller, with signed receipts.",
+      "version": "1.0.0",
+      "verification": "relay-listed"
     },
     {
-      // Pear Tickets — landing page (driveKey, pinned) + the runnable ticketing
-      // app (pear:// link, seeded + reachable). Open page → hyper://ec309f51…/ ;
-      // Run app → pear://gsnmwo4k… (3584ba43…, verify-pin OK).
-      name: 'Pear Tickets',
-      driveKey: 'ec309f516da659718746fe10ded086e2b6d157718c3e3651f86e07a4df34210a',
-      link: 'pear://gsnmwo4kdopbcif44wgt9k1ysmwwn1erh4o1358kis1ebtwbpouy',
-      type: 'standalone',
-      author: 'bigdestiny2',
-      categories: ['commerce', 'productivity'],
-      description: 'Offline-capable, signed-Hypercore event ticketing — Lightning, Cashu, and Stripe.',
-      verification: 'relay-listed'
+      "name": "Pear POS",
+      "type": "standalone",
+      "driveKey": "b776f15f3e6860ecf6d923853c295350e55b708772e67d7124899b96aecfcd43",
+      "link": "pear://e1uchyxceqgybdeab44ks7har9pu9fw6y5ehtjjs19dhowajtcmo",
+      "author": "Pear POS",
+      "categories": [
+        "business",
+        "commerce",
+        "featured"
+      ],
+      "description": "Peer-to-peer, offline-first point of sale — AI scanning, self-custodial USD₮ & Bitcoin, multi-terminal sync. $0 forever.",
+      "version": "1.0.0",
+      "verification": "relay-listed"
     },
     {
-      // PearPoker — runnable P2P poker app. Drive/project key 850929ab… resolved
-      // from the pear:// link via `pear info`. (author/verification: confirm.)
-      name: 'PearPoker',
-      link: 'pear://owr1ukamxhxm1j67p8dkhbm46n1d9qoh7igd8ag9f36x6dzjrjwy',
-      type: 'standalone',
-      author: 'PearPoker',
-      categories: ['games'],
-      description: 'Peer-to-peer poker — play directly between players over Hyperswarm. No server, no house, no rake.',
-      verification: 'unverified'
+      "name": "Pear Tickets",
+      "type": "standalone",
+      "driveKey": "ec309f516da659718746fe10ded086e2b6d157718c3e3651f86e07a4df34210a",
+      "link": "pear://gsnmwo4kdopbcif44wgt9k1ysmwwn1erh4o1358kis1ebtwbpouy",
+      "author": "bigdestiny2",
+      "categories": [
+        "commerce",
+        "productivity"
+      ],
+      "description": "Offline-capable, signed-Hypercore event ticketing — Lightning, Cashu, and Stripe.",
+      "version": "1.0.0",
+      "verification": "relay-listed"
     }
   ]
 }
