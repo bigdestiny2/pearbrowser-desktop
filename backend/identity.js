@@ -381,6 +381,23 @@ class Identity {
     return secp.nip01Sign({ ...ev, pubkey: this.getNostrPublicKey() }, this._nostrSecretHex(), aux)
   }
 
+  /** NOSTR2 — mint a cross-curve binding linking our pear root ↔ our Nostr key,
+   *  signed by BOTH (ed25519 root + secp256k1 nostr). `epoch` is monotonic. */
+  makeNostrBinding (epoch, auxRandHex) {
+    const nb = require('./nostr-bind.cjs')
+    const rootPubkey = b4a.toString(this.getSigningKeypair().publicKey, 'hex')
+    return nb.makeNostrBind(
+      { rootPubkey, nostrPubkey: this.getNostrPublicKey(), epoch },
+      (msg) => this.sign(msg).signature, // ed25519 root attestation
+      (msg32Hex) => this.nostrSign(msg32Hex, auxRandHex) // secp256k1 nostr attestation
+    )
+  }
+
+  /** Verify a peer's cross-curve binding against their (Contacts-held) root. */
+  verifyNostrBinding (bind, expectedRootPubkey) {
+    return require('./nostr-bind.cjs').verifyNostrBind(bind, expectedRootPubkey)
+  }
+
   /**
    * Sign with the per-app sub-key (not the root). Safe to expose to
    * pages — the root remains sealed inside the worklet.
