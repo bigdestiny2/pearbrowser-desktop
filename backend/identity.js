@@ -342,6 +342,45 @@ class Identity {
     return { ...this._deriveSubkey('pear-session-v1:', String(sessionSalt == null ? '' : sessionSalt)), sessionSalt }
   }
 
+  // --- Nostr (secp256k1 / BIP-340) — NOSTR0 -----------------------------------
+  // Derived deterministically from the root seed via the Bare-loadable
+  // secp256k1-bundle.cjs (SPIKE-SCHNORR-BARE). The nsec (secret) stays SEALED in
+  // here — callers only get the public key + sign/verify, never the secret.
+
+  _nostrSecretHex () {
+    if (!this._seed) throw new Error('Identity not ready')
+    const hash = crypto.createHash('sha256')
+    hash.update(this._seed)
+    hash.update('pear-nostr-v1:')
+    return b4a.toString(hash.digest(), 'hex')
+  }
+
+  /** The user's Nostr x-only public key (hex). Stable across devices/restores. */
+  getNostrPublicKey () {
+    return require('./secp256k1-bundle.cjs').schnorrGetPublicKey(this._nostrSecretHex())
+  }
+
+  /** Schnorr-sign a 32-byte message hash with the Nostr key. We supply aux
+   *  randomness from bare-crypto (the bundle's default uses a WebCrypto global
+   *  that isn't guaranteed under Bare). */
+  nostrSign (msg32Hex, auxRandHex) {
+    const aux = auxRandHex || b4a.toString(crypto.randomBytes(32), 'hex')
+    return require('./secp256k1-bundle.cjs').schnorrSign(msg32Hex, this._nostrSecretHex(), aux)
+  }
+
+  /** Verify ANY party's Nostr (BIP-340) signature — pure, needs only the pubkey. */
+  nostrVerify (sigHex, msg32Hex, pubkeyHex) {
+    return require('./secp256k1-bundle.cjs').schnorrVerify(sigHex, msg32Hex, pubkeyHex)
+  }
+
+  /** Sign a NIP-01 event { kind, created_at, tags, content } with our Nostr key —
+   *  fills pubkey, computes the event id, attaches the signature. */
+  nostrSignEvent (ev, auxRandHex) {
+    const secp = require('./secp256k1-bundle.cjs')
+    const aux = auxRandHex || b4a.toString(crypto.randomBytes(32), 'hex')
+    return secp.nip01Sign({ ...ev, pubkey: this.getNostrPublicKey() }, this._nostrSecretHex(), aux)
+  }
+
   /**
    * Sign with the per-app sub-key (not the root). Safe to expose to
    * pages — the root remains sealed inside the worklet.
