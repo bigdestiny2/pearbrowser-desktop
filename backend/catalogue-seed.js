@@ -119,10 +119,13 @@ module.exports = {
       verification: 'relay-listed'
     },
     {
-      // Pear Tickets landing — published Hyperdrive (ec309f51…), pinned on HiveRelay.
+      // Pear Tickets — landing page (driveKey, pinned) + the runnable ticketing
+      // app (pear:// link, seeded + reachable). Open page → hyper://ec309f51…/ ;
+      // Run app → pear://gsnmwo4k… (3584ba43…, verify-pin OK).
       name: 'Pear Tickets',
       driveKey: 'ec309f516da659718746fe10ded086e2b6d157718c3e3651f86e07a4df34210a',
-      type: 'hypersite',
+      link: 'pear://gsnmwo4kdopbcif44wgt9k1ysmwwn1erh4o1358kis1ebtwbpouy',
+      type: 'standalone',
       author: 'bigdestiny2',
       categories: ['commerce', 'productivity'],
       description: 'Offline-capable, signed-Hypercore event ticketing — Lightning, Cashu, and Stripe.',
