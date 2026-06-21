@@ -1288,7 +1288,10 @@ async function ensureNameRegistry ({ create = false } = {}) {
   }
   if (!create) return null
   const encKey = require('crypto').randomBytes(32).toString('hex')
-  const mint = await new NameRegistry(store, { bootstrap: null, encryptionKey: encKey, namespace: 'namereg-mint-' + Date.now() }).ready()
+  // Mint the autobase key, then reopen by key (mirrors ensureBrowserSync). The
+  // store is namespaced inside the helper, so mint.close() frees only the
+  // registry's substore — never the shared root Corestore.
+  const mint = await new NameRegistry(store, { bootstrap: null, encryptionKey: encKey }).ready()
   const mintedKey = mint.key
   await mint.close()
   await requireUserData().setSettings({ nameRegKey: mintedKey, nameRegEncKey: encKey })
@@ -1368,12 +1371,22 @@ rpc.handle(C.CMD_NAMEREG_RESOLVE, async ({ name } = {}) => {
 
 rpc.handle(C.CMD_NAMEREG_CLAIM, async ({ name, target } = {}) => {
   await whenReady(); await requireNaming()
+  // Pre-validate BEFORE minting, so garbage input never creates a registry or
+  // appends a dead op. A name that normalizes to empty (all-invisible) or exceeds
+  // MAX_NAME would be silently dropped by the reducer → a confusing {ok, null}.
+  const { normalize } = require('./name-normalize.cjs')
+  const { MAX_NAME } = require('./name-registry-ops.cjs')
   if (typeof name !== 'string' || !name.trim()) throw new Error('name required')
+  if (name.length > MAX_NAME || !normalize(name)) throw new Error('invalid name (too long, or empty after normalization)')
   if (typeof target !== 'string' || !/^[0-9a-f]{64}$/i.test(target)) throw new Error('target must be a 64-hex drive key')
   const reg = await ensureNameRegistry({ create: true })
   const { owner, ownerSign } = nameRegSigner()
   await reg.claim({ name, target: target.toLowerCase(), owner }, ownerSign)
-  return { ok: true, resolved: await reg.resolve(name) }
+  const resolved = await reg.resolve(name)
+  // A null resolve after a well-formed claim means the reducer rejected it —
+  // homograph-blocked or already held by someone else. Report it honestly.
+  if (!resolved) throw new Error('Name unavailable — already held or blocked as a look-alike of an existing name.')
+  return { ok: true, resolved }
 })
 
 rpc.handle(C.CMD_NAMEREG_ROTATE, async ({ name, target } = {}) => {

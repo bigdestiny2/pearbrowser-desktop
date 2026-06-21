@@ -33,6 +33,15 @@ function createEncryptedAutobaseManager (store, opts = {}) {
   const viewName = opts.viewName || `eab-${ns}-view`
   const valueEncoding = opts.viewValueEncoding || 'json'
   const applyOp = typeof opts.applyOp === 'function' ? opts.applyOp : async () => {}
+  // CRITICAL: give the Autobase its OWN namespaced substore (keyed by the unique
+  // viewName) rather than the raw store. base.close() runs store.close(); on the
+  // shared ROOT Corestore that would tear down Hyperdrive/UserData/Names/
+  // replication for the WHOLE app (a single consumer's close kills everything).
+  // A namespace session's close() frees only its own cores, leaving the root
+  // alive. A distinct viewName per consumer also prevents cross-consumer core
+  // collisions on one shared store. The namespace MUST wrap the store passed to
+  // new Autobase — opts.namespace alone (used only for the view name) does not.
+  const baseStore = typeof store.namespace === 'function' ? store.namespace('eab-' + viewName) : store
   let base = null
 
   const handlers = {
@@ -53,7 +62,7 @@ function createEncryptedAutobaseManager (store, opts = {}) {
   if (encryptionKey) handlers.encryptionKey = encryptionKey // blind-pin: relay holds bytes, can't read
 
   return {
-    async ready () { base = new Autobase(store, bootstrap, handlers); await base.ready(); return this },
+    async ready () { base = new Autobase(baseStore, bootstrap, handlers); await base.ready(); return this },
     get base () { return base },
     get view () { return base && base.view },
     get writable () { return !!(base && base.writable) },
