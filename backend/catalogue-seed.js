@@ -113,6 +113,36 @@ module.exports = {
       categories: ['community'],
       description: 'Where the people building peer-to-peer hang out — a permissionless, server-less board and the front door to the whole Pear ecosystem of real apps.',
       verification: 'relay-listed'
+    },
+    {
+      // Paste (pearpaste) landing — published Hyperdrive, pinned on HiveRelay.
+      name: 'Paste',
+      driveKey: '25a06bb3dddec8138e9eda606cc4a11e9ebbe47815fd5d22064b30cff752bb5b',
+      type: 'hypersite',
+      author: 'defidon',
+      categories: ['productivity', 'security'],
+      description: 'Local-first, end-to-end encrypted notes & clipboard sync for your own devices — no account, no server, no plaintext replication.',
+      verification: 'relay-listed'
+    },
+    {
+      // Pear Dealroom landing — published Hyperdrive, pinned on HiveRelay.
+      name: 'Pear Dealroom',
+      driveKey: '0724aabf2ad6394983f91c6b24ebd417cb3d25addcf29c98eb246c512dc77f90',
+      type: 'hypersite',
+      author: 'defidon',
+      categories: ['productivity', 'security'],
+      description: 'Zero-infrastructure E2EE virtual data room for M&A — a signed tamper-evident audit trail and cryptographic access tiers, no cloud.',
+      verification: 'relay-listed'
+    },
+    {
+      // Pear Tickets landing — published Hyperdrive (ec309f51…), pinned on HiveRelay.
+      name: 'Pear Tickets',
+      driveKey: 'ec309f516da659718746fe10ded086e2b6d157718c3e3651f86e07a4df34210a',
+      type: 'hypersite',
+      author: 'bigdestiny2',
+      categories: ['commerce', 'productivity'],
+      description: 'Offline-capable, signed-Hypercore event ticketing — Lightning, Cashu, and Stripe.',
+      verification: 'relay-listed'
     }
   ]
 }
