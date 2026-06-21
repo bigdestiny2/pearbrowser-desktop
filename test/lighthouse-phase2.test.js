@@ -25,23 +25,36 @@ test('verifyAppSig validates a domain-separated per-app signature', () => {
 
 // --- identity-binding: versioned binding + first-use auth ----------------------
 
-test('verifyBinding authenticates against the Contacts-held root, not a self-asserted one', () => {
+test('verifyBinding authenticates against the Contacts-held root (+ purpose)', () => {
   const root = crypto.keyPair()
   const attacker = crypto.keyPair()
   const rootHex = hex(root.publicKey)
   const search1 = hex(crypto.keyPair().publicKey)
 
-  const binding = ib.makeBinding({ rootPubkey: rootHex, searchPubkey: search1, version: 1 }, signer(root))
-  assert.equal(ib.verifyBinding(binding, rootHex), true)
+  const binding = ib.makeBinding({ rootPubkey: rootHex, searchPubkey: search1, purpose: 'search', version: 1 }, signer(root))
+  assert.equal(ib.verifyBinding(binding, rootHex, 'search'), true)
 
   // MITM: attacker presents a binding claiming the victim's rootPubkey but signs
   // it with their own key → fails against the Contacts-held root pubkey.
-  const forged = ib.makeBinding({ rootPubkey: rootHex, searchPubkey: hex(attacker.publicKey), version: 1 }, signer(attacker))
-  assert.equal(ib.verifyBinding(forged, rootHex), false)
+  const forged = ib.makeBinding({ rootPubkey: rootHex, searchPubkey: hex(attacker.publicKey), purpose: 'search', version: 1 }, signer(attacker))
+  assert.equal(ib.verifyBinding(forged, rootHex, 'search'), false)
   // and a binding for a different root must not verify against rootHex
-  const otherHex = hex(attacker.publicKey)
-  const otherBinding = ib.makeBinding({ rootPubkey: otherHex, searchPubkey: search1, version: 1 }, signer(attacker))
-  assert.equal(ib.verifyBinding(otherBinding, rootHex), false)
+  const otherBinding = ib.makeBinding({ rootPubkey: hex(attacker.publicKey), searchPubkey: search1, purpose: 'search', version: 1 }, signer(attacker))
+  assert.equal(ib.verifyBinding(otherBinding, rootHex, 'search'), false)
+})
+
+test('cross-purpose replay: a binding for one purpose never satisfies another', () => {
+  const root = crypto.keyPair(); const rootHex = hex(root.publicKey)
+  const sk = hex(crypto.keyPair().publicKey)
+  // a perfectly valid NOSTR binding (right root, right signature)...
+  const nostr = ib.makeBinding({ rootPubkey: rootHex, searchPubkey: sk, purpose: 'nostr', version: 1 }, signer(root))
+  assert.equal(ib.verifyBinding(nostr, rootHex, 'nostr'), true)
+  // ...must NOT verify as a SEARCH binding, even with the valid root signature
+  assert.equal(ib.verifyBinding(nostr, rootHex, 'search'), false)
+  // and resolveSearchKey (purpose 'search') ignores it entirely
+  assert.equal(ib.resolveSearchKey(rootHex, [nostr], []), null)
+  // makeBinding requires a purpose
+  assert.throws(() => ib.makeBinding({ rootPubkey: rootHex, searchPubkey: sk, version: 1 }, signer(root)), /purpose/)
 })
 
 test('resolveSearchKey rotates to the highest non-revoked version', () => {
@@ -49,41 +62,39 @@ test('resolveSearchKey rotates to the highest non-revoked version', () => {
   const rootHex = hex(root.publicKey)
   const sk1 = hex(crypto.keyPair().publicKey)
   const sk2 = hex(crypto.keyPair().publicKey)
-  const b1 = ib.makeBinding({ rootPubkey: rootHex, searchPubkey: sk1, version: 1 }, signer(root))
-  const b2 = ib.makeBinding({ rootPubkey: rootHex, searchPubkey: sk2, version: 2 }, signer(root))
+  const b1 = ib.makeBinding({ rootPubkey: rootHex, searchPubkey: sk1, purpose: 'search', version: 1 }, signer(root))
+  const b2 = ib.makeBinding({ rootPubkey: rootHex, searchPubkey: sk2, purpose: 'search', version: 2 }, signer(root))
 
   assert.equal(ib.resolveSearchKey(rootHex, [b1, b2], []), sk2, 'highest version wins (rotation)')
 
   // revoke v2 → falls back to v1
-  const rev = ib.makeRevocation({ rootPubkey: rootHex, searchPubkey: sk2, version: 2 }, signer(root))
+  const rev = ib.makeRevocation({ rootPubkey: rootHex, searchPubkey: sk2, purpose: 'search', version: 2 }, signer(root))
   assert.equal(ib.resolveSearchKey(rootHex, [b1, b2], [rev]), sk1, 'revoked version drops out')
 
   // a revocation signed by the wrong key is ignored
   const attacker = crypto.keyPair()
-  const fakeRev = ib.makeRevocation({ rootPubkey: rootHex, searchPubkey: sk2, version: 2 }, signer(attacker))
+  const fakeRev = ib.makeRevocation({ rootPubkey: rootHex, searchPubkey: sk2, purpose: 'search', version: 2 }, signer(attacker))
   assert.equal(ib.resolveSearchKey(rootHex, [b1, b2], [fakeRev]), sk2, 'forged revocation ignored')
 })
 
 test('resolveSearchKey breaks equal-version equivocation deterministically', () => {
   const root = crypto.keyPair(); const rootHex = hex(root.publicKey)
-  const bA = ib.makeBinding({ rootPubkey: rootHex, searchPubkey: 'aaa', version: 2 }, signer(root))
-  const bB = ib.makeBinding({ rootPubkey: rootHex, searchPubkey: 'bbb', version: 2 }, signer(root))
+  const bA = ib.makeBinding({ rootPubkey: rootHex, searchPubkey: 'aaa', purpose: 'search', version: 2 }, signer(root))
+  const bB = ib.makeBinding({ rootPubkey: rootHex, searchPubkey: 'bbb', purpose: 'search', version: 2 }, signer(root))
   // same resolution regardless of array order; smaller searchPubkey wins
   assert.equal(ib.resolveSearchKey(rootHex, [bA, bB], []), ib.resolveSearchKey(rootHex, [bB, bA], []))
   assert.equal(ib.resolveSearchKey(rootHex, [bB, bA], []), 'aaa')
 })
 
-test('verifyBinding/verifyRevocation reject a non-integer (string) version', () => {
+test('verifyBinding rejects a non-integer (string) version and non-string searchPubkey', () => {
   const root = crypto.keyPair(); const rootHex = hex(root.publicKey)
-  const cB = 'pear.lighthouse.binding.v2:' + JSON.stringify({ r: rootHex, s: 'sk', v: '10' }, ['r', 's', 'v'])
-  const evilB = { kind: 'binding', v: 2, rootPubkey: rootHex, searchPubkey: 'sk', version: '10', sig: signer(root)(cB) }
-  assert.equal(ib.verifyBinding(evilB, rootHex), false, 'string version must not verify')
-  // and so resolveSearchKey never lets it win / break order-independence
+  const cB = 'pear.idbinding.v3:' + JSON.stringify({ p: 'search', r: rootHex, s: 'sk', v: '10' }, ['p', 'r', 's', 'v'])
+  const evilB = { kind: 'binding', v: 3, rootPubkey: rootHex, searchPubkey: 'sk', purpose: 'search', version: '10', sig: signer(root)(cB) }
+  assert.equal(ib.verifyBinding(evilB, rootHex, 'search'), false, 'string version must not verify')
   assert.equal(ib.resolveSearchKey(rootHex, [evilB], []), null)
-  // searchPubkey must also be a string (number/null reopen the order-dependence)
-  const cS = 'pear.lighthouse.binding.v2:' + JSON.stringify({ r: rootHex, s: 5, v: 1 }, ['r', 's', 'v'])
-  const evilS = { kind: 'binding', v: 2, rootPubkey: rootHex, searchPubkey: 5, version: 1, sig: signer(root)(cS) }
-  assert.equal(ib.verifyBinding(evilS, rootHex), false, 'non-string searchPubkey must not verify')
+  const cS = 'pear.idbinding.v3:' + JSON.stringify({ p: 'search', r: rootHex, s: 5, v: 1 }, ['p', 'r', 's', 'v'])
+  const evilS = { kind: 'binding', v: 3, rootPubkey: rootHex, searchPubkey: 5, purpose: 'search', version: 1, sig: signer(root)(cS) }
+  assert.equal(ib.verifyBinding(evilS, rootHex, 'search'), false, 'non-string searchPubkey must not verify')
 })
 
 // --- digest tier --------------------------------------------------------------

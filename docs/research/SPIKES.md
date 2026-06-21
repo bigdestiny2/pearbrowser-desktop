@@ -11,7 +11,7 @@ dep. All gates below are real and unstarted unless noted.
 
 1. **SPIKE-AUTOBEE-DURABILITY** (~1d) — ✅ **GREEN / RESOLVED** (`test/spike-autobee-durability.test.js`). A fresh never-writer node re-serves the converged view byte-identical after all writers go offline, via a **blind** relay (no encryption key). N5/PAY1/PAY6/NOSTR1 are de-risked. Lesson: re-derive via the Autobase from a replica — do NOT pin the view core standalone.
 2. **SPIKE-SCHNORR-BARE** (~1d) — ✅ **GREEN / RESOLVED** (`backend/secp256k1-bundle.cjs` + `test/nostr-events-ops.test.js`). A self-contained CJS bundle of BIP-340 Schnorr loads via `require()` (zero node-builtin requires → Bare-loadable), matches official BIP-340 vector #1, and signs/verifies NIP-01 events. All of Nostr + anonGPT receipts are unblocked.
-3. **SPIKE-BINDING-COORDINATION** (~1d) — one-time canonical-shape gate for N2/PAY3/NOSTR2/PRIV1; must land before any track publishes bindings (free to cut now — no live bindings).
+3. **SPIKE-BINDING-COORDINATION** (~1d) — ✅ **GREEN / DONE**. `identity-binding.cjs` is now v3 with a signed `purpose` field {search|name|merchant|nostr|routing}; `verifyBinding`/`verifyRevocation` require the expected purpose, so a 'search' binding can't replay as 'nostr'/'merchant'. Clean v2→v3 cut (no live bindings). The search spine + federation smoke still pass.
 4. **SEC0 seed-at-rest** (~2d) — gates real-user PAY2/NOSTR2/N2. **Crypto core + identity integration already built this session** (`1f8bf02`); only first-run migration + boot-unlock UX remain.
 5. **SPIKE-LN** (~3d) — gates PAY-Lightning + NOSTR8 only; runs after SCHNORR-BARE proves bundling.
 6. **PRIV3-ANONYMITY** (~4.5d research) — gates only the optional onion-overlay L2; sequence late.
@@ -43,7 +43,9 @@ dep. All gates below are real and unstarted unless noted.
 **GREEN:** bundle loads under `require()`, all vectors pass, NIP-01 ids byte-exact.
 **RED fallback (2–3d):** diagnose bundler vs runtime; vendor a minimal audited BIP-340 impl under security review — never ship Schnorr without a correctness proof.
 
-## 3. SPIKE-BINDING-COORDINATION  (~1d)
+## 3. SPIKE-BINDING-COORDINATION  (~1d) — ✅ GREEN / DONE (2026-06-21)
+**Verdict:** DONE. `identity-binding.cjs` bumped v2→v3 (`pear.idbinding.v3:`): `purpose` is in the SIGNED canonical bytes (`canonBinding`/`canonRevoke` over `{p,r,s,v}`), `makeBinding`/`makeRevocation` require it, and `verifyBinding`/`verifyRevocation` take + match an `expectedPurpose` — a 'nostr' binding can't satisfy a 'search' resolve even with a valid root sig. `resolveSearchKey` filters to `purpose='search'`. Publisher mints/revokes with `PURPOSE_SEARCH`; field stays named `searchPubkey` (the bound sub-key, generic across purposes). `test/lighthouse-phase2.test.js` adds a cross-purpose-replay test; full suite 259/259 + federation smoke pass. Clean cut — no live bindings predated v3. N2/PAY3/NOSTR2/PRIV1 can publish bindings safely.
+
 **Q:** Add a `purpose` field to IdentityBinding so search/name/merchant/nostr/routing bindings are cryptographically isolated (no cross-purpose replay)?
 **Gates:** the federation phases of N2/PAY3/NOSTR2/PRIV1.
 **Experiment:** bump `BINDING_TAG` v2→v3; include `purpose` in `canonBinding`/`canonRevoke` bytes; `makeBinding`/`verifyBinding` take + check it (different purpose → different sig → fail-closed). Coordinate the schema cut across tracks NOW (no live bindings = free migration).

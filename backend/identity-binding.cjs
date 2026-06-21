@@ -44,35 +44,49 @@ function verifyAppSig (appId, payload, sigHex, pubkeyHex, namespace = '') {
 // which is seed-derived and therefore unrotatable). A revocation (same version)
 // invalidates a binding.
 
-const BINDING_TAG = 'pear.lighthouse.binding.v2:'
-const REVOKE_TAG = 'pear.lighthouse.revoke.v2:'
+const BINDING_TAG = 'pear.idbinding.v3:'
+const REVOKE_TAG = 'pear.idbinding.revoke.v3:'
+
+// A binding ties root → a sub-key FOR ONE PURPOSE. `purpose` is in the SIGNED
+// bytes (cross-purpose replay defense): a binding minted for 'search' can never
+// satisfy a 'nostr'/'merchant'/... resolve, even with a valid root signature.
+// Add purposes here as tracks land; every resolver MUST pass the purpose it
+// expects. (v3 cut from v2 is free — no live bindings predate it.)
+const PURPOSES = ['search', 'name', 'merchant', 'nostr', 'routing']
+const PURPOSE_SEARCH = 'search'
 
 // Canonical, stable bytes a binding/revocation signs (sorted keys, no clock).
-function canonBinding (rootPubkey, searchPubkey, version) {
-  return BINDING_TAG + JSON.stringify({ r: rootPubkey, s: searchPubkey, v: version }, ['r', 's', 'v'])
+function canonBinding (rootPubkey, searchPubkey, purpose, version) {
+  return BINDING_TAG + JSON.stringify({ p: purpose, r: rootPubkey, s: searchPubkey, v: version }, ['p', 'r', 's', 'v'])
 }
-function canonRevoke (rootPubkey, searchPubkey, version) {
-  return REVOKE_TAG + JSON.stringify({ r: rootPubkey, s: searchPubkey, v: version }, ['r', 's', 'v'])
+function canonRevoke (rootPubkey, searchPubkey, purpose, version) {
+  return REVOKE_TAG + JSON.stringify({ p: purpose, r: rootPubkey, s: searchPubkey, v: version }, ['p', 'r', 's', 'v'])
 }
 
 // `rootSign(msgString) -> sigHex` signs with the user's ROOT key (identity.sign
-// in the app; a test stub otherwise).
-function makeBinding ({ rootPubkey, searchPubkey, version }, rootSign) {
+// in the app; a test stub otherwise). `searchPubkey` is the bound sub-key (named
+// for the search consumer; generic across purposes).
+function makeBinding ({ rootPubkey, searchPubkey, purpose, version }, rootSign) {
   if (!Number.isInteger(version) || version < 1) throw new Error('version must be a positive integer')
-  const sig = rootSign(canonBinding(rootPubkey, searchPubkey, version))
-  return { kind: 'binding', v: 2, rootPubkey, searchPubkey, version, sig }
+  if (typeof purpose !== 'string' || !purpose) throw new Error('purpose must be a non-empty string')
+  const sig = rootSign(canonBinding(rootPubkey, searchPubkey, purpose, version))
+  return { kind: 'binding', v: 3, rootPubkey, searchPubkey, purpose, version, sig }
 }
 
-function makeRevocation ({ rootPubkey, searchPubkey, version }, rootSign) {
+function makeRevocation ({ rootPubkey, searchPubkey, purpose, version }, rootSign) {
   if (!Number.isInteger(version) || version < 1) throw new Error('version must be a positive integer')
-  const sig = rootSign(canonRevoke(rootPubkey, searchPubkey, version))
-  return { kind: 'revoke', v: 2, rootPubkey, searchPubkey, version, sig }
+  if (typeof purpose !== 'string' || !purpose) throw new Error('purpose must be a non-empty string')
+  const sig = rootSign(canonRevoke(rootPubkey, searchPubkey, purpose, version))
+  return { kind: 'revoke', v: 3, rootPubkey, searchPubkey, purpose, version, sig }
 }
 
 // Verify a binding's root signature against the EXPECTED root pubkey (the one
 // held in Contacts for this peer — NOT binding.rootPubkey, which is attacker-
 // controllable on first sight). This is the MITM defense.
-function verifyBinding (binding, expectedRootPubkey) {
+// Verify a binding's root signature AND that it was minted for `expectedPurpose`.
+// expectedPurpose is REQUIRED — a binding counts only for the EXACT purpose the
+// consumer asks for, so a 'nostr' binding can't satisfy a 'search' resolve.
+function verifyBinding (binding, expectedRootPubkey, expectedPurpose) {
   if (!binding || binding.kind !== 'binding') return false
   // version must be a canonical integer: a string "10" would verify (the sig is
   // over its JSON form) yet break resolveSearchKey's `===`/`>` version logic,
@@ -83,20 +97,23 @@ function verifyBinding (binding, expectedRootPubkey) {
   // array-order-dependent resolution (the equivocation split-view), and a null
   // "winner" collides with the no-key sentinel.
   if (typeof binding.searchPubkey !== 'string' || !binding.searchPubkey) return false
+  // purpose must be a string AND match — cross-purpose replay defense.
+  if (typeof binding.purpose !== 'string' || binding.purpose !== expectedPurpose) return false
   if (binding.rootPubkey !== expectedRootPubkey) return false
   try {
-    return crypto.verify(b4a.from(canonBinding(binding.rootPubkey, binding.searchPubkey, binding.version), 'utf-8'),
+    return crypto.verify(b4a.from(canonBinding(binding.rootPubkey, binding.searchPubkey, binding.purpose, binding.version), 'utf-8'),
       b4a.from(binding.sig, 'hex'), b4a.from(expectedRootPubkey, 'hex'))
   } catch { return false }
 }
 
-function verifyRevocation (rev, expectedRootPubkey) {
+function verifyRevocation (rev, expectedRootPubkey, expectedPurpose) {
   if (!rev || rev.kind !== 'revoke') return false
   if (!Number.isInteger(rev.version) || rev.version < 1) return false
   if (typeof rev.searchPubkey !== 'string' || !rev.searchPubkey) return false
+  if (typeof rev.purpose !== 'string' || rev.purpose !== expectedPurpose) return false
   if (rev.rootPubkey !== expectedRootPubkey) return false
   try {
-    return crypto.verify(b4a.from(canonRevoke(rev.rootPubkey, rev.searchPubkey, rev.version), 'utf-8'),
+    return crypto.verify(b4a.from(canonRevoke(rev.rootPubkey, rev.searchPubkey, rev.purpose, rev.version), 'utf-8'),
       b4a.from(rev.sig, 'hex'), b4a.from(expectedRootPubkey, 'hex'))
   } catch { return false }
 }
@@ -107,11 +124,11 @@ function verifyRevocation (rev, expectedRootPubkey) {
 function resolveSearchKey (expectedRootPubkey, bindings, revocations) {
   const revoked = new Set()
   for (const r of revocations || []) {
-    if (verifyRevocation(r, expectedRootPubkey)) revoked.add(r.version + ':' + r.searchPubkey)
+    if (verifyRevocation(r, expectedRootPubkey, PURPOSE_SEARCH)) revoked.add(r.version + ':' + r.searchPubkey)
   }
   let best = null
   for (const b of bindings || []) {
-    if (!verifyBinding(b, expectedRootPubkey)) continue
+    if (!verifyBinding(b, expectedRootPubkey, PURPOSE_SEARCH)) continue
     if (revoked.has(b.version + ':' + b.searchPubkey)) continue
     // highest version wins; equal-version ties (equivocation — two valid
     // bindings at the same version) broken deterministically by searchPubkey so
@@ -126,4 +143,5 @@ module.exports = {
   appTag, appMessage, verifyAppSig,
   canonBinding, canonRevoke,
   makeBinding, makeRevocation, verifyBinding, verifyRevocation, resolveSearchKey,
+  PURPOSES, PURPOSE_SEARCH,
 }

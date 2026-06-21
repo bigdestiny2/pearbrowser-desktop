@@ -129,7 +129,7 @@ class IdentityBindingPublisher {
     } else {
       if (rotate && current) {
         const rev = this.ib.makeRevocation(
-          { rootPubkey: rootHex, searchPubkey: current.searchPubkey, version: current.version },
+          { rootPubkey: rootHex, searchPubkey: current.searchPubkey, purpose: this.ib.PURPOSE_SEARCH, version: current.version },
           (m) => this._rootSign(m)
         )
         await this.personalIndex.putMeta('revoke!' + current.version, rev)
@@ -137,9 +137,9 @@ class IdentityBindingPublisher {
       if (rotate || !searchKp) searchKp = await this._createSearchKeypair()
       const searchHex = b4a.toString(searchKp.publicKey, 'hex')
       version = (await this._currentVersion()) + 1
-      binding = this.ib.makeBinding({ rootPubkey: rootHex, searchPubkey: searchHex, version }, (m) => this._rootSign(m))
+      binding = this.ib.makeBinding({ rootPubkey: rootHex, searchPubkey: searchHex, purpose: this.ib.PURPOSE_SEARCH, version }, (m) => this._rootSign(m))
       // fail closed: a bad signer wiring must never reach the DHT
-      if (!this.ib.verifyBinding(binding, rootHex)) {
+      if (!this.ib.verifyBinding(binding, rootHex, this.ib.PURPOSE_SEARCH)) {
         throw new Error('binding self-verify failed — root signer wiring is wrong')
       }
       await this.personalIndex.putMeta(BINDING_META, binding)
