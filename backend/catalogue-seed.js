@@ -61,6 +61,7 @@ module.exports = {
       "type": "standalone",
       "driveKey": "0724aabf2ad6394983f91c6b24ebd417cb3d25addcf29c98eb246c512dc77f90",
       "link": "pear://7octu5dimjye8rn68raehwuetk5mttzt4zxh6yjw1eqktn49bq7o",
+      "iconData": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMwYTBkMTIiLz48cGF0aCBkPSJNMzIgMTJsMTYgNnYxMWMwIDExLTcgMTgtMTYgMjMtOS01LTE2LTEyLTE2LTIzVjE4eiIgZmlsbD0iIzU4YTZmZiIvPjxnIHN0cm9rZT0iIzBhMGQxMiIgc3Ryb2tlLXdpZHRoPSIyLjYiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCI+PHBhdGggZD0iTTI2IDI4aDEyTTI2IDM0aDEyTTI2IDQwaDgiLz48L2c+PC9zdmc+",
       "author": "defidon",
       "categories": [
         "productivity",
@@ -73,7 +74,9 @@ module.exports = {
     {
       "name": "Paste",
       "type": "standalone",
-      "link": "pear://u6oyh38gcn3ouk6wnzpoetzpeg7gs1w5s9f5aw5quocr1eubsoiy",
+      "driveKey": "4b41b1c1986b2c70ff8f5a374551ddd6820768a50f47036a26729d5a6d001fa3",
+      "link": "pear://qnax5k8ojtod51ci9qwkrawdof1hx5w3a7gqbueoqnzzq9dw5hfo",
+      "iconData": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMwYTBkMTIiLz48cmVjdCB4PSIxOCIgeT0iMTYiIHdpZHRoPSIyOCIgaGVpZ2h0PSIzNCIgcng9IjQiIGZpbGw9IiM0YWRlODAiLz48cmVjdCB4PSIyNSIgeT0iMTEiIHdpZHRoPSIxNCIgaGVpZ2h0PSI5IiByeD0iMi41IiBmaWxsPSIjNGFkZTgwIiBzdHJva2U9IiMwYTBkMTIiIHN0cm9rZS13aWR0aD0iMiIvPjxnIHN0cm9rZT0iIzBhMGQxMiIgc3Ryb2tlLXdpZHRoPSIyLjYiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCI+PHBhdGggZD0iTTI0IDMwaDE2TTI0IDM2aDE2TTI0IDQyaDEwIi8+PC9nPjwvc3ZnPg==",
       "author": "defidon",
       "categories": [
         "productivity",
@@ -89,6 +92,7 @@ module.exports = {
       "type": "standalone",
       "driveKey": "850929ab0b7f1eb927dd69c6ae057af0a43fba1ced4c33e0df2e7cff0ee92268",
       "link": "pear://owr1ukamxhxm1j67p8dkhbm46n1d9qoh7igd8ag9f36x6dzjrjwy",
+      "iconData": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMwYTBkMTIiLz48cGF0aCBkPSJNMzIgMTNDMjEgMjUgMTUgMjkgMTUgMzdhOCA4IDAgMCAwIDE0IDVjLTEgNC0zIDYtNiA5aDE4Yy0zLTMtNS01LTYtOWE4IDggMCAwIDAgMTQtNWMwLTgtNi0xMi0xNy0yNHoiIGZpbGw9IiMzZmI5NTAiLz48L3N2Zz4=",
       "author": "bigdestiny2",
       "categories": [
         "games",
@@ -103,6 +107,7 @@ module.exports = {
       "name": "Keet",
       "type": "standalone",
       "link": "pear://oeeoz3w6fjjt7bym3ndpa6hhicm8f8naxyk11z4iypeoupn6jzpo",
+      "iconData": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMwYTBkMTIiLz48cGF0aCBkPSJNMTQgMjFhNiA2IDAgMCAxIDYtNmgyNGE2IDYgMCAwIDEgNiA2djE1YTYgNiAwIDAgMS02IDZIMjlsLTEwIDh2LThhNiA2IDAgMCAxLTUtNnoiIGZpbGw9IiNmYmJmMjQiLz48ZyBmaWxsPSIjMGEwZDEyIj48Y2lyY2xlIGN4PSIyNSIgY3k9IjI4LjUiIHI9IjIuNiIvPjxjaXJjbGUgY3g9IjMzIiBjeT0iMjguNSIgcj0iMi42Ii8+PGNpcmNsZSBjeD0iNDEiIGN5PSIyOC41IiByPSIyLjYiLz48L2c+PC9zdmc+",
       "author": "Holepunch",
       "categories": [
         "chat",
@@ -117,6 +122,7 @@ module.exports = {
       "name": "PearPass",
       "type": "standalone",
       "link": "pear://tywsat7gz8m65ejx4zjn3773pbdc4j8m66tukis8dgzekraymtzo",
+      "iconData": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMwYTBkMTIiLz48cmVjdCB4PSIxOCIgeT0iMzAiIHdpZHRoPSIyOCIgaGVpZ2h0PSIyMiIgcng9IjQiIGZpbGw9IiMzZmI5NTAiLz48cGF0aCBkPSJNMjQgMzB2LTZhOCA4IDAgMCAxIDE2IDB2NiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjM2ZiOTUwIiBzdHJva2Utd2lkdGg9IjQiLz48Y2lyY2xlIGN4PSIzMiIgY3k9IjM5IiByPSIzLjQiIGZpbGw9IiMwYTBkMTIiLz48cmVjdCB4PSIzMC41IiB5PSIzOSIgd2lkdGg9IjMiIGhlaWdodD0iOCIgcng9IjEuNSIgZmlsbD0iIzBhMGQxMiIvPjwvc3ZnPg==",
       "author": "Tether",
       "categories": [
         "security",
@@ -131,6 +137,7 @@ module.exports = {
       "name": "HiveWorm",
       "type": "standalone",
       "link": "hyper://e3f910d11e70044afe361b1cecfb5cfb3c4f61f600cc81c2365ba0e6f58c8d4d/",
+      "iconData": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMwYTBkMTIiLz48ZyBmaWxsPSIjYTM3MWY3Ij48Y2lyY2xlIGN4PSIxOSIgY3k9IjQ0IiByPSI3Ii8+PGNpcmNsZSBjeD0iMjkiIGN5PSI0MCIgcj0iNyIvPjxjaXJjbGUgY3g9IjM5IiBjeT0iMzMiIHI9IjcuNSIvPjxjaXJjbGUgY3g9IjQ2IiBjeT0iMjQiIHI9IjgiLz48L2c+PGcgZmlsbD0iIzBhMGQxMiI+PGNpcmNsZSBjeD0iNDgiIGN5PSIyMiIgcj0iMS43Ii8+PGNpcmNsZSBjeD0iNDQiIGN5PSIyMC41IiByPSIxLjciLz48L2c+PC9zdmc+",
       "author": "HiveWorm",
       "categories": [
         "games"
@@ -143,6 +150,7 @@ module.exports = {
       "name": "anonGPT",
       "type": "standalone",
       "link": "pear://rpzh3fsgg38kfir9nmae7x3o8ubofddzzixr5js4mxd6a6drb6wo",
+      "iconData": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMwYTBkMTIiLz48cGF0aCBkPSJNMTQgMjFhNiA2IDAgMCAxIDYtNmgyNGE2IDYgMCAwIDEgNiA2djE1YTYgNiAwIDAgMS02IDZIMjlsLTEwIDh2LThhNiA2IDAgMCAxLTUtNnoiIGZpbGw9IiMyMmQzZWUiLz48cGF0aCBkPSJNMzMgMjBsMi4zIDUuNyA1LjcgMi4zLTUuNyAyLjMtMi4zIDUuNy0yLjMtNS43LTUuNy0yLjMgNS43LTIuM3oiIGZpbGw9IiMwYTBkMTIiLz48L3N2Zz4=",
       "author": "anonGPT",
       "categories": [
         "ai",
@@ -156,7 +164,7 @@ module.exports = {
       "name": "Pear POS",
       "type": "standalone",
       "driveKey": "b776f15f3e6860ecf6d923853c295350e55b708772e67d7124899b96aecfcd43",
-      "link": "pear://e1uchyxceqgybdeab44ks7har9pu9fw6y5ehtjjs19dhowajtcmo",
+      "link": "pear://myhk94sz7tokqcs58173xe7359c6nd9enwrm7z7xrthy9xsr7ehy",
       "author": "Pear POS",
       "categories": [
         "business",
@@ -172,6 +180,7 @@ module.exports = {
       "type": "standalone",
       "driveKey": "ec309f516da659718746fe10ded086e2b6d157718c3e3651f86e07a4df34210a",
       "link": "pear://gsnmwo4kdopbcif44wgt9k1ysmwwn1erh4o1358kis1ebtwbpouy",
+      "iconData": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMwYTBkMTIiLz48cGF0aCBkPSJNMTQgMjRoMzZhNCA0IDAgMCAxIDQgNHYxLjVhMy4yIDMuMiAwIDAgMCAwIDYuNFYzN2E0IDQgMCAwIDEtNCA0SDE0YTQgNCAwIDAgMS00LTR2LTEuMWEzLjIgMy4yIDAgMCAwIDAtNi40VjI4YTQgNCAwIDAgMSA0LTR6IiBmaWxsPSIjZmJiZjI0Ii8+PHBhdGggZD0iTTQwIDI2djEzIiBzdHJva2U9IiMwYTBkMTIiIHN0cm9rZS13aWR0aD0iMi40IiBzdHJva2UtZGFzaGFycmF5PSIzIDMiLz48L3N2Zz4=",
       "author": "bigdestiny2",
       "categories": [
         "commerce",
