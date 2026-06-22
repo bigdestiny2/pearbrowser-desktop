@@ -206,6 +206,7 @@ const EVT_SWARM_REQUEST = 107
 // Lighthouse Phase 2 — federated search push results + binding lifecycle.
 const EVT_SEARCH_FEDERATED = 108           // { queryId, results, phase:'enriched', verifyBudgetExhausted, digestHit, fallbackPull, partial, provenance }
 const EVT_IDENTITY_BINDING_PUBLISHED = 109 // { searchPubkey, version }
+const EVT_LAUNCH_PROGRESS = 110            // { key, link, phase:'connecting'|'downloading'|'launching'|'done'|'error', downloaded, total, percent, peers, error }
 
 // --- anonGPT bridge (Phase 0 plumbing — see backend/anongpt-buyer.js) ---
 
@@ -294,6 +295,6 @@ module.exports = {
   CMD_STOP,
   EVT_READY, EVT_PEER_COUNT, EVT_ERROR, EVT_INSTALL_PROGRESS, EVT_SITE_PUBLISHED, EVT_BOOT_PROGRESS,
   EVT_LOGIN_REQUEST, EVT_SWARM_REQUEST,
-  EVT_SEARCH_FEDERATED, EVT_IDENTITY_BINDING_PUBLISHED,
+  EVT_SEARCH_FEDERATED, EVT_IDENTITY_BINDING_PUBLISHED, EVT_LAUNCH_PROGRESS,
   ANONGPT_DRIVE_KEY,
 }

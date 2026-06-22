@@ -1759,6 +1759,74 @@ function dedupeApps (list) {
   return [...byKey.values()]
 }
 
+// Decode an app's bundle drive key from its pear:// link (z-base-32 host,
+// tolerating a versioned `N.M.<z32>` form), falling back to its driveKey.
+// Used for live size/peers and to correlate launch-progress events.
+function appBundleKey (app) {
+  if (app && typeof app.link === 'string' && /^pear:\/\//.test(app.link)) {
+    const host = app.link.replace(/^pear:\/\//, '').split('/')[0].split('.').pop()
+    try { const k = hexFromZ32(host); if (/^[0-9a-f]{64}$/i.test(k)) return k.toLowerCase() } catch {}
+  }
+  if (app && /^[0-9a-f]{64}$/i.test(app.driveKey || '')) return app.driveKey.toLowerCase()
+  return null
+}
+
+// A card footer: the app's pear:// (or hyper://) address (click to copy), its
+// size, and a live peer count — all from CMD_GET_DRIVE_INFO on the bundle key.
+function AppMeta ({ rpc, C, app }) {
+  const bundleKey = appBundleKey(app)
+  const addr = (app && app.link) ? app.link : (app && /^[0-9a-f]{64}$/i.test(app.driveKey || '') ? ('hyper://' + app.driveKey + '/') : null)
+  const [info, setInfo] = useState(null)
+  useEffect(() => {
+    if (!bundleKey || !(C && C.CMD_GET_DRIVE_INFO)) { setInfo(null); return }
+    let cancelled = false
+    const load = async () => {
+      try { const r = await rpc.request(C.CMD_GET_DRIVE_INFO, { keyHex: bundleKey }, 12000); if (!cancelled) setInfo(r) } catch { /* best-effort */ }
+    }
+    load()
+    const t = setInterval(load, 15000)
+    return () => { cancelled = true; clearInterval(t) }
+  }, [bundleKey, rpc, C])
+  if (!addr) return null
+  const shortAddr = addr.length > 30 ? (addr.slice(0, 20) + '…' + addr.slice(-6)) : addr
+  const peers = info ? (info.peerCount || 0) : null
+  const size = info && info.byteLength ? formatBytes(info.byteLength) : null
+  return html`
+    <div className="app-p2p-meta" style=${{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px', marginTop: '5px', fontSize: '11px' }}>
+      <button title=${'Copy ' + addr} onClick=${(e) => { e.stopPropagation(); copyText(addr) }} style=${{ background: 'none', border: 'none', padding: 0, color: '#6e7681', cursor: 'pointer', fontFamily: 'ui-monospace, monospace', fontSize: '11px' }}>${shortAddr} ⧉</button>
+      ${size ? html`<span style=${{ color: '#8b949e' }}>${size}</span>` : ''}
+      <span title="Peers currently serving this app" style=${{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: peers > 0 ? '#3fb950' : '#6e7681' }}>
+        <span style=${{ width: '6px', height: '6px', borderRadius: '50%', background: peers > 0 ? '#3fb950' : '#484f58', display: 'inline-block' }}></span>
+        ${peers == null ? '…' : (peers + ' ' + (peers === 1 ? 'peer' : 'peers'))}
+      </span>
+    </div>
+  `
+}
+
+// Inline download-progress bar shown in place of a card's Run-app button while
+// the bundle is being pulled (driven by EVT_LAUNCH_PROGRESS).
+function LaunchBar ({ prog, onRetry }) {
+  if (!prog) return null
+  if (prog.phase === 'error') {
+    return html`<div style=${{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: '#f85149', width: '100%' }}>
+      <span>Launch failed${prog.error ? ': ' + prog.error : ''}</span>
+      <button className="btn subtle" onClick=${onRetry}>Retry</button>
+    </div>`
+  }
+  const pct = Math.max(0, Math.min(100, prog.phase === 'launching' ? 100 : (prog.percent || 0)))
+  const label = prog.phase === 'connecting' ? ('Finding peers… ' + (prog.peers || 0))
+    : prog.phase === 'launching' ? 'Launching…'
+    : (formatBytes(prog.downloaded || 0) + ' / ' + formatBytes(prog.total || 0) + ' · ' + (prog.peers || 0) + ' peers · ' + pct + '%')
+  return html`
+    <div style=${{ width: '100%' }}>
+      <div style=${{ height: '6px', borderRadius: '3px', background: '#21262d', overflow: 'hidden' }}>
+        <div style=${{ height: '100%', width: pct + '%', background: 'linear-gradient(90deg,#58a6ff,#3fb950)', transition: 'width .25s ease' }}></div>
+      </div>
+      <div style=${{ marginTop: '4px', fontSize: '11px', color: '#8b949e' }}>${label}</div>
+    </div>
+  `
+}
+
 function Apps ({ rpc, C, onLaunch }) {
   const [catalogKey, setCatalogKey] = useState('')
   // Cross-catalog store: PearBrowser keeps every catalog the user has
@@ -1792,18 +1860,39 @@ function Apps ({ rpc, C, onLaunch }) {
   const [autoLoadAttempted, setAutoLoadAttempted] = useState(false)
   const [pearLink, setPearLink] = useState('')
   const [launched, setLaunched] = useState('')
+  // Live download/launch progress per bundle key, fed by EVT_LAUNCH_PROGRESS.
+  const [launchProg, setLaunchProg] = useState({})
+  useEffect(() => {
+    if (!(rpc && C && C.EVT_LAUNCH_PROGRESS)) return
+    const onProg = (e) => {
+      const d = (e && e.detail) || {}
+      const k = d.key || d.link
+      if (!k) return
+      setLaunchProg((prev) => {
+        const next = { ...prev, [k]: d }
+        if (d.phase === 'done') setTimeout(() => setLaunchProg((p) => { const n = { ...p }; delete n[k]; return n }), 1200)
+        return next
+      })
+    }
+    rpc.addEventListener(`event:${C.EVT_LAUNCH_PROGRESS}`, onProg)
+    return () => rpc.removeEventListener(`event:${C.EVT_LAUNCH_PROGRESS}`, onProg)
+  }, [rpc, C])
 
   const launchPearLink = async (overrideLink) => {
     const link = (typeof overrideLink === 'string' ? overrideLink : pearLink).trim()
     if (!link) return
+    const keyHex = appBundleKey({ link })
     setErr(''); setBusy('pear-link'); setLaunched('')
+    if (keyHex) setLaunchProg((p) => ({ ...p, [keyHex]: { phase: 'connecting', percent: 0, peers: 0, downloaded: 0, total: 0 } }))
     try {
-      await rpc.request(C.CMD_LAUNCH_PEAR_LINK, { link }, 60000)
-      setLaunched(`Launched ${link.slice(0, 60)}${link.length > 60 ? '…' : ''} in a new window.`)
+      await rpc.request(C.CMD_LAUNCH_PEAR_LINK, { link, keyHex }, 60000)
       setPearLink('')
-      setTimeout(() => setLaunched(''), 4000)
+      // pear:// launches show progress inline via EVT_LAUNCH_PROGRESS; file://
+      // and others have no bundle to track, so keep the toast for them.
+      if (!keyHex) { setLaunched(`Launched ${link.slice(0, 60)}${link.length > 60 ? '…' : ''} in a new window.`); setTimeout(() => setLaunched(''), 4000) }
     } catch (e) {
       setErr(`launch: ${e.message}`)
+      if (keyHex) setLaunchProg((p) => ({ ...p, [keyHex]: { phase: 'error', error: e.message } }))
     } finally {
       setBusy(null)
     }
@@ -2020,10 +2109,12 @@ function Apps ({ rpc, C, onLaunch }) {
     setEditingAppId(id)
     setAppDraft({
       name: app.name || '',
+      type: app.type || 'standalone',
       description: app.description || '',
       version: app.version || '',
       author: app.author || '',
-      categories: appCategories(app).join(', ')
+      categories: appCategories(app).join(', '),
+      icon: app.icon || app.iconRef || ''
     })
   }
 
@@ -2053,10 +2144,12 @@ function Apps ({ rpc, C, onLaunch }) {
         id,
         app: {
           name: appDraft.name,
+          type: appDraft.type,
           description: appDraft.description,
           version: appDraft.version,
           author: appDraft.author,
-          categories
+          categories,
+          icon: appDraft.icon
         }
       }, 60000)
       setMyCatalog(res)
@@ -2302,6 +2395,13 @@ function Apps ({ rpc, C, onLaunch }) {
                     <input type="text" value=${appDraft.name} onInput=${(e) => updateAppDraft('name', e.target.value)} />
                   </label>
                   <label>
+                    Type <span style=${{ opacity: 0.6, fontWeight: 'normal' }}>(how it launches — required)</span>
+                    <select value=${appDraft.type || 'standalone'} onChange=${(e) => updateAppDraft('type', e.target.value)} style=${{ width: '100%', padding: '8px', borderRadius: '6px', background: '#0d1117', color: '#c9d1d9', border: '1px solid #30363d' }}>
+                      <option value="standalone">standalone — opens in its own window (pear:// app)</option>
+                      <option value="hypersite">hypersite — runs inline in a tab (pear-request / static)</option>
+                    </select>
+                  </label>
+                  <label>
                     Description
                     <textarea rows="3" value=${appDraft.description} onInput=${(e) => updateAppDraft('description', e.target.value)}></textarea>
                   </label>
@@ -2319,6 +2419,11 @@ function Apps ({ rpc, C, onLaunch }) {
                     Categories
                     <input type="text" value=${appDraft.categories} onInput=${(e) => updateAppDraft('categories', e.target.value)} />
                   </label>
+                  <label>
+                    Icon <span style=${{ opacity: 0.6, fontWeight: 'normal' }}>(path inside your drive, e.g. /icon.svg)</span>
+                    <input type="text" placeholder="/icon.svg" value=${appDraft.icon || ''} onInput=${(e) => updateAppDraft('icon', e.target.value)} />
+                  </label>
+                  ${(app.link || app.driveKey) && html`<div className="app-meta" style=${{ marginTop: '2px', fontFamily: 'ui-monospace, monospace', fontSize: '11px', color: '#6e7681', wordBreak: 'break-all' }}>launch: ${app.link || ('hyper://' + app.driveKey + '/')}</div>`}
                 </div>
               </div>
             `
@@ -2488,17 +2593,27 @@ function Apps ({ rpc, C, onLaunch }) {
                     ${app.type === 'hypersite' ? html`<span style=${{ marginLeft: '6px', opacity: 0.75 }}>· ${app.driveKey && !app.link ? 'opens in a tab' : 'runs in a tab'}</span>` : (app.link && !app.driveKey ? html`<span style=${{ marginLeft: '6px', opacity: 0.75 }}>· opens in a window</span>` : '')}
                   </div>
                   ${app.catalogName && html`<div className="app-source-tag">${app.catalogName}</div>`}
+                  <${AppMeta} rpc=${rpc} C=${C} app=${app} />
                 </div>
                 <div className="app-actions">
-                  ${app.driveKey && /^[0-9a-f]{64}$/i.test(app.driveKey)
-                    ? html`<button key="open-page" className="btn subtle" onClick=${() => openSite(app)} title="Open this app's P2P page in a tab">Open page</button>`
-                    : ''}
-                  ${app.type === 'hypersite'
-                    ? html`<button key="run-in-tab" className="btn primary" onClick=${() => runInTab(app)} disabled=${busy === 'run-in-tab'} title="Run headless — the app's UI streams into a tab">Run app</button>`
-                    : html`<button key="run-window" className="btn primary" onClick=${() => launchFeaturedApp(app)} disabled=${busy === 'pear-link'} title="Open the app in its own window">Run app</button>`}
-                  ${canEditMyCatalog && app.catalogKey !== myCatalog.keyHex && !inMyCatalog([app.id, app.driveKey, app.link]) && html`
-                    <button key="add-catalog" className="btn subtle" title="Add to my catalog" onClick=${() => addToMyCatalog(app)} disabled=${busy === `addcat:${app.id || app.driveKey || app.link}`}>+ Catalog</button>
-                  `}
+                  ${(() => {
+                    const bk = appBundleKey(app)
+                    const prog = bk && launchProg[bk]
+                    if (prog && prog.phase !== 'done') {
+                      return html`<${LaunchBar} prog=${prog} onRetry=${() => (app.type === 'hypersite' ? runInTab(app) : launchFeaturedApp(app))} />`
+                    }
+                    return html`
+                      ${app.driveKey && /^[0-9a-f]{64}$/i.test(app.driveKey)
+                        ? html`<button key="open-page" className="btn subtle" onClick=${() => openSite(app)} title="Open this app's P2P page in a tab">Open page</button>`
+                        : ''}
+                      ${app.type === 'hypersite'
+                        ? html`<button key="run-in-tab" className="btn primary" onClick=${() => runInTab(app)} disabled=${busy === 'run-in-tab'} title="Run headless — the app's UI streams into a tab">Run app</button>`
+                        : html`<button key="run-window" className="btn primary" onClick=${() => launchFeaturedApp(app)} disabled=${busy === 'pear-link'} title="Open the app in its own window">Run app</button>`}
+                      ${canEditMyCatalog && app.catalogKey !== myCatalog.keyHex && !inMyCatalog([app.id, app.driveKey, app.link]) && html`
+                        <button key="add-catalog" className="btn subtle" title="Add to my catalog" onClick=${() => addToMyCatalog(app)} disabled=${busy === `addcat:${app.id || app.driveKey || app.link}`}>+ Catalog</button>
+                      `}
+                    `
+                  })()}
                 </div>
               </div>
             `)}

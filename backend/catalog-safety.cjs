@@ -236,7 +236,10 @@ function sanitizePersonalCatalogEntry (app) {
     link: str(app.link, 300),
     version: str(app.version, 40),
     author: str(app.author, 200),
-    icon: str(app.icon, 300)
+    icon: str(app.icon, 300),
+    // Launch gating (PBACS §9): explicit standalone (own window) vs hypersite
+    // (inline tab). Only the two valid enum values survive; anything else drops.
+    type: (['standalone', 'hypersite'].includes(String(app.type || '').trim()) ? String(app.type).trim() : undefined)
   }
   if (Array.isArray(app.categories)) {
     draft.categories = app.categories.map((c) => String(c).trim().slice(0, 60)).filter(Boolean).slice(0, 12)
@@ -247,6 +250,7 @@ function sanitizePersonalCatalogEntry (app) {
   return {
     id: out.id,
     name: out.name,
+    ...(draft.type ? { type: draft.type } : {}),
     description: out.description || '',
     ...(out.driveKey ? { driveKey: out.driveKey } : {}),
     ...(out.link ? { link: out.link } : {}),
