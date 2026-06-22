@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import safetyMod from '../backend/catalog-safety.cjs'
 
-const { aggregateCatalogApps, catalogAppStableKey, normalizeCatalogApp, normalizeCatalogData, safeJSONParse, searchAppsList } = safetyMod
+const { aggregateCatalogApps, catalogAppSearchText, catalogAppStableKey, normalizeCatalogApp, normalizeCatalogData, safeJSONParse, sanitizePersonalCatalogEntry, searchAppsList } = safetyMod
 const key = (ch) => ch.repeat(64)
 
 test('safe catalog JSON parse strips prototype-pollution keys recursively', () => {
@@ -33,13 +33,17 @@ test('safe catalog JSON parse strips prototype-pollution keys recursively', () =
 
 test('catalog app search tolerates empty and non-string queries', () => {
   const apps = [
-    { id: 'one', name: 'PearBrowser', description: 'P2P browser' },
-    { id: 'two', name: 'HiveRelay', description: 'Relay infrastructure' },
+    { id: 'one', name: 'PearBrowser', description: 'P2P browser', categories: ['Tools'], catalogName: 'Pear Apps', source: 'sheets', author: 'Holepunch' },
+    { id: 'two', name: 'HiveRelay', description: 'Relay infrastructure', version: '2.1.0', verification: 'relay-listed' },
   ]
 
   assert.equal(searchAppsList(apps, '').length, 2)
   assert.equal(searchAppsList(apps, null).length, 2)
   assert.deepEqual(searchAppsList(apps, 'relay').map((a) => a.id), ['two'])
+  assert.deepEqual(searchAppsList(apps, 'tools').map((a) => a.id), ['one'])
+  assert.deepEqual(searchAppsList(apps, 'pear apps').map((a) => a.id), ['one'])
+  assert.deepEqual(searchAppsList(apps, '2.1').map((a) => a.id), ['two'])
+  assert.ok(catalogAppSearchText(apps[0]).includes('holepunch'))
 })
 
 test('catalog JSON normalizer accepts relay items and entries envelopes', () => {
@@ -83,13 +87,7 @@ test('catalog app normalizer drops unsafe targets and keeps allowed app links', 
 
   assert.equal(normalizeCatalogApp({ id: 'bad-key', driveKey: 'not-a-key', name: 'Bad key' }), null)
   assert.equal(normalizeCatalogApp({ id: 'bad-link', link: 'javascript:alert(1)', name: 'Bad link' }), null)
-  assert.deepEqual(normalizeCatalogApp({ id: 'targetless', name: 'No target' }), {
-    id: 'targetless',
-    name: 'No target',
-    version: '',
-    categories: [],
-    verification: 'unverified',
-  })
+  assert.equal(normalizeCatalogApp({ id: 'targetless', name: 'No target' }), null)
 
   assert.deepEqual(normalizeCatalogApp({ id: 'linked', driveKey: 'not-a-key', link: 'pear://keet', name: 'Keet' }), {
     id: 'linked',
@@ -127,7 +125,27 @@ test('shared catalog app normalizer builds stable target keys', () => {
   assert.equal(catalogAppStableKey(app), `drive:${driveKey}`)
 
   assert.equal(catalogAppStableKey({ link: ' PEAR://Demo ' }), 'link:pear://Demo')
-  assert.equal(catalogAppStableKey({ id: 'only-id' }), 'id:only-id')
+  assert.equal(catalogAppStableKey({ id: 'only-id' }), '')
+})
+
+test('personal catalog entry sanitizer accepts link-only apps and rejects targetless rows', () => {
+  assert.deepEqual(sanitizePersonalCatalogEntry({
+    id: 'keet',
+    name: ' Keet ',
+    link: ' PEAR://keet ',
+    categories: [' chat ', '']
+  }), {
+    id: 'keet',
+    name: 'Keet',
+    description: '',
+    link: 'pear://keet',
+    version: '',
+    author: '',
+    categories: ['chat']
+  })
+
+  assert.equal(sanitizePersonalCatalogEntry({ id: 'site', link: `hyper://${key('a')}/app` }).driveKey, key('a'))
+  assert.throws(() => sanitizePersonalCatalogEntry({ id: 'empty', name: 'No target' }), /valid 64-hex drive key/)
 })
 
 test('backend aggregation dedupes by stable target across all catalog sources', () => {

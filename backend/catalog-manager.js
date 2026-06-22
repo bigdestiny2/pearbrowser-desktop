@@ -15,8 +15,20 @@ const {
   normalizeCatalogApp,
   normalizeCatalogData,
   safeJSONParse,
+  sanitizePersonalCatalogEntry,
   searchAppsList
 } = require('./catalog-safety.cjs')
+
+// Race a promise against a timeout. A Hypercore `.get()` (and a Hyperbee read
+// stream) on a partially-replicated / unreachable core WAITS for the missing
+// block forever — it never rejects — so an unbounded await can hang a catalog
+// load indefinitely. withTimeout caps the wait and resolves `fallback` so the
+// load always returns with whatever data is locally available.
+function withTimeout (promise, ms, fallback) {
+  let timer
+  const guard = new Promise((resolve) => { timer = setTimeout(() => resolve(fallback), ms) })
+  return Promise.race([promise, guard]).finally(() => clearTimeout(timer))
+}
 
 class CatalogManager {
   constructor (store, swarm) {
@@ -131,6 +143,14 @@ class CatalogManager {
     return entry.sheets.listApps(jmespath)
   }
 
+  async listSheetsSchemas (link) {
+    const { decodeSheetsLink } = require('./sheets-catalog')
+    const { keyHex } = decodeSheetsLink(link)
+    const entry = this.catalogs.get(`sheets:${keyHex}`)
+    if (!entry || !entry.sheets) throw new Error('Sheets catalogue not loaded')
+    return entry.sheets.listSchemas()
+  }
+
   /**
    * Load a catalogue from a relay's INDEX ROOM (Phase 5) — the 5th source. The
    * index sidecar publishes app-manifest rows in a schema-sheets room advertised
@@ -197,10 +217,17 @@ class CatalogManager {
     }
 
     const core = this.store.get(Buffer.from(keyHex, 'hex'))
+    // A fragile / unreachable catalog core must never crash the worklet via an
+    // unhandled 'error' event (an uncaught 'error' on an EventEmitter throws).
+    core.on('error', (err) => console.warn(`[catalog] core ${keyHex.slice(0, 8)} error:`, err && err.message))
     await core.ready().catch((err) => {
       throw new Error(`Could not open catalog hypercore: ${getUserFriendlyError(err && err.message)}`)
     })
-    this.swarm.join(core.discoveryKey, { server: false, client: true })
+    // Sink discovery/replication errors so a flaky peer connection can't surface
+    // as an unhandled rejection while another RPC (e.g. CMD_GET_CATALOG_APPS) is
+    // mid-flight — that race was the "catalog: RPC timeout" trigger.
+    const discovery = this.swarm.join(core.discoveryKey, { server: false, client: true })
+    if (discovery && typeof discovery.flushed === 'function') discovery.flushed().catch(() => {})
 
     const bee = new Hyperbee(core, {
       keyEncoding: 'utf-8',
@@ -211,20 +238,25 @@ class CatalogManager {
     // Wait briefly for initial replication — same pattern as _waitForData
     await this._waitForBeeData(bee, 15000).catch(() => {})
 
+    // Drain the app! range, but BOUNDED: on an unreachable / partially-replicated
+    // bee the stream blocks on a missing block forever, which would hang the
+    // load (and starve later RPCs). Cap it and keep whatever streamed.
     const apps = []
-    try {
-      for await (const entry of bee.createReadStream({ gte: 'app!', lt: 'app!~' })) {
-        if (entry.value && typeof entry.value === 'object') {
-          apps.push(entry.value)
-        }
+    const stream = bee.createReadStream({ gte: 'app!', lt: 'app!~' })
+    const drained = await withTimeout((async () => {
+      for await (const entry of stream) {
+        if (entry.value && typeof entry.value === 'object') apps.push(entry.value)
       }
-    } catch (err) {
-      throw new Error(`Could not read catalog Hyperbee: ${getUserFriendlyError(err && err.message)}`)
+      return true
+    })().catch(() => false), 10000, false)
+    if (!drained) {
+      try { stream.destroy() } catch {}
+      console.warn(`[catalog] hyperbee ${keyHex.slice(0, 8)} read timed out — using ${apps.length} app(s) available so far`)
     }
 
-    // Load meta if present
-    const nameEntry = await bee.get('meta!name').catch(() => null)
-    const versionEntry = await bee.get('meta!version').catch(() => null)
+    // Load meta if present — also bounded (a blocking .get never rejects).
+    const nameEntry = await withTimeout(bee.get('meta!name'), 3000, null).catch(() => null)
+    const versionEntry = await withTimeout(bee.get('meta!version'), 3000, null).catch(() => null)
 
     const data = normalizeCatalogData({
       version: versionEntry ? versionEntry.value : 1,
@@ -539,7 +571,7 @@ class CatalogManager {
   }
 
   /**
-   * Search apps by name or description
+   * Search apps by user-visible catalogue metadata.
    */
   searchApps (query) {
     return searchAppsList(this.getAllApps(), query)
@@ -592,8 +624,8 @@ class CatalogManager {
     const drive = await this._ensureMyCatalogDrive(keyHex)
     if (!drive.writable) throw new Error('This catalog is not editable on this device.')
     const entry = this._sanitizeCatalogEntry(app)
-    if (!entry.driveKey) throw new Error('App is missing a drive key.')
-    entry.id = entry.id || entry.driveKey
+    if (!entry.driveKey && !entry.link) throw new Error('App is missing a valid drive key or app link.')
+    entry.id = entry.id || entry.driveKey || entry.link
 
     const data = await this._readMyCatalogData(drive)
     const idx = data.apps.findIndex((a) => a && a.id === entry.id)
@@ -631,7 +663,7 @@ class CatalogManager {
     const existing = data.apps[idx]
     const stableId = existing.id || appId
     const entry = this._sanitizeCatalogEntry({ ...existing, ...(patch || {}), id: stableId })
-    if (!entry.driveKey) throw new Error('App is missing a drive key.')
+    if (!entry.driveKey && !entry.link) throw new Error('App is missing a valid drive key or app link.')
     entry.id = stableId
     data.apps[idx] = entry
 
@@ -647,22 +679,7 @@ class CatalogManager {
   // Keep only the fields a catalog entry needs, length-bounded, so a
   // hostile or oversized app object can't bloat or pollute catalog.json.
   _sanitizeCatalogEntry (app) {
-    if (!app || typeof app !== 'object') throw new Error('Invalid app')
-    const str = (v, n) => (typeof v === 'string' ? v.slice(0, n) : undefined)
-    const out = {
-      id: str(app.id, 128),
-      name: str(app.name, 200),
-      description: str(app.description, 1000),
-      driveKey: str(app.driveKey, 128),
-      version: str(app.version, 40),
-      author: str(app.author, 200),
-    }
-    if (Array.isArray(app.categories)) {
-      out.categories = app.categories.map((c) => String(c).slice(0, 60)).slice(0, 12)
-    }
-    if (typeof app.icon === 'string') out.icon = app.icon.slice(0, 300)
-    for (const k of Object.keys(out)) if (out[k] === undefined) delete out[k]
-    return out
+    return sanitizePersonalCatalogEntry(app)
   }
 
   _sanitizeCatalogName (name) {
@@ -670,7 +687,7 @@ class CatalogManager {
   }
 
   _catalogAppMatches (app, appId) {
-    return !!(app && appId && (app.id === appId || app.driveKey === appId))
+    return !!(app && appId && (app.id === appId || app.driveKey === appId || app.link === appId))
   }
 
   async _readMyCatalogData (drive) {

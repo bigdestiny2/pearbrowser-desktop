@@ -155,8 +155,8 @@ export function normalizeNameTarget (raw) {
 // avoids an RPC on ordinary navigations). Rejects keys explicitly so a typed
 // 64-hex/52-z32 key always goes straight to drive loading.
 export function looksLikeName (raw) {
-  const s = String(raw || '').trim()
-  if (!/^[a-z0-9][a-z0-9_-]{0,127}$/i.test(s)) return false  // single token: no dot/slash/scheme/space
+  const s = String(raw || '').normalize('NFKC').trim()
+  if (!/^[\p{L}\p{N}][\p{L}\p{N}_-]{0,127}$/u.test(s)) return false // single token: no dot/slash/scheme/space
   if (/^[0-9a-f]{64}$/i.test(s)) return false                 // 64-char hex drive key
   if (/^[13-9a-km-uw-z]{52}$/i.test(s)) return false          // 52-char z-base-32 key
   return true

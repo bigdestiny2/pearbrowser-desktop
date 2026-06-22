@@ -180,6 +180,17 @@ class SheetsCatalog {
     return this._appsSchemaIdP
   }
 
+  async listSchemas () {
+    if (!this.sheets || typeof this.sheets.listSchemas !== 'function') return []
+    const schemas = await this.sheets.listSchemas()
+    return (Array.isArray(schemas) ? schemas : [])
+      .map((s) => ({
+        name: typeof s?.name === 'string' ? s.name : '',
+        schemaId: b4a.isBuffer(s?.schemaId) ? b4a.toString(s.schemaId, 'hex') : String(s?.schemaId || '')
+      }))
+      .filter((s) => s.name && s.schemaId)
+  }
+
   // List the room's apps as DTOs. Optional JMESPath query (validated).
   async listApps (jmespath) {
     const q = safeJmesPath(jmespath)

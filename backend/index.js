@@ -69,9 +69,13 @@ try {
 } catch {}
 
 // --- Storage Limits ---
-const STORAGE_LIMIT = 1024 * 1024 * 1024 // 1GB max
+const {
+  DEFAULT_STORAGE_LIMIT: STORAGE_LIMIT,
+  DEFAULT_EVICT_THRESHOLD: EVICT_THRESHOLD,
+  shouldCleanupStorage,
+  cleanupBrowseStorage
+} = require('./storage-quota.cjs')
 const STORAGE_CHECK_INTERVAL = 5 * 60 * 1000 // Check every 5 minutes
-const EVICT_THRESHOLD = 0.8 // Start cleanup at 80% capacity
 
 // --- State ---
 
@@ -272,6 +276,13 @@ rpc.handle(C.CMD_SHEETS_LIST, async (data) => {
   return await catalogManager.querySheetsCatalog(link, query)
 })
 
+rpc.handle(C.CMD_SHEETS_LIST_SCHEMAS, async (data) => {
+  await whenReady()
+  const link = String((data && data.link) || '').trim()
+  if (!link) throw new Error('sheets catalogue link required')
+  return { schemas: await catalogManager.listSheetsSchemas(link) }
+})
+
 rpc.handle(C.CMD_INSTALL_APP, async (data) => {
   await whenReady()
   const result = await appManager.install(data, (progress) => {
@@ -346,6 +357,11 @@ const handleSearch = createSearchHandler({
 rpc.handle(C.CMD_SEARCH, async (data) => {
   await whenReady()
   return handleSearch(data)
+})
+
+rpc.handle(C.CMD_SEARCH_FEDERATED, async (data = {}) => {
+  await whenReady()
+  return handleSearch({ ...data, federated: true })
 })
 
 // Lighthouse Phase 2 — publish/refresh our IdentityBinding on demand (e.g. a
@@ -487,13 +503,25 @@ function relayManageHttp (spec, timeoutMs = 15000) {
   })
 }
 
-// Promote an approved app into the community Hyperbee (5d961fdc) + re-pin so
-// desktop community-list readers see it. Implemented in the follow-up pass
-// (opens the operator-configured community-catalog Corestore, writes app!<id>
-// via communitySubmit.communityBeeEntry(), re-pins via HiveRelay). Stubbed here
-// so the approve path is wired end-to-end with no dangling reference.
+// Promote an approved app into the published community Hyperbee (5d961fdc) so
+// desktop community-list readers see it. Deliberately NOT done from the worklet:
+//   1. The community bee's writer secret lives in the source tree
+//      (03-sites/pearbrowser-publishers/community-catalog), which a
+//      released/staged app does not ship, and the worklet has no source-tree
+//      path primitive (no __dirname / Pear.config.dir in use here).
+//   2. The relay pin-queue carries only { appKey, publisherPubkey } — no app
+//      name/description — so an approve alone can't synthesise a rich entry.
+// The authoritative moderation action (pin approve/reject) runs relay-side and
+// is fully wired. To surface an approved app in everyone's Community list, the
+// operator republishes the community bee from its source via the proven secret-
+// holding path:  node scripts/publish-catalog-bee.js \
+//   ../../../03-sites/pearbrowser-publishers/community-catalog-source/catalog.json \
+//   --storage ../../../03-sites/pearbrowser-publishers/community-catalog
+// (A future enhancement could mirror approved apps into an app-OWNED bee via the
+// CMD_MYCATALOG_* machinery + auto-load its key, sidestepping the external
+// secret — see communitySubmit.communityBeeEntry() for the entry shape.)
 async function promoteToCommunityCatalogue (manifest) {
-  return { ok: false, deferred: true, reason: 'community-bee write not yet enabled' }
+  return { ok: false, deferred: true, reason: 'Approved + pinned on relays. Republish the community bee (scripts/publish-catalog-bee.js) to list it for everyone.' }
 }
 
 rpc.handle(C.CMD_SUBMIT_APP, async (data = {}) => {
@@ -632,6 +660,34 @@ rpc.handle(C.CMD_AUTOBEE_ADD_WRITER, async (data) => {
 })
 
 // Site Builder commands
+const SITE_TEMPLATES = {
+  blank: { id: 'blank', name: 'Blank', blocks: [], theme: null },
+  simple: {
+    id: 'simple',
+    name: 'Simple page',
+    blocks: [
+      { type: 'heading', level: 1, text: 'New site' },
+      { type: 'text', text: 'Write something worth sharing.' }
+    ],
+    theme: null
+  },
+  links: {
+    id: 'links',
+    name: 'Link page',
+    blocks: [
+      { type: 'heading', level: 1, text: 'Links' },
+      { type: 'link', href: 'https://', text: 'Add a link' },
+      { type: 'divider' },
+      { type: 'text', text: 'A small page of useful places.' }
+    ],
+    theme: null
+  }
+}
+
+function cloneSiteTemplate (template) {
+  return JSON.parse(JSON.stringify(template))
+}
+
 rpc.handle(C.CMD_CREATE_SITE, async (data) => {
   await whenReady()
   console.log('[create-site] start:', data?.name)
@@ -755,6 +811,16 @@ rpc.handle(C.CMD_UNPUBLISH_SITE, async (data) => {
 rpc.handle(C.CMD_LIST_SITES, () => {
   if (!siteManager) return []
   return siteManager.listSites()
+})
+
+rpc.handle(C.CMD_LOAD_TEMPLATE, async ({ id } = {}) => {
+  await whenReady()
+  const key = String(id || 'blank').trim().toLowerCase()
+  const template = SITE_TEMPLATES[key] || SITE_TEMPLATES.blank
+  return {
+    template: cloneSiteTemplate(template),
+    templates: Object.values(SITE_TEMPLATES).map(({ blocks, theme, ...meta }) => meta)
+  }
 })
 
 rpc.handle(C.CMD_GET_SITE_BLOCKS, async (data) => {
@@ -1842,14 +1908,23 @@ rpc.handle(C.CMD_NOSTR_QUERY, async ({ filter, federated } = {}) => {
   let own = []
   try { const es = await ensureNostrEventStore({ create: false }); if (es) own = (await es.listEvents()).map((ev) => ({ ...ev, _via: null })) } catch {}
   let contactEvents = []
+  let hidden = null
   if (federated && federatedNostrFeed) {
-    try { contactEvents = await federatedNostrFeed.events() } catch {}
+    try {
+      if (typeof federatedNostrFeed.eventsWithDiagnostics === 'function') {
+        const res = await federatedNostrFeed.eventsWithDiagnostics()
+        contactEvents = Array.isArray(res?.events) ? res.events : []
+        hidden = res?.hidden || null
+      } else {
+        contactEvents = await federatedNostrFeed.events()
+      }
+    } catch {}
   }
   const byId = new Map()
   for (const ev of own) byId.set(ev.id, ev) // own wins on id collision
   for (const ev of contactEvents) if (!byId.has(ev.id)) byId.set(ev.id, ev)
   const cap = Math.min((filter && Number.isInteger(filter.limit) && filter.limit > 0) ? filter.limit : MAX_FEED_EVENTS, MAX_FEED_EVENTS)
-  return { events: queryEvents([...byId.values()], { ...(filter || {}), limit: cap }) }
+  return { events: queryEvents([...byId.values()], { ...(filter || {}), limit: cap }), hidden }
 })
 
 
@@ -2624,7 +2699,7 @@ async function checkStorageQuota () {
     const stats = await getStorageSize(storagePath)
     console.log(`Storage usage: ${formatBytes(stats)} / ${formatBytes(STORAGE_LIMIT)}`)
 
-    if (stats > STORAGE_LIMIT * EVICT_THRESHOLD) {
+    if (shouldCleanupStorage(stats, { limit: STORAGE_LIMIT, threshold: EVICT_THRESHOLD })) {
       console.log('Storage above threshold, running cleanup...')
       await cleanupOldData()
     }
@@ -2665,28 +2740,19 @@ function formatBytes (bytes) {
 }
 
 async function cleanupOldData () {
-  // 1. Evict least recently used browse drives
-  const sortedDrives = Array.from(browseDrives.entries())
-    .sort((a, b) => (a[1].lastAccess || 0) - (b[1].lastAccess || 0))
+  const result = await cleanupBrowseStorage({
+    browseDrives,
+    proxy,
+    onEvict: (key) => console.log(`Evicting old browse drive: ${key.slice(0, 8)}...`),
+    unregisterDrive: unregisterHiveRelayDrive,
+    leaveDiscovery: (discoveryKey) => swarm?.leave(discoveryKey)
+  })
 
-  // Remove oldest 20% of drives
-  const toRemove = Math.ceil(sortedDrives.length * 0.2)
-  for (let i = 0; i < toRemove && i < sortedDrives.length; i++) {
-    const [key, entry] = sortedDrives[i]
-    console.log(`Evicting old browse drive: ${key.slice(0, 8)}...`)
-    browseDrives.delete(key)
-    unregisterHiveRelayDrive(key, entry.drive)
-    try { await swarm.leave(entry.drive.discoveryKey) } catch {}
-    try { await entry.drive.close() } catch {}
-  }
-
-  // 2. Clear proxy cache
-  if (proxy) {
-    proxy.clearCache?.()
+  if (result.proxyCacheCleared) {
     console.log('Cleared proxy cache')
   }
 
-  // 3. In future: could also prune old/unused app versions
+  // In future: could also prune old/unused app versions.
 }
 
 // --- Lifecycle ---

@@ -86,3 +86,19 @@ test('listApps returns [] when the room has no apps schema yet', async () => {
   sc.sheets = { list: async () => { throw new Error('should not be called') } }
   assert.deepEqual(await sc.listApps("[?type=='standalone']"), [])
 })
+
+test('listSchemas exposes sanitized schema names and ids for RPC callers', async () => {
+  const sc = new SheetsCatalog({}, null)
+  sc.sheets = {
+    listSchemas: async () => [
+      { name: 'apps', schemaId: 'schema-apps', extra: 'ignored' },
+      { name: '', schemaId: 'empty-name' },
+      { name: 'missing-id' },
+      { name: 'buffer-id', schemaId: Buffer.from([0x12, 0x34]) }
+    ]
+  }
+  assert.deepEqual(await sc.listSchemas(), [
+    { name: 'apps', schemaId: 'schema-apps' },
+    { name: 'buffer-id', schemaId: '1234' }
+  ])
+})

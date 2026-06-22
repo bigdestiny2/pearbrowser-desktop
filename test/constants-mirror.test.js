@@ -15,6 +15,7 @@ import { readFileSync } from 'node:fs'
 
 const constantsSrc = readFileSync(new URL('../backend/constants.js', import.meta.url), 'utf8')
 const bootSrc = readFileSync(new URL('../ui/boot.js', import.meta.url), 'utf8')
+const backendIndexSrc = readFileSync(new URL('../backend/index.js', import.meta.url), 'utf8')
 
 // `const CMD_X = 250` / `const EVT_X = 100` definitions in constants.js.
 const backendIds = {}
@@ -30,6 +31,10 @@ for (const m of bootSrc.matchAll(/\b(CMD_[A-Z0-9_]+|EVT_[A-Z0-9_]+)\s*:\s*(\d+)/
 
 // The `module.exports = { ... }` block, to confirm a const is actually surfaced.
 const exportsBlock = (constantsSrc.match(/module\.exports\s*=\s*\{([\s\S]*?)\}/) || [, ''])[1]
+const backendHandlers = new Set()
+for (const m of backendIndexSrc.matchAll(/rpc\.handle\(C\.(CMD_[A-Z0-9_]+)/g)) {
+  backendHandlers.add(m[1])
+}
 
 test('both maps parsed (regexes actually matched)', () => {
   assert.ok(Object.keys(backendIds).length > 30, 'expected constants.js to define many CMD_/EVT_')
@@ -69,4 +74,11 @@ test('N1 naming commands: mirrored in both maps AND exported', () => {
     assert.equal(bootIds[k], v, `${k} should be mirrored as ${v} in boot.js`)
     assert.match(exportsBlock, new RegExp('\\b' + k + '\\b'), `${k} must be in module.exports`)
   }
+})
+
+test('every renderer command mirrored in boot.js has a backend handler', () => {
+  const missing = Object.keys(bootIds)
+    .filter((k) => k.startsWith('CMD_'))
+    .filter((k) => !backendHandlers.has(k))
+  assert.deepEqual(missing, [], `renderer commands without backend handlers: ${missing.join(', ')}`)
 })

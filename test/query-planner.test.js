@@ -107,6 +107,17 @@ test('planAndSearch local-only path matches personalIndex.search exactly', async
     // self results are tagged hop-0 / self by the merge
     assert.ok(fed.results.every((r) => r.trustHop === 0 && r.tier === 'self'))
     assert.equal(fed.verifyBudgetExhausted, false)
+    assert.equal(fed.digestHit, false)
+    assert.equal(fed.fallbackPull, false)
+    assert.equal(fed.partial, false)
+    assert.deepEqual(fed.provenance, {
+      digestHit: false,
+      fallbackPull: false,
+      partial: false,
+      plannedPeers: 0,
+      pulledPeers: 0,
+      digestSkipped: 0
+    })
   })
 })
 
@@ -129,5 +140,52 @@ test('_trustSnapshot puts direct contacts at hop 1 (followed), others at default
     assert.equal(snap.graph.tierOf(friend), 'followed')
     assert.equal(snap.graph.tierOf('bb'.repeat(32)), 'default')
     assert.deepEqual(snap.contactRoots, [friend])
+  })
+})
+
+test('planAndSearch pulls digest-hit peers and skips known digest misses', async () => {
+  await withPlanner(async ({ planner, setContacts }) => {
+    const hit = '11'.repeat(32)
+    const miss = '22'.repeat(32)
+    const unknown = '33'.repeat(32)
+    setContacts([{ pubkey: hit }, { pubkey: miss }, { pubkey: unknown }])
+    planner._digestCache.set(hit, { v: 1, topTerms: ['peer'] })
+    planner._digestCache.set(miss, { v: 1, topTerms: ['recipes'] })
+
+    let fetched = []
+    planner._fetchPeerHits = async (roots) => { fetched = roots; return [] }
+
+    const fed = await planner.planAndSearch('peer', { now0: 1, limit: 50 })
+    assert.deepEqual(fetched, [hit])
+    assert.equal(fed.digestHit, true)
+    assert.equal(fed.fallbackPull, false)
+    assert.equal(fed.partial, true)
+    assert.equal(fed.provenance.plannedPeers, 3)
+    assert.equal(fed.provenance.pulledPeers, 1)
+    assert.equal(fed.provenance.digestSkipped, 1)
+  })
+})
+
+test('planAndSearch marks no-digest peer fanout as fallback and partial', async () => {
+  await withPlanner(async ({ planner, setContacts }) => {
+    const friend = '44'.repeat(32)
+    setContacts([{ pubkey: friend }])
+
+    let fetched = []
+    planner._fetchPeerHits = async (roots) => { fetched = roots; return [] }
+
+    const fed = await planner.planAndSearch('peer', { now0: 1, limit: 50 })
+    assert.deepEqual(fetched, [friend])
+    assert.equal(fed.digestHit, false)
+    assert.equal(fed.fallbackPull, true)
+    assert.equal(fed.partial, true)
+    assert.deepEqual(fed.provenance, {
+      digestHit: false,
+      fallbackPull: true,
+      partial: true,
+      plannedPeers: 1,
+      pulledPeers: 1,
+      digestSkipped: 0
+    })
   })
 })

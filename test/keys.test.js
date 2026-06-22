@@ -135,6 +135,8 @@ test('looksLikeName accepts bare name tokens, rejects URLs/keys/domains', () => 
   assert.equal(looksLikeName('pear-pass'), true)       // hyphen allowed
   assert.equal(looksLikeName('anon_gpt'), true)        // underscore allowed
   assert.equal(looksLikeName('  keet  '), true)        // trimmed
+  assert.equal(looksLikeName('алиса'), true)           // Unicode letters follow backend normalization
+  assert.equal(looksLikeName('ＫＥＥＴ'), true)         // NFKC-normalized fullwidth token
 
   // NOT names — must fall straight through to URL handling.
   assert.equal(looksLikeName(''), false)

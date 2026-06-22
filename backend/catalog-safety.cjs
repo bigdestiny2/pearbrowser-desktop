@@ -97,7 +97,7 @@ function normalizeCatalogApp (app, opts = {}) {
   const link = normalizeCatalogLink(out.link)
   const driveKey = normalizeDriveKey(key) || driveKeyFromHyperLink(link)
   const id = trimString(out.id) || driveKey || link
-  if ((key && !driveKey && !link) || (rawLink && !link && !driveKey) || !id) return null
+  if ((key && !driveKey && !link) || (rawLink && !link && !driveKey) || (!driveKey && !link) || !id) return null
 
   out.id = id || undefined
   out.name = trimString(out.name) || id || undefined
@@ -198,12 +198,63 @@ function aggregateCatalogApps (catalogs, sourceForEntry = defaultCatalogEntrySou
 
 function searchAppsList (apps, query) {
   const list = Array.isArray(apps) ? apps : []
-  const q = String(query || '').trim().toLowerCase()
+  const q = String(query || '').normalize('NFKC').trim().toLowerCase()
   if (!q) return list
-  return list.filter(app =>
-    (app && app.name && String(app.name).toLowerCase().includes(q)) ||
-    (app && app.description && String(app.description).toLowerCase().includes(q))
-  )
+  return list.filter(app => catalogAppSearchText(app).includes(q))
+}
+
+function catalogAppSearchText (app) {
+  if (!app || typeof app !== 'object') return ''
+  const fields = [
+    app.name,
+    app.description,
+    app.author,
+    app.id,
+    app.version,
+    app.source,
+    app.catalogName,
+    app.verification,
+    app.link,
+    app.driveKey,
+    ...(Array.isArray(app.categories) ? app.categories : []),
+    ...(Array.isArray(app._sources) ? app._sources : [])
+  ]
+  return fields
+    .filter((value) => value != null && value !== '')
+    .map((value) => String(value).normalize('NFKC').toLowerCase())
+    .join(' ')
+}
+
+function sanitizePersonalCatalogEntry (app) {
+  if (!app || typeof app !== 'object') throw new Error('Invalid app')
+  const str = (v, n) => (typeof v === 'string' ? v.trim().slice(0, n) : undefined)
+  const draft = {
+    id: str(app.id, 128),
+    name: str(app.name, 200),
+    description: str(app.description, 1000),
+    driveKey: str(app.driveKey, 128),
+    link: str(app.link, 300),
+    version: str(app.version, 40),
+    author: str(app.author, 200),
+    icon: str(app.icon, 300)
+  }
+  if (Array.isArray(app.categories)) {
+    draft.categories = app.categories.map((c) => String(c).trim().slice(0, 60)).filter(Boolean).slice(0, 12)
+  }
+  for (const k of Object.keys(draft)) if (draft[k] === undefined || draft[k] === '') delete draft[k]
+  const out = normalizeCatalogApp(draft)
+  if (!out) throw new Error('App needs a valid 64-hex drive key, hyper:// drive link, pear:// link, or file:// link.')
+  return {
+    id: out.id,
+    name: out.name,
+    description: out.description || '',
+    ...(out.driveKey ? { driveKey: out.driveKey } : {}),
+    ...(out.link ? { link: out.link } : {}),
+    version: out.version || '',
+    author: out.author || '',
+    categories: Array.isArray(out.categories) ? out.categories : [],
+    ...(out.icon ? { icon: out.icon } : {})
+  }
 }
 
 module.exports = {
@@ -211,6 +262,7 @@ module.exports = {
   aggregateCatalogApps,
   betterCatalogApp,
   catalogAppStableKey,
+  catalogAppSearchText,
   catalogAppsFromEnvelope,
   mergeCatalogAppEntries,
   normalizeCatalogApp,
@@ -218,5 +270,6 @@ module.exports = {
   normalizeCatalogData,
   scrubPrototypeKeys,
   safeJSONParse,
+  sanitizePersonalCatalogEntry,
   searchAppsList
 }

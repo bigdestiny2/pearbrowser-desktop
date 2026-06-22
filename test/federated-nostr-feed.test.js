@@ -58,3 +58,24 @@ test('remote Nostr revocation record blocks the advertised author key', async ()
 
   assert.deepEqual(await feed.events(), [])
 })
+
+test('eventsWithDiagnostics reports contact notes hidden by revoked binding', async () => {
+  const root = crypto.keyPair()
+  const rootHex = hex(root.publicKey)
+  const sk = '11'.repeat(32)
+  const bind = mkBind(root, sk, 1)
+  const rev = nb.makeNostrRevoke({ rootPubkey: rootHex, nostrPubkey: npk(sk), epoch: 1 }, rootSigner(root))
+  const feed = feedFor({
+    root,
+    nostrBind: bind,
+    nostrRevocations: [rev],
+    events: [mkEvent(sk, 'hidden by revocation')],
+  })
+
+  const res = await feed.eventsWithDiagnostics()
+  assert.deepEqual(res.events, [])
+  assert.equal(res.hidden.contactsEligible, 1)
+  assert.equal(res.hidden.bindingUntrusted, 1)
+  assert.equal(res.hidden.quarantined, 1)
+  assert.equal(res.hidden.byReason.revoked, 2)
+})

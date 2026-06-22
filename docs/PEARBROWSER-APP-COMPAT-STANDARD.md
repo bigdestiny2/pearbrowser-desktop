@@ -1,6 +1,6 @@
 # PearBrowser App Compatibility Standard (PBACS) v0.1
 
-**Status:** Draft standard, v0.1. Grounded against the live PearBrowser desktop fork (`/Users/localllm/Desktop/pearbrowser-desktop/`) and mobile app (`/Users/localllm/Desktop/PearBrowser/`) as of 2026-06. Requirements that describe **behavior not present in current code** are explicitly tagged **PROPOSED** and are non-binding until implemented.
+**Status:** Draft standard, v0.1. Grounded against the live `pearbrowser-desktop` and `PearBrowser` repositories as of 2026-06. Requirements that describe **behavior not present in current code** are explicitly tagged **PROPOSED** and are non-binding until implemented.
 
 ---
 
@@ -11,7 +11,7 @@ PearBrowser is a peer-to-peer browser that can host Pear apps. It decides — **
 ### TL;DR for app authors
 
 - **Ship a static Hyperdrive with `/index.html` at the root.** It is the *only* shape that runs inline in a tab on **both** desktop and mobile. This is the universal compatibility floor (Tier A).
-- **Set `type` explicitly** in your catalogue row to `standalone` or `hypersite` — never rely on inference. Desktop gates tab-vs-window entirely on this field; mobile ignores it.
+- **Set `type` explicitly** in your catalogue row to `standalone` or `hypersite` — never rely on inference. Desktop gates tab-vs-window on this field; mobile does not use it for tab/window routing and treats a static Hyperdrive as the universal app floor.
 - **Author to the strictest target.** Use relative URLs only, external (not inline) JS/CSS, mapped file extensions, hash-based routing, and self-impose the strict mobile CSP via a `<meta>` tag so desktop and mobile behave identically.
 - **Feature-detect every capability** (`if (window.pear?.swarm?.v1)`). The bridge differs by platform, is absent on untrusted origins, and is *not* the Pear Runtime global.
 - **Route all durable state** through Hypercore/Hyperbee/Hyperdrive or the token-authenticated `/api/*` bridge — **never** `localStorage`/cookies (shared across all apps on one loopback origin, ephemeral, XSS-exposed).
@@ -28,14 +28,14 @@ PearBrowser apps fall into three deployable shapes. The single number that matte
 | Tier | Name | Runs where | Required shape | Catalogue declaration |
 |------|------|-----------|----------------|----------------------|
 | **A** | **Universal (in-tab, both platforms)** | Desktop tab **and** mobile tab | Static Hyperdrive (`driveKey` + root `/index.html`). *Optionally also* a `hypersite` worker build for richer desktop UX. | `type` set explicitly; `driveKey` present; root `index.html` exists; mobile `manifest.json` with `name`+`entry:"/index.html"`. |
-| **B** | **Desktop-inline (hypersite)** | Desktop tab only | pear-request/htmx headless worker (`pear.type:"terminal"`, `Pear.worker.pipe()` + `PearRequestRouter`). | `type:"hypersite"`; launch `link` is `pear://` or `file://`. Mobile: unreachable unless you *also* ship a Tier-A static drive. |
-| **C** | **Window-only (standalone)** | Own OS window (desktop); **unreachable on mobile** | Full Bare/Pear GUI app (ships its own runtime, `Pear.worker.run` + FramedStream IPC, renders its own window — e.g. Keet). | `type:"standalone"` with a launch `link` and **no** `driveKey`. |
+| **B** | **Desktop-inline (hypersite)** | Desktop tab only | pear-request/htmx headless worker (`pear.type:"terminal"`, `Pear.worker.pipe()` + `PearRequestRouter`). | `type:"hypersite"`; launch `link` is `pear://` or `file://`. Mobile has no worker host unless you *also* ship a Tier-A static drive. |
+| **C** | **Window-only (standalone)** | Own OS window (desktop); mobile can preserve a safe launch link but has no standalone Pear GUI window host | Full Bare/Pear GUI app (ships its own runtime, `Pear.worker.run` + FramedStream IPC, renders its own window — e.g. Keet). | `type:"standalone"` with a launch `link` and **no** `driveKey`. |
 
 **Tier criteria & honest declaration:**
 
-- **Tier A is the floor for any app claiming mobile support.** Mobile has no `type` handling, no `pear://` launch, and no headless-worker tab host; it serves every app as a static Hyperdrive at `/app/<key>/index.html`. If you have no static drive with a root `index.html`, you have **no mobile experience at all**.
+- **Tier A is the floor for any app claiming a guaranteed mobile in-WebView experience.** Mobile preserves safe `hyper://`, `pear://`, and `file://` link-only rows, but it has no `type`-gated window launcher and no headless-worker tab host. A static drive with root `/index.html` is the portable mobile app shape.
 - **Tier B (`hypersite`) runs inline on desktop only.** The desktop "Run in tab" action exists *if and only if* `type === 'hypersite'`. There is no mobile worker-IPC host, so a hypersite cannot run in a mobile tab.
-- **Tier C (`standalone`) cannot be embedded anywhere.** It opens in its own window on desktop and fails on mobile. Declaring it `hypersite` to force a "Run in tab" button yields a **permanently blank tab** — the app does not speak the pear-request wire protocol the tab host streams.
+- **Tier C (`standalone`) cannot be embedded anywhere.** It opens in its own window on desktop; mobile may preserve a safe launch link but has no standalone Pear GUI host. Declaring it `hypersite` to force a "Run in tab" button yields a **permanently blank tab** — the app does not speak the pear-request wire protocol the tab host streams.
 - **There is no fourth launch path** and **no in-tab embedding of a foreign full-GUI app** (no working iframe/`Pear.View` host exists for foreign GUIs in current code). The only two in-tab shapes are static Hyperdrive and hypersite worker.
 
 > **PROPOSED — Machine-readable tier self-declaration.** A future catalogue/manifest block letting an app declare its tier and transports machine-readably, e.g.:
@@ -70,7 +70,7 @@ PearBrowser apps fall into three deployable shapes. The single number that matte
 - **PB-TYPEMODEL-5 (MUST, desktop).** A full-GUI / worker-class app (Keet-style: own Pear runtime, `Pear.worker.run` + FramedStream IPC) MUST be declared `type:'standalone'` (equivalently: a launch `link` and **no** `driveKey`). It opens in its own window. **Do NOT** declare it `hypersite` — that surfaces a "Run in tab" button that loads a permanently blank tab.
   *Note:* the window-launch branch is gated on `link && !driveKey`; `type:'standalone'` is the catalogue-level declaration that produces this shape. PearBrowser does not "crash" a misdeclared app — the tab simply stays blank and the host logs a worker error.
 
-- **PB-TYPEMODEL-6 (MUST, mobile).** To run on mobile you MUST ship a browsable static Hyperdrive: a 64-hex `driveKey` with `/index.html` at the root. Mobile has no `pear://` launch, no headless-worker tab, and reads no `type` field. Do not rely on `type:'hypersite'` or a `pear://` link for any mobile experience.
+- **PB-TYPEMODEL-6 (MUST, mobile).** To guarantee mobile WebView execution you MUST ship a browsable static Hyperdrive: a 64-hex `driveKey` with `/index.html` at the root. Mobile preserves safe link-only rows, but has no headless-worker tab and does not use `type` for app routing. Do not rely on `type:'hypersite'` or a `pear://` link as your only mobile experience.
 
 - **PB-TYPEMODEL-7 (SHOULD, both).** For maximal reach, ship **both** a static Hyperdrive (mobile + universal tab floor) **and** — where you want richer desktop-inline UX — a hypersite build, on the **same catalogue row** (`driveKey` for static, `link`+`type:'hypersite'` for the worker). The static drive guarantees the app is never unrunnable on a platform.
 
@@ -97,7 +97,7 @@ PearBrowser apps fall into three deployable shapes. The single number that matte
 
 - Marking a Keet-style full-GUI app `hypersite` → permanently blank tab + host worker-error log.
 - Marking a headless pear-request worker `standalone` (or giving it a non-`pear://` link) → user gets "Open", a windowless process spawns, nothing visible happens.
-- Shipping **only** a `pear://`/hypersite app with no `driveKey` and expecting mobile to work → mobile `handleVisit` cannot form `hyper://<driveKey>` → "Invalid drive key"; a bogus driveKey makes the proxy fetch a nonexistent drive → directory-listing/hang. (This is the documented mobile "blank tab + WorkerError" for worker-class apps.)
+- Shipping **only** a `pear://`/hypersite app with no static `driveKey` and expecting a mobile WebView app → mobile may preserve/navigate the safe link, but it cannot run a desktop pear-request worker or standalone Pear GUI host.
 - Omitting `type` and assuming tab behavior → link-only rows silently become `standalone`; an invalid/extra field fails the schema and the app never appears.
 - Assuming a foreign windowed GUI can be iframed/`Pear.View`-embedded inline → no such host path exists.
 
@@ -124,17 +124,17 @@ PearBrowser apps fall into three deployable shapes. The single number that matte
 - **PB-MANIFEST-7 (MUST, desktop).** Tab-ability is decided **only** by the catalogue row's `type` enum, never by your own `pear.type`/`pear.gui`/any in-drive field. Set `type:'hypersite'` for an inline worker, or supply a `driveKey` static drive for a tab-served static site.
   *Correction:* only `type:'hypersite'` renders a literal **"Run in tab"** button (→ `CMD_RUN_APP_IN_TAB`, passing `app.link`). A `driveKey` static drive instead renders **Install → Launch** (→ `CMD_LAUNCH_APP`, opening `localUrl` in a Browse tab). **Both end up in a tab via different affordances** — do not expect a static drive to show "Run in tab."
 
-- **PB-MANIFEST-8 (MUST, both).** Publish an installable static site with a `driveKey`, not only a `link`. A `link`-only row with no `type` infers `standalone` (window-only, no install/tab path) and is **unreachable on mobile**.
+- **PB-MANIFEST-8 (MUST, both).** Publish an installable static site with a `driveKey`, not only a `link`. A `link`-only row with no `type` infers `standalone` on desktop and gives mobile no guaranteed in-WebView app runtime.
 
 - **PB-MANIFEST-9 (SHOULD, desktop).** A hypersite app SHOULD be a `pear.type:'terminal'` Pear app depending on `pear-request` + htmx, emitting HTML fragments over its worker pipe. The tab runtime bridges only the worker pipe; it hosts no GUI window. *(Confidence: medium on the exact pear-request dependency contract — see §6.)*
 
 - **PB-MANIFEST-10 (MUST, desktop).** A full-GUI / `pear.type:'desktop'` app MUST be declared `type:'standalone'` with a `pear://` `link`. Do not tag it `hypersite` or publish it as an installable static `driveKey` expecting a tab.
 
-- **PB-MANIFEST-11 (MUST, mobile).** Mobile compatibility = "ships a root `/index.html` static drive," period. No window launcher, no run-in-tab, no `type` field. A `link`-only or worker-class app has no mobile launch path.
+- **PB-MANIFEST-11 (MUST, mobile).** Guaranteed mobile WebView compatibility = "ships a root `/index.html` static drive." Mobile has no desktop worker host and no standalone Pear GUI window launcher. A `link`-only or worker-class app may be preserved as a safe target, but it is not a portable mobile app by itself.
 
 - **PB-MANIFEST-12 (SHOULD, desktop window path).** For standalone apps, set a valid `pear.name`: lowercase, one word, matching `^[@/a-z0-9-_]+$`. An invalid name throws `ERR_INVALID_APP_NAME` and the window launch fails. (Irrelevant to static-drive tab serving.)
 
-- **PB-MANIFEST-13 (MAY, both).** Provide `iconRef` (path into your drive, ≤300 chars) and `version` (string) for display. See **PB-DISCOVERYCATALOGUE-9** for the important caveat that a sheets-row drive-hosted icon **does not currently render on desktop**.
+- **PB-MANIFEST-13 (MAY, both).** Provide `iconRef` (path into your drive, ≤300 chars) and `version` (string) for display. Desktop resolves drive-hosted icons for sheets, index-room, and legacy catalogue sources; mobile renders relay/manifest icons.
 
 - **PB-MANIFEST-14 (split by platform — host CSP differs).** Every drive shares one loopback origin `http://127.0.0.1:PORT`; there is **no per-app origin isolation** (cookies/storage shared) on **both** platforms.
   - **Mobile (enforced):** the proxy sets a strict CSP on **every** HTML response: `default-src 'self'; script-src 'self'; connect-src 'self' http://127.0.0.1:PORT http://localhost:PORT; object-src 'none'; base-uri 'self'`. Design within it: no inline/remote scripts, styles, fonts, or images; no `eval`; connect only to the loopback proxy.
@@ -368,7 +368,7 @@ Hardcoding loopback port/origin/dkey; capturing the token once / persisting it; 
 - **PB-DISCOVERYCATALOGUE-2 (MUST, desktop).** Set `type` explicitly to `'hypersite'` (inline tab) or `'standalone'` (own window). Use `hypersite` iff your app speaks `Pear.worker.pipe()`/`PearRequestRouter` (or serves static files) and renders no window.
 - **PB-DISCOVERYCATALOGUE-3 (MUST, desktop).** Never rely on `type` inference — the two readers diverge: the **sheets** reader infers `'standalone'` only for link-only rows (else `undefined`); the **relay index-room** reader infers `'standalone'` for driveKey-only rows and `'hypersite'` otherwise. An omitted `type` yields inconsistent (sometimes absent) launch behavior.
 - **PB-DISCOVERYCATALOGUE-4 (MUST, both).** Do not publish a full-GUI/worker-class app as `hypersite` — the tab runtime can only host pear-request/static apps, so it renders a blank tab.
-- **PB-DISCOVERYCATALOGUE-5 (SHOULD, both).** Author as `hypersite` (or Tier-A static) rather than `standalone` for maximal in-tab reach; standalone opens a separate window on desktop and fails on mobile.
+- **PB-DISCOVERYCATALOGUE-5 (SHOULD, both).** Author as `hypersite` (or Tier-A static) rather than `standalone` for maximal in-tab reach; standalone opens a separate window on desktop and has no guaranteed mobile WebView runtime unless you also ship a Tier-A static drive.
 - **PB-DISCOVERYCATALOGUE-6 (SHOULD, desktop).** Supply canonical optional metadata with **exactly** these keys: `description` (≤1000), `author` (≤200), `categories` (array ≤12, each ≤60), `version` (≤40), `iconRef` (≤300), `publishedAt` (epoch-ms integer, also passed as the row time for recency).
 - **PB-DISCOVERYCATALOGUE-7 (MUST, desktop).** Include **no** key outside `APPS_SCHEMA` — `additionalProperties:false` rejects the whole row at apply time (silently, per PB-1).
 - **PB-DISCOVERYCATALOGUE-8 (MUST, desktop).** `driveKey`/`manifestHash` are lowercase 64-hex (`^[0-9a-f]{64}$`); malformed → silent rejection.
@@ -495,10 +495,10 @@ Resolves the desktop/mobile conflicts in one table. Set **all** of these for a T
 
 | Logical field | Desktop key (sheets row) | Mobile key (manifest.json) | Canonical rule |
 |---|---|---|---|
-| App class | `type` ∈ {`standalone`,`hypersite`} — **always explicit** | *(none — mobile ignores `type`)* | Set `type` on desktop; mobile serves every app as a static drive. |
+| App class | `type` ∈ {`standalone`,`hypersite`} — **always explicit** | *(none — mobile does not route on `type`)* | Set `type` on desktop; ship a static drive for mobile WebView execution. |
 | Entry point | *(hardcoded `/index.html`)* | `entry` (**required**) | `entry` MUST be exactly `"/index.html"`; the file MUST be at the drive root. Any other value is invalid/ignored. |
 | Drive identity | `driveKey` (`^[0-9a-f]{64}$`) | *(drive root has `manifest.json`)* | Lowercase 64-hex; root `/index.html` present. Universal floor (Tier A). |
-| Icon | `iconRef` (path, ≤300) | `icon` (drive path) | **Set BOTH** to the same in-drive asset. *(Desktop sheets-path icon does not render today — PB-DISCOVERYCATALOGUE-9; mobile renders it.)* |
+| Icon | `iconRef` (path, ≤300) | `icon` (drive path) | **Set BOTH** to the same in-drive asset. Desktop resolves drive-hosted icons for every catalogue source; mobile renders the relay/manifest icon. |
 | Categories | free-form array (≤12, ≤60 each) | fixed enum: `utilities`\|`productivity`\|`communication`\|`games` | **Use the mobile fixed vocabulary** (desktop accepts it as a subset) so cross-platform listing/filtering works. |
 | Version | `version` (string ≤40) | `version` | Bump on **every** content change (string-inequality update trigger — PB-VERSION-1/2). |
 | Trust | `verification` (`unverified` only) | *(n/a)* | Author sets only `unverified`; relay/attestation owns the rest. |
@@ -558,7 +558,7 @@ Run before release. Grouped by tier; **Tier A items are the universal floor**.
 - [ ] Declared `type:'standalone'` with a `link` and **no** `driveKey`; not advertised as tab-able.
 - [ ] `pear.name` matches `^[@/a-z0-9-_]+$` (avoids `ERR_INVALID_APP_NAME`).
 - [ ] Single-instance: store opened once, closed cleanly on teardown; no held rocksdb LOCK / bound fixed port; second launch focuses/hands off.
-- [ ] Honestly declared window/launcher-only (no false tab-compatibility claim); accepts it is unreachable on mobile.
+- [ ] Honestly declared window/launcher-only (no false tab-compatibility claim); accepts it has no guaranteed mobile WebView runtime unless a Tier-A static drive is also shipped.
 
 ### Bridge & consent (any tier using `window.pear`)
 
@@ -581,11 +581,11 @@ Run before release. Grouped by tier; **Tier A items are the universal floor**.
 1. **Machine-readable tier/self-declaration block** (`pearbrowser: { tier, runIn, transport, platforms, entry }`) and a **conformance badge** with defined semantics and a certifier. Currently tier is inferred from `type` + link regex + whether the worker speaks pear-request.
 2. **Declared capabilities / permissions** surfaced at install time (the mobile `permissions` array is a no-op today); runtime scopes should be a subset of declared capabilities.
 3. **App lifecycle signal contract** for in-tab apps (`pagehide`/`visibilitychange`/discard/graceful-drain) and **hypersite worker restart-on-crash** supervision.
-4. **Desktop sheets-path icon resolution** — wire `iconRef`→drive fetch so sheets-row drive-hosted icons render on desktop (currently only the legacy `catalog.json` path inlines icons).
+4. **Icon cache/version contract** — drive-hosted icon resolution is implemented; define cache invalidation and versioned icon refresh semantics.
 5. **Update/cache contract** — define cache invalidation and re-replication on `version` bump; replace string-inequality update detection with real semver ordering.
 6. **`manifestHash` canonicalization** — define exactly which bytes/ordering produce the hash so a future verifier can accept author-computed values; wire install-time verification.
 7. **`canonicalJSON` spec** for signed-catalog Ed25519 verification (key ordering, number/unicode normalization) so independent relays interoperate.
-8. **Cross-platform `type` unification** — either teach mobile to honor `type`, or formally bless "mobile ignores `type`, always static-drive" as the contract (this standard currently mandates the latter).
+8. **Cross-platform `type` unification** — either teach mobile to honor `type`, or formally bless "mobile does not route on `type`; static drive is the mobile app floor" as the contract.
 9. **Inter-app deep-link contract** — a canonical way to construct a shareable link to a hypersite/static app at a specific resource (beyond `hyper://` + ad-hoc hash params).
 10. **Standalone app management** — a real launcher (terminate/focus/relaunch, exit propagation, launcher-card persistence). `CMD_LAUNCH_PEAR_LINK` is fire-and-forget today; the §3 lifecycle block is entirely aspirational.
 

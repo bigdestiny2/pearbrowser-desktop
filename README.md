@@ -1,10 +1,12 @@
 # PearBrowser Desktop
 
-A peer-to-peer browser, app store, and site publisher for macOS, Windows, and Linux, built on the Pear Runtime.
+A local-first peer-to-peer browser, app store, search engine, naming layer, Nostr bridge, and site publisher for macOS, Windows, and Linux, built on the Pear Runtime.
 
-**No accounts. No DNS. No servers.** Sites are Hyperdrives, addressed by public key, pinned 24/7 on the [HiveRelay](https://github.com/bigdestiny2/P2P-Hiverelay) backbone. The publisher's laptop being offline doesn't matter — the relays carry the bytes.
+**No accounts. No DNS. No manual app updates.** Sites and apps are addressed by stable Pear/Hyperdrive keys and pinned 24/7 on the [HiveRelay](https://github.com/bigdestiny2/P2P-Hiverelay) backbone. The publisher's laptop being offline doesn't matter — the relays carry the bytes, and users launch the current release from the catalogue without hunting for a download or applying an updater.
 
 **Current release:** `v0.4.5` · production length `5440` · pinned on 5+ relays · 365-day TTL · desktop packages pinned to local [`00-core/hiverelay`](/Users/localllm/Projects/pear-ecosystem/00-core/hiverelay) with runtime docs targeting the live `0.19.x` relay contract.
+
+**Current architecture:** start with [docs/ARCHITECTURE_AND_CAPABILITIES.md](./docs/ARCHITECTURE_AND_CAPABILITIES.md). The deeper catalogue/search/naming/Nostr audit is in [docs/DEEP_AUDIT_CATALOG_SEARCH_NAMING_NOSTR_2026-06-21.md](./docs/DEEP_AUDIT_CATALOG_SEARCH_NAMING_NOSTR_2026-06-21.md).
 
 ## Run it
 
@@ -30,9 +32,11 @@ One install, one key, works on all three desktop platforms — Pear downloads th
 
 ### Apps
 - Paste any `pear://` link → opens in its own isolated window
-- Load a decentralized catalog Hyperdrive → install / launch / uninstall apps
+- Launch the latest available release from a stable catalogue row or app link; users do not need to revisit a project page, download a package, or manually update installed app bytes
+- Load decentralized catalogues from Hyperdrive JSON, signed Hyperbee, Autobee, schema-sheets rooms, HiveRelay index rooms, default curated seeds, community submissions, and your own writable catalogues
 - Keep multiple catalogs loaded at once with search, category, and source filters across the aggregated app store
 - **My Catalog:** create a writable personal catalog, add apps from loaded catalogs or installed apps, rename it, edit saved metadata (name, description, version, author, categories), and share the catalog key; copies opened without the writer key stay read-only
+- Safe catalogue normalization accepts `apps[]`, `items[]`, or `entries[]`, preserves safe link-only rows (`hyper://`, `pear://`, `file://`), rejects malformed targets, and strips prototype-pollution keys before rendering
 - Default catalog auto-loads on first Apps-tab visit (the "PearBrowser Network" Hyperbee `hyperbee://f5fb7500bccd…` — PearBrowser, HiveRelay, P2P Builders, Pear Dealroom, Paste, PearPoker, Keet, PearPass, anonGPT, Pear POS, Pear Tickets, HiveWorm), generated from a single source manifest and mirrored into the offline seed
 - Featured apps: **Keet** · **PearPass** · **[HiveWorm](https://github.com/bigdestiny2/hiveworm)** (a multiplayer life-sim that uses `window.pear.swarm.v1` directly)
 
@@ -47,6 +51,21 @@ One install, one key, works on all three desktop platforms — Pear downloads th
 ### Library
 - Bookmarks + history stored in a local Hyperbee (private, local-only by default)
 - Cross-launch persistence; powers the URL-bar autocomplete
+
+### Search
+- Local-first personal index returns first-paint results immediately from local browser/catalogue data
+- Optional trusted-peer federation enriches results in the background through `QueryPlanner`, digest checks, provenance, and stale-query suppression
+- Query length and result limits are bounded; no query leaves the device unless the user asks for federated search
+
+### Naming
+- `pearname://` and typed names resolve through local petnames, owned registry records, trusted-contact federation, and curated defaults
+- Unicode normalization and homograph guardrails keep memorable names from hiding unsafe targets
+- Resolution keeps provenance so a local petname, contact assertion, and curated alias do not look equivalent
+
+### Nostr Bridge
+- Deterministic Nostr key derived from the PearBrowser identity seed, with binding and revoke records
+- Local NIP-01-style event storage and ingest
+- Trusted-contact feed aggregation with hidden diagnostics; this is not a general public relay client
 
 ### Identity (BIP-39)
 - 12-word backup phrase + Restore-from-phrase ("Moving to a new device?" framing in Settings)
@@ -69,32 +88,36 @@ One install, one key, works on all three desktop platforms — Pear downloads th
 - **Profile:** display name, bio, avatar URL, website, email — opt-in fields apps see when you grant a login
 - **Connected Apps:** per-app login grants list, revoke individually or all
 - **Relays:** add / remove / mark-primary URLs · toggle hybrid-fetch vs pure-P2P · live capability advertisement pills showing version + region + transports (`hyperswarm` · `dht-relay-ws`) from `/.well-known/hiverelay.json`
+- **Trusted peers, names, and Nostr:** manage trusted contacts, name sources, binding state, and bridge diagnostics
+- **Device Sync:** browser-state sync primitives for tabs/bookmarks/settings across your own devices
 - **Storage:** path, usage, clear cache, reset data (signed-unseed every pinned site first)
 
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│  Chromium renderer  (React + htm, no build step)         │
-│  - Multi-tab Browse / Apps / Sites / Library / Settings  │
-│  - window.pear.swarm.v1 / window.pear.login() in iframes │
-└────────────────────────────┬─────────────────────────────┘
-                             │ WebSocket (length-prefixed JSON) ws://127.0.0.1:9876
-                             ▼
-┌──────────────────────────────────────────────────────────┐
-│  Bare main process                                       │
-│  ├── HiveRelayClient        (Protomux, signed seed/unseed, 0.19-target contract)
-│  ├── Hyperswarm             (HyperDHT + UDX)
-│  ├── Corestore              (auto-managed primaryKey, decoupled from identity)
-│  ├── Hyperdrive             (per-site namespace)
-│  ├── Hyperbee × 5           (bookmarks, history, profile, contacts, swarm-grants)
-│  ├── Identity               (BIP-39 entropy → ed25519 root → per-app sub-keys)
-│  ├── SwarmBridge            (per-page swarm.v1 channels + tier policy)
-│  └── HyperProxy             (http://127.0.0.1:PORT/hyper/<key>/path)
-└──────────────────────────────────────────────────────────┘
+Renderer UI (React + htm, no build step)
+  Browse / Apps / Publish / Library / Search / Names / Nostr / Settings
+  iframe sandbox + page shims
+        |
+        | WebSocket (length-prefixed JSON) ws://127.0.0.1:9876
+        v
+Bare backend process
+  HiveRelayClient, Hyperswarm, Corestore, Hyperdrive, Hyperbee, Autobase
+  HyperProxy, HttpBridge, PearBridge, SwarmBridge
+  CatalogManager, PersonalIndex, QueryPlanner, NameRegistry, Nostr stores
+  Identity, profile, contacts, grants, browser-state sync, storage quota
 ```
 
 Three independent keypairs — BIP-39 identity, HiveRelay publisher key, Corestore primaryKey — all with separate backup stories. Identity regeneration never bricks the store; storage resets never orphan your pinned sites (signed unseeds first).
+
+## Documentation
+
+| Document | What |
+|---|---|
+| [Architecture and capabilities](./docs/ARCHITECTURE_AND_CAPABILITIES.md) | Current system map for browser surfaces, runtime layers, catalogue, search, naming, Nostr, APIs, and validation. |
+| [Deep audit](./docs/DEEP_AUDIT_CATALOG_SEARCH_NAMING_NOSTR_2026-06-21.md) | Detailed catalogue/search/naming/Nostr audit, issue list, fixes, and test evidence. |
+| [App compatibility standard](./docs/PEARBROWSER-APP-COMPAT-STANDARD.md) | Author-facing release contract for apps targeting desktop and mobile. |
+| [Feature roadmap](./docs/P2P-BROWSER-FEATURE-ROADMAP.md) | Current shipped/next/parking-lot roadmap after the 2026 audit. |
 
 ## Develop
 

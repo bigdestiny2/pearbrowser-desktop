@@ -53,6 +53,10 @@ function createSearchHandler ({ getPersonalIndex, getQueryPlanner, emit, onError
               results: (fed && fed.results) || [],
               phase: 'enriched',
               verifyBudgetExhausted: !!(fed && fed.verifyBudgetExhausted),
+              digestHit: !!(fed && fed.digestHit),
+              fallbackPull: !!(fed && fed.fallbackPull),
+              partial: !!(fed && fed.partial),
+              provenance: (fed && fed.provenance) || null,
             })
           }
         })

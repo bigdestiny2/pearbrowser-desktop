@@ -9,6 +9,12 @@
 > `index.js` anchors below describe the working-tree state on 2026-06-17. Anchors in every other
 > file are committed and verify exactly.
 
+> **Current implementation note (2026-06-22):** a desktop trusted-contact Nostr
+> bridge subset has since landed: deterministic Nostr keys, binding/revoke
+> records, local event storage, ingest, and trusted feed aggregation. This
+> document remains the broader design for a public gateway/NIP expansion. See
+> [`../ARCHITECTURE_AND_CAPABILITIES.md`](../ARCHITECTURE_AND_CAPABILITIES.md).
+
 ---
 
 ## 1. Executive Summary
@@ -36,7 +42,7 @@ A bridge is therefore not bolting on a foreign system — it is **translating be
 
 ## 3. Current State in Our Codebase (grounded)
 
-**There is no feed / social / Nostr / secp256k1 / Schnorr / WebSocket-relay code anywhere in the tree today.** Confirmed by repo-wide grep across `backend/` and `ui/` for `nostr|secp256k1|schnorr|npub|nsec` — zero source matches (only this doc). Everything below is a **seam** into working machinery, not existing functionality. **All line anchors below were verified against the live working tree on 2026-06-17;** `index.js` anchors reflect its modified-but-uncommitted state, all other files are committed and verify exactly.
+At the time of this 2026-06-17 design, there was **no feed / social / Nostr / secp256k1 / Schnorr / WebSocket-relay code anywhere in the tree.** The current desktop branch now has a trusted-contact bridge subset, while the broader public gateway described below remains design work. Everything below should be read as the original seam analysis into working machinery. **All line anchors below were verified against the live working tree on 2026-06-17;** `index.js` anchors reflect its modified-but-uncommitted state, all other files are committed and verify exactly.
 
 ### 3.1 Identity — `backend/identity.js`
 A complete Ed25519 stack, BIP-39 backed. `class Identity` (`:117`), instantiated **once** at boot: `identity = new Identity(storagePath)` (`index.js:1530`).

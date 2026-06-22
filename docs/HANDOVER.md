@@ -7,6 +7,13 @@
 The earlier `HANDOVER-v0.4.5.md` snapshot has been folded in here and removed. Since it: **Phase N1 is COMPLETE
 on one branch** (n1ui UI half merged — §4) and **device sync is fully committed** (UI `b26e4c3` — §2/§6).
 
+> **Historical note (2026-06-22):** this handover preserves the branch status as
+> of 2026-06-19. Naming, search hardening, and a trusted-contact Nostr bridge
+> subset have advanced since then. Use
+> [`ARCHITECTURE_AND_CAPABILITIES.md`](./ARCHITECTURE_AND_CAPABILITIES.md) and
+> [`DEEP_AUDIT_CATALOG_SEARCH_NAMING_NOSTR_2026-06-21.md`](./DEEP_AUDIT_CATALOG_SEARCH_NAMING_NOSTR_2026-06-21.md)
+> as the current product/audit baseline.
+
 > ⚠️ **This worktree has multiple Claude sessions running on it at once.** During this handover,
 > concurrent sessions committed, stashed, and reset files, and authored other handover docs
 > (`SEARCH-HANDOVER.md` appeared mid-merge). Before editing a shared file (`ui/shell.js`,
@@ -42,7 +49,7 @@ shared substrate, so the tracks **reuse it, not rebuild it**:
 | **L0 — Identity `verify()`** | ✅ **Committed** (P0) | `06614f2`; `backend/identity.js`, `CMD_IDENTITY_VERIFY=75`, `test/identity-verify.test.js` | Ed25519 `verify`/`verifyForApp`; un-stubbed `anongpt-buyer`. The root gate for all trust-bearing work. |
 | **Naming** | ✅ **N0 + N1 COMPLETE** (behind `experimentalNaming`) | N0 `e6c649e`, N1-core `103211c`, N1-wiring `637ef61`+`76af6ef`, merge `fc7b620` | Tiers 0 (local petname, wins) + 3 (curated floor) ship. URL-bar bare-word resolution + provenance chip live. **Next: N2 is superseded by `identity-binding.cjs`; the real next step is N3/N4** (pointer publish, then endorsement rooms + the shared `endorsement-rank.cjs`). `CMD_NAME_LOAD_DIRECTORY=254` reserved for N3/N4. |
 | **Payments** | ⛔ **Not started** | no `backend/payment*`/`*receipt*` files | First real phase PAY1 (signed receipt op-log) is **gated on `SPIKE-AUTOBEE-DURABILITY`**. PAY2/3 span **pear-pos / pear-exchange** (vendor escrow/onchain `.cjs`). |
-| **Nostr** | ⛔ **Not started** | no `backend/nostr*`/`secp256k1*` files | All of NOSTR0–8 gated on **`SPIKE-SCHNORR-BARE`** (Bare-loadable BIP-340). |
+| **Nostr** | Historical snapshot: not started on 2026-06-19 | no `backend/nostr*`/`secp256k1*` files at that snapshot | A trusted-contact bridge subset has since landed; broader public-relay work remains gated on **`SPIKE-SCHNORR-BARE`**. |
 | **Privacy-routing** | ⛔ **Not started** | no `backend/routing*` files | PRIV0 (metadata-min defaults) is cheap + default-on and can land early; PRIV1+ build the routing directory + single-hop. |
 | **Search** (substrate's origin) | ✅ Committed — phases 0–5 + 4 hardening rounds + UI search box/indexer | `b7addc7`, `826b04b`, `be9a7e9`…`b58c49d`, `0c53ed4`…`b2cc5bd` | See [`SEARCH-HANDOVER.md`](./SEARCH-HANDOVER.md) (concurrent) + [`P2P-SEARCH-RESEARCH.md`](./P2P-SEARCH-RESEARCH.md). |
 | **Device sync** (adjacent, not a plan track) | ✅ **Fully committed** (backend + UI) | `3051373` (engine), `366f78e` (invite helpers), `b26e4c3` (UI) | Behind `experimentalDeviceSync`. `DeviceSync` panel + toggle in `ui/shell.js`. |

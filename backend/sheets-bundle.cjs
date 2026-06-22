@@ -36,7 +36,7 @@ var __toCommonJS = (mod2) => __copyProps(__defProp({}, "__esModule", { value: tr
 // node_modules/events-universal/default.js
 var require_default = __commonJS({
   "node_modules/events-universal/default.js"(exports2, module2) {
-    module2.exports = require("events");
+    module2.exports = require("bare-events");
   }
 });
 
@@ -2192,7 +2192,7 @@ var require_safety_catch = __commonJS({
 // node_modules/ready-resource/index.js
 var require_ready_resource = __commonJS({
   "node_modules/ready-resource/index.js"(exports2, module2) {
-    var EventEmitter = require("events");
+    var EventEmitter = require("bare-events");
     module2.exports = class ReadyResource extends EventEmitter {
       constructor() {
         super();
@@ -12948,8 +12948,8 @@ var require_node2 = __commonJS({
         return process.platform === "linux" && fs.existsSync("/etc/alpine-release");
       };
       readPackage = readPackage2, isAlpine = isAlpine2;
-      const url = require("url");
-      const fs = require("fs");
+      const url = require("bare-url");
+      const fs = require("bare-fs");
       const resolve = require_bare_addon_resolve();
       let host = process.platform + "-" + process.arch;
       const conditions = ["addon", "node", process.platform, process.arch];
@@ -22475,7 +22475,7 @@ var require_fully_remote_proof = __commonJS({
 // node_modules/hypercore/index.js
 var require_hypercore = __commonJS({
   "node_modules/hypercore/index.js"(exports2, module2) {
-    var { EventEmitter } = require("events");
+    var { EventEmitter } = require("bare-events");
     var isOptions = require_is_options();
     var crypto = require_hypercore_crypto();
     var CoreStorage = require("hypercore-storage");

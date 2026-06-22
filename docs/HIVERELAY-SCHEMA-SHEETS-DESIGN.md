@@ -5,6 +5,12 @@
 **Scope:** `pearbrowser-desktop` (catalogue + UI), `p2p-hiverelay` (relay backbone), `p2p-hiverelay-verifier` (trust), `p2p-hiverelay-client` (gateway client)
 **Credits:** `schema-sheets` by **ryanramage**. The pattern of a Holepunch-native browser shipping a schema-sheets room as its app catalogue is taken from **Drache93's Pear Browser** (`/tmp/pear-browser-ref`), which is the inspiration for this whole design.
 
+> **Current implementation note (2026-06-22):** schema-sheets catalogues and
+> HiveRelay index-room loading are implemented additively in PearBrowser
+> Desktop. This document remains the design rationale and relay-side expansion
+> plan. See [`ARCHITECTURE_AND_CAPABILITIES.md`](./ARCHITECTURE_AND_CAPABILITIES.md)
+> for the current browser-facing catalogue pipeline.
+
 ---
 
 ## 1. Executive Summary + Core Idea

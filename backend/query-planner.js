@@ -224,7 +224,17 @@ class QueryPlanner {
   // (best-trust-wins) and ranked together exactly once. Returns the enriched set;
   // the synchronous local-first reply lives in the CMD_SEARCH handler (Step 4).
   async planAndSearch (query, { now0 = 0, limit = 50 } = {}) {
-    if (!this.personalIndex) return { results: [], verifyBudgetExhausted: false, phase: 'enriched' }
+    if (!this.personalIndex) {
+      return {
+        results: [],
+        verifyBudgetExhausted: false,
+        digestHit: false,
+        fallbackPull: false,
+        partial: false,
+        provenance: { digestHit: false, fallbackPull: false, partial: false, plannedPeers: 0, pulledPeers: 0, digestSkipped: 0 },
+        phase: 'enriched'
+      }
+    }
     const { selfRoot, contactRoots, graph } = await this._trustSnapshot()
 
     const selfCandidates = await sc.searchCandidates(this.personalIndex.bee, query, { tier: 'self', trustHop: 0 })
@@ -234,16 +244,39 @@ class QueryPlanner {
     const frontier = fr.buildFrontier(contactRoots, graph, { digests: this._digestCache, warm: this.budget.warmRoots() })
     this.budget.beginQuery()
     const plan = fr.planFanout(frontier, queryTerms, this.budget.toBudgetArg())
-    // v1: peer digests aren't replicated yet, so the digest-first plan.pull is
-    // empty — fetch the frontier directly, still bounded by the connection
-    // budget. Digest-first gating activates once digests are wired.
-    const fetchRoots = (plan.pull.length ? plan.pull : frontier).map((f) => f.rootPubkey)
+    // Prefer digest-positive peers. While some contacts still lack digest
+    // metadata, fall back only to those unknown peers; do not spend a fetch on a
+    // peer whose known digest says none of the query terms can match.
+    const fallbackFrontier = frontier.some((f) => f.digest)
+      ? frontier.filter((f) => !f.digest)
+      : frontier
+    const fetchPlan = plan.pull.length ? plan.pull : fallbackFrontier
+    const fetchRoots = fetchPlan.map((f) => f.rootPubkey)
+    const digestHit = plan.pull.length > 0
+    const fallbackPull = !digestHit && fetchRoots.length > 0
     const peerData = await this._fetchPeerHits(fetchRoots, query)
     const peerSources = this._verifyPeerSources(peerData)
 
     const sources = [{ rootPubkey: selfRoot, candidates: selfCandidates }, ...peerSources]
     const results = sf.mergeFederated(sources, graph, { now0, limit })
-    return { results, verifyBudgetExhausted: this._verifyBudgetExhausted, phase: 'enriched' }
+    const partial = fallbackPull || this._verifyBudgetExhausted || fetchRoots.length < frontier.length
+    const provenance = {
+      digestHit,
+      fallbackPull,
+      partial,
+      plannedPeers: frontier.length,
+      pulledPeers: fetchRoots.length,
+      digestSkipped: (plan.skipped || []).filter((p) => p && p.digest).length
+    }
+    return {
+      results,
+      verifyBudgetExhausted: this._verifyBudgetExhausted,
+      digestHit,
+      fallbackPull,
+      partial,
+      provenance,
+      phase: 'enriched'
+    }
   }
 }
 

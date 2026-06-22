@@ -35,7 +35,16 @@ test('federated:true emits exactly one enriched event with the planner results +
   const events = []
   const h = createSearchHandler({
     getPersonalIndex: () => fakePI(rows),
-    getQueryPlanner: () => ({ planAndSearch: async () => ({ results: fedRows, verifyBudgetExhausted: false }) }),
+    getQueryPlanner: () => ({
+      planAndSearch: async () => ({
+        results: fedRows,
+        verifyBudgetExhausted: false,
+        digestHit: true,
+        fallbackPull: false,
+        partial: true,
+        provenance: { digestHit: true, fallbackPull: false, partial: true, plannedPeers: 2, pulledPeers: 1, digestSkipped: 1 }
+      })
+    }),
     emit: (e) => events.push(e),
   })
   const res = await h({ query: 'x', federated: true })
@@ -47,6 +56,10 @@ test('federated:true emits exactly one enriched event with the planner results +
   assert.deepEqual(events[0].results, fedRows)
   assert.equal(events[0].queryId, res.queryId)
   assert.equal(events[0].verifyBudgetExhausted, false)
+  assert.equal(events[0].digestHit, true)
+  assert.equal(events[0].fallbackPull, false)
+  assert.equal(events[0].partial, true)
+  assert.deepEqual(events[0].provenance, { digestHit: true, fallbackPull: false, partial: true, plannedPeers: 2, pulledPeers: 1, digestSkipped: 1 })
 })
 
 test('federating is false when no planner exists, even with federated:true', async () => {

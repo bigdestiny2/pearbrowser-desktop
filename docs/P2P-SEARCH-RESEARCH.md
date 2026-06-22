@@ -1,6 +1,15 @@
 # Pear-Native P2P Search: Synthesized Architecture & Research Report
 
-*Lead-architect deliverable. Synthesizes four competing proposals (TermShard, Trustweave, HiveSearch, Constellation) and their adversarial reviews against the live PearBrowser codebase. Every load-bearing primitive claim below was re-checked against the repo at `/Users/localllm/Desktop/pearbrowser-desktop`. Knowledge cutoff Jan 2026.*
+*Lead-architect deliverable. Synthesizes four competing proposals (TermShard, Trustweave, HiveSearch, Constellation) and their adversarial reviews against the live PearBrowser codebase. Every load-bearing primitive claim below was re-checked against the desktop repo at the time of writing. Knowledge cutoff Jan 2026.*
+
+> **Current implementation note (2026-06-22):** the first local-first and
+> trusted-peer federation search layers have landed, and several prerequisites
+> called out as blockers here have since been implemented or fixed, including
+> `identity.verify()`/binding substrate and the `MAX_SHEETS_ROWS` export. This
+> report remains the research rationale for the architecture, while
+> [`ARCHITECTURE_AND_CAPABILITIES.md`](./ARCHITECTURE_AND_CAPABILITIES.md) and
+> [`DEEP_AUDIT_CATALOG_SEARCH_NAMING_NOSTR_2026-06-21.md`](./DEEP_AUDIT_CATALOG_SEARCH_NAMING_NOSTR_2026-06-21.md)
+> describe current product behavior and test evidence.
 
 ---
 
@@ -659,7 +668,7 @@ The unit of the "small signed index" (directory-of-keys for discovery vs per-pub
 
 ---
 
-Relevant files: `/Users/localllm/Desktop/pearbrowser-desktop/backend/catalog-manager.js`, `/Users/localllm/Desktop/pearbrowser-desktop/backend/sheets-catalog.js`, `/Users/localllm/Desktop/pearbrowser-desktop/backend/index.js` (pin path :1582-1585), `/Users/localllm/Desktop/pearbrowser-desktop/backend/hyper-proxy.js` (:678-694 relay race), `/Users/localllm/Desktop/pearbrowser-desktop/backend/identity.js`, `/Users/localllm/Desktop/pearbrowser-desktop/backend/autobee-catalog-apply.cjs`, `/Users/localllm/Desktop/pearbrowser-desktop/docs/HIVERELAY-SCHEMA-SHEETS-DESIGN.md`, `/Users/localllm/Desktop/pearbrowser-desktop/docs/AUTOBEE-RESEARCH.md`.
+Relevant files at the time of writing: `backend/catalog-manager.js`, `backend/sheets-catalog.js`, `backend/index.js` (pin path), `backend/hyper-proxy.js` (relay race), `backend/identity.js`, `backend/autobee-catalog-apply.cjs`, `docs/HIVERELAY-SCHEMA-SHEETS-DESIGN.md`, `docs/AUTOBEE-RESEARCH.md`.
 
 
 ---

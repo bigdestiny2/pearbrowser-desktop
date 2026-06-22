@@ -8,6 +8,12 @@
 `docs/HIVERELAY-BACKBONE-HANDOVER.md` / `docs/HIVERELAY-SCHEMA-SHEETS-DESIGN.md` (relay durability, "index not authority"),
 `docs/P2P-SEARCH-RESEARCH.md` (independent confirmation of the identity-binding gap).
 
+> **Current implementation note (2026-06-22):** this proposal predates the
+> shipped `identity.verify()` / identity-binding substrate. Treat references to
+> that verifier as a historical prerequisite that has since been satisfied;
+> the payments-specific receipt, settlement, and escrow work remains proposal
+> state.
+
 ---
 
 ## 1. Executive summary
@@ -23,9 +29,9 @@ implements Bitcoin 2-of-3 P2WSH multisig escrow, Cashu NUT-11 P2PK ecash, on-cha
 primitives. This doc proposes a P2P-native payments layer that (a) wires real settlement confirmation into the
 POS crypto path, (b) imports `pear-exchange`'s non-custodial escrow/crypto/price modules behind POS's existing
 `PaymentProcessorAdapter`/`registry` seam, (c) replaces unsigned point-to-point receipts with Ed25519-signed,
-Autobee-logged, buyer-verifiable receipts derived from PearBrowser's per-app subkey identity, and (d) adds the
-one missing foundational primitive everything depends on — a signature **verifier** in
-`backend/identity.js` plus a self-certifying merchant-identity binding record modeled on the relay's
+Autobee-logged, buyer-verifiable receipts derived from PearBrowser's per-app subkey identity, and (d) depends on the
+then-missing foundational primitive — a signature **verifier** in
+`backend/identity.js` — plus a self-certifying merchant-identity binding record modeled on the relay's
 already-shipped `dht.mutableGet` self-certifying pattern. The work is mostly **integration**, not greenfield;
 the hardest genuinely-unsolved pieces (offline double-spend *prevention*, fair trustless dispute adjudication)
 are scoped honestly as bounded-risk, not solved.
@@ -678,10 +684,10 @@ Internal source files read for this doc (all absolute):
 - `/Users/localllm/Desktop/pear-exchange/app/backend/escrow-cashu.js` (NUT-11 P2PK, `verifySignatures`, placeholder mint URL)
 - `/Users/localllm/Desktop/pear-exchange/app/backend/crypto.js` (Ed25519 sign **and** verify; deterministic replay-bound messages)
 - `/Users/localllm/Desktop/pear-exchange/app/backend/price-feeds.js` (multi-source median + `rejectOutliers`)
-- `/Users/localllm/Desktop/pearbrowser-desktop/backend/identity.js` (sign/signForApp/getAppKeypair; **no verify**; seed unencrypted at rest)
-- `/Users/localllm/Desktop/pearbrowser-desktop/backend/anongpt-buyer.js` (signed-receipt dial pattern; verify stubbed fail-closed)
-- `/Users/localllm/Desktop/pearbrowser-desktop/backend/autobee-catalog-ops.cjs` (op schema + `validateOp` tri-state template)
-- `/Users/localllm/Desktop/pearbrowser-desktop/backend/relay-record.js` (self-certifying `dht.mutableGet` pattern for merchant binding)
-- `/Users/localllm/Desktop/pearbrowser-desktop/backend/relay-client.js` (`listRelays` re-verify-don't-trust, "index not authority")
-- `/Users/localllm/Desktop/pearbrowser-desktop/backend/constants.js` (RPC numbering convention; free 210–229 range)
-- `/Users/localllm/Desktop/pearbrowser-desktop/docs/AUTOBEE-RESEARCH.md`, `docs/HIVERELAY-BACKBONE-HANDOVER.md`, `docs/HIVERELAY-SCHEMA-SHEETS-DESIGN.md`, `docs/P2P-SEARCH-RESEARCH.md`
+- `backend/identity.js` (sign/signForApp/getAppKeypair; verifier has since landed; seed-at-rest hardening remains separate)
+- `backend/anongpt-buyer.js` (signed-receipt dial pattern; verify path has since been un-stubbed)
+- `backend/autobee-catalog-ops.cjs` (op schema + `validateOp` tri-state template)
+- `backend/relay-record.js` (self-certifying `dht.mutableGet` pattern for merchant binding)
+- `backend/relay-client.js` (`listRelays` re-verify-don't-trust, "index not authority")
+- `backend/constants.js` (RPC numbering convention; free 210–229 range in the original proposal)
+- `docs/AUTOBEE-RESEARCH.md`, `docs/HIVERELAY-BACKBONE-HANDOVER.md`, `docs/HIVERELAY-SCHEMA-SHEETS-DESIGN.md`, `docs/P2P-SEARCH-RESEARCH.md`
