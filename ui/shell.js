@@ -700,11 +700,19 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
   }, [sessionReady, active?.id, active?.url, active?.src])
 
   // External navUrl prop (Apps tab → "open in Browse"). Open in a new
-  // tab if the active tab already has content; otherwise navigate the
+  // tab if the active tab already has an address; otherwise navigate the
   // current empty tab.
   useEffect(() => {
     if (!navUrl) return
-    if (active && active.src) {
+    // Spawn a new tab whenever the active tab already has an address — loaded
+    // (active.src) OR mid-load (active.url set, src still null). The latter is
+    // the first-launch case: the default landing tab (active.url === DEFAULT_URL)
+    // is auto-loading behind the onboarding modal when the user picks a site.
+    // Without the `active.url` guard the navUrl effect would take the else branch
+    // and navigate that single landing tab away to the picked site, so the
+    // landing never finishes loading anywhere. Treating "has an address" as the
+    // new-tab trigger leaves the landing to finish in tab 0.
+    if (active && (active.src || active.url)) {
       // Open a fresh tab AND navigate it. newTab() alone only sets .url, not
       // .src, so a second run-in-tab rendered the empty-state until a manual
       // reload — create the tab here and drive go() so it's one click every time.
@@ -4760,11 +4768,12 @@ export function App ({ rpc, C, storagePath }) {
       // either show the onboarding (first launch) or skip it.
       rpc.request(C.CMD_USERDATA_GET_SETTINGS).then((res) => {
         const s = unwrapSettings(res)
-        // The landing-page hyperdrive IS the welcome experience now — open
-        // straight into it (the default tab auto-loads DEFAULT_URL) instead of a
-        // modal click-through. The Onboarding component stays available but is no
-        // longer auto-shown on first launch.
-        setOnboardingState('done')
+        // Show the first-launch onboarding modal. The landing-page hyperdrive
+        // (DEFAULT_URL) auto-loads in the default browse tab BEHIND the modal —
+        // the auto-load effect runs once settings are ready, independent of
+        // onboarding — so skipping or clicking through reveals the already-loaded
+        // landing, and reopening later (onboardingDone) lands straight on it.
+        setOnboardingState(s?.onboardingDone ? 'done' : 'show')
         // Session restore: rehydrate browse tabs from previous session.
         // Iframes are recreated on first activation, but tab order,
         // active tab, pinned state, and per-tab back/forward history
@@ -4774,8 +4783,12 @@ export function App ({ rpc, C, storagePath }) {
           const restoredPairs = savedTabs
             .map((t) => ({ saved: t, tab: restoreSavedTab(t) }))
             .filter((entry) => entry.tab)
-          if (restoredPairs.length > 0) {
-            const restored = sortTabsPinnedFirst(restoredPairs.map((entry) => entry.tab))
+          const restored = sortTabsPinnedFirst(restoredPairs.map((entry) => entry.tab))
+          // Only resume the saved session if it carries real content. If every
+          // restored tab is blank (url-less), fall through to the default landing
+          // tab instead of reopening onto a blank page — so a returning user still
+          // lands on the loaded landing.
+          if (restored.some((t) => t.url)) {
             setTabs(restored)
             // Resume on whichever tab was active last time, fall back to first.
             const activePair = restoredPairs.find((entry) => entry.saved && entry.saved.active === true)
