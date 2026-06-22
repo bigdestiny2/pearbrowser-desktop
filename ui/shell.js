@@ -4645,7 +4645,11 @@ export function App ({ rpc, C, storagePath }) {
       // either show the onboarding (first launch) or skip it.
       rpc.request(C.CMD_USERDATA_GET_SETTINGS).then((res) => {
         const s = unwrapSettings(res)
-        setOnboardingState(s?.onboardingDone ? 'done' : 'show')
+        // The landing-page hyperdrive IS the welcome experience now — open
+        // straight into it (the default tab auto-loads DEFAULT_URL) instead of a
+        // modal click-through. The Onboarding component stays available but is no
+        // longer auto-shown on first launch.
+        setOnboardingState('done')
         // Session restore: rehydrate browse tabs from previous session.
         // Iframes are recreated on first activation, but tab order,
         // active tab, pinned state, and per-tab back/forward history
