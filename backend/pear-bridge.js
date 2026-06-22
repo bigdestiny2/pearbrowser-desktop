@@ -724,6 +724,24 @@ const PEAR_ANONGPT_SHIM = `<script>(function () {
         message: 'anongpt.infer: HTTP ' + res.status + ' ' + res.statusText
       }
     }
+    if (!json || typeof json !== 'object') {
+      return {
+        ok: false,
+        code: 'bad-json',
+        message: 'anongpt.infer: worklet returned a non-JSON response',
+        verify: { ok: false, reason: 'bad-json' }
+      }
+    }
+    if (json.ok === true) {
+      // Trust must come from the worklet's local verifier. If that field is
+      // missing or malformed, coerce to unverified rather than allowing a
+      // successful response to become implicitly trusted.
+      if (!json.verify || typeof json.verify !== 'object') {
+        json.verify = { ok: false, reason: 'missing-local-verify' }
+      } else if (json.verify.ok !== true) {
+        json.verify.ok = false
+      }
+    }
     return json
   }
   if (!window.pear) window.pear = {}

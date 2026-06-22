@@ -10,24 +10,24 @@ export function Logo ({ size = 64, animated = false }) {
       viewBox="0 0 120 120"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
-      class=${animated ? 'logo-svg logo-pulse' : 'logo-svg'}
+      className=${animated ? 'logo-svg logo-pulse' : 'logo-svg'}
     >
       <defs>
         <radialGradient id="peerGrad" cx="50%" cy="50%" r="50%">
-          <stop offset="0%" stop-color="#7ee787" />
-          <stop offset="100%" stop-color="#238636" />
+          <stop offset="0%" stopColor="#7ee787" />
+          <stop offset="100%" stopColor="#238636" />
         </radialGradient>
         <linearGradient id="lineGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stop-color="#3fb950" stop-opacity="0.6" />
-          <stop offset="100%" stop-color="#58a6ff" stop-opacity="0.4" />
+          <stop offset="0%" stopColor="#3fb950" stopOpacity="0.6" />
+          <stop offset="100%" stopColor="#58a6ff" stopOpacity="0.4" />
         </linearGradient>
       </defs>
       <!-- Stem -->
-      <line x1="60" y1="10" x2="60" y2="22" stroke="url(#lineGrad)" stroke-width="2.2" stroke-linecap="round" />
+      <line x1="60" y1="10" x2="60" y2="22" stroke="url(#lineGrad)" strokeWidth="2.2" strokeLinecap="round" />
       <!-- Leaf -->
       <ellipse cx="68" cy="16" rx="7" ry="3.5" fill="url(#peerGrad)" transform="rotate(-20 68 16)" opacity="0.85" />
       <!-- Connection lines forming pear silhouette: narrow top → wide bottom -->
-      <g stroke="url(#lineGrad)" stroke-width="1.4">
+      <g stroke="url(#lineGrad)" strokeWidth="1.4">
         <!-- Top narrow cluster -->
         <line x1="60" y1="26" x2="48" y2="42" />
         <line x1="60" y1="26" x2="72" y2="42" />
@@ -68,8 +68,8 @@ export function Logo ({ size = 64, animated = false }) {
 
 export function Wordmark () {
   return html`
-    <div class="wordmark">
-      <span class="wordmark-bold">Pear</span><span class="wordmark-light">Browser</span>
+    <div className="wordmark">
+      <span className="wordmark-bold">Pear</span><span className="wordmark-light">Browser</span>
     </div>
   `
 }

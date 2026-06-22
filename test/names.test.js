@@ -42,6 +42,7 @@ test('petname accepts a link; requires key or link', async () => {
     const r = await names.setPetname({ name: 'home', link: 'hyper://abc/' })
     assert.equal(r.link, 'hyper://abc/')
     assert.equal(r.key, null)
+    await assert.rejects(() => names.setPetname({ name: 'badlink', link: 'javascript:alert(1)' }), /needs a key or link/)
     await assert.rejects(() => names.setPetname({ name: 'bad' }), /needs a key or link/)
     await assert.rejects(() => names.setPetname({ name: '', key: KEY }), /name required/)
   })

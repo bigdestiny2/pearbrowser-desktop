@@ -9,6 +9,18 @@
 // Deps are injected as getters (the live values are mutable boot-time globals in
 // index.js) plus an emit callback, so the whole contract is unit-testable.
 
+const MAX_QUERY_CHARS = 512
+const MAX_SEARCH_LIMIT = 100
+
+function normalizeSearchRequest (data = {}) {
+  const query = String(data.query || '').normalize('NFKC').trim().slice(0, MAX_QUERY_CHARS)
+  const rawLimit = Number(data.limit == null ? 50 : data.limit)
+  const limit = Number.isFinite(rawLimit)
+    ? Math.max(0, Math.min(MAX_SEARCH_LIMIT, Math.floor(rawLimit)))
+    : 50
+  return { query, limit }
+}
+
 function createSearchHandler ({ getPersonalIndex, getQueryPlanner, emit, onError, now } = {}) {
   const clock = typeof now === 'function' ? now : () => Date.now()
   const fail = typeof onError === 'function'
@@ -18,8 +30,7 @@ function createSearchHandler ({ getPersonalIndex, getQueryPlanner, emit, onError
 
   return async function handleSearch (data) {
     const personalIndex = getPersonalIndex()
-    const query = String((data && data.query) || '')
-    const limit = (data && data.limit) || 50
+    const { query, limit } = normalizeSearchRequest(data)
     const now0 = clock()
     const id = ++queryId
 
@@ -52,4 +63,4 @@ function createSearchHandler ({ getPersonalIndex, getQueryPlanner, emit, onError
   }
 }
 
-module.exports = { createSearchHandler }
+module.exports = { createSearchHandler, normalizeSearchRequest, MAX_QUERY_CHARS, MAX_SEARCH_LIMIT }

@@ -129,6 +129,24 @@ export function normalizeUrl (raw) {
   return `hyper://${s}`
 }
 
+export function driveKeyFromHyperRef (raw) {
+  const s = String(raw || '').trim()
+  if (!s) return null
+  const rest = s.replace(/^hyper:\/\//i, '')
+  const key = rest.split('/')[0].trim()
+  if (/^[0-9a-f]{64}$/i.test(key)) return key.toLowerCase()
+  if (/^[13-9a-km-uw-z]{52}$/i.test(key)) return hexFromZ32(key)
+  return null
+}
+
+export function normalizeNameTarget (raw) {
+  const s = String(raw || '').trim()
+  if (!s) return null
+  if (/^[0-9a-f]{64}$/i.test(s)) return s.toLowerCase()
+  if (s.length <= 300 && /^(?:hyper|pear|file):\/\/.+/i.test(s)) return s
+  return null
+}
+
 // Naming Phase N1 — true when `raw` is a bare name token the resolver should
 // try BEFORE URL handling: a single word like "keet" or "pear-pass", not a
 // drive key, domain, path, or scheme. A cheap pre-filter so the URL bar only
@@ -145,19 +163,48 @@ export function looksLikeName (raw) {
 }
 
 // Route a catalog reference to the right backend loader by URL scheme:
-//   bare key / hyper://  → Hyperdrive catalog  (CMD_LOAD_CATALOG)
-//   hyperbee://          → Hyperbee catalog     (CMD_LOAD_CATALOG_BEE)
-//   autobee://           → Autobase collab cat. (CMD_LOAD_CATALOG_AUTOBEE)
+//   bare key / hyper://  → Hyperdrive catalog       (CMD_LOAD_CATALOG)
+//   hyperbee://          → Hyperbee catalog         (CMD_LOAD_CATALOG_BEE)
+//   autobee://           → Autobase collab catalog  (CMD_LOAD_CATALOG_AUTOBEE)
+//   sheets://            → schema-sheets catalog    (CMD_SHEETS_LOAD)
+//   hiveindex://         → relay index room catalog (CMD_LOAD_CATALOG_INDEX)
 // Returns the scheme-stripped key plus `bee`/`autobee` flags, or null for
 // empty input. (`bee` stays for back-compat; `kind` is the canonical field.)
 export function parseCatalogRef (raw) {
   const s = String(raw || '').trim()
   if (!s) return null
-  const autobee = /^autobee:\/\//i.test(s)
-  const bee = /^hyperbee:\/\//i.test(s)
-  const key = s.replace(/^(autobee|hyperbee|hyper):\/\//i, '').replace(/\/+$/, '').trim()
+  const scheme = (s.match(/^([a-z][a-z0-9+.-]*):\/\//i)?.[1] || 'hyper').toLowerCase()
+  const kind = scheme === 'autobee'
+    ? 'autobee'
+    : scheme === 'hyperbee'
+      ? 'hyperbee'
+      : scheme === 'sheets'
+        ? 'sheets'
+        : scheme === 'hiveindex'
+          ? 'hiveindex'
+          : 'drive'
+  const key = s.replace(/^(autobee|hyperbee|hiveindex|sheets|hyper):\/\//i, '').replace(/\/+$/, '').trim()
   if (!key) return null
-  return { key, bee, autobee, kind: autobee ? 'autobee' : bee ? 'hyperbee' : 'drive' }
+  return { key, bee: kind === 'hyperbee', autobee: kind === 'autobee', kind }
+}
+
+// Convert a user-facing catalog reference (hyperbee://<key>, autobee://<key>,
+// sheets://<z32>, hiveindex://<z32>, hyper://<key>, or bare key) into the backend
+// cache key used by listCatalogs().
+// Also accepts an already-materialized cache key such as `bee:<key>`.
+export function catalogCacheKeyForRef (raw) {
+  const s = String(raw || '').trim()
+  if (!s) return ''
+  if (/^(bee|sheets|hiveindex|autobee):(?!\/\/)/i.test(s)) return s
+  const parsed = parseCatalogRef(s)
+  if (!parsed) return s
+  if (parsed.autobee) return `autobee:${parsed.key}`
+  if (parsed.bee) return `bee:${parsed.key}`
+  if (parsed.kind === 'sheets' || parsed.kind === 'hiveindex') {
+    const keyHex = hexFromZ32(parsed.key)
+    return `${parsed.kind}:${keyHex || parsed.key}`
+  }
+  return parsed.key
 }
 
 // Parse a multi-device sync pairing invite: `sync://<key>:<encKey>` (the bare

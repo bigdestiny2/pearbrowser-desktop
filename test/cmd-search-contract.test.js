@@ -3,7 +3,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import handlerMod from '../backend/search-handler.js'
-const { createSearchHandler } = handlerMod
+const { createSearchHandler, MAX_QUERY_CHARS, MAX_SEARCH_LIMIT } = handlerMod
 
 const tick = () => new Promise((r) => setTimeout(r, 0))
 const fakePI = (rows = []) => ({
@@ -73,6 +73,30 @@ test('no personalIndex yields an empty first-paint result', async () => {
   assert.equal(res.federating, false)
   assert.equal(res.phase, 'first-paint')
   assert.equal(res.stats.docs, 0)
+})
+
+test('normalizes query text and clamps limit before local and federated search', async () => {
+  const calls = []
+  const plannerCalls = []
+  const pi = {
+    search: async (query, opts) => { calls.push({ query, opts }); return [] },
+    stats: async () => ({ docs: 0 }),
+  }
+  const planner = {
+    planAndSearch: async (query, opts) => { plannerCalls.push({ query, opts }); return { results: [] } },
+  }
+  const h = createSearchHandler({
+    getPersonalIndex: () => pi,
+    getQueryPlanner: () => planner,
+    emit: () => {},
+  })
+  await h({ query: `  ${'x'.repeat(MAX_QUERY_CHARS + 40)}  `, limit: 100000, federated: true })
+  await tick()
+
+  assert.equal(calls[0].query.length, MAX_QUERY_CHARS)
+  assert.equal(calls[0].opts.limit, MAX_SEARCH_LIMIT)
+  assert.equal(plannerCalls[0].query.length, MAX_QUERY_CHARS)
+  assert.equal(plannerCalls[0].opts.limit, MAX_SEARCH_LIMIT)
 })
 
 test('a stale federation from a superseded query is dropped; only the newest emits', async () => {

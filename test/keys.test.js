@@ -3,7 +3,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   hexToBytes, bytesToHex, z32FromHex, hexFromZ32,
-  formatBytes, shortKey, normalizeUrl, parseCatalogRef, looksLikeName,
+  formatBytes, shortKey, normalizeUrl, driveKeyFromHyperRef, normalizeNameTarget, parseCatalogRef, catalogCacheKeyForRef, looksLikeName,
   parseSyncInvite, formatSyncInvite, parsePearname
 } from '../ui/lib/keys.js'
 
@@ -71,11 +71,13 @@ test('normalizeUrl canonicalizes URL-bar input', () => {
   assert.equal(normalizeUrl('plainname'), 'hyper://plainname')
 })
 
-test('parseCatalogRef routes drive/hyperbee/autobee and strips the scheme', () => {
+test('parseCatalogRef routes catalog schemes and strips the scheme', () => {
   assert.equal(parseCatalogRef(''), null)
   assert.equal(parseCatalogRef('   '), null)
   assert.equal(parseCatalogRef('hyperbee://'), null)          // scheme with no key
   assert.equal(parseCatalogRef('autobee://'), null)
+  assert.equal(parseCatalogRef('sheets://'), null)
+  assert.equal(parseCatalogRef('hiveindex://'), null)
 
   // Bare key / hyper:// → Hyperdrive catalog.
   assert.deepEqual(parseCatalogRef(CATALOG_HEX), { key: CATALOG_HEX, bee: false, autobee: false, kind: 'drive' })
@@ -88,6 +90,42 @@ test('parseCatalogRef routes drive/hyperbee/autobee and strips the scheme', () =
   // autobee:// → Autobase collaborative catalog.
   assert.deepEqual(parseCatalogRef(`autobee://${CATALOG_HEX}`), { key: CATALOG_HEX, bee: false, autobee: true, kind: 'autobee' })
   assert.deepEqual(parseCatalogRef(`AUTOBEE://${CATALOG_HEX}/`), { key: CATALOG_HEX, bee: false, autobee: true, kind: 'autobee' })
+
+  // sheets:// and hiveindex:// links stay link-shaped; the backend decodes z32.
+  const z = z32FromHex(CATALOG_HEX)
+  assert.deepEqual(parseCatalogRef(`sheets://${z}`), { key: z, bee: false, autobee: false, kind: 'sheets' })
+  assert.deepEqual(parseCatalogRef(`HIVEINDEX://${z}/`), { key: z, bee: false, autobee: false, kind: 'hiveindex' })
+})
+
+test('driveKeyFromHyperRef accepts hyper refs, bare keys, and z32 keys only', () => {
+  assert.equal(driveKeyFromHyperRef(CATALOG_HEX), CATALOG_HEX)
+  assert.equal(driveKeyFromHyperRef(`hyper://${CATALOG_HEX}/index.html`), CATALOG_HEX)
+  assert.equal(driveKeyFromHyperRef(z32FromHex(CATALOG_HEX)), CATALOG_HEX)
+  assert.equal(driveKeyFromHyperRef('hyper://not-a-key/page'), null)
+  assert.equal(driveKeyFromHyperRef('pear://app'), null)
+})
+
+test('normalizeNameTarget accepts drive keys and allowed app links only', () => {
+  assert.equal(normalizeNameTarget(CATALOG_HEX.toUpperCase()), CATALOG_HEX)
+  assert.equal(normalizeNameTarget(' pear://keet '), 'pear://keet')
+  assert.equal(normalizeNameTarget(`hyper://${CATALOG_HEX}/app`), `hyper://${CATALOG_HEX}/app`)
+  assert.equal(normalizeNameTarget('file:///tmp/app'), 'file:///tmp/app')
+  assert.equal(normalizeNameTarget('javascript:alert(1)'), null)
+  assert.equal(normalizeNameTarget('https://example.com'), null)
+  assert.equal(normalizeNameTarget('pear://' + 'x'.repeat(301)), null)
+})
+
+test('catalogCacheKeyForRef matches persisted refs to loaded-catalog cache keys', () => {
+  assert.equal(catalogCacheKeyForRef(''), '')
+  assert.equal(catalogCacheKeyForRef(CATALOG_HEX), CATALOG_HEX)
+  assert.equal(catalogCacheKeyForRef(`hyper://${CATALOG_HEX}/`), CATALOG_HEX)
+  assert.equal(catalogCacheKeyForRef(`hyperbee://${CATALOG_HEX}`), `bee:${CATALOG_HEX}`)
+  assert.equal(catalogCacheKeyForRef(`autobee://${CATALOG_HEX}`), `autobee:${CATALOG_HEX}`)
+  assert.equal(catalogCacheKeyForRef(`sheets://${z32FromHex(CATALOG_HEX)}`), `sheets:${CATALOG_HEX}`)
+  assert.equal(catalogCacheKeyForRef(`hiveindex://${z32FromHex(CATALOG_HEX)}`), `hiveindex:${CATALOG_HEX}`)
+  assert.equal(catalogCacheKeyForRef(`bee:${CATALOG_HEX}`), `bee:${CATALOG_HEX}`)
+  assert.equal(catalogCacheKeyForRef(`sheets:${CATALOG_HEX}`), `sheets:${CATALOG_HEX}`)
+  assert.equal(catalogCacheKeyForRef(`hiveindex:${CATALOG_HEX}`), `hiveindex:${CATALOG_HEX}`)
 })
 
 test('looksLikeName accepts bare name tokens, rejects URLs/keys/domains', () => {

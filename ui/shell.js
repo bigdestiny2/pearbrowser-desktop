@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { html } from 'htm/react'
 import { Logo, Wordmark } from './logo.js'
-import { z32FromHex, hexFromZ32, formatBytes, shortKey, normalizeUrl, parseCatalogRef, looksLikeName, parseSyncInvite, formatSyncInvite, parsePearname } from './lib/keys.js'
+import { z32FromHex, hexFromZ32, formatBytes, shortKey, normalizeUrl, driveKeyFromHyperRef, normalizeNameTarget, parseCatalogRef, catalogCacheKeyForRef, looksLikeName, parseSyncInvite, formatSyncInvite, parsePearname } from './lib/keys.js'
 import {
   MAX_TAB_HISTORY, MAX_CLOSED_TABS,
   makeTab, cleanTabUrl, cleanTabTitle,
@@ -49,15 +49,6 @@ const FEATURED_APPS = [
     initial: 'P',
     gradient: 'linear-gradient(135deg, #3fb950, #58a6ff)'
   },
-  {
-    id: 'hiveworm',
-    name: 'HiveWorm',
-    type: 'standalone',
-    tagline: 'Perpetual P2P life-sim — runs as a Pear app via swarm.v1.',
-    link: 'pear://d1xbkcpcbi1xa8dexp49rsendra5r67w3qh5a9k8t44oemm4k16y',
-    initial: 'W',
-    gradient: 'linear-gradient(135deg, #a371f7, #d946ef)'
-  },
   // anonGPT — private P2P AI chat. A full Pear app: opens in its own window.
   // (The in-browser window.pear.anongpt buyer shim in backend/anongpt-buyer.js
   // is a separate hyper:// hosting path, not exercised by this pear:// launch.)
@@ -81,27 +72,6 @@ const FEATURED_APPS = [
     link: 'pear://u6oyh38gcn3ouk6wnzpoetzpeg7gs1w5s9f5aw5quocr1eubsoiy',
     initial: '📋',
     gradient: 'linear-gradient(135deg, #4ade80, #22d3ee)'
-  },
-  // pear-request htmx apps that render HEADLESS in a tab (no window): the tab's
-  // XMLHttpRequest is hooked to a streamx talking to a worker. Pattern from
-  // Drache93's Pear Browser; our run-in-tab bridge in backend/tab-runtime.js.
-  {
-    id: 'headless-demo',
-    name: 'Headless Demo',
-    type: 'hypersite',
-    tagline: 'A pear-request htmx app streamed headless into this tab — no separate window. Runs the in-process demo router.',
-    link: 'demo',
-    initial: '▶',
-    gradient: 'linear-gradient(135deg, #16a34a, #22d3ee)'
-  },
-  {
-    id: 'headless-demo-worker',
-    name: 'Headless Demo (worker)',
-    type: 'hypersite',
-    tagline: 'The real path: a pear-request terminal app spawned as an isolated pear-run worker, UI streamed into this tab. (Local file:// demo app.)',
-    link: 'file:///Users/localllm/Desktop/pear-request-demo',
-    initial: '⚙',
-    gradient: 'linear-gradient(135deg, #6366f1, #d946ef)'
   }
 ]
 
@@ -120,19 +90,32 @@ const TAB_META = {
 // republish — block-source lives at /.blocks.json inside the drive.
 const DEFAULT_URL = 'hyper://1868916a7a282ff0f211b11b536e9642828c32d3a817a254e1ef7e602709e25d/'
 
-// Default catalog drive — auto-loads on first Apps-tab visit when the
-// user has not yet pinned a catalog of their own. Curated entry point
-// for the Pear ecosystem; lists pearbrowser-desktop, hiverelay,
-// p2pbuilders. Source under
-// ~/Desktop/pearbrowser-publishers/catalog-source/, signing key under
-// ~/Desktop/pearbrowser-publishers/catalog/. Pinned on 5 HiveRelays.
-const DEFAULT_CATALOG_KEY = '0c35d12fd9b1115dd2d1fb1cd1751817c9173d3196ac7c62ae37d023340dcb75'
+// Default catalog — auto-loads on first Apps-tab visit when the user has not yet
+// pinned a catalog of their own. The "PearBrowser Network" curated entry point,
+// published as a Hyperbee (the Pear-native, updatable catalog format) from the
+// single source of truth: 03-sites/pearbrowser-publishers/catalog-source/catalog.json
+// (same source backend/catalogue-seed.js is generated from, so the offline seed and
+// this live catalog agree — dedupeApps collapses the overlap by driveKey/link).
+// Signing key under 03-sites/pearbrowser-publishers/catalog/; re-publish with
+// scripts/publish-catalog-bee.js. Supersedes the dead 0c35d12f hyperdrive whose
+// writable secret was unrecoverable (see OLD_DEAD_CATALOG_KEY migration below).
+const DEFAULT_CATALOG_KEY = 'hyperbee://f5fb7500bccd60a976d2b1d24246108f4444a210b9ca591533114dffc089934d'
+// The community catalogue — apps submitted by anyone (Apps tab → "Submit your
+// app") and approved by a moderator land here. Auto-loaded alongside the curated
+// default so the store shows both a Curated list and a Community list. Storage +
+// publisher: 03-sites/pearbrowser-publishers/community-catalog(-source).
+const DEFAULT_COMMUNITY_CATALOG = 'hyperbee://5d961fdc2f56215463e5d4656dd4a3f22bb5e15b93f9bfc8439a63a18f974d75'
+// The previous default: a Hyperdrive that can no longer be updated (lost secret).
+// Existing installs persisted it in recentCatalogs; migrate them to the new key.
+const OLD_DEAD_CATALOG_KEY = '0c35d12fd9b1115dd2d1fb1cd1751817c9173d3196ac7c62ae37d023340dcb75'
 
 // Map a parsed catalog ref (parseCatalogRef) to the RPC command that loads
 // it and the scheme-qualified string to persist, so a relaunch routes to the
 // same loader. Drive keys stay bare (unchanged behavior); hyperbee:// and
 // autobee:// keep their scheme.
 function catalogLoadPlan (parsed, C) {
+  if (parsed.kind === 'sheets') return { cmd: C.CMD_SHEETS_LOAD, payload: { link: parsed.key }, persistRef: `sheets://${parsed.key}` }
+  if (parsed.kind === 'hiveindex') return { cmd: C.CMD_LOAD_CATALOG_INDEX, payload: { link: parsed.key }, persistRef: `hiveindex://${parsed.key}` }
   if (parsed.autobee) return { cmd: C.CMD_LOAD_CATALOG_AUTOBEE, persistRef: `autobee://${parsed.key}` }
   if (parsed.bee) return { cmd: C.CMD_LOAD_CATALOG_BEE, persistRef: `hyperbee://${parsed.key}` }
   return { cmd: C.CMD_LOAD_CATALOG, persistRef: parsed.key }
@@ -297,30 +280,34 @@ function AboutSite ({ rpc, C, url, onClose, onBookmarkToggle }) {
   }
 
   const pin = aboutPinStatus(driveInfo, driveInfoErr)
+  const updatedAt = Number(driveInfo?.updatedAt)
+  const updatedText = Number.isFinite(updatedAt) && updatedAt > 0
+    ? new Date(updatedAt).toLocaleTimeString()
+    : ''
 
   return html`
-    <div class="modal-overlay" role="dialog" aria-modal="true"
+    <div className="modal-overlay" role="dialog" aria-modal="true"
          onClick=${(e) => e.target.classList.contains('modal-overlay') && onClose()}>
-      <div class="modal-card about-card">
-        <div class="about-head">
-          <div class="about-title">About this site</div>
-          <button class="about-close" onClick=${onClose} title="Close">×</button>
+      <div className="modal-card about-card">
+        <div className="about-head">
+          <div className="about-title">About this site</div>
+          <button className="about-close" onClick=${onClose} title="Close">×</button>
         </div>
 
-        <div class="about-section-label">FULL URL</div>
-        <div class="about-row">
-          <code class="about-mono">${url || '(no URL loaded)'}</code>
-          <button class="copy-btn-small ${copyState.url ? 'copied' : ''}"
+        <div className="about-section-label">FULL URL</div>
+        <div className="about-row">
+          <code className="about-mono">${url || '(no URL loaded)'}</code>
+          <button className="copy-btn-small ${copyState.url ? 'copied' : ''}"
                   onClick=${() => copy('url', url)} disabled=${!url}>
             ${copyState.url ? '✓' : 'Copy'}
           </button>
         </div>
 
         ${drive && drive.hex && html`
-          <div class="about-section-label">DRIVE KEY (hex)</div>
-          <div class="about-row">
-            <code class="about-mono">${drive.hex}</code>
-            <button class="copy-btn-small ${copyState.hex ? 'copied' : ''}"
+          <div className="about-section-label">DRIVE KEY (hex)</div>
+          <div className="about-row">
+            <code className="about-mono">${drive.hex}</code>
+            <button className="copy-btn-small ${copyState.hex ? 'copied' : ''}"
                     onClick=${() => copy('hex', drive.hex)}>
               ${copyState.hex ? '✓' : 'Copy'}
             </button>
@@ -328,10 +315,10 @@ function AboutSite ({ rpc, C, url, onClose, onBookmarkToggle }) {
         `}
 
         ${drive && drive.z32 && html`
-          <div class="about-section-label">DRIVE KEY (z-base-32)</div>
-          <div class="about-row">
-            <code class="about-mono">${drive.z32}</code>
-            <button class="copy-btn-small ${copyState.z32 ? 'copied' : ''}"
+          <div className="about-section-label">DRIVE KEY (z-base-32)</div>
+          <div className="about-row">
+            <code className="about-mono">${drive.z32}</code>
+            <button className="copy-btn-small ${copyState.z32 ? 'copied' : ''}"
                     onClick=${() => copy('z32', drive.z32)}>
               ${copyState.z32 ? '✓' : 'Copy'}
             </button>
@@ -339,72 +326,72 @@ function AboutSite ({ rpc, C, url, onClose, onBookmarkToggle }) {
         `}
 
         ${drive && html`
-          <div class="about-meta-grid">
+          <div className="about-meta-grid">
             <div>
-              <div class="about-meta-label">Scheme</div>
-              <div class="about-meta-value">${drive.proto}://</div>
+              <div className="about-meta-label">Scheme</div>
+              <div className="about-meta-value">${drive.proto}://</div>
             </div>
             <div>
-              <div class="about-meta-label">Path</div>
-              <div class="about-meta-value">${drive.path}</div>
+              <div className="about-meta-label">Path</div>
+              <div className="about-meta-value">${drive.path}</div>
             </div>
           </div>
         `}
 
         ${drive && drive.hex && html`
-          <div class="about-section-label">LIVE DRIVE</div>
-          <div class="about-meta-grid about-live-grid">
+          <div className="about-section-label">LIVE DRIVE</div>
+          <div className="about-meta-grid about-live-grid">
             <div>
-              <div class="about-meta-label">Version</div>
-              <div class="about-meta-value">${driveInfo ? (driveInfo.version ?? '—') : '…'}</div>
+              <div className="about-meta-label">Version</div>
+              <div className="about-meta-value">${driveInfo ? (driveInfo.version ?? '—') : '…'}</div>
             </div>
             <div>
-              <div class="about-meta-label">Peers</div>
-              <div class="about-meta-value" title=${driveInfo ? `${driveInfo.metadataPeerCount || 0} metadata · ${driveInfo.blobPeerCount || 0} blob` : ''}>
+              <div className="about-meta-label">Peers</div>
+              <div className="about-meta-value" title=${driveInfo ? `${driveInfo.metadataPeerCount || 0} metadata · ${driveInfo.blobPeerCount || 0} blob` : ''}>
                 ${driveInfo ? (driveInfo.peerCount || 0) : '…'}
               </div>
             </div>
             <div>
-              <div class="about-meta-label">Relays</div>
-              <div class="about-meta-value">${driveInfo ? (driveInfo.relay?.connectedRelays || 0) : '…'}</div>
+              <div className="about-meta-label">Relays</div>
+              <div className="about-meta-value">${driveInfo ? (driveInfo.relay?.connectedRelays || 0) : '…'}</div>
             </div>
             <div>
-              <div class="about-meta-label">Cached</div>
-              <div class="about-meta-value">${driveInfo ? formatBytes(driveInfo.byteLength) : '…'}</div>
+              <div className="about-meta-label">Cached</div>
+              <div className="about-meta-value">${driveInfo ? formatBytes(driveInfo.byteLength) : '…'}</div>
             </div>
             <div>
-              <div class="about-meta-label">Mode</div>
-              <div class="about-meta-value">${driveInfo ? (driveInfo.writable ? 'writable' : 'read-only') : '…'}</div>
+              <div className="about-meta-label">Mode</div>
+              <div className="about-meta-value">${driveInfo ? (driveInfo.writable ? 'writable' : 'read-only') : '…'}</div>
             </div>
             <div>
-              <div class="about-meta-label">Fetch</div>
-              <div class="about-meta-value">${driveInfo ? (driveInfo.relay?.hybridFetchEnabled ? 'hybrid' : 'P2P') : '…'}</div>
+              <div className="about-meta-label">Fetch</div>
+              <div className="about-meta-value">${driveInfo ? (driveInfo.relay?.hybridFetchEnabled ? 'hybrid' : 'P2P') : '…'}</div>
             </div>
           </div>
-          <div class=${'about-pin-status ' + pin.tone}>${pin.text}</div>
+          <div className=${'about-pin-status ' + pin.tone}>${pin.text}</div>
         `}
 
         ${driveInfo && driveInfo.discoveryKey && html`
-          <div class="about-section-label">DISCOVERY KEY</div>
-          <div class="about-row">
-            <code class="about-mono">${driveInfo.discoveryKey}</code>
-            <button class="copy-btn-small ${copyState.discovery ? 'copied' : ''}"
+          <div className="about-section-label">DISCOVERY KEY</div>
+          <div className="about-row">
+            <code className="about-mono">${driveInfo.discoveryKey}</code>
+            <button className="copy-btn-small ${copyState.discovery ? 'copied' : ''}"
                     onClick=${() => copy('discovery', driveInfo.discoveryKey)}>
               ${copyState.discovery ? '✓' : 'Copy'}
             </button>
           </div>
         `}
 
-        <div class="about-section-label">YOUR LIBRARY</div>
-        <div class="about-row about-bookmark-row">
+        <div className="about-section-label">YOUR LIBRARY</div>
+        <div className="about-row about-bookmark-row">
           <div>
             ${bookmarked === null
-              ? html`<span class="settings-subtle">Checking…</span>`
+              ? html`<span className="settings-subtle">Checking…</span>`
               : bookmarked
                 ? html`<span style=${{ color: '#ff9500' }}>★ Bookmarked</span>`
-                : html`<span class="settings-subtle">Not in your bookmarks</span>`}
+                : html`<span className="settings-subtle">Not in your bookmarks</span>`}
           </div>
-          <button class="btn ${bookmarked ? 'subtle' : 'primary'}"
+          <button className="btn ${bookmarked ? 'subtle' : 'primary'}"
                   onClick=${toggleBookmark}
                   disabled=${busy === 'bookmark' || bookmarked === null || !url}>
             ${busy === 'bookmark' ? '…' : (bookmarked ? 'Remove bookmark' : 'Bookmark this site')}
@@ -412,8 +399,8 @@ function AboutSite ({ rpc, C, url, onClose, onBookmarkToggle }) {
         </div>
 
         ${driveInfo && html`
-          <div class="about-foot">
-            Updated ${new Date(driveInfo.updatedAt).toLocaleTimeString()} ·
+          <div className="about-foot">
+            ${updatedText ? `Updated ${updatedText} · ` : ''}
             ${driveInfo.relay?.hybridFetchEnabled ? 'hybrid relay fetch enabled' : 'pure P2P fetch'}
           </div>
         `}
@@ -605,25 +592,24 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
     const closing = tabs.find((t) => t.id === id)
     const closed = normalizeTabSnapshot(closing)
     if (closed) setClosedTabs((prev) => [closed, ...prev].slice(0, MAX_CLOSED_TABS))
-    setTabs((prev) => {
-      const idx = prev.findIndex((t) => t.id === id)
-      if (idx === -1) return prev
-      const remaining = prev.filter((t) => t.id !== id)
-      // Drop the iframe ref so it can GC.
-      delete iframeRefs.current[id]
-      if (remaining.length === 0) {
-        const fresh = makeTab('')
-        setActiveId(fresh.id)
-        setEditingUrl('')
-        return [fresh]
-      }
-      if (id === activeId) {
-        const next = remaining[Math.min(idx, remaining.length - 1)]
-        setActiveId(next.id)
-        setEditingUrl(next.displayUrl || '')
-      }
-      return remaining
-    })
+    const idx = tabs.findIndex((t) => t.id === id)
+    if (idx === -1) return
+    const remaining = tabs.filter((t) => t.id !== id)
+    // Drop the iframe ref so it can GC.
+    delete iframeRefs.current[id]
+    if (remaining.length === 0) {
+      const fresh = makeTab('')
+      setTabs([fresh])
+      setActiveId(fresh.id)
+      setEditingUrl('')
+      return
+    }
+    setTabs(remaining)
+    if (id === activeId) {
+      const next = remaining[Math.min(idx, remaining.length - 1)]
+      setActiveId(next.id)
+      setEditingUrl(next.displayUrl || '')
+    }
   }
 
   const reopenClosedTab = () => {
@@ -815,32 +801,32 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
   }
 
   return html`
-    <div class="browse">
-      <div class="tabstrip">
+    <div className="browse">
+      <div className="tabstrip">
         ${tabs.map((t, i) => html`
           <button
             key=${t.id}
-            class=${'tabchip' + (t.id === activeId ? ' active' : '') + (t.pinned ? ' pinned' : '')}
+            className=${'tabchip' + (t.id === activeId ? ' active' : '') + (t.pinned ? ' pinned' : '')}
             onClick=${() => setActive(t.id)}
             title=${t.displayUrl || 'New tab'}
           >
-            <span class="tabchip-favicon">${t.src ? '🌐' : '🆕'}</span>
+            <span className="tabchip-favicon">${t.src ? '🌐' : '🆕'}</span>
             <span
-              class=${'tabchip-pin' + (t.pinned ? ' on' : '')}
+              className=${'tabchip-pin' + (t.pinned ? ' on' : '')}
               title=${t.pinned ? 'Unpin tab' : 'Pin tab'}
               onClick=${(e) => { e.stopPropagation(); togglePinned(t.id) }}
             >${t.pinned ? '●' : '○'}</span>
-            <span class="tabchip-title">${t.title || (t.displayUrl ? t.displayUrl.replace(/^hyper:\/\//, '').slice(0, 28) : 'New tab')}</span>
-            <span class="tabchip-close" onClick=${(e) => { e.stopPropagation(); closeTab(t.id) }}>×</span>
+            <span className="tabchip-title">${t.title || (t.displayUrl ? t.displayUrl.replace(/^hyper:\/\//, '').slice(0, 28) : 'New tab')}</span>
+            <span className="tabchip-close" onClick=${(e) => { e.stopPropagation(); closeTab(t.id) }}>×</span>
           </button>
         `)}
-        <button class="tabchip-new" onClick=${() => newTab()} title="New tab (⌘T)">+</button>
-        <button class="tabchip-new tabchip-restore" onClick=${reopenClosedTab} disabled=${closedTabs.length === 0} title="Reopen closed tab (⌘⇧T)">↺</button>
+        <button className="tabchip-new" onClick=${() => newTab()} title="New tab (⌘T)">+</button>
+        <button className="tabchip-new tabchip-restore" onClick=${reopenClosedTab} disabled=${closedTabs.length === 0} title="Reopen closed tab (⌘⇧T)">↺</button>
       </div>
-      <div class="urlbar">
-        <button class="nav" onClick=${back} disabled=${!active || active.histIdx <= 0} title="Back">◀</button>
-        <button class="nav" onClick=${forward} disabled=${!active || active.histIdx >= (active.history || []).length - 1} title="Forward">▶</button>
-        <button class="nav" onClick=${reload} disabled=${!active?.src} title="Reload (⌘R)">⟳</button>
+      <div className="urlbar">
+        <button className="nav" onClick=${back} disabled=${!active || active.histIdx <= 0} title="Back">◀</button>
+        <button className="nav" onClick=${forward} disabled=${!active || active.histIdx >= (active.history || []).length - 1} title="Forward">▶</button>
+        <button className="nav" onClick=${reload} disabled=${!active?.src} title="Reload (⌘R)">⟳</button>
         <input
           ref=${inputRef}
           type="text"
@@ -850,18 +836,18 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
           onBlur=${() => { setTimeout(() => setAutocompleteOpen(false), 120) }}
           onKeyDown=${onUrlKeyDown}
           placeholder="hyper://<key>/path"
-          spellcheck="false"
+          spellCheck="false"
         />
-        <button class="nav" onClick=${bookmark} disabled=${!editingUrl?.trim?.()} title="Bookmark this URL">☆</button>
-        <button class="nav" onClick=${() => setAboutOpen(true)} disabled=${!active?.url} title="About this site">ⓘ</button>
-        <button class="nav" onClick=${openDevtools} disabled=${!active?.src} title="Devtools (⌘⇧I)">⚙</button>
-        <button class="nav go" onClick=${() => go(editingUrl)}>Go</button>
+        <button className="nav" onClick=${bookmark} disabled=${!editingUrl?.trim?.()} title="Bookmark this URL">☆</button>
+        <button className="nav" onClick=${() => setAboutOpen(true)} disabled=${!active?.url} title="About this site">ⓘ</button>
+        <button className="nav" onClick=${openDevtools} disabled=${!active?.src} title="Devtools (⌘⇧I)">⚙</button>
+        <button className="nav go" onClick=${() => go(editingUrl)}>Go</button>
         ${autocompleteOpen && suggestions.length > 0 && html`
-          <div class="urlbar-suggestions">
+          <div className="urlbar-suggestions">
             ${suggestions.map((s, idx) => html`
               <div
                 key=${s.url}
-                class=${'urlbar-suggestion' + (idx === autocompleteIdx ? ' active' : '')}
+                className=${'urlbar-suggestion' + (idx === autocompleteIdx ? ' active' : '')}
                 onMouseDown=${(e) => {
                   // mousedown fires before blur (which closes the dropdown)
                   e.preventDefault()
@@ -872,69 +858,74 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
                 }}
                 onMouseEnter=${() => setAutocompleteIdx(idx)}
               >
-                <span class="urlbar-suggestion-icon">${s.kind === 'bookmark' ? '★' : '🕘'}</span>
-                <div class="urlbar-suggestion-text">
+                <span className="urlbar-suggestion-icon">${s.kind === 'bookmark' ? '★' : '🕘'}</span>
+                <div className="urlbar-suggestion-text">
                   ${s.title && s.title !== s.url
-                    ? html`<div class="urlbar-suggestion-title">${s.title}</div>`
+                    ? html`<div className="urlbar-suggestion-title">${s.title}</div>`
                     : null}
-                  <div class="urlbar-suggestion-url">${s.url}</div>
+                  <div className="urlbar-suggestion-url">${s.url}</div>
                 </div>
               </div>
             `)}
           </div>
         `}
       </div>
-      ${active?.status && html`<div class="browse-status">${active.status}</div>`}
+      ${active?.status && html`<div className="browse-status">${active.status}</div>`}
       ${active?.nameProv && html`
-        <div class=${`name-prov-chip name-prov-${active.nameProv.provenance}`}
+        <div className=${`name-prov-chip name-prov-${active.nameProv.provenance}`}
              title=${`“${active.nameProv.name}” resolved to ${active.displayUrl}`}>
-          <span class="name-prov-name">${active.nameProv.label}</span>
-          <span class="name-prov-tier">${active.nameProv.provenance === 'petname' ? 'your saved name' : active.nameProv.provenance === 'registry' ? 'name registry' : active.nameProv.provenance === 'contact' ? `from ${active.nameProv.source || 'a contact'}` : 'curated'}</span>
+          <span className="name-prov-name">${active.nameProv.label}</span>
+          <span className="name-prov-tier">${active.nameProv.provenance === 'petname' ? 'your saved name' : active.nameProv.provenance === 'registry' ? 'name registry' : active.nameProv.provenance === 'contact' ? `from ${active.nameProv.source || 'a contact'}` : 'curated'}</span>
         </div>
       `}
-      <div class="browse-stage">
-        ${tabs.map((t) => t.src
-          ? html`<iframe
-              key=${t.id}
-              ref=${(el) => { if (el) iframeRefs.current[t.id] = el }}
-              class=${'webview' + (t.id === activeId ? '' : ' hidden')}
-              src=${t.src}
-              onLoad=${(e) => indexPage(t, e.target)}
-              sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-pointer-lock"
-            ></iframe>`
-          : t.id === activeId
-            ? (t.url
-                // A tab with an address but no loaded content yet is mid-fetch —
-                // show a loading state, NOT the welcome/clickthrough (the default
-                // landing tab opens straight into the PearBrowser site).
-                ? html`<div class="browse-welcome" key=${t.id}>
-                    <div class="browse-welcome-inner">
-                      <div class="browse-welcome-logo">🍐</div>
-                      ${(t.status && /^error/i.test(t.status))
-                        ? html`<h2>Couldn't load this page</h2>
-                            <p>${String(t.status).replace(/^error:\s*/i, '')}</p>`
-                        : html`<h2>Loading…</h2>
-                            <p>Fetching <code>${t.url}</code> directly from its peers — first load of a cold drive can take a moment.</p>`}
-                      <div class="browse-welcome-actions">
-                        <button class="btn primary" onClick=${() => go(t.url, t.id)}>${(t.status && /^error/i.test(t.status)) ? 'Retry' : 'Reload'}</button>
-                        <button class="btn subtle" onClick=${() => { inputRef.current?.focus(); inputRef.current?.select?.() }}>Edit URL</button>
+      <div className="browse-stage">
+        ${tabs.map((t) =>
+          t.src
+            ? html`<iframe
+                key=${t.id}
+                ref=${(el) => { if (el) iframeRefs.current[t.id] = el }}
+                className=${'webview' + (t.id === activeId ? '' : ' hidden')}
+                src=${t.src}
+                onLoad=${(e) => indexPage(t, e.target)}
+                sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-pointer-lock"
+              ></iframe>`
+            : t.id === activeId
+              ? (t.url
+                  // A tab with an address but no loaded content yet is mid-fetch —
+                  // show a loading state, NOT the welcome/clickthrough (the default
+                  // landing tab opens straight into the PearBrowser site).
+                  ? html`<div key=${t.id} className="browse-welcome">
+                      <div className="browse-welcome-inner">
+                        <div className="browse-welcome-logo">🍐</div>
+                        ${(t.status && /^error/i.test(t.status))
+                          ? html`<div className="browse-welcome-copy">
+                              <h2>Couldn't load this page</h2>
+                              <p>${String(t.status).replace(/^error:\s*/i, '')}</p>
+                            </div>`
+                          : html`<div className="browse-welcome-copy">
+                              <h2>Loading…</h2>
+                              <p>Fetching <code>${t.url}</code> directly from its peers — first load of a cold drive can take a moment.</p>
+                            </div>`}
+                        <div className="browse-welcome-actions">
+                          <button className="btn primary" onClick=${() => go(t.url, t.id)}>${(t.status && /^error/i.test(t.status)) ? 'Retry' : 'Reload'}</button>
+                          <button className="btn subtle" onClick=${() => { inputRef.current?.focus(); inputRef.current?.select?.() }}>Edit URL</button>
+                        </div>
                       </div>
-                    </div>
-                  </div>`
-                // A truly blank tab (⌘T) gets the welcome + quick actions.
-                : html`<div class="browse-welcome" key=${t.id}>
-                    <div class="browse-welcome-inner">
-                      <div class="browse-welcome-logo">🍐</div>
-                      <h2>The peer-to-peer web starts here</h2>
-                      <p>Paste any <code>hyper://</code> URL above — hex or z-base-32 — and PearBrowser fetches it directly from its peers. No DNS, no servers, no CDN.</p>
-                      <div class="browse-welcome-actions">
-                        <button class="btn primary" onClick=${() => go(DEFAULT_URL)}>Open the PearBrowser site</button>
-                        <button class="btn subtle" onClick=${() => { inputRef.current?.focus(); inputRef.current?.select?.() }}>Focus the URL bar</button>
+                    </div>`
+                  // A truly blank tab (⌘T) gets the welcome + quick actions.
+                  : html`<div key=${t.id} className="browse-welcome">
+                      <div className="browse-welcome-inner">
+                        <div className="browse-welcome-logo">🍐</div>
+                        <h2>The peer-to-peer web starts here</h2>
+                        <p>Paste any <code>hyper://</code> URL above — hex or z-base-32 — and PearBrowser fetches it directly from its peers. No DNS, no servers, no CDN.</p>
+                        <div className="browse-welcome-actions">
+                          <button className="btn primary" onClick=${() => go(DEFAULT_URL)}>Open the PearBrowser site</button>
+                          <button className="btn subtle" onClick=${() => { inputRef.current?.focus(); inputRef.current?.select?.() }}>Focus the URL bar</button>
+                        </div>
+                        <div className="browse-welcome-tip">Tip: <code>⌘T</code> opens a new tab, <code>⌘⇧T</code> reopens one, <code>⌘W</code> closes one, <code>⌘L</code> jumps to the URL bar, <code>⌘1</code>–<code>⌘9</code> switches between tabs.</div>
                       </div>
-                      <div class="browse-welcome-tip">Tip: <code>⌘T</code> opens a new tab, <code>⌘⇧T</code> reopens one, <code>⌘W</code> closes one, <code>⌘L</code> jumps to the URL bar, <code>⌘1</code>–<code>⌘9</code> switches between tabs.</div>
-                    </div>
-                  </div>`)
-            : null
+                    </div>`)
+              : null
         )}
       </div>
       ${aboutOpen && html`<${AboutSite}
@@ -1001,41 +992,41 @@ function LoginConsent ({ rpc, C, request, identity, onClose }) {
   const driveLabel = shortKey(request.driveKey)
 
   return html`
-    <div class="modal-overlay" role="dialog" aria-modal="true" onClick=${(e) => e.target.classList.contains('modal-overlay') && decide(false)}>
-      <div class="modal-card login-consent">
-        <div class="login-header">
-          <div class="login-app-icon">🍐</div>
-          <div class="login-header-text">
-            <div class="login-app-name">${appLabel}</div>
-            <div class="login-app-sub">wants to sign you in</div>
-            <div class="login-app-key" title=${request.driveKey}>${driveLabel}</div>
+    <div className="modal-overlay" role="dialog" aria-modal="true" onClick=${(e) => e.target.classList.contains('modal-overlay') && decide(false)}>
+      <div className="modal-card login-consent">
+        <div className="login-header">
+          <div className="login-app-icon">🍐</div>
+          <div className="login-header-text">
+            <div className="login-app-name">${appLabel}</div>
+            <div className="login-app-sub">wants to sign you in</div>
+            <div className="login-app-key" title=${request.driveKey}>${driveLabel}</div>
           </div>
         </div>
 
-        ${request.reason && html`<div class="login-reason">"${request.reason}"</div>`}
+        ${request.reason && html`<div className="login-reason">"${request.reason}"</div>`}
 
-        <div class="login-section-label">SIGNING IN AS</div>
-        <div class="login-identity">
-          <div class="login-identity-avatar">🍐</div>
-          <div class="login-identity-meta">
-            <div class="login-identity-label">You</div>
-            <code class="login-identity-key">${shortKey(identity?.publicKey || '')}</code>
+        <div className="login-section-label">SIGNING IN AS</div>
+        <div className="login-identity">
+          <div className="login-identity-avatar">🍐</div>
+          <div className="login-identity-meta">
+            <div className="login-identity-label">You</div>
+            <code className="login-identity-key">${shortKey(identity?.publicKey || '')}</code>
           </div>
         </div>
 
-        <div class="login-section-label">${appLabel} WILL SEE</div>
-        <div class="login-scopes">
+        <div className="login-section-label">${appLabel} WILL SEE</div>
+        <div className="login-scopes">
           ${(request.scopes || []).length === 0
-            ? html`<div class="login-scope-empty">Nothing — sign-in only confirms it's you.</div>`
+            ? html`<div className="login-scope-empty">Nothing — sign-in only confirms it's you.</div>`
             : (request.scopes || []).map((s) => {
                 const meta = SCOPE_LABELS[s] || { label: s, detail: '' }
                 const on = granted.has(s)
                 return html`
-                  <label class=${'login-scope' + (on ? ' on' : '')} key=${s}>
+                  <label className=${'login-scope' + (on ? ' on' : '')} key=${s}>
                     <input type="checkbox" checked=${on} onChange=${() => toggle(s)} />
-                    <div class="login-scope-meta">
-                      <div class="login-scope-label">${meta.label}</div>
-                      <div class="login-scope-detail">${meta.detail || s}</div>
+                    <div className="login-scope-meta">
+                      <div className="login-scope-label">${meta.label}</div>
+                      <div className="login-scope-detail">${meta.detail || s}</div>
                     </div>
                   </label>
                 `
@@ -1043,19 +1034,19 @@ function LoginConsent ({ rpc, C, request, identity, onClose }) {
         </div>
 
         ${request.currentGrant && html`
-          <div class="login-existing">
+          <div className="login-existing">
             You previously granted this app on
             ${' ' + new Date(request.currentGrant.grantedAt).toLocaleDateString()}.
           </div>
         `}
 
-        ${err && html`<div class="apps-error">${err}</div>`}
+        ${err && html`<div className="apps-error">${err}</div>`}
 
-        <div class="login-actions">
-          <button class="btn subtle" onClick=${() => decide(false)} disabled=${busy !== null}>
+        <div className="login-actions">
+          <button className="btn subtle" onClick=${() => decide(false)} disabled=${busy !== null}>
             ${busy === 'deny' ? 'Cancelling…' : 'Cancel'}
           </button>
-          <button class="btn primary" onClick=${() => decide(true)} disabled=${busy !== null}>
+          <button className="btn primary" onClick=${() => decide(true)} disabled=${busy !== null}>
             ${busy === 'approve' ? 'Signing in…' : 'Sign in'}
           </button>
         </div>
@@ -1099,55 +1090,55 @@ function SwarmConsent ({ rpc, C, request, identity, onClose }) {
   const topicLabel = shortKey(request.topicHex)
 
   return html`
-    <div class="modal-overlay" role="dialog" aria-modal="true" onClick=${(e) => e.target.classList.contains('modal-overlay') && decide(false)}>
-      <div class="modal-card login-consent">
-        <div class="login-header">
-          <div class="login-app-icon" style=${{ background: 'linear-gradient(135deg, #58a6ff, #a371f7)' }}>📡</div>
-          <div class="login-header-text">
-            <div class="login-app-name">${appLabel}</div>
-            <div class="login-app-sub">wants to connect to peers on a swarm topic</div>
-            <div class="login-app-key" title=${request.driveKey}>${driveLabel}</div>
+    <div className="modal-overlay" role="dialog" aria-modal="true" onClick=${(e) => e.target.classList.contains('modal-overlay') && decide(false)}>
+      <div className="modal-card login-consent">
+        <div className="login-header">
+          <div className="login-app-icon" style=${{ background: 'linear-gradient(135deg, #58a6ff, #a371f7)' }}>📡</div>
+          <div className="login-header-text">
+            <div className="login-app-name">${appLabel}</div>
+            <div className="login-app-sub">wants to connect to peers on a swarm topic</div>
+            <div className="login-app-key" title=${request.driveKey}>${driveLabel}</div>
           </div>
         </div>
 
-        ${request.reason && html`<div class="login-reason">"${request.reason}"</div>`}
+        ${request.reason && html`<div className="login-reason">"${request.reason}"</div>`}
 
-        <div class="login-section-label">SWARM TOPIC</div>
-        <div class="login-identity">
-          <div class="login-identity-avatar">🔑</div>
-          <div class="login-identity-meta">
-            <div class="login-identity-label">${request.protocol || 'pear.swarm.v1'}</div>
-            <code class="login-identity-key">${topicLabel}</code>
+        <div className="login-section-label">SWARM TOPIC</div>
+        <div className="login-identity">
+          <div className="login-identity-avatar">🔑</div>
+          <div className="login-identity-meta">
+            <div className="login-identity-label">${request.protocol || 'pear.swarm.v1'}</div>
+            <code className="login-identity-key">${topicLabel}</code>
           </div>
         </div>
 
-        <div class="login-section-label">WHAT THIS MEANS</div>
-        <div class="login-scopes">
-          <div class="login-scope on">
-            <div class="login-scope-meta">
-              <div class="login-scope-label">Discover peers via DHT</div>
-              <div class="login-scope-detail">Other devices on this topic will see your IP address.</div>
+        <div className="login-section-label">WHAT THIS MEANS</div>
+        <div className="login-scopes">
+          <div className="login-scope on">
+            <div className="login-scope-meta">
+              <div className="login-scope-label">Discover peers via DHT</div>
+              <div className="login-scope-detail">Other devices on this topic will see your IP address.</div>
             </div>
           </div>
-          <div class="login-scope on">
-            <div class="login-scope-meta">
-              <div class="login-scope-label">Send and receive messages directly</div>
-              <div class="login-scope-detail">No relay between your peers and you. Messages aren't logged by PearBrowser.</div>
+          <div className="login-scope on">
+            <div className="login-scope-meta">
+              <div className="login-scope-label">Send and receive messages directly</div>
+              <div className="login-scope-detail">No relay between your peers and you. Messages aren't logged by PearBrowser.</div>
             </div>
           </div>
         </div>
 
-        <div class="login-existing">
+        <div className="login-existing">
           Approving stores a grant for this app + this topic. You can revoke it any time in <strong>Settings → Connected Apps</strong>.
         </div>
 
-        ${err && html`<div class="apps-error">${err}</div>`}
+        ${err && html`<div className="apps-error">${err}</div>`}
 
-        <div class="login-actions">
-          <button class="btn subtle" onClick=${() => decide(false)} disabled=${busy !== null}>
+        <div className="login-actions">
+          <button className="btn subtle" onClick=${() => decide(false)} disabled=${busy !== null}>
             ${busy === 'deny' ? 'Cancelling…' : 'Cancel'}
           </button>
-          <button class="btn primary" onClick=${() => decide(true)} disabled=${busy !== null}>
+          <button className="btn primary" onClick=${() => decide(true)} disabled=${busy !== null}>
             ${busy === 'approve' ? 'Connecting…' : 'Approve & Connect'}
           </button>
         </div>
@@ -1219,85 +1210,85 @@ function Onboarding ({ rpc, C, onPickSite, onClose }) {
   }
 
   return html`
-    <div class="modal-overlay onboarding-overlay" role="dialog" aria-modal="true">
-      <div class="modal-card onboarding-card">
+    <div className="modal-overlay onboarding-overlay" role="dialog" aria-modal="true">
+      <div className="modal-card onboarding-card">
         ${slide === 0 && html`
-          <div class="onb-slide onb-slide-welcome">
-            <div class="onb-hero">
+          <div className="onb-slide onb-slide-welcome">
+            <div className="onb-hero">
               <${Logo} size=${72} />
             </div>
-            <h1 class="onb-title">Welcome to <strong>PearBrowser</strong></h1>
-            <p class="onb-subtitle">The web that doesn't go down.</p>
-            <p class="onb-blurb">
+            <h1 className="onb-title">Welcome to <strong>PearBrowser</strong></h1>
+            <p className="onb-subtitle">The web that doesn't go down.</p>
+            <p className="onb-blurb">
               A peer-to-peer browser, app store, and site publisher. Pages
               live as Hyperdrives, identified by 32-byte keys, replicated
               by their readers. No DNS. No servers. No accounts.
             </p>
-            <div class="onb-actions">
-              <button class="btn primary" onClick=${() => setSlide(1)}>Get started →</button>
+            <div className="onb-actions">
+              <button className="btn primary" onClick=${() => setSlide(1)}>Get started →</button>
             </div>
           </div>
         `}
         ${slide === 1 && html`
-          <div class="onb-slide">
-            <h2 class="onb-stepname">Three things at once</h2>
-            <div class="onb-pitch-grid">
-              <div class="onb-pitch">
-                <div class="onb-pitch-icon">🌐</div>
-                <div class="onb-pitch-title">Browse hyper://</div>
-                <div class="onb-pitch-body">Paste a drive key, fetch from peers, render in-app.</div>
+          <div className="onb-slide">
+            <h2 className="onb-stepname">Three things at once</h2>
+            <div className="onb-pitch-grid">
+              <div className="onb-pitch">
+                <div className="onb-pitch-icon">🌐</div>
+                <div className="onb-pitch-title">Browse hyper://</div>
+                <div className="onb-pitch-body">Paste a drive key, fetch from peers, render in-app.</div>
               </div>
-              <div class="onb-pitch">
-                <div class="onb-pitch-icon">📦</div>
-                <div class="onb-pitch-title">Run Pear apps</div>
-                <div class="onb-pitch-body">Click a pear:// link, the app opens in its own window.</div>
+              <div className="onb-pitch">
+                <div className="onb-pitch-icon">📦</div>
+                <div className="onb-pitch-title">Run Pear apps</div>
+                <div className="onb-pitch-body">Click a pear:// link, the app opens in its own window.</div>
               </div>
-              <div class="onb-pitch">
-                <div class="onb-pitch-icon">✒️</div>
-                <div class="onb-pitch-title">Publish your own</div>
-                <div class="onb-pitch-body">Block editor → publish → pinned 24/7 on HiveRelay.</div>
+              <div className="onb-pitch">
+                <div className="onb-pitch-icon">✒️</div>
+                <div className="onb-pitch-title">Publish your own</div>
+                <div className="onb-pitch-body">Block editor → publish → pinned 24/7 on HiveRelay.</div>
               </div>
             </div>
-            <p class="onb-blurb onb-foot">
+            <p className="onb-blurb onb-foot">
               Your identity is generated automatically and stored on this
               machine. You can back it up later in <em>Settings → Identity</em>
               if you want to use it on another device.
             </p>
-            <div class="onb-actions">
-              <button class="btn subtle" onClick=${() => setSlide(0)}>← Back</button>
-              <button class="btn primary" onClick=${() => setSlide(2)}>Continue →</button>
+            <div className="onb-actions">
+              <button className="btn subtle" onClick=${() => setSlide(0)}>← Back</button>
+              <button className="btn primary" onClick=${() => setSlide(2)}>Continue →</button>
             </div>
           </div>
         `}
         ${slide === 2 && html`
-          <div class="onb-slide">
-            <h2 class="onb-stepname">Try a site</h2>
-            <p class="onb-blurb">Pick one to start with — you can always come back here.</p>
-            <div class="onb-sites">
+          <div className="onb-slide">
+            <h2 className="onb-stepname">Try a site</h2>
+            <p className="onb-blurb">Pick one to start with — you can always come back here.</p>
+            <div className="onb-sites">
               ${ONBOARDING_FIRST_SITES.map((s) => html`
                 <button
-                  class="onb-site-card"
+                  className="onb-site-card"
                   key=${s.id}
                   onClick=${() => finish(s.url)}
                   title=${s.url}
                 >
-                  <div class="onb-site-icon" style=${{ background: s.gradient }}>${s.initial}</div>
-                  <div class="onb-site-text">
-                    <div class="onb-site-title">${s.title}</div>
-                    <div class="onb-site-subtitle">${s.subtitle}</div>
+                  <div className="onb-site-icon" style=${{ background: s.gradient }}>${s.initial}</div>
+                  <div className="onb-site-text">
+                    <div className="onb-site-title">${s.title}</div>
+                    <div className="onb-site-subtitle">${s.subtitle}</div>
                   </div>
                 </button>
               `)}
             </div>
-            <div class="onb-actions">
-              <button class="btn subtle" onClick=${() => setSlide(1)}>← Back</button>
-              <button class="onb-skip" onClick=${() => finish(null)}>Skip — I'll explore</button>
+            <div className="onb-actions">
+              <button className="btn subtle" onClick=${() => setSlide(1)}>← Back</button>
+              <button className="onb-skip" onClick=${() => finish(null)}>Skip — I'll explore</button>
             </div>
           </div>
         `}
-        <div class="onb-dots">
+        <div className="onb-dots">
           ${[0, 1, 2].map((i) => html`
-            <span class=${'onb-dot' + (i === slide ? ' on' : '')} key=${i}></span>
+            <span className=${'onb-dot' + (i === slide ? ' on' : '')} key=${i}></span>
           `)}
         </div>
       </div>
@@ -1329,8 +1320,8 @@ function AppIcon ({ rpc, C, driveKey, iconRef, iconData, name }) {
     return () => { alive = false }
   }, [driveKey, iconRef])
   return src
-    ? html`<img src=${src} alt="" class="app-icon" />`
-    : html`<div class="app-icon app-icon-fallback">${(name || '?').charAt(0)}</div>`
+    ? html`<img src=${src} alt="" className="app-icon" />`
+    : html`<div className="app-icon app-icon-fallback">${(name || '?').charAt(0)}</div>`
 }
 
 // Normalize an app's category metadata to a string array. Catalogs in the
@@ -1411,9 +1402,10 @@ function CollaborativeCatalog ({ rpc, C }) {
   const addApp = async () => {
     const val = appKey.trim()
     if (!val) return
-    const app = /^pear:\/\//i.test(val)
+    const app = /^(?:pear|file):\/\//i.test(val)
       ? { link: val, name: appName || val }
-      : { driveKey: val.replace(/^hyper:\/\//i, '').replace(/\/+$/, ''), name: appName || val }
+      : { driveKey: driveKeyFromHyperRef(val), name: appName || val }
+    if (!app.link && !app.driveKey) { setErr('Enter a pear:// link, file:// link, or a valid hyper:// drive key.'); return }
     setErr(''); setBusy('addapp')
     try {
       const res = await rpc.request(C.CMD_AUTOBEE_ADD_APP, { keyHex: cat.keyHex, app }, 60000)
@@ -1432,92 +1424,275 @@ function CollaborativeCatalog ({ rpc, C }) {
   if (!enabled) return null // hidden while loading and when the flag is off
 
   return html`
-    <h2>Collaborative catalog <span class="settings-subtle">(experimental)</span></h2>
-    <p class="subtitle">An app catalog several people can co-edit, synced peer-to-peer. Not pinned on relays yet — reachable only while a writer is online.</p>
-    <div class="settings-card">
-      ${err && html`<div class="apps-error">${err}</div>`}
-      ${notice && html`<div class="apps-ok">${notice}</div>`}
+    <div className="collab-catalog">
+      <h2>Collaborative catalog <span className="settings-subtle">(experimental)</span></h2>
+      <p className="subtitle">An app catalog several people can co-edit, synced peer-to-peer. Not pinned on relays yet — reachable only while a writer is online.</p>
+      <div className="settings-card">
+        ${err && html`<div className="apps-error">${err}</div>`}
+        ${notice && html`<div className="apps-ok">${notice}</div>`}
 
-      ${!cat && html`
-        <div class="settings-row">
-          <div class="profile-field">
-            <div class="settings-label">Create a new collaborative catalog</div>
-            <input class="profile-input" placeholder="Catalog name" value=${newName} onInput=${(e) => setNewName(e.target.value)} />
-          </div>
-          <button class="btn primary" onClick=${create} disabled=${busy === 'create'}>${busy === 'create' ? 'Creating…' : 'Create'}</button>
-        </div>
-        <div class="settings-row">
-          <div class="profile-field">
-            <div class="settings-label">…or open one by key</div>
-            <input class="profile-input" placeholder="autobee://… or 64-hex key" value=${joinKey} onInput=${(e) => setJoinKey(e.target.value)} onKeyDown=${(e) => e.key === 'Enter' && open()} />
-          </div>
-          <button class="btn" onClick=${open} disabled=${busy === 'open' || !joinKey.trim()}>${busy === 'open' ? 'Opening…' : 'Open'}</button>
-        </div>
-      `}
-
-      ${cat && html`
-        <div class="settings-row">
-          <div>
-            <div class="settings-label">${cat.name} ${cat.writable ? '' : html`<span class="settings-subtle">· read-only</span>`}</div>
-            <div class="settings-subtle">${cat.apps.length} app(s)</div>
-          </div>
-          <button class="btn subtle" onClick=${() => { setCat(null); persistOwned('') }}>Close</button>
-        </div>
-        <div class="settings-row">
-          <div class="profile-field">
-            <div class="settings-label">Share key — anyone can load this in the Apps tab</div>
-            <code class="settings-code">${cat.shareKey}</code>
-          </div>
-          <button class="btn small" onClick=${() => copy(cat.shareKey, 'share')}>${copied === 'share' ? 'Copied' : 'Copy'}</button>
-        </div>
-        <div class="settings-row">
-          <div class="profile-field">
-            <div class="settings-label">Your writer key — give this to the owner to be invited</div>
-            <code class="settings-code">${cat.writerKey}</code>
-          </div>
-          <button class="btn small" onClick=${() => copy(cat.writerKey, 'writer')}>${copied === 'writer' ? 'Copied' : 'Copy'}</button>
-        </div>
-
-        ${cat.writable && html`
-          <div class="settings-row">
-            <div class="profile-field">
-              <div class="settings-label">Invite a writer (paste their writer key)</div>
-              <input class="profile-input" placeholder="64-hex writer key" value=${inviteKey} onInput=${(e) => setInviteKey(e.target.value)} />
-            </div>
-            <button class="btn" onClick=${invite} disabled=${busy === 'invite' || !inviteKey.trim()}>${busy === 'invite' ? 'Adding…' : 'Invite'}</button>
-          </div>
-          <div class="settings-row">
-            <div class="profile-field">
-              <div class="settings-label">Add an app</div>
-              <input class="profile-input" placeholder="App name (optional)" value=${appName} onInput=${(e) => setAppName(e.target.value)} />
-              <input class="profile-input" placeholder="hyper:// drive key or pear:// link" value=${appKey} onInput=${(e) => setAppKey(e.target.value)} onKeyDown=${(e) => e.key === 'Enter' && addApp()} />
-            </div>
-            <button class="btn primary" onClick=${addApp} disabled=${busy === 'addapp' || !appKey.trim()}>${busy === 'addapp' ? 'Adding…' : 'Add app'}</button>
-          </div>
-        `}
-
-        ${cat.apps.length > 0 && html`
-          <div class="settings-row"><div class="settings-label">Apps</div></div>
-          ${cat.apps.map((a) => html`
-            <div class="settings-row" key=${a.id}>
-              <div>
-                <div class="settings-label">${a.name || a.id}</div>
-                <div class="settings-subtle">${a.driveKey || a.link || ''}</div>
+        ${!cat && html`
+          <div className="collab-empty">
+            <div className="settings-row">
+              <div className="profile-field">
+                <div className="settings-label">Create a new collaborative catalog</div>
+                <input className="profile-input" placeholder="Catalog name" value=${newName} onInput=${(e) => setNewName(e.target.value)} />
               </div>
-              ${cat.writable && html`<button class="btn small subtle" onClick=${() => removeApp(a.id)} disabled=${busy === 'rm:' + a.id}>Remove</button>`}
+              <button className="btn primary" onClick=${create} disabled=${busy === 'create'}>${busy === 'create' ? 'Creating…' : 'Create'}</button>
             </div>
-          `)}
+            <div className="settings-row">
+              <div className="profile-field">
+                <div className="settings-label">…or open one by key</div>
+                <input className="profile-input" placeholder="autobee://… or 64-hex key" value=${joinKey} onInput=${(e) => setJoinKey(e.target.value)} onKeyDown=${(e) => e.key === 'Enter' && open()} />
+              </div>
+              <button className="btn" onClick=${open} disabled=${busy === 'open' || !joinKey.trim()}>${busy === 'open' ? 'Opening…' : 'Open'}</button>
+            </div>
+          </div>
         `}
+
+        ${cat && html`
+          <div className="collab-open">
+            <div className="settings-row">
+              <div>
+                <div className="settings-label">${cat.name} ${cat.writable ? '' : html`<span className="settings-subtle">· read-only</span>`}</div>
+                <div className="settings-subtle">${cat.apps.length} app(s)</div>
+              </div>
+              <button className="btn subtle" onClick=${() => { setCat(null); persistOwned('') }}>Close</button>
+            </div>
+            <div className="settings-row">
+              <div className="profile-field">
+                <div className="settings-label">Share key — anyone can load this in the Apps tab</div>
+                <code className="settings-code">${cat.shareKey}</code>
+              </div>
+              <button className="btn small" onClick=${() => copy(cat.shareKey, 'share')}>${copied === 'share' ? 'Copied' : 'Copy'}</button>
+            </div>
+            <div className="settings-row">
+              <div className="profile-field">
+                <div className="settings-label">Your writer key — give this to the owner to be invited</div>
+                <code className="settings-code">${cat.writerKey}</code>
+              </div>
+              <button className="btn small" onClick=${() => copy(cat.writerKey, 'writer')}>${copied === 'writer' ? 'Copied' : 'Copy'}</button>
+            </div>
+
+            ${cat.writable && html`
+              <div className="collab-writable">
+                <div className="settings-row">
+                  <div className="profile-field">
+                    <div className="settings-label">Invite a writer (paste their writer key)</div>
+                    <input className="profile-input" placeholder="64-hex writer key" value=${inviteKey} onInput=${(e) => setInviteKey(e.target.value)} />
+                  </div>
+                  <button className="btn" onClick=${invite} disabled=${busy === 'invite' || !inviteKey.trim()}>${busy === 'invite' ? 'Adding…' : 'Invite'}</button>
+                </div>
+                <div className="settings-row">
+                  <div className="profile-field">
+                    <div className="settings-label">Add an app</div>
+                    <input className="profile-input" placeholder="App name (optional)" value=${appName} onInput=${(e) => setAppName(e.target.value)} />
+                    <input className="profile-input" placeholder="hyper:// drive key or pear:// link" value=${appKey} onInput=${(e) => setAppKey(e.target.value)} onKeyDown=${(e) => e.key === 'Enter' && addApp()} />
+                  </div>
+                  <button className="btn primary" onClick=${addApp} disabled=${busy === 'addapp' || !appKey.trim()}>${busy === 'addapp' ? 'Adding…' : 'Add app'}</button>
+                </div>
+              </div>
+            `}
+
+            ${cat.apps.length > 0 && html`
+              <div className="collab-apps">
+                <div className="settings-row"><div className="settings-label">Apps</div></div>
+                ${cat.apps.map((a) => html`
+                  <div className="settings-row" key=${a.id || a.driveKey || a.link || a.name}>
+                    <div>
+                      <div className="settings-label">${a.name || a.id}</div>
+                      <div className="settings-subtle">${a.driveKey || a.link || ''}</div>
+                    </div>
+                    ${cat.writable && html`<button className="btn small subtle" onClick=${() => removeApp(a.id)} disabled=${busy === 'rm:' + a.id}>Remove</button>`}
+                  </div>
+                `)}
+              </div>
+            `}
+          </div>
+        `}
+      </div>
+    </div>
+  `
+}
+
+// "Submit your app" — anyone can propose an app for the COMMUNITY catalogue.
+// CMD_SUBMIT_APP publishes a manifest drive + seeds the app drive via HiveRelay;
+// the relay queues a pin request in `review` mode. The app appears in everyone's
+// Community list once a moderator approves it (ModeratorPanel below).
+function CommunitySubmit ({ rpc, C }) {
+  const [name, setName] = useState('')
+  const [link, setLink] = useState('')
+  const [description, setDescription] = useState('')
+  const [author, setAuthor] = useState('')
+  const [categories, setCategories] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const [ok, setOk] = useState('')
+
+  const submit = async () => {
+    setErr(''); setOk('')
+    if (!name.trim()) { setErr('App name is required.'); return }
+    if (!link.trim()) { setErr('Paste a pear:// link, a hyper:// link, or a drive key.'); return }
+    setBusy(true)
+    try {
+      const res = await rpc.request(C.CMD_SUBMIT_APP, {
+        name: name.trim(), link: link.trim(), description: description.trim(),
+        author: author.trim(), categories
+      }, 90000)
+      setOk(`Submitted "${(res && res.manifest && res.manifest.name) || name.trim()}" for review — it joins the Community list once a moderator approves it.`)
+      setName(''); setLink(''); setDescription(''); setAuthor(''); setCategories('')
+    } catch (e) { setErr((e && e.message) || String(e)) } finally { setBusy(false) }
+  }
+
+  return html`
+    <div className="community-submit">
+      <h2>Submit your app <span className="settings-subtle">→ Community list</span></h2>
+      <p className="subtitle">Add any Pear app or hyperdrive site to the community catalogue. Submissions are pinned on relays and reviewed by a moderator before appearing in everyone's Community list.</p>
+      <div className="settings-card">
+        ${err && html`<div className="apps-error">${err}</div>`}
+        ${ok && html`<div className="apps-ok">${ok}</div>`}
+        <div className="settings-row">
+          <div className="profile-field">
+            <div className="settings-label">App name *</div>
+            <input className="profile-input" placeholder="My Cool App" value=${name} onInput=${(e) => setName(e.target.value)} />
+          </div>
+        </div>
+        <div className="settings-row">
+          <div className="profile-field">
+            <div className="settings-label">Link *</div>
+            <input className="profile-input" placeholder="pear://… or hyper://… (or a 64-hex / z-base-32 key)" value=${link} onInput=${(e) => setLink(e.target.value)} onKeyDown=${(e) => e.key === 'Enter' && submit()} />
+          </div>
+        </div>
+        <div className="settings-row">
+          <div className="profile-field">
+            <div className="settings-label">Description</div>
+            <input className="profile-input" placeholder="What does it do?" value=${description} onInput=${(e) => setDescription(e.target.value)} />
+          </div>
+        </div>
+        <div className="settings-row">
+          <div className="profile-field">
+            <div className="settings-label">Author</div>
+            <input className="profile-input" placeholder="Your name or handle" value=${author} onInput=${(e) => setAuthor(e.target.value)} />
+          </div>
+          <div className="profile-field">
+            <div className="settings-label">Categories</div>
+            <input className="profile-input" placeholder="tools, social" value=${categories} onInput=${(e) => setCategories(e.target.value)} />
+          </div>
+        </div>
+        <div className="settings-row">
+          <button className="btn primary" onClick=${submit} disabled=${busy || !name.trim() || !link.trim()}>${busy ? 'Submitting…' : 'Submit for review'}</button>
+        </div>
+      </div>
+    </div>
+  `
+}
+
+// In-app moderator panel — operator-gated (needs the relay management URL + API
+// key, saved to userdata settings). Lists the relay's pending pin-requests
+// (CMD_MOD_PENDING) and approves/rejects them (CMD_MOD_APPROVE / CMD_MOD_REJECT).
+// Collapsed by default since only the operator needs it. The relay must run in
+// `review` accept mode for submissions to queue here.
+function ModeratorPanel ({ rpc, C }) {
+  const [open, setOpen] = useState(false)
+  const [url, setUrl] = useState('')
+  const [apiKey, setApiKey] = useState('')
+  const [saved, setSaved] = useState(false)
+  const [pending, setPending] = useState(null) // null = not loaded yet
+  const [mode, setMode] = useState(null)
+  const [busy, setBusy] = useState(null)
+  const [err, setErr] = useState('')
+  const [notice, setNotice] = useState('')
+
+  useEffect(() => {
+    rpc.request(C.CMD_USERDATA_GET_SETTINGS).then((res) => {
+      const s = unwrapSettings(res) || {}
+      if (typeof s.relayManageUrl === 'string') setUrl(s.relayManageUrl)
+      if (typeof s.relayManageKey === 'string') setApiKey(s.relayManageKey)
+    }).catch(() => {})
+  }, [])
+
+  const flash = (m) => { setNotice(m); setTimeout(() => setNotice(''), 1800) }
+
+  const saveConfig = async () => {
+    setErr('')
+    try {
+      await rpc.request(C.CMD_USERDATA_SET_SETTINGS, { updates: { relayManageUrl: url.trim(), relayManageKey: apiKey.trim() } })
+      setSaved(true); setTimeout(() => setSaved(false), 1500); flash('Saved.')
+    } catch (e) { setErr(e.message) }
+  }
+
+  const loadPending = async () => {
+    setErr(''); setBusy('load')
+    try {
+      const res = await rpc.request(C.CMD_MOD_PENDING, {}, 30000)
+      setPending(res.pending || []); setMode(res.mode || null)
+    } catch (e) { setErr(e.message); setPending([]) } finally { setBusy(null) }
+  }
+
+  const decide = async (appKey, approve) => {
+    setErr(''); setBusy((approve ? 'a:' : 'r:') + appKey)
+    try {
+      await rpc.request(approve ? C.CMD_MOD_APPROVE : C.CMD_MOD_REJECT, { appKey }, 60000)
+      setPending((list) => (list || []).filter((p) => p.appKey !== appKey))
+      flash(approve ? 'Approved + pinned.' : 'Rejected.')
+    } catch (e) { setErr(e.message) } finally { setBusy(null) }
+  }
+
+  return html`
+    <div className="moderator-panel">
+      <h2>
+        <button className="btn subtle small" onClick=${() => setOpen((v) => !v)} style=${{ marginRight: '8px' }}>${open ? '▾' : '▸'}</button>
+        Moderator tools <span className="settings-subtle">(operator)</span>
+      </h2>
+      ${open && html`
+        <div className="settings-card">
+          ${err && html`<div className="apps-error">${err}</div>`}
+          ${notice && html`<div className="apps-ok">${notice}</div>`}
+          <p className="subtitle">Review apps submitted to the Community list. Needs your relay's management URL + operator API key. The relay must run in <code>review</code> accept mode.</p>
+          <div className="settings-row">
+            <div className="profile-field">
+              <div className="settings-label">Relay management URL</div>
+              <input className="profile-input" placeholder="https://relay-eu.p2phiverelay.xyz or http://127.0.0.1:9100" value=${url} onInput=${(e) => setUrl(e.target.value)} />
+            </div>
+          </div>
+          <div className="settings-row">
+            <div className="profile-field">
+              <div className="settings-label">Operator API key</div>
+              <input className="profile-input" type="password" placeholder="Bearer token" value=${apiKey} onInput=${(e) => setApiKey(e.target.value)} />
+            </div>
+            <button className="btn" onClick=${saveConfig}>${saved ? 'Saved' : 'Save'}</button>
+          </div>
+          <div className="settings-row">
+            <button className="btn primary" onClick=${loadPending} disabled=${busy === 'load' || !url.trim()}>${busy === 'load' ? 'Loading…' : 'Load pending'}</button>
+            ${mode && html`<span className="settings-subtle">relay mode: ${mode}</span>`}
+          </div>
+          ${pending && pending.length === 0 && html`<div className="settings-subtle" style=${{ padding: '6px 0' }}>No pending submissions.</div>`}
+          ${pending && pending.length > 0 && html`
+            <div className="mod-pending">
+              ${pending.map((p) => html`
+                <div className="settings-row" key=${p.appKey}>
+                  <div style=${{ minWidth: 0 }}>
+                    <div className="settings-label" style=${{ fontFamily: 'monospace' }}>${(p.appKey || '').slice(0, 16)}…</div>
+                    <div className="settings-subtle">by ${(p.publisherPubkey || 'unknown').slice(0, 12)}…${p.currentRelays ? ` · ${p.currentRelays} relay(s)` : ''}</div>
+                  </div>
+                  <div style=${{ display: 'flex', gap: '6px' }}>
+                    <button className="btn small primary" onClick=${() => decide(p.appKey, true)} disabled=${!!busy}>${busy === 'a:' + p.appKey ? '…' : 'Approve'}</button>
+                    <button className="btn small subtle" onClick=${() => decide(p.appKey, false)} disabled=${!!busy}>${busy === 'r:' + p.appKey ? '…' : 'Reject'}</button>
+                  </div>
+                </div>
+              `)}
+            </div>
+          `}
+        </div>
       `}
     </div>
   `
 }
 
-// Browser-side dedup. getAggregatedApps only collapses by per-row id, so the
-// SAME app (same driveKey/link) arriving from different catalogues — or as
-// different schema-sheets rows/uuids — would appear multiple times. Collapse by
-// stable identity (driveKey, else link), keep the most-trustworthy copy
-// (verification, then version), and record which catalogues list it.
+// Browser-side defensive dedup. The backend aggregate now collapses by stable
+// identity (driveKey, else link, else id), but keep this final pass for stale
+// backends and local state restored from older versions. It mirrors the backend
+// winner rule: verification first, then version, while recording source names.
 const VERIFICATION_RANK = { 'author-signed': 3, 'relay-listed': 2, unverified: 1 }
 function appVersionGreater (a, b) {
   const pa = String(a || '0').split('.').map((n) => parseInt(n, 10) || 0)
@@ -1546,7 +1721,16 @@ function dedupeApps (list) {
       continue
     }
     const sources = [...new Set([...(existing._sources || []), app.catalogName].filter(Boolean))]
-    byKey.set(key, { ...betterApp(app, existing), _sources: sources })
+    // Keep the most-trustworthy copy's metadata, but backfill presentation-only
+    // fields (icon) from the other copy — so an app whose winning entry lacks an
+    // icon still shows one if ANY catalogue carries it (e.g. the offline seed
+    // wins on verification but only the published bee carries the inline icon).
+    const winner = betterApp(app, existing)
+    const other = winner === app ? existing : app
+    const merged = { ...winner }
+    if (!merged.iconData && other.iconData) merged.iconData = other.iconData
+    if (!merged.icon && other.icon) merged.icon = other.icon
+    byKey.set(key, { ...merged, _sources: sources })
   }
   return [...byKey.values()]
 }
@@ -1880,9 +2064,9 @@ function Apps ({ rpc, C, onLaunch }) {
     if (!parsed) return
     setErr(''); setBusy('catalog')
     try {
-      // Route by scheme: hyper(drive) / hyperbee:// / autobee://.
-      const { cmd, persistRef } = catalogLoadPlan(parsed, C)
-      await rpc.request(cmd, { keyHex: parsed.key }, 60000)
+      // Route by scheme: hyper(drive) / hyperbee:// / autobee:// / sheets:// / hiveindex://.
+      const { cmd, payload, persistRef } = catalogLoadPlan(parsed, C)
+      await rpc.request(cmd, payload || { keyHex: parsed.key }, 60000)
       setCatalogKey('')
       await refreshAggregate()
       refreshUpdates()
@@ -1910,8 +2094,9 @@ function Apps ({ rpc, C, onLaunch }) {
       await rpc.request(C.CMD_UNLOAD_CATALOG, { keyHex: key })
       if (source === key) setSource('all')
       await refreshAggregate()
+      const removed = catalogCacheKeyForRef(key)
       setRecentCatalogs((prev) => {
-        const next = prev.filter((k) => k !== key && `bee:${k}` !== key)
+        const next = prev.filter((k) => catalogCacheKeyForRef(k) !== removed)
         rpc.request(C.CMD_USERDATA_SET_SETTINGS, { updates: { recentCatalogs: next } }).catch(() => {})
         return next
       })
@@ -1931,11 +2116,18 @@ function Apps ({ rpc, C, onLaunch }) {
     ;(async () => {
       try {
         const settings = unwrapSettings(await rpc.request(C.CMD_USERDATA_GET_SETTINGS))
-        const recent = Array.isArray(settings?.recentCatalogs) ? settings.recentCatalogs : []
+        const recentRaw = Array.isArray(settings?.recentCatalogs) ? settings.recentCatalogs : []
         // Back-compat: older builds persisted only a single lastCatalogKey.
         const last = settings?.lastCatalogKey
         const myKey = typeof settings?.myCatalogKey === 'string' ? settings.myCatalogKey : null
-        const keys = [...new Set([...recent, ...(last ? [last] : []), ...(myKey ? [myKey] : [])])]
+        // Migrate installs stuck on the dead 0c35 hyperdrive (its writable secret was
+        // unrecoverable) → the live PearBrowser Network bee. Handles bare + hyper:// forms.
+        const migrateKey = (k) => (parseCatalogRef(k)?.key === OLD_DEAD_CATALOG_KEY ? DEFAULT_CATALOG_KEY : k)
+        const recent = recentRaw.map(migrateKey)
+        if (recent.some((k, i) => k !== recentRaw[i])) {
+          rpc.request(C.CMD_USERDATA_SET_SETTINGS, { updates: { recentCatalogs: recent } }).catch(() => {})
+        }
+        const keys = [...new Set([...recent, ...(last ? [migrateKey(last)] : []), ...(myKey ? [myKey] : [])])]
         if (recent.length) setRecentCatalogs(recent)
         if (myKey) {
           rpc.request(C.CMD_MYCATALOG_GET, { keyHex: myKey }).then(setMyCatalog).catch(() => {})
@@ -1946,22 +2138,40 @@ function Apps ({ rpc, C, onLaunch }) {
         // the user later unloads everything we respect that rather than
         // re-adding the default on every launch.
         const seeded = settings?.defaultCatalogSeeded === true
-        const toLoad = keys.length ? keys : (seeded ? [] : [DEFAULT_CATALOG_KEY])
+        const communitySeeded = settings?.communityCatalogSeeded === true
+        const comKey = parseCatalogRef(DEFAULT_COMMUNITY_CATALOG)?.key
+        const hasCommunity = keys.some((k) => parseCatalogRef(k)?.key === comKey)
+        // Fresh install → load BOTH defaults (curated + community). An install that
+        // predates the community list → add it once (communityCatalogSeeded), so a
+        // later manual unload is still respected rather than re-added every launch.
+        let toLoad = keys.length ? [...keys] : (seeded ? [] : [DEFAULT_CATALOG_KEY, DEFAULT_COMMUNITY_CATALOG])
+        const addCommunity = !hasCommunity && !communitySeeded
+        if (addCommunity) toLoad = [...new Set([...toLoad, DEFAULT_COMMUNITY_CATALOG])]
         if (toLoad.length) {
           setBusy('catalog')
           await Promise.allSettled(
             toLoad.map((k) => {
               const parsed = parseCatalogRef(k)
               if (!parsed) return Promise.resolve()
-              const { cmd } = catalogLoadPlan(parsed, C)
-              return rpc.request(cmd, { keyHex: parsed.key }, 60000)
+              const { cmd, payload } = catalogLoadPlan(parsed, C)
+              return rpc.request(cmd, payload || { keyHex: parsed.key }, 60000)
             })
           )
+          const updates = {}
           if (!keys.length && !seeded) {
-            setRecentCatalogs([DEFAULT_CATALOG_KEY])
-            rpc.request(C.CMD_USERDATA_SET_SETTINGS, {
-              updates: { recentCatalogs: [DEFAULT_CATALOG_KEY], defaultCatalogSeeded: true }
-            }).catch(() => {})
+            const fresh = [DEFAULT_CATALOG_KEY, DEFAULT_COMMUNITY_CATALOG]
+            setRecentCatalogs(fresh)
+            updates.recentCatalogs = fresh
+            updates.defaultCatalogSeeded = true
+            updates.communityCatalogSeeded = true
+          } else if (addCommunity) {
+            const next = [...new Set([...recent, DEFAULT_COMMUNITY_CATALOG])]
+            setRecentCatalogs(next)
+            updates.recentCatalogs = next
+            updates.communityCatalogSeeded = true
+          }
+          if (Object.keys(updates).length) {
+            rpc.request(C.CMD_USERDATA_SET_SETTINGS, { updates }).catch(() => {})
           }
           await refreshAggregate()
           refreshUpdates()
@@ -2050,55 +2260,63 @@ function Apps ({ rpc, C, onLaunch }) {
     const editing = editingAppId === editableId && appDraft
     const canSave = !!(appDraft && String(appDraft.name || '').trim())
     return html`
-      <div class=${'app-card' + (editing ? ' editing' : '')} key=${savedId}>
+      <div className=${'app-card' + (editing ? ' editing' : '')} key=${savedId}>
         <${AppIcon} rpc=${rpc} C=${C} driveKey=${app.driveKey} iconRef=${app.icon} iconData=${app.iconData} name=${app.name} />
-        <div class="app-info">
+        <div className="app-info">
           ${editing
             ? html`
-              <div class="catalog-edit-form">
-                <label>
-                  Name
-                  <input type="text" value=${appDraft.name} onInput=${(e) => updateAppDraft('name', e.target.value)} />
-                </label>
-                <label>
-                  Description
-                  <textarea rows="3" value=${appDraft.description} onInput=${(e) => updateAppDraft('description', e.target.value)}></textarea>
-                </label>
-                <div class="catalog-form-grid">
+              <div className="catalog-edit-wrap">
+                <div className="catalog-edit-form">
                   <label>
-                    Version
-                    <input type="text" value=${appDraft.version} onInput=${(e) => updateAppDraft('version', e.target.value)} />
+                    Name
+                    <input type="text" value=${appDraft.name} onInput=${(e) => updateAppDraft('name', e.target.value)} />
                   </label>
                   <label>
-                    Author
-                    <input type="text" value=${appDraft.author} onInput=${(e) => updateAppDraft('author', e.target.value)} />
+                    Description
+                    <textarea rows="3" value=${appDraft.description} onInput=${(e) => updateAppDraft('description', e.target.value)}></textarea>
+                  </label>
+                  <div className="catalog-form-grid">
+                    <label>
+                      Version
+                      <input type="text" value=${appDraft.version} onInput=${(e) => updateAppDraft('version', e.target.value)} />
+                    </label>
+                    <label>
+                      Author
+                      <input type="text" value=${appDraft.author} onInput=${(e) => updateAppDraft('author', e.target.value)} />
+                    </label>
+                  </div>
+                  <label>
+                    Categories
+                    <input type="text" value=${appDraft.categories} onInput=${(e) => updateAppDraft('categories', e.target.value)} />
                   </label>
                 </div>
-                <label>
-                  Categories
-                  <input type="text" value=${appDraft.categories} onInput=${(e) => updateAppDraft('categories', e.target.value)} />
-                </label>
               </div>
             `
             : html`
-              <div class="app-name">${app.name || app.id}</div>
-              <div class="app-desc">${app.description || ''}</div>
-              <div class="app-meta">${app.version ? 'v' + app.version : ''} ${app.author ? '· ' + app.author : ''}</div>
+              <div className="app-info-copy">
+                <div className="app-name">${app.name || app.id}</div>
+                <div className="app-desc">${app.description || ''}</div>
+                <div className="app-meta">${app.version ? 'v' + app.version : ''} ${app.author ? '· ' + app.author : ''}</div>
+              </div>
             `}
         </div>
-        <div class="app-actions">
+        <div className="app-actions">
           ${editing
             ? html`
-              <button class="btn primary" onClick=${() => saveMyCatalogApp(editableId)} disabled=${busy === `editcat:${editableId}` || !canSave}>
-                ${busy === `editcat:${editableId}` ? 'Saving…' : 'Save'}
-              </button>
-              <button class="btn subtle" onClick=${cancelEditMyCatalogApp} disabled=${busy === `editcat:${editableId}`}>Cancel</button>
+              <div className="app-actions-group">
+                <button key="save" className="btn primary" onClick=${() => saveMyCatalogApp(editableId)} disabled=${busy === `editcat:${editableId}` || !canSave}>
+                  ${busy === `editcat:${editableId}` ? 'Saving…' : 'Save'}
+                </button>
+                <button key="cancel" className="btn subtle" onClick=${cancelEditMyCatalogApp} disabled=${busy === `editcat:${editableId}`}>Cancel</button>
+              </div>
             `
             : html`
-              ${canEditMyCatalog && editableId && html`
-                <button class="btn subtle" onClick=${() => startEditMyCatalogApp(app)} disabled=${busy === `rmcat:${editableId}`}>Edit</button>
-                <button class="btn subtle" onClick=${() => removeFromMyCatalog(editableId)} disabled=${busy === `rmcat:${editableId}`}>Remove</button>
-              `}
+              <div className="app-actions-group">
+                ${canEditMyCatalog && editableId && html`
+                  <button key="edit" className="btn subtle" onClick=${() => startEditMyCatalogApp(app)} disabled=${busy === `rmcat:${editableId}`}>Edit</button>
+                  <button key="remove" className="btn subtle" onClick=${() => removeFromMyCatalog(editableId)} disabled=${busy === `rmcat:${editableId}`}>Remove</button>
+                `}
+              </div>
             `}
         </div>
       </div>
@@ -2106,90 +2324,90 @@ function Apps ({ rpc, C, onLaunch }) {
   }
 
   return html`
-    <div class="apps">
+    <div className="apps">
       <h1>Apps</h1>
-      <p class="subtitle">Launch any Pear app by link, or browse a HiveRelay catalog.</p>
+      <p className="subtitle">Launch any Pear app by link, or browse a HiveRelay catalog.</p>
 
       <h2>Featured</h2>
-      <div class="app-grid">
+      <div className="app-grid">
         ${FEATURED_APPS.map((app) => html`
-          <div class="app-card" key=${app.id}>
-            <div class="app-icon app-icon-fallback" style=${{ background: app.gradient, color: '#0b0e14' }}>${app.initial}</div>
-            <div class="app-info">
-              <div class="app-name">${app.name}</div>
-              <div class="app-desc">${app.tagline}</div>
-              <div class="app-meta" title=${app.link}>${app.link.slice(0, 20)}…${app.link.slice(-6)}</div>
+          <div className="app-card" key=${app.id}>
+            <div className="app-icon app-icon-fallback" style=${{ background: app.gradient, color: '#0b0e14' }}>${app.initial}</div>
+            <div className="app-info">
+              <div className="app-name">${app.name}</div>
+              <div className="app-desc">${app.tagline}</div>
+              <div className="app-meta" title=${app.link}>${app.link.slice(0, 20)}…${app.link.slice(-6)}</div>
             </div>
-            <div class="app-actions">
+            <div className="app-actions">
               ${app.type === 'hypersite'
-                ? html`<button class="btn primary" onClick=${() => runInTab(app)} disabled=${busy === 'run-in-tab'} title="Run headless — the app's UI streams into a tab over a pipe">Run in tab</button>`
-                : html`<button class="btn primary" onClick=${() => launchFeaturedApp(app)} disabled=${busy === 'pear-link'} title="Full Pear app — opens in its own window">Open</button>`}
+                ? html`<button key="run-featured" className="btn primary" onClick=${() => runInTab(app)} disabled=${busy === 'run-in-tab'} title="Run headless — the app's UI streams into a tab over a pipe">Run in tab</button>`
+                : html`<button key="open-featured" className="btn primary" onClick=${() => launchFeaturedApp(app)} disabled=${busy === 'pear-link'} title="Full Pear app — opens in its own window">Open</button>`}
             </div>
           </div>
         `)}
       </div>
 
       <h2>Launch a Pear app</h2>
-      <div class="catalog-loader">
+      <div className="catalog-loader">
         <input
           type="text"
           placeholder=${'pear://<key> — opens in a new window'}
           value=${pearLink}
           onInput=${(e) => setPearLink(e.target.value)}
           onKeyDown=${(e) => e.key === 'Enter' && launchPearLink()}
-          spellcheck="false"
+          spellCheck="false"
         />
-        <button class="btn primary" onClick=${launchPearLink} disabled=${!pearLink || busy === 'pear-link'}>
+        <button className="btn primary" onClick=${launchPearLink} disabled=${!pearLink || busy === 'pear-link'}>
           ${busy === 'pear-link' ? 'Launching…' : 'Launch'}
         </button>
       </div>
-      ${launched && html`<div class="apps-ok">${launched}</div>`}
+      ${launched && html`<div className="apps-ok">${launched}</div>`}
 
       <h2>App Catalog</h2>
-      <div class="catalog-loader">
+      <div className="catalog-loader">
         <input
           type="text"
-          placeholder="Catalog drive key (hex or z32)"
+          placeholder="Catalog key: hex, z32, hyperbee://…, autobee://…, sheets://… or hiveindex://…"
           value=${catalogKey}
           onInput=${(e) => setCatalogKey(e.target.value)}
           onKeyDown=${(e) => e.key === 'Enter' && loadCatalog()}
-          spellcheck="false"
+          spellCheck="false"
         />
-        <button class="btn primary" onClick=${() => loadCatalog()} disabled=${!catalogKey || busy === 'catalog'}>
+        <button className="btn primary" onClick=${() => loadCatalog()} disabled=${!catalogKey || busy === 'catalog'}>
           ${busy === 'catalog' ? 'Loading…' : 'Add catalog'}
         </button>
       </div>
 
       ${loadedCatalogs.length > 0 && html`
-        <div class="catalog-sources">
+        <div className="catalog-sources">
           <button
-            class=${'catalog-chip' + (source === 'all' ? ' active' : '')}
+            className=${'catalog-chip' + (source === 'all' ? ' active' : '')}
             onClick=${() => setSource('all')}
           >All · ${uniqueAppCount}</button>
           ${loadedCatalogs.map((cat) => html`
-            <span class="catalog-source" key=${cat.key}>
+            <span className="catalog-source" key=${cat.key}>
               <button
-                class=${'catalog-chip' + (source === cat.key ? ' active' : '')}
+                className=${'catalog-chip' + (source === cat.key ? ' active' : '')}
                 title=${cat.key}
                 onClick=${() => setSource(cat.key)}
               >${cat.name} · ${cat.count}</button>
-              <button class="catalog-source-x" title="Remove this catalog" onClick=${() => unloadCatalog(cat.key)}>×</button>
+              <button className="catalog-source-x" title="Remove this catalog" onClick=${() => unloadCatalog(cat.key)}>×</button>
             </span>
           `)}
         </div>
       `}
 
-      ${err && html`<div class="apps-error">${err}</div>`}
+      ${err && html`<div className="apps-error">${err}</div>`}
 
       ${busy === 'catalog' && apps.length === 0 && html`
-        <div class="catalog-loading">
-          <span class="spinner"></span>
+        <div className="catalog-loading">
+          <span className="spinner"></span>
           <span>Loading catalogs from peers…</span>
         </div>
       `}
 
       ${autoLoadAttempted && apps.length === 0 && !busy && !err && html`
-        <div class="catalog-empty">
+        <div className="catalog-empty">
           <strong>No catalogs loaded.</strong>
           Paste a catalog drive key above, or use one of the featured Pear apps to launch directly.
           The browser remembers catalogs you've loaded before — they'll reload here next time.
@@ -2197,95 +2415,98 @@ function Apps ({ rpc, C, onLaunch }) {
       `}
 
       ${apps.length > 0 && html`
-        <h2>All apps · ${uniqueAppCount}${loadedCatalogs.length ? ` across ${loadedCatalogs.length} ${loadedCatalogs.length === 1 ? 'catalog' : 'catalogs'}` : ''}</h2>
+        <div className="catalog-results">
+          <h2>All apps · ${uniqueAppCount}${loadedCatalogs.length ? ` across ${loadedCatalogs.length} ${loadedCatalogs.length === 1 ? 'catalog' : 'catalogs'}` : ''}</h2>
 
-        <div class="catalog-filter">
-          <input
-            type="text"
-            class="catalog-search"
-            placeholder="Search apps by name, description, or author…"
-            value=${query}
-            onInput=${(e) => setQuery(e.target.value)}
-            spellcheck="false"
-          />
-          ${categories.length > 1 && html`
-            <div class="catalog-categories">
-              ${categories.map((c) => html`
-                <button
-                  class=${'catalog-chip' + (c === category ? ' active' : '')}
-                  key=${c}
-                  onClick=${() => setCategory(c)}
-                >${c === 'all' ? 'All' : c}</button>
-              `)}
+          <div className="catalog-filter">
+            <input
+              type="text"
+              className="catalog-search"
+              placeholder="Search apps by name, description, or author…"
+              value=${query}
+              onInput=${(e) => setQuery(e.target.value)}
+              spellCheck="false"
+            />
+            ${categories.length > 1 && html`
+              <div className="catalog-categories">
+                ${categories.map((c) => html`
+                  <button
+                    className=${'catalog-chip' + (c === category ? ' active' : '')}
+                    key=${c}
+                    onClick=${() => setCategory(c)}
+                  >${c === 'all' ? 'All' : c}</button>
+                `)}
+              </div>
+            `}
+          </div>
+
+          ${filteredApps.length === 0
+            ? html`<p className="placeholder">No apps match ${query ? `"${query}"` : 'this filter'}.</p>`
+            : html`<div className="app-grid">
+              ${filteredApps.map((app) => html`
+              <div className="app-card" key=${app.id}>
+                <${AppIcon} rpc=${rpc} C=${C} driveKey=${app.driveKey} iconRef=${app.icon} iconData=${app.iconData} name=${app.name} />
+                <div className="app-info" onClick=${() => setDetailApp(app)} style=${{ cursor: 'pointer' }} title="View details">
+                  <div className="app-name">
+                    ${app.name || app.id || 'Untitled app'}
+                    ${app.verification === 'relay-listed' ? html`<span title="Relay-listed" style=${{ marginLeft: '5px', color: '#58a6ff', fontSize: '12px' }}>✓</span>` : ''}
+                    ${app.verification === 'author-signed' ? html`<span title="Author-signed" style=${{ marginLeft: '5px', color: '#3fb950', fontSize: '12px' }}>✦</span>` : ''}
+                  </div>
+                  <div className="app-desc">${app.description || ''}</div>
+                  <div className="app-meta">
+                    ${app.version ? 'v' + app.version : ''} ${app.author ? '· ' + app.author : ''}
+                    ${app.type === 'hypersite' ? html`<span style=${{ marginLeft: '6px', opacity: 0.75 }}>· ${app.driveKey && !app.link ? 'opens in a tab' : 'runs in a tab'}</span>` : (app.link && !app.driveKey ? html`<span style=${{ marginLeft: '6px', opacity: 0.75 }}>· opens in a window</span>` : '')}
+                  </div>
+                  ${app.catalogName && html`<div className="app-source-tag">${app.catalogName}</div>`}
+                </div>
+                <div className="app-actions">
+                  ${app.driveKey && /^[0-9a-f]{64}$/i.test(app.driveKey)
+                    ? html`<button key="open-page" className="btn subtle" onClick=${() => openSite(app)} title="Open this app's P2P page in a tab">Open page</button>`
+                    : ''}
+                  ${app.type === 'hypersite'
+                    ? html`<button key="run-in-tab" className="btn primary" onClick=${() => runInTab(app)} disabled=${busy === 'run-in-tab'} title="Run headless — the app's UI streams into a tab">Run app</button>`
+                    : html`<button key="run-window" className="btn primary" onClick=${() => launchFeaturedApp(app)} disabled=${busy === 'pear-link'} title="Open the app in its own window">Run app</button>`}
+                  ${canEditMyCatalog && app.catalogKey !== myCatalog.keyHex && !inMyCatalog(app.id || app.driveKey) && html`
+                    <button key="add-catalog" className="btn subtle" title="Add to my catalog" onClick=${() => addToMyCatalog(app)} disabled=${busy === `addcat:${app.id || app.driveKey}`}>+ Catalog</button>
+                  `}
+                </div>
+              </div>
+            `)}
             </div>
           `}
         </div>
-
-        ${filteredApps.length === 0
-          ? html`<p class="placeholder">No apps match ${query ? `"${query}"` : 'this filter'}.</p>`
-          : html`<div class="app-grid">
-            ${filteredApps.map((app) => html`
-            <div class="app-card" key=${app.id}>
-              <${AppIcon} rpc=${rpc} C=${C} driveKey=${app.driveKey} iconRef=${app.icon} iconData=${app.iconData} name=${app.name} />
-              <div class="app-info" onClick=${() => setDetailApp(app)} style=${{ cursor: 'pointer' }} title="View details">
-                <div class="app-name">
-                  ${app.name || app.id || 'Untitled app'}
-                  ${app.verification === 'relay-listed' ? html`<span title="Relay-listed" style=${{ marginLeft: '5px', color: '#58a6ff', fontSize: '12px' }}>✓</span>` : ''}
-                  ${app.verification === 'author-signed' ? html`<span title="Author-signed" style=${{ marginLeft: '5px', color: '#3fb950', fontSize: '12px' }}>✦</span>` : ''}
-                </div>
-                <div class="app-desc">${app.description || ''}</div>
-                <div class="app-meta">
-                  ${app.version ? 'v' + app.version : ''} ${app.author ? '· ' + app.author : ''}
-                  ${app.type === 'hypersite' ? html`<span style=${{ marginLeft: '6px', opacity: 0.75 }}>· ${app.driveKey && !app.link ? 'opens in a tab' : 'runs in a tab'}</span>` : (app.link && !app.driveKey ? html`<span style=${{ marginLeft: '6px', opacity: 0.75 }}>· opens in a window</span>` : '')}
-                </div>
-                ${app.catalogName && html`<div class="app-source-tag">${app.catalogName}</div>`}
-              </div>
-              <div class="app-actions">
-                ${app.driveKey && /^[0-9a-f]{64}$/i.test(app.driveKey)
-                  ? html`<button class="btn subtle" onClick=${() => openSite(app)} title="Open this app's P2P page in a tab">Open page</button>`
-                  : ''}
-                ${app.type === 'hypersite'
-                  ? html`<button class="btn primary" onClick=${() => runInTab(app)} disabled=${busy === 'run-in-tab'} title="Run headless — the app's UI streams into a tab">Run app</button>`
-                  : html`<button class="btn primary" onClick=${() => launchFeaturedApp(app)} disabled=${busy === 'pear-link'} title="Open the app in its own window">Run app</button>`}
-                ${canEditMyCatalog && app.catalogKey !== myCatalog.keyHex && !inMyCatalog(app.id || app.driveKey) && html`
-                  <button class="btn subtle" title="Add to my catalog" onClick=${() => addToMyCatalog(app)} disabled=${busy === `addcat:${app.id || app.driveKey}`}>+ Catalog</button>
-                `}
-              </div>
-            </div>
-          `)}
-          </div>`}
       `}
 
       <h2>My Catalog</h2>
       ${!myCatalog
         ? html`
-          <div class="catalog-empty">
+          <div className="catalog-empty">
             <strong>Publish your own catalog.</strong>
             Create a catalog, add apps you want to share, then hand out its key — anyone can load it above to discover your picks. It's pinned to the relays, so it stays reachable even when you're offline.
-            <div class="catalog-loader" style=${{ marginTop: '10px' }}>
+            <div className="catalog-loader" style=${{ marginTop: '10px' }}>
               <input
                 type="text"
                 placeholder="Catalog name (e.g. My Picks)"
                 value=${newCatalogName}
                 onInput=${(e) => setNewCatalogName(e.target.value)}
                 onKeyDown=${(e) => e.key === 'Enter' && createMyCatalog()}
-                spellcheck="false"
+                spellCheck="false"
               />
-              <button class="btn primary" onClick=${createMyCatalog} disabled=${busy === 'mycatalog'}>
+              <button className="btn primary" onClick=${createMyCatalog} disabled=${busy === 'mycatalog'}>
                 ${busy === 'mycatalog' ? 'Creating…' : 'Create catalog'}
               </button>
             </div>
           </div>
         `
         : html`
-          <div class="mycatalog">
-            <div class="mycatalog-head">
-              <div class="mycatalog-title">
+          <div className="mycatalog">
+            <div className="mycatalog-head">
+              <div className="mycatalog-title">
                 ${editingCatalogName
                   ? html`
-                    <div class="mycatalog-title-edit">
+                    <div className="mycatalog-title-edit">
                       <input
-                        class="mycatalog-title-input"
+                        className="mycatalog-title-input"
                         type="text"
                         value=${catalogNameDraft}
                         onInput=${(e) => setCatalogNameDraft(e.target.value)}
@@ -2293,29 +2514,29 @@ function Apps ({ rpc, C, onLaunch }) {
                           if (e.key === 'Enter') saveMyCatalogName()
                           if (e.key === 'Escape') setEditingCatalogName(false)
                         }}
-                        spellcheck="false"
+                        spellCheck="false"
                         autoFocus
                       />
-                      <button class="btn primary small" onClick=${saveMyCatalogName} disabled=${busy === 'renamecat' || !catalogNameDraft.trim()}>
-                        ${busy === 'renamecat' ? 'Saving…' : 'Save'}
-                      </button>
-                      <button class="btn subtle small" onClick=${() => setEditingCatalogName(false)} disabled=${busy === 'renamecat'}>Cancel</button>
+                    <button key="save-name" className="btn primary small" onClick=${saveMyCatalogName} disabled=${busy === 'renamecat' || !catalogNameDraft.trim()}>
+                      ${busy === 'renamecat' ? 'Saving…' : 'Save'}
+                    </button>
+                    <button key="cancel-name" className="btn subtle small" onClick=${() => setEditingCatalogName(false)} disabled=${busy === 'renamecat'}>Cancel</button>
                     </div>
                   `
                   : html`
-                    <div class="mycatalog-title-row">
-                      <div class="app-name">${myCatalog.name}</div>
-                      ${canEditMyCatalog && html`<button class="btn subtle small" onClick=${startRenameMyCatalog}>Rename</button>`}
+                    <div className="mycatalog-title-row">
+                      <div className="app-name">${myCatalog.name}</div>
+                      ${canEditMyCatalog && html`<button key="rename" className="btn subtle small" onClick=${startRenameMyCatalog}>Rename</button>`}
                     </div>
                   `}
-                <div class="app-meta">${myCatalog.apps.length} app${myCatalog.apps.length === 1 ? '' : 's'}${myCatalog.writable ? '' : ' · read-only on this device'}</div>
+                <div className="app-meta">${myCatalog.apps.length} app${myCatalog.apps.length === 1 ? '' : 's'}${myCatalog.writable ? '' : ' · read-only on this device'}</div>
               </div>
-              <button class="btn subtle" onClick=${() => copyKey(myCatalog.keyHex)}>${copied ? 'Copied!' : 'Copy share key'}</button>
+              <button className="btn subtle" onClick=${() => copyKey(myCatalog.keyHex)}>${copied ? 'Copied!' : 'Copy share key'}</button>
             </div>
-            <div class="mycatalog-key" title=${myCatalog.keyHex}>${myCatalog.keyHex}</div>
+            <div className="mycatalog-key" title=${myCatalog.keyHex}>${myCatalog.keyHex}</div>
             ${myCatalog.apps.length === 0
-              ? html`<p class="placeholder">${myCatalog.writable ? 'No apps yet. Use + Catalog on any app above to add it.' : 'This catalog has no saved apps.'}</p>`
-              : html`<div class="app-grid">
+              ? html`<p className="placeholder">${myCatalog.writable ? 'No apps yet. Use + Catalog on any app above to add it.' : 'This catalog has no saved apps.'}</p>`
+              : html`<div className="app-grid">
                   ${myCatalog.apps.map(renderMyCatalogApp)}
                 </div>`}
           </div>
@@ -2323,38 +2544,42 @@ function Apps ({ rpc, C, onLaunch }) {
 
       <h2>Installed</h2>
       ${installed.length === 0
-        ? html`<p class="placeholder">No apps installed yet.</p>`
-        : html`<div class="app-grid">
+        ? html`<p className="placeholder">No apps installed yet.</p>`
+        : html`<div className="app-grid">
             ${installed.map((app) => html`
-              <div class="app-card" key=${app.id}>
+              <div className="app-card" key=${app.id}>
                 <${AppIcon} rpc=${rpc} C=${C} driveKey=${app.driveKey} iconRef=${app.icon} iconData=${app.iconData} name=${app.name} />
-                <div class="app-info">
-                  <div class="app-name">${app.name}</div>
-                  <div class="app-meta">v${app.version || '?'}${updates[app.id] ? ` · update available → v${updates[app.id]}` : ''}</div>
+                <div className="app-info">
+                  <div className="app-name">${app.name}</div>
+                  <div className="app-meta">v${app.version || '?'}${updates[app.id] ? ` · update available → v${updates[app.id]}` : ''}</div>
                 </div>
-                <div class="app-actions">
+                <div className="app-actions">
                   ${updates[app.id] && html`
-                    <button class="btn primary" onClick=${() => updateApp(app.id)} disabled=${busy === `install:${app.id}`}>
+                    <button key="update" className="btn primary" onClick=${() => updateApp(app.id)} disabled=${busy === `install:${app.id}`}>
                       ${busy === `install:${app.id}` ? 'Updating…' : 'Update'}
                     </button>
                   `}
-                  <button class="btn" onClick=${() => launchApp(app)} disabled=${busy === `launch:${app.id}`}>Launch</button>
-                  <button class="btn subtle" onClick=${() => uninstallApp(app)} disabled=${busy === `uninstall:${app.id}`}>Uninstall</button>
+                  <button key="launch" className="btn" onClick=${() => launchApp(app)} disabled=${busy === `launch:${app.id}`}>Launch</button>
+                  <button key="uninstall" className="btn subtle" onClick=${() => uninstallApp(app)} disabled=${busy === `uninstall:${app.id}`}>Uninstall</button>
                   ${canEditMyCatalog && !inMyCatalog(app.id || app.driveKey) && html`
-                    <button class="btn subtle" title="Add to my catalog" onClick=${() => addToMyCatalog(app)} disabled=${busy === `addcat:${app.id || app.driveKey}`}>+ Catalog</button>
+                    <button key="add-installed" className="btn subtle" title="Add to my catalog" onClick=${() => addToMyCatalog(app)} disabled=${busy === `addcat:${app.id || app.driveKey}`}>+ Catalog</button>
                   `}
                 </div>
               </div>
             `)}
           </div>`}
 
+      <${CommunitySubmit} rpc=${rpc} C=${C} />
+
       <${CollaborativeCatalog} rpc=${rpc} C=${C} />
+
+      <${ModeratorPanel} rpc=${rpc} C=${C} />
 
       ${detailApp && html`
         <div onClick=${() => setDetailApp(null)} style=${{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '24px' }}>
           <div onClick=${(e) => e.stopPropagation()} style=${{ background: '#11161f', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '14px', padding: '20px 24px 24px', maxWidth: '480px', width: '100%', maxHeight: '82vh', overflowY: 'auto' }}>
             <div style=${{ display: 'flex', justifyContent: 'flex-end' }}>
-              <button class="btn subtle" title="Close" onClick=${() => setDetailApp(null)} style=${{ padding: '2px 9px' }}>✕</button>
+              <button className="btn subtle" title="Close" onClick=${() => setDetailApp(null)} style=${{ padding: '2px 9px' }}>✕</button>
             </div>
             <div style=${{ display: 'flex', gap: '14px', alignItems: 'center', marginBottom: '14px' }}>
               ${safeIconSrc(detailApp.iconData)
@@ -2372,7 +2597,7 @@ function Apps ({ rpc, C, onLaunch }) {
             <p style=${{ color: '#c9d1d9', lineHeight: 1.6, margin: '0 0 14px' }}>${detailApp.description || 'No description.'}</p>
             ${(detailApp.categories && detailApp.categories.length) ? html`
               <div style=${{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '14px' }}>
-                ${detailApp.categories.map((c) => html`<span style=${{ fontSize: '12px', padding: '2px 9px', borderRadius: '8px', background: 'rgba(255,255,255,0.06)', color: '#8b949e' }}>${c}</span>`)}
+                ${detailApp.categories.map((c) => html`<span key=${c} style=${{ fontSize: '12px', padding: '2px 9px', borderRadius: '8px', background: 'rgba(255,255,255,0.06)', color: '#8b949e' }}>${c}</span>`)}
               </div>` : ''}
             <div style=${{ fontSize: '13px', color: '#8b949e', display: 'grid', gap: '6px', marginBottom: '18px' }}>
               <div><strong style=${{ color: '#c9d1d9' }}>Runs:</strong> ${detailApp.type === 'hypersite' ? 'headless in a tab' : 'in its own window'}</div>
@@ -2388,14 +2613,14 @@ function Apps ({ rpc, C, onLaunch }) {
             <div style=${{ display: 'flex', gap: '8px' }}>
               ${detailApp.type === 'hypersite'
                 ? (detailApp.driveKey && !detailApp.link
-                    ? html`<button class="btn primary" onClick=${() => { openSite(detailApp); setDetailApp(null) }}>Open</button>`
-                    : html`<button class="btn primary" onClick=${() => { runInTab(detailApp); setDetailApp(null) }}>Run in tab</button>`)
+                    ? html`<button key="detail-open-site" className="btn primary" onClick=${() => { openSite(detailApp); setDetailApp(null) }}>Open</button>`
+                    : html`<button key="detail-run-tab" className="btn primary" onClick=${() => { runInTab(detailApp); setDetailApp(null) }}>Run in tab</button>`)
                 : (detailApp.link && !detailApp.driveKey)
-                  ? html`<button class="btn primary" onClick=${() => { launchFeaturedApp(detailApp); setDetailApp(null) }}>Open</button>`
+                  ? html`<button key="detail-open-window" className="btn primary" onClick=${() => { launchFeaturedApp(detailApp); setDetailApp(null) }}>Open</button>`
                   : (isInstalled(detailApp.id)
-                    ? html`<button class="btn primary" onClick=${() => { launchApp(detailApp); setDetailApp(null) }}>Launch</button>`
-                    : html`<button class="btn primary" onClick=${() => { installApp(detailApp); setDetailApp(null) }}>Install</button>`)}
-              <button class="btn" onClick=${() => setDetailApp(null)}>Close</button>
+                    ? html`<button key="detail-launch" className="btn primary" onClick=${() => { launchApp(detailApp); setDetailApp(null) }}>Launch</button>`
+                    : html`<button key="detail-install" className="btn primary" onClick=${() => { installApp(detailApp); setDetailApp(null) }}>Install</button>`)}
+              <button key="detail-close" className="btn" onClick=${() => setDetailApp(null)}>Close</button>
             </div>
           </div>
         </div>
@@ -2440,34 +2665,34 @@ function TrustedPeers ({ rpc, C }) {
   }
 
   return html`
-    <details class="trusted-peers">
+    <details className="trusted-peers">
       <summary>Trusted peers for federated search (${peers.length})</summary>
-      <div class="tp-body">
-        <p class="subtitle">Share your invite so a peer can add you; paste theirs to search their content. Peer results are cryptographically verified before they're shown.</p>
+      <div className="tp-body">
+        <p className="subtitle">Share your invite so a peer can add you; paste theirs to search their content. Peer results are cryptographically verified before they're shown.</p>
         ${invite && html`
-          <div class="tp-field">
+          <div className="tp-field">
             <label>Your invite</label>
-            <div class="tp-row">
-              <input class="profile-input" readonly value=${invite.url} onClick=${(e) => e.target.select()} />
-              <button class="btn small" onClick=${copy}>${copied ? 'Copied' : 'Copy'}</button>
+            <div className="tp-row">
+              <input className="profile-input" readOnly value=${invite.url} onClick=${(e) => e.target.select()} />
+              <button className="btn small" onClick=${copy}>${copied ? 'Copied' : 'Copy'}</button>
             </div>
           </div>`}
-        <div class="tp-field">
+        <div className="tp-field">
           <label>Add a peer</label>
-          <div class="tp-row">
-            <input class="profile-input" placeholder="Paste a pear://contact invite…" value=${addUrl}
+          <div className="tp-row">
+            <input className="profile-input" placeholder="Paste a pear://contact invite…" value=${addUrl}
                    onInput=${(e) => setAddUrl(e.target.value)} onKeyDown=${(e) => e.key === 'Enter' && add()} />
-            <button class="btn small primary" onClick=${add} disabled=${!addUrl.trim()}>Add</button>
+            <button className="btn small primary" onClick=${add} disabled=${!addUrl.trim()}>Add</button>
           </div>
         </div>
-        ${msg && html`<div class="tp-msg">${msg}</div>`}
+        ${msg && html`<div className="tp-msg">${msg}</div>`}
         ${peers.length > 0 && html`
-          <ul class="tp-list">
+          <ul className="tp-list">
             ${peers.map((p) => html`
               <li key=${p.pubkey}>
-                <span class="tp-name">${p.displayName || (p.pubkey.slice(0, 16) + '…')}</span>
-                ${p.verifiedAt ? html`<span class="src-badge followed">verified</span>` : html`<span class="src-badge other">unverified</span>`}
-                ${p.bindingKey ? html`<span class="src-badge self">searchable</span>` : ''}
+                <span className="tp-name">${p.displayName || (p.pubkey.slice(0, 16) + '…')}</span>
+                ${p.verifiedAt ? html`<span className="src-badge followed">verified</span>` : html`<span className="src-badge other">unverified</span>`}
+                ${p.bindingKey ? html`<span className="src-badge self">searchable</span>` : ''}
               </li>`)}
           </ul>`}
       </div>
@@ -2505,11 +2730,15 @@ function Library ({ rpc, C, onBrowse }) {
     } catch (e) { setErr(`search: ${e.message}`) }
     finally { setSearching(false) }
   }
-  const resultUrl = (r) => `hyper://${r.driveKey}${r.path && r.path !== '/' ? r.path : '/'}`
+  const resultUrl = (r) => {
+    if (r && r.link) return r.link
+    if (r && /^(?:pear|file|hyper):\/\//i.test(r.driveKey || '')) return r.driveKey
+    return `hyper://${r.driveKey}${r.path && r.path !== '/' ? r.path : '/'}`
+  }
   const srcBadge = (r) => {
-    if (!r.tier || r.tier === 'self') return html`<span class="src-badge self">you</span>`
-    if (r.tier === 'followed') return html`<span class="src-badge followed">trusted · hop ${r.trustHop ?? 1}</span>`
-    return html`<span class="src-badge other">${r.tier}</span>`
+    if (!r.tier || r.tier === 'self') return html`<span className="src-badge self">you</span>`
+    if (r.tier === 'followed') return html`<span className="src-badge followed">trusted · hop ${r.trustHop ?? 1}</span>`
+    return html`<span className="src-badge other">${r.tier}</span>`
   }
 
   // Enriched federated results push (Lighthouse Phase 2).
@@ -2557,73 +2786,73 @@ function Library ({ rpc, C, onBrowse }) {
   }
 
   return html`
-    <div class="library">
+    <div className="library">
       <h1>Library</h1>
-      <p class="subtitle">Your saved bookmarks and recent browsing history, stored locally in your Hyperbee.</p>
-      ${err && html`<div class="apps-error">${err}</div>`}
+      <p className="subtitle">Your saved bookmarks and recent browsing history, stored locally in your Hyperbee.</p>
+      ${err && html`<div className="apps-error">${err}</div>`}
 
       <h2>Search your P2P content</h2>
-      <p class="subtitle">Full-text search over everything you've browsed, fully local — no query ever leaves your device.${indexed ? ` ${indexed} page(s) indexed.` : ''}</p>
-      <div class="urlbar" style=${{ marginBottom: '12px' }}>
+      <p className="subtitle">Full-text search over everything you've browsed, fully local — no query ever leaves your device.${indexed ? ` ${indexed} page(s) indexed.` : ''}</p>
+      <div className="urlbar" style=${{ marginBottom: '12px' }}>
         <input
           type="text"
-          class="url-input"
+          className="url-input"
           placeholder="Search pages you've visited…"
           value=${query}
           onInput=${(e) => setQuery(e.target.value)}
           onKeyDown=${(e) => e.key === 'Enter' && runSearch()}
         />
-        <button class="btn primary" onClick=${runSearch} disabled=${searching || !query.trim()}>${searching ? 'Searching…' : 'Search'}</button>
+        <button className="btn primary" onClick=${runSearch} disabled=${searching || !query.trim()}>${searching ? 'Searching…' : 'Search'}</button>
       </div>
-      <label class="search-fed-toggle">
+      <label className="search-fed-toggle">
         <input type="checkbox" checked=${federated} onChange=${(e) => setFederated(e.target.checked)} />
-        Include trusted peers${federating ? html` <span class="fed-status">· searching peers…</span>` : ''}
+        Include trusted peers${federating ? html` <span className="fed-status">· searching peers…</span>` : ''}
       </label>
       <${TrustedPeers} rpc=${rpc} C=${C} />
       ${results !== null && (results.length === 0
-        ? html`<p class="placeholder">No matches${indexed === 0 ? ' yet — browse some hyper:// pages first to build your index.' : '.'}</p>`
-        : html`<div class="library-list">
+        ? html`<p className="placeholder">No matches${indexed === 0 ? ' yet — browse some hyper:// pages first to build your index.' : '.'}</p>`
+        : html`<div className="library-list">
             ${results.map((r) => html`
-              <div class="library-row" key=${r.docId || (r.driveKey + r.path)}>
-                <div class="library-row-main">
-                  <div class="library-title">${r.title || resultUrl(r)}${federated ? srcBadge(r) : ''}</div>
-                  <div class="library-url">${resultUrl(r)}</div>
+              <div className="library-row" key=${r.docId || (r.driveKey + r.path)}>
+                <div className="library-row-main">
+                  <div className="library-title">${r.title || resultUrl(r)}${federated ? srcBadge(r) : ''}</div>
+                  <div className="library-url">${resultUrl(r)}</div>
                 </div>
-                <button class="btn small" onClick=${() => onBrowse(resultUrl(r))}>Open</button>
+                <button className="btn small" onClick=${() => onBrowse(resultUrl(r))}>Open</button>
               </div>
             `)}
           </div>`)}
 
       <h2>Bookmarks (${bookmarks.length})</h2>
       ${bookmarks.length === 0
-        ? html`<p class="placeholder">No bookmarks yet. In the Browse tab, right-click the URL bar to bookmark the current page (coming soon) — or use the button on a hyperdrive page.</p>`
-        : html`<div class="library-list">
+        ? html`<p className="placeholder">No bookmarks yet. Use the star button in Browse, or open About this site and choose Bookmark this site.</p>`
+        : html`<div className="library-list">
             ${bookmarks.map((b) => html`
-              <div class="library-row" key=${b.url}>
-                <div class="library-row-main">
-                  <div class="library-title">${b.title || b.url}</div>
-                  <div class="library-url">${b.url}</div>
+              <div className="library-row" key=${b.url}>
+                <div className="library-row-main">
+                  <div className="library-title">${b.title || b.url}</div>
+                  <div className="library-url">${b.url}</div>
                 </div>
-                <button class="btn small" onClick=${() => onBrowse(b.url)}>Open</button>
-                <button class="btn small subtle" onClick=${() => removeBookmark(b.url)}>Remove</button>
+                <button className="btn small" onClick=${() => onBrowse(b.url)}>Open</button>
+                <button className="btn small subtle" onClick=${() => removeBookmark(b.url)}>Remove</button>
               </div>
             `)}
           </div>`}
 
-      <div class="library-history-head">
+      <div className="library-history-head">
         <h2>History (${history.length})</h2>
-        ${history.length > 0 && html`<button class="btn small subtle" onClick=${clearHistory}>Clear history</button>`}
+        ${history.length > 0 && html`<button className="btn small subtle" onClick=${clearHistory}>Clear history</button>`}
       </div>
       ${history.length === 0
-        ? html`<p class="placeholder">No browsing history yet.</p>`
-        : html`<div class="library-list">
+        ? html`<p className="placeholder">No browsing history yet.</p>`
+        : html`<div className="library-list">
             ${history.slice(0, 100).map((h, i) => html`
-              <div class="library-row" key=${(h.url || '') + ':' + i}>
-                <div class="library-row-main">
-                  <div class="library-title">${h.title || h.url}</div>
-                  <div class="library-url">${h.url} ${h.visitedAt ? '· ' + new Date(h.visitedAt).toLocaleString() : ''}</div>
+              <div className="library-row" key=${(h.url || '') + ':' + i}>
+                <div className="library-row-main">
+                  <div className="library-title">${h.title || h.url}</div>
+                  <div className="library-url">${h.url} ${h.visitedAt ? '· ' + new Date(h.visitedAt).toLocaleString() : ''}</div>
                 </div>
-                <button class="btn small" onClick=${() => onBrowse(h.url)}>Open</button>
+                <button className="btn small" onClick=${() => onBrowse(h.url)}>Open</button>
               </div>
             `)}
           </div>`}
@@ -2734,16 +2963,16 @@ function ProfileSection ({ rpc, C }) {
   }
 
   return html`
-    <div class="settings-card">
-      ${err && html`<div class="apps-error">${err}</div>`}
-      ${notice && html`<div class="apps-ok">${notice}</div>`}
+    <div className="settings-card">
+      ${err && html`<div className="apps-error">${err}</div>`}
+      ${notice && html`<div className="apps-ok">${notice}</div>`}
       ${PROFILE_FIELDS.map(({ key, label, placeholder, textarea }) => html`
-        <div class="settings-row" key=${key}>
-          <div class="profile-field">
-            <div class="settings-label">${label}</div>
+        <div className="settings-row" key=${key}>
+          <div className="profile-field">
+            <div className="settings-label">${label}</div>
             ${textarea
               ? html`<textarea
-                  class="profile-input"
+                  className="profile-input"
                   rows="2"
                   placeholder=${placeholder}
                   value=${draft[key] || ''}
@@ -2751,7 +2980,7 @@ function ProfileSection ({ rpc, C }) {
                 ></textarea>`
               : html`<input
                   type="text"
-                  class="profile-input"
+                  className="profile-input"
                   placeholder=${placeholder}
                   value=${draft[key] || ''}
                   onInput=${(e) => setDraft({ ...draft, [key]: e.target.value })}
@@ -2759,11 +2988,11 @@ function ProfileSection ({ rpc, C }) {
           </div>
         </div>
       `)}
-      <div class="settings-row settings-row-actions">
-        <button class="btn subtle" onClick=${clearAll} disabled=${busy !== null}>
+      <div className="settings-row settings-row-actions">
+        <button className="btn subtle" onClick=${clearAll} disabled=${busy !== null}>
           ${busy === 'clear' ? 'Clearing…' : 'Clear all'}
         </button>
-        <button class="btn primary" onClick=${save} disabled=${!dirty || busy !== null}>
+        <button className="btn primary" onClick=${save} disabled=${!dirty || busy !== null}>
           ${busy === 'save' ? 'Saving…' : 'Save profile'}
         </button>
       </div>
@@ -2880,110 +3109,110 @@ function PermissionCenterSection ({ rpc, C }) {
   }
 
   return html`
-    <div class="settings-card permission-center">
-      ${err && html`<div class="apps-error">${err}</div>`}
+    <div className="settings-card permission-center">
+      ${err && html`<div className="apps-error">${err}</div>`}
 
-      <div class="permission-summary">
-        <div class="permission-stat">
-          <div class="permission-stat-value">${loginGrants.length}</div>
-          <div class="permission-stat-label">sign-in grants</div>
+      <div className="permission-summary">
+        <div className="permission-stat">
+          <div className="permission-stat-value">${loginGrants.length}</div>
+          <div className="permission-stat-label">sign-in grants</div>
         </div>
-        <div class="permission-stat">
-          <div class="permission-stat-value">${profileReaders.length}</div>
-          <div class="permission-stat-label">profile readers</div>
+        <div className="permission-stat">
+          <div className="permission-stat-value">${profileReaders.length}</div>
+          <div className="permission-stat-label">profile readers</div>
         </div>
-        <div class="permission-stat">
-          <div class="permission-stat-value">${contactReaders.length}</div>
-          <div class="permission-stat-label">contact readers</div>
+        <div className="permission-stat">
+          <div className="permission-stat-value">${contactReaders.length}</div>
+          <div className="permission-stat-label">contact readers</div>
         </div>
-        <div class="permission-stat">
-          <div class="permission-stat-value">${swarmGrants.length}</div>
-          <div class="permission-stat-label">swarm topics</div>
+        <div className="permission-stat">
+          <div className="permission-stat-value">${swarmGrants.length}</div>
+          <div className="permission-stat-label">swarm topics</div>
         </div>
       </div>
 
-      <div class="settings-subsection-label">Apps and sites</div>
+      <div className="settings-subsection-label">Apps and sites</div>
       ${!loaded
-        ? html`<div class="settings-subtle">Loading…</div>`
+        ? html`<div className="settings-subtle">Loading…</div>`
         : apps.length === 0
-          ? html`<div class="settings-subtle">No stored app permissions yet.</div>`
+          ? html`<div className="settings-subtle">No stored app permissions yet.</div>`
           : apps.map((app) => {
               const profileFields = profileFieldsForScopes(app.login?.scopes || [])
               const contactAccess = (app.login?.scopes || []).includes('contacts:read')
               return html`
-                <div class="permission-app" key=${app.driveKey}>
-                  <div class="permission-app-head">
+                <div className="permission-app" key=${app.driveKey}>
+                  <div className="permission-app-head">
                     <div>
-                      <div class="settings-label">${app.appName || shortKey(app.driveKey)}</div>
-                      <code class="settings-code">${shortKey(app.driveKey)}</code>
+                      <div className="settings-label">${app.appName || shortKey(app.driveKey)}</div>
+                      <code className="settings-code">${shortKey(app.driveKey)}</code>
                     </div>
-                    <button class="btn subtle danger" onClick=${() => revokeEverythingForApp(app)}
+                    <button className="btn subtle danger" onClick=${() => revokeEverythingForApp(app)}
                             disabled=${busy === `app:${app.driveKey}`}>
                       ${busy === `app:${app.driveKey}` ? 'Revoking…' : 'Revoke app'}
                     </button>
                   </div>
 
-                  <div class="permission-cap-grid">
-                    <div class="permission-cap">
-                      <div class="permission-cap-label">Sign-in</div>
+                  <div className="permission-cap-grid">
+                    <div className="permission-cap">
+                      <div className="permission-cap-label">Sign-in</div>
                       ${app.login
                         ? html`
-                          <div class="permission-chip-row">
+                          <div className="permission-chip-row">
                             ${(scopeLabels(app.login.scopes).length ? scopeLabels(app.login.scopes) : ['sign-in only']).map((label) => html`
-                              <span class="permission-chip" key=${label}>${label}</span>
+                              <span className="permission-chip" key=${label}>${label}</span>
                             `)}
                           </div>
-                          <div class="settings-subtle">
+                          <div className="settings-subtle">
                             Granted ${new Date(app.login.grantedAt).toLocaleDateString()}
                             ${app.login.expiresAt ? html` · expires ${new Date(app.login.expiresAt).toLocaleDateString()}` : ''}
                           </div>
-                          <button class="btn subtle danger small" onClick=${() => revokeLogin(app.login)}
+                          <button className="btn subtle danger small" onClick=${() => revokeLogin(app.login)}
                                   disabled=${busy === `login:${app.driveKey}`}>Revoke sign-in</button>
                         `
-                        : html`<div class="settings-subtle">No sign-in grant.</div>`}
+                        : html`<div className="settings-subtle">No sign-in grant.</div>`}
                     </div>
 
-                    <div class="permission-cap">
-                      <div class="permission-cap-label">Profile fields</div>
+                    <div className="permission-cap">
+                      <div className="permission-cap-label">Profile fields</div>
                       ${profileFields.length
-                        ? html`<div class="permission-chip-row">
-                            ${profileFields.map((label) => html`<span class="permission-chip" key=${label}>${label}</span>`)}
+                        ? html`<div className="permission-chip-row">
+                            ${profileFields.map((label) => html`<span className="permission-chip" key=${label}>${label}</span>`)}
                           </div>`
-                        : html`<div class="settings-subtle">No profile fields shared.</div>`}
+                        : html`<div className="settings-subtle">No profile fields shared.</div>`}
                     </div>
 
-                    <div class="permission-cap">
-                      <div class="permission-cap-label">Contacts</div>
+                    <div className="permission-cap">
+                      <div className="permission-cap-label">Contacts</div>
                       ${contactAccess
                         ? html`
-                          <div class="permission-chip-row"><span class="permission-chip warn">contacts:read</span></div>
-                          <div class="settings-subtle">${contacts.length} saved contact${contacts.length === 1 ? '' : 's'} visible through this scope.</div>
+                          <div className="permission-chip-row"><span className="permission-chip warn">contacts:read</span></div>
+                          <div className="settings-subtle">${contacts.length} saved contact${contacts.length === 1 ? '' : 's'} visible through this scope.</div>
                         `
-                        : html`<div class="settings-subtle">No contact access.</div>`}
+                        : html`<div className="settings-subtle">No contact access.</div>`}
                     </div>
 
-                    <div class="permission-cap">
-                      <div class="permission-cap-label">Swarm topics</div>
+                    <div className="permission-cap">
+                      <div className="permission-cap-label">Swarm topics</div>
                       ${app.swarm.length
                         ? html`
-                          <div class="settings-subtle">${app.swarm.length} persisted topic${app.swarm.length === 1 ? '' : 's'}.</div>
+                          <div className="settings-subtle">${app.swarm.length} persisted topic${app.swarm.length === 1 ? '' : 's'}.</div>
                           ${app.swarm.map((grant) => html`
-                            <div class="permission-topic" key=${grant.topicHex}>
+                            <div className="permission-topic" key=${grant.topicHex}>
                               <div>
-                                <code class="settings-code">${grant.protocol || 'pear.swarm.v1'} · ${shortKey(grant.topicHex)}</code>
-                                <div class="settings-subtle">
+                                <code className="settings-code">${grant.protocol || 'pear.swarm.v1'} · ${shortKey(grant.topicHex)}</code>
+                                <div className="settings-subtle">
                                   Granted ${new Date(grant.grantedAt).toLocaleDateString()}
                                   ${grant.lastUsedAt && grant.lastUsedAt !== grant.grantedAt ? html` · last used ${new Date(grant.lastUsedAt).toLocaleDateString()}` : ''}
                                 </div>
                               </div>
-                              <button class="btn subtle danger small" onClick=${() => revokeSwarmGrant(grant)}
+                              <button className="btn subtle danger small" onClick=${() => revokeSwarmGrant(grant)}
                                       disabled=${busy === `swarm:${grant.driveKey}:${grant.topicHex}`}>Revoke</button>
                             </div>
                           `)}
-                          <button class="btn subtle danger small" onClick=${() => revokeAppSwarm(app)}
+                          <button className="btn subtle danger small" onClick=${() => revokeAppSwarm(app)}
                                   disabled=${busy === `swarm-all:${app.driveKey}`}>Revoke all topics</button>
                         `
-                        : html`<div class="settings-subtle">No arbitrary topic grants.</div>`}
+                        : html`<div className="settings-subtle">No arbitrary topic grants.</div>`}
                     </div>
                   </div>
                 </div>
@@ -2991,8 +3220,8 @@ function PermissionCenterSection ({ rpc, C }) {
             })}
 
       ${loginGrants.length > 0 && html`
-        <div class="settings-row settings-row-actions">
-          <button class="btn subtle danger" onClick=${revokeAllLogin} disabled=${busy === 'login-all'}>
+        <div className="settings-row settings-row-actions">
+          <button className="btn subtle danger" onClick=${revokeAllLogin} disabled=${busy === 'login-all'}>
             ${busy === 'login-all' ? 'Revoking…' : 'Revoke all sign-ins'}
           </button>
         </div>
@@ -3099,62 +3328,62 @@ function RelaysSection ({ rpc, C }) {
   }
 
   return html`
-    <div class="settings-card">
-      ${err && html`<div class="apps-error">${err}</div>`}
-      <div class="settings-row">
+    <div className="settings-card">
+      ${err && html`<div className="apps-error">${err}</div>`}
+      <div className="settings-row">
         <div>
-          <div class="settings-label">${config.enabled ? 'Hybrid fetch' : 'Pure P2P mode'}</div>
-          <div class="settings-subtle">${config.enabled
+          <div className="settings-label">${config.enabled ? 'Hybrid fetch' : 'Pure P2P mode'}</div>
+          <div className="settings-subtle">${config.enabled
             ? 'Try a relay first (1-2s first paint), fall back to P2P. Recommended for most users.'
             : 'P2P only — slower first paint, no relay dependency. Toggle this on to use relays.'
           }</div>
         </div>
-        <button class="btn subtle" onClick=${() => toggleEnabled(!config.enabled)} disabled=${busy === 'toggle'}>
+        <button className="btn subtle" onClick=${() => toggleEnabled(!config.enabled)} disabled=${busy === 'toggle'}>
           ${config.enabled ? 'Disable' : 'Enable'}
         </button>
       </div>
       ${loaded && config.relays.length === 0 && html`
-        <div class="settings-subtle">No relays configured.</div>
+        <div className="settings-subtle">No relays configured.</div>
       `}
       ${config.relays.map((url, idx) => {
         const cap = capabilities[url]
         return html`
-        <div class="settings-row relay-row" key=${url}>
-          <div class="relay-info">
-            <div class="relay-url-line">
-              <code class="settings-code">${url}</code>
-              ${idx === 0 ? html`<span class="settings-pill">primary</span>` : ''}
+        <div className="settings-row relay-row" key=${url}>
+          <div className="relay-info">
+            <div className="relay-url-line">
+              <code className="settings-code">${url}</code>
+              ${idx === 0 ? html`<span className="settings-pill">primary</span>` : ''}
             </div>
             ${cap === undefined || cap === null
-              ? html`<div class="relay-caps relay-caps-loading">probing capability advertisement…</div>`
+              ? html`<div className="relay-caps relay-caps-loading">probing capability advertisement…</div>`
               : !cap.ok
-                ? html`<div class="relay-caps relay-caps-err">capability check failed: ${cap.error}</div>`
-                : html`<div class="relay-caps">
-                    <span class="relay-cap-label">v${cap.doc?.version || '?'}</span>
-                    ${cap.doc?.region ? html`<span class="relay-cap-label">${cap.doc.region}</span>` : ''}
+                ? html`<div className="relay-caps relay-caps-err">capability check failed: ${cap.error}</div>`
+                : html`<div className="relay-caps">
+                    <span className="relay-cap-label">v${cap.doc?.version || '?'}</span>
+                    ${cap.doc?.region ? html`<span className="relay-cap-label">${cap.doc.region}</span>` : ''}
                     ${(cap.doc?.supported_transports || []).map((t) => html`
-                      <span class=${'relay-cap-pill' + (t === 'dht-relay-ws' ? ' relay-cap-pill-new' : '')} key=${t}>${t}</span>
+                      <span className=${'relay-cap-pill' + (t === 'dht-relay-ws' ? ' relay-cap-pill-new' : '')} key=${t}>${t}</span>
                     `)}
                   </div>`}
           </div>
           ${config.relays.length > 1 ? html`
-            <button class="btn subtle" onClick=${() => removeRelay(url)} disabled=${busy === 'save'}>
+            <button className="btn subtle" onClick=${() => removeRelay(url)} disabled=${busy === 'save'}>
               Remove
             </button>
           ` : ''}
         </div>
       `})}
-      <div class="settings-row">
+      <div className="settings-row">
         <input
           type="text"
-          class="profile-input"
+          className="profile-input"
           placeholder="https://relay.example.com"
           value=${input}
           onInput=${(e) => setInput(e.target.value)}
           onKeyDown=${(e) => e.key === 'Enter' && addRelay()}
-          spellcheck="false"
+          spellCheck="false"
         />
-        <button class="btn primary" onClick=${addRelay} disabled=${!input.trim() || busy === 'save'}>
+        <button className="btn primary" onClick=${addRelay} disabled=${!input.trim() || busy === 'save'}>
           Add
         </button>
       </div>
@@ -3191,32 +3420,46 @@ function NostrIdentitySection ({ rpc, C }) {
 
   const npub = state?.npub || ''
   const short = npub ? npub.slice(0, 14) + '…' + npub.slice(-6) : '—'
-  const linked = !!state?.linked
+  const status = state?.status || (state?.linked ? 'linked' : 'unverified')
+  const linked = status === 'linked'
   const epoch = state?.epoch || 0
+  const statusBadge = status === 'linked' ? 'self' : status === 'revoked' ? 'other danger' : 'other'
+  const statusText = status === 'linked'
+    ? `linked (attested) · epoch ${epoch}`
+    : status === 'revoked'
+      ? `revoked · epoch ${epoch}`
+      : status === 'stale'
+        ? `stale · epoch ${epoch}`
+        : 'not linked'
+  const statusHelp = status === 'linked'
+    ? 'Your pear root and this Nostr key are mutually signed.'
+    : status === 'revoked'
+      ? 'The last attestation was revoked and is no longer trusted.'
+      : status === 'stale'
+        ? 'The stored attestation points at an older Nostr key.'
+        : 'Mint a mutual attestation binding your pear root ↔ Nostr key.'
 
   return html`
-    <div class="settings-card">
-      <div class="settings-row">
+    <div className="settings-card">
+      <div className="settings-row">
         <div>
-          <div class="settings-label">Your Nostr key</div>
-          <div class="settings-subtle">${state ? short : 'Loading…'}</div>
+          <div className="settings-label">Your Nostr key</div>
+          <div className="settings-subtle">${state ? short : 'Loading…'}</div>
         </div>
-        <button class="btn small" onClick=${copy} disabled=${!npub}>${copied ? 'Copied' : 'Copy npub'}</button>
+        <button className="btn small" onClick=${copy} disabled=${!npub}>${copied ? 'Copied' : 'Copy npub'}</button>
       </div>
-      <div class="settings-row">
+      <div className="settings-row">
         <div>
-          <div class="settings-label">Link status</div>
-          <div class="settings-subtle">
-            ${linked
-              ? html`<span class="src-badge self">linked (attested) · epoch ${epoch}</span> Your pear root and this Nostr key are mutually signed.`
-              : html`<span class="src-badge other">not linked</span> Mint a mutual attestation binding your pear root ↔ Nostr key.`}
+          <div className="settings-label">Link status</div>
+          <div className="settings-subtle">
+            <span className=${`src-badge ${statusBadge}`}>${statusText}</span> ${statusHelp}
           </div>
         </div>
         ${linked
-          ? html`<button class="btn subtle danger" onClick=${() => run(C.CMD_NOSTR_REVOKE, 'revoke')} disabled=${busy != null}>${busy === 'revoke' ? 'Revoking…' : 'Revoke'}</button>`
-          : html`<button class="btn primary" onClick=${() => run(C.CMD_NOSTR_BIND, 'bind')} disabled=${busy != null}>${busy === 'bind' ? 'Linking…' : 'Link (attest)'}</button>`}
+          ? html`<button className="btn subtle danger" onClick=${() => run(C.CMD_NOSTR_REVOKE, 'revoke')} disabled=${busy != null}>${busy === 'revoke' ? 'Revoking…' : 'Revoke'}</button>`
+          : html`<button className="btn primary" onClick=${() => run(C.CMD_NOSTR_BIND, 'bind')} disabled=${busy != null}>${busy === 'bind' ? 'Linking…' : 'Link (attest)'}</button>`}
       </div>
-      ${err && html`<div class="tp-msg">${err}</div>`}
+      ${err && html`<div className="tp-msg">${err}</div>`}
     </div>
   `
 }
@@ -3257,30 +3500,30 @@ function NostrFeedSection ({ rpc, C }) {
   }
 
   return html`
-    <div class="settings-card">
-      <div class="tp-field">
+    <div className="settings-card">
+      <div className="tp-field">
         <label>Post a note</label>
-        <textarea class="profile-input" rows="2" placeholder="What's happening?" value=${draft}
+        <textarea className="profile-input" rows="2" placeholder="What's happening?" value=${draft}
                   onInput=${(e) => setDraft(e.target.value)}></textarea>
-        <button class="btn small primary" onClick=${post} disabled=${busy || !draft.trim()}>${busy ? 'Posting…' : 'Post'}</button>
+        <button className="btn small primary" onClick=${post} disabled=${busy || !draft.trim()}>${busy ? 'Posting…' : 'Post'}</button>
       </div>
-      ${err && html`<div class="tp-msg">${err}</div>`}
-      <div class="settings-row">
-        <label class="login-scope${federated ? ' on' : ''}">
+      ${err && html`<div className="tp-msg">${err}</div>`}
+      <div className="settings-row">
+        <label className="login-scope${federated ? ' on' : ''}">
           <input type="checkbox" checked=${federated} onChange=${() => setFederated((v) => !v)} />
           Include trusted contacts' notes
         </label>
       </div>
-      <div class="nostr-feed">
+      <div className="nostr-feed">
         ${events.length === 0
-          ? html`<div class="settings-subtle">No notes yet — post one above. Each is signed with your Nostr key and stored in your local event log.</div>`
+          ? html`<div className="settings-subtle">No notes yet — post one above. Each is signed with your Nostr key and stored in your local event log.</div>`
           : events.map((ev) => html`
-            <div class="nostr-note" key=${ev.id}>
-              <div class="nostr-note-content">${ev.content}</div>
-              <div class="settings-subtle">
+            <div className="nostr-note" key=${ev.id}>
+              <div className="nostr-note-content">${ev.content}</div>
+              <div className="settings-subtle">
                 ${ev._via
-                  ? html`<span class="src-badge followed">from ${ev._via}</span>`
-                  : html`<span class="src-badge self">you</span>`}
+                  ? html`<span className="src-badge followed">from ${ev._via}</span>`
+                  : html`<span className="src-badge self">you</span>`}
                 kind ${ev.kind} · ${when(ev.created_at)}
               </div>
             </div>`)}
@@ -3289,7 +3532,7 @@ function NostrFeedSection ({ rpc, C }) {
   `
 }
 
-// --- Name registry (Phase N5) — claim memorable names → drive keys ----------
+// --- Name registry (Phase N5) — claim memorable names → drives/app links ----
 // Owner-signed, multi-writer, first-claim-wins with a confusable/homograph guard.
 // One form claims a new name or updates (rotates) one you already own; each name
 // is shareable as pearname://<name> and resolves in the URL bar.
@@ -3314,7 +3557,8 @@ function NameRegistrySection ({ rpc, C }) {
 
   const submit = async () => {
     const n = name.trim()
-    const t = target.trim().toLowerCase()
+    const t = normalizeNameTarget(target)
+    if (!t) { setErr('Enter a 64-hex drive key or pear://, hyper://, file:// link.'); return }
     const owned = list.find((e) => e.normalized === n.toLowerCase() || (e.name || '').toLowerCase() === n.toLowerCase())
     setBusy('submit'); setErr('')
     try {
@@ -3331,40 +3575,40 @@ function NameRegistrySection ({ rpc, C }) {
     try { await navigator.clipboard.writeText('pearname://' + n); setCopied(n); setTimeout(() => setCopied(''), 1500) } catch {}
   }
 
-  const targetValid = /^[0-9a-f]{64}$/i.test(target.trim())
+  const targetValid = normalizeNameTarget(target) != null
   return html`
-    <div class="settings-card">
+    <div className="settings-card">
       ${status && !status.enabled
-        ? html`<div class="settings-subtle">Turn on “Names” in Experimental (below) to claim registry names.</div>`
+        ? html`<div className="settings-subtle">Turn on “Names” in Experimental (below) to claim registry names.</div>`
         : html`
-        <div class="settings-row">
+        <div className="settings-row">
           <div>
-            <div class="settings-label">Claim or update a name</div>
-            <div class="settings-subtle">A memorable name → a drive key. First claim wins; confusable look-alikes are rejected. Re-submitting a name you own updates its target.</div>
+            <div className="settings-label">Claim or update a name</div>
+            <div className="settings-subtle">A memorable name → a drive key or app link. First claim wins; confusable look-alikes are rejected. Re-submitting a name you own updates its target.</div>
           </div>
         </div>
-        <div class="tp-row">
-          <input class="profile-input" placeholder="name (e.g. alice)" value=${name} onInput=${(e) => setName(e.target.value)} />
-          <input class="profile-input" placeholder="target drive key (64-hex)" value=${target} onInput=${(e) => setTarget(e.target.value)} />
-          <button class="btn small primary" onClick=${submit} disabled=${busy != null || !name.trim() || !targetValid}>${busy === 'submit' ? 'Saving…' : 'Save'}</button>
+        <div className="tp-row">
+          <input className="profile-input" placeholder="name (e.g. alice)" value=${name} onInput=${(e) => setName(e.target.value)} />
+          <input className="profile-input" placeholder="64-hex key, pear://, hyper://, file://" value=${target} onInput=${(e) => setTarget(e.target.value)} />
+          <button className="btn small primary" onClick=${submit} disabled=${busy != null || !name.trim() || !targetValid}>${busy === 'submit' ? 'Saving…' : 'Save'}</button>
         </div>
-        ${list.length > 0 && html`<div class="namereg-list">
+        ${list.length > 0 && html`<div className="namereg-list">
           ${list.map((e) => html`
-            <div class="settings-row" key=${e.normalized}>
+            <div className="settings-row" key=${e.normalized}>
               <div>
-                <div class="settings-label">${e.name} <span class="src-badge self">pearname://${e.normalized}</span></div>
-                <div class="settings-subtle">→ ${shortKey(e.target)} · v${e.version}</div>
+                <div className="settings-label">${e.name} <span className="src-badge self">pearname://${e.normalized}</span></div>
+                <div className="settings-subtle" title=${e.link || e.key || e.target}>→ ${shortKey(e.link || e.key || e.target)} · v${e.version}</div>
               </div>
               <div>
-                <button class="btn small" onClick=${() => copyPearname(e.normalized)}>${copied === e.normalized ? 'Copied' : 'Copy'}</button>
-                <button class="btn small" onClick=${() => act(C.CMD_NAMEREG_RELEASE, e.normalized)} disabled=${busy != null}>Release</button>
-                <button class="btn subtle danger" onClick=${() => act(C.CMD_NAMEREG_REVOKE, e.normalized)} disabled=${busy != null}>Revoke</button>
+                <button className="btn small" onClick=${() => copyPearname(e.normalized)}>${copied === e.normalized ? 'Copied' : 'Copy'}</button>
+                <button className="btn small" onClick=${() => act(C.CMD_NAMEREG_RELEASE, e.normalized)} disabled=${busy != null}>Release</button>
+                <button className="btn subtle danger" onClick=${() => act(C.CMD_NAMEREG_REVOKE, e.normalized)} disabled=${busy != null}>Revoke</button>
               </div>
             </div>`)}
         </div>`}
-        ${status && status.created && list.length === 0 && html`<div class="settings-subtle">No names yet — claim one above.</div>`}
+        ${status && status.created && list.length === 0 && html`<div className="settings-subtle">No names yet — claim one above.</div>`}
       `}
-      ${err && html`<div class="tp-msg">${err}</div>`}
+      ${err && html`<div className="tp-msg">${err}</div>`}
     </div>
   `
 }
@@ -3445,7 +3689,7 @@ function DeviceSync ({ rpc, C }) {
     catch (e) { setErr(e.message) } finally { setBusy(null) }
   }
 
-  if (status === null) return html`<div class="settings-card"><div class="settings-subtle">Loading…</div></div>`
+  if (status === null) return html`<div className="settings-card"><div className="settings-subtle">Loading…</div></div>`
 
   const paired = !!status.paired
   const writable = !!status.writable
@@ -3454,79 +3698,79 @@ function DeviceSync ({ rpc, C }) {
   const count = (status.count && Number.isFinite(status.count.bookmarks)) ? status.count.bookmarks : bookmarks.length
 
   return html`
-    <div class="settings-card">
-      ${err && html`<div class="apps-error">${err}</div>`}
-      ${notice && html`<div class="apps-ok">${notice}</div>`}
+    <div className="settings-card">
+      ${err && html`<div className="apps-error">${err}</div>`}
+      ${notice && html`<div className="apps-ok">${notice}</div>`}
 
       ${!paired && html`
-        <div class="settings-row">
+        <div className="settings-row">
           <div>
-            <div class="settings-label">Set up sync on this device</div>
-            <div class="settings-subtle">Creates a private, encrypted bookmark store. This device becomes the first writer; pair your other devices to it.</div>
+            <div className="settings-label">Set up sync on this device</div>
+            <div className="settings-subtle">Creates a private, encrypted bookmark store. This device becomes the first writer; pair your other devices to it.</div>
           </div>
-          <button class="btn primary" onClick=${create} disabled=${busy === 'create'}>${busy === 'create' ? 'Setting up…' : 'Set up sync'}</button>
+          <button className="btn primary" onClick=${create} disabled=${busy === 'create'}>${busy === 'create' ? 'Setting up…' : 'Set up sync'}</button>
         </div>
-        <div class="settings-row">
-          <div class="profile-field">
-            <div class="settings-label">…or pair this device with another</div>
-            <input class="profile-input" placeholder="sync://<key>:<encryption-key>" value=${joinInput}
+        <div className="settings-row">
+          <div className="profile-field">
+            <div className="settings-label">…or pair this device with another</div>
+            <input className="profile-input" placeholder="sync://<key>:<encryption-key>" value=${joinInput}
                    onInput=${(e) => setJoinInput(e.target.value)} onKeyDown=${(e) => e.key === 'Enter' && join()} />
           </div>
-          <button class="btn" onClick=${join} disabled=${busy === 'join' || !joinInput.trim()}>${busy === 'join' ? 'Pairing…' : 'Pair'}</button>
+          <button className="btn" onClick=${join} disabled=${busy === 'join' || !joinInput.trim()}>${busy === 'join' ? 'Pairing…' : 'Pair'}</button>
         </div>
       `}
 
       ${paired && html`
-        <div class="settings-row">
+        <div className="settings-row">
           <div>
-            <div class="settings-label">Syncing ${writable ? '' : html`<span class="settings-subtle">· read-only on this device</span>`}</div>
-            <div class="settings-subtle">${count} bookmark(s) in the synced set</div>
+            <div className="settings-label">Syncing ${writable ? '' : html`<span className="settings-subtle">· read-only on this device</span>`}</div>
+            <div className="settings-subtle">${count} bookmark(s) in the synced set</div>
           </div>
-          <div class="settings-row-actions">
-            <button class="btn subtle small" onClick=${refresh} disabled=${busy === 'refresh'} title="Re-check sync status (e.g. after another device added this one as a writer)">${busy === 'refresh' ? 'Refreshing…' : 'Refresh'}</button>
-            ${writable && html`<button class="btn subtle" onClick=${pushLocal} disabled=${busy === 'push'}>${busy === 'push' ? 'Importing…' : 'Import local bookmarks'}</button>`}
+          <div className="settings-row-actions">
+            <button className="btn subtle small" onClick=${refresh} disabled=${busy === 'refresh'} title="Re-check sync status (e.g. after another device added this one as a writer)">${busy === 'refresh' ? 'Refreshing…' : 'Refresh'}</button>
+            ${writable && html`<button className="btn subtle" onClick=${pushLocal} disabled=${busy === 'push'}>${busy === 'push' ? 'Importing…' : 'Import local bookmarks'}</button>`}
           </div>
         </div>
 
-        <div class="settings-row">
-          <div class="profile-field">
-            <div class="settings-label">Pairing invite — open this on another device to sync it</div>
-            <code class="settings-code">${invite || '(unavailable)'}</code>
-            <div class="settings-subtle">Carries your encryption key. Anyone with it can read your synced bookmarks — treat it like a password.</div>
+        <div className="settings-row">
+          <div className="profile-field">
+            <div className="settings-label">Pairing invite — open this on another device to sync it</div>
+            <code className="settings-code">${invite || '(unavailable)'}</code>
+            <div className="settings-subtle">Carries your encryption key. Anyone with it can read your synced bookmarks — treat it like a password.</div>
           </div>
-          <button class="btn small" onClick=${() => copy(invite, 'invite')} disabled=${!invite}>${copied === 'invite' ? 'Copied' : 'Copy'}</button>
+          <button className="btn small" onClick=${() => copy(invite, 'invite')} disabled=${!invite}>${copied === 'invite' ? 'Copied' : 'Copy'}</button>
         </div>
 
-        <div class="settings-row">
-          <div class="profile-field">
-            <div class="settings-label">This device’s writer key${writable ? '' : ' — give it to a writer device to be added'}</div>
-            <code class="settings-code">${status.writerKey || '(unavailable)'}</code>
+        <div className="settings-row">
+          <div className="profile-field">
+            <div className="settings-label">This device’s writer key${writable ? '' : ' — give it to a writer device to be added'}</div>
+            <code className="settings-code">${status.writerKey || '(unavailable)'}</code>
           </div>
-          <button class="btn small" onClick=${() => copy(status.writerKey, 'writer')} disabled=${!status.writerKey}>${copied === 'writer' ? 'Copied' : 'Copy'}</button>
+          <button className="btn small" onClick=${() => copy(status.writerKey, 'writer')} disabled=${!status.writerKey}>${copied === 'writer' ? 'Copied' : 'Copy'}</button>
         </div>
 
         ${writable && html`
-          <div class="settings-row">
-            <div class="profile-field">
-              <div class="settings-label">Add another device (paste its writer key)</div>
-              <input class="profile-input" placeholder="64-hex writer key" value=${writerInput}
+          <div className="settings-row">
+            <div className="profile-field">
+              <div className="settings-label">Add another device (paste its writer key)</div>
+              <input className="profile-input" placeholder="64-hex writer key" value=${writerInput}
                      onInput=${(e) => setWriterInput(e.target.value)} onKeyDown=${(e) => e.key === 'Enter' && addWriter()} />
             </div>
-            <button class="btn" onClick=${addWriter} disabled=${busy === 'writer' || !writerInput.trim()}>${busy === 'writer' ? 'Adding…' : 'Add device'}</button>
+            <button className="btn" onClick=${addWriter} disabled=${busy === 'writer' || !writerInput.trim()}>${busy === 'writer' ? 'Adding…' : 'Add device'}</button>
           </div>
         `}
 
-        ${!writable && html`<div class="settings-subtle">This device is read-only until a writer device adds the key above. Synced bookmarks still replicate here in the meantime.</div>`}
+        ${!writable && html`<div className="settings-subtle">This device is read-only until a writer device adds the key above. Synced bookmarks still replicate here in the meantime.</div>`}
 
         ${bookmarks.length > 0 && html`
-          <div class="settings-row"><div class="settings-label">Synced bookmarks</div></div>
+          <div className="settings-row"><div className="settings-label">Synced bookmarks</div></div>
           ${bookmarks.map((b) => html`
-            <div class="settings-row" key=${b.url}>
+            <div className="settings-row" key=${b.url}>
               <div>
-                <div class="settings-label">${b.title || b.url}</div>
-                <div class="settings-subtle">${b.url}</div>
+                <div className="settings-label">${b.title || b.url}</div>
+                <div className="settings-subtle">${b.url}</div>
               </div>
-              ${writable && html`<button class="btn small subtle" onClick=${() => removeBookmark(b.url)} disabled=${busy === 'rm:' + b.url}>Remove</button>`}
+              ${writable && html`<button className="btn small subtle" onClick=${() => removeBookmark(b.url)} disabled=${busy === 'rm:' + b.url}>Remove</button>`}
             </div>
           `)}
         `}
@@ -3570,34 +3814,34 @@ function ExperimentalSection ({ rpc, C, onAutobeeChange, onDeviceSyncChange }) {
   }
 
   return html`
-    <div class="settings-card">
-      ${err && html`<div class="apps-error">${err}</div>`}
-      <div class="settings-row">
+    <div className="settings-card">
+      ${err && html`<div className="apps-error">${err}</div>`}
+      <div className="settings-row">
         <div>
-          <div class="settings-label">Names (petnames)</div>
-          <div class="settings-subtle">Type friendly names like <code>keet</code> in the address bar instead of 52-character keys. Resolves your own saved petnames plus a curated set of well-known names, fully local — a provenance chip shows how each name resolved. Experimental.</div>
+          <div className="settings-label">Names (petnames)</div>
+          <div className="settings-subtle">Type friendly names like <code>keet</code> in the address bar instead of 52-character keys. Resolves your own saved petnames plus a curated set of well-known names, fully local — a provenance chip shows how each name resolved. Experimental.</div>
         </div>
-        <label class="login-scope${naming ? ' on' : ''}">
+        <label className="login-scope${naming ? ' on' : ''}">
           <input type="checkbox" checked=${naming} disabled=${busy === 'experimentalNaming'}
                  onChange=${() => toggle('experimentalNaming', !naming, setNaming)} />
         </label>
       </div>
-      <div class="settings-row">
+      <div className="settings-row">
         <div>
-          <div class="settings-label">Collaborative catalogs (Autobee)</div>
-          <div class="settings-subtle">Create app catalogs several people can co-edit, synced peer-to-peer with no server. Experimental — load or create them with <code>autobee://</code> keys in the Apps tab. Not yet pinned on relays, so a catalog is reachable only while a writer is online.</div>
+          <div className="settings-label">Collaborative catalogs (Autobee)</div>
+          <div className="settings-subtle">Create app catalogs several people can co-edit, synced peer-to-peer with no server. Experimental — load or create them with <code>autobee://</code> keys in the Apps tab. Not yet pinned on relays, so a catalog is reachable only while a writer is online.</div>
         </div>
-        <label class="login-scope${autobee ? ' on' : ''}">
+        <label className="login-scope${autobee ? ' on' : ''}">
           <input type="checkbox" checked=${autobee} disabled=${busy === 'experimentalAutobeeCatalogs'}
                  onChange=${() => toggle('experimentalAutobeeCatalogs', !autobee, setAutobee, onAutobeeChange)} />
         </label>
       </div>
-      <div class="settings-row">
+      <div className="settings-row">
         <div>
-          <div class="settings-label">Device sync (encrypted bookmarks)</div>
-          <div class="settings-subtle">Sync your bookmarks across your own devices, encrypted end-to-end with no server or account. Once enabled, pair devices in the <strong>Device sync</strong> section below. Experimental — your synced data is readable only on devices that hold the pairing invite.</div>
+          <div className="settings-label">Device sync (encrypted bookmarks)</div>
+          <div className="settings-subtle">Sync your bookmarks across your own devices, encrypted end-to-end with no server or account. Once enabled, pair devices in the <strong>Device sync</strong> section below. Experimental — your synced data is readable only on devices that hold the pairing invite.</div>
         </div>
-        <label class="login-scope${deviceSync ? ' on' : ''}">
+        <label className="login-scope${deviceSync ? ' on' : ''}">
           <input type="checkbox" checked=${deviceSync} disabled=${busy === 'experimentalDeviceSync'}
                  onChange=${() => toggle('experimentalDeviceSync', !deviceSync, setDeviceSync, onDeviceSyncChange)} />
         </label>
@@ -3707,153 +3951,153 @@ function Settings ({ rpc, C, status, storagePath, log }) {
   }
 
   return html`
-    <div class="settings">
+    <div className="settings">
       <h1>Settings</h1>
-      <p class="subtitle">Identity, infrastructure, and diagnostics for your peer-to-peer browser.</p>
-      ${err && html`<div class="apps-error">${err}</div>`}
+      <p className="subtitle">Identity, infrastructure, and diagnostics for your peer-to-peer browser.</p>
+      ${err && html`<div className="apps-error">${err}</div>`}
 
       <h2>Identity</h2>
-      <div class="settings-card">
-        <div class="settings-row">
+      <div className="settings-card">
+        <div className="settings-row">
           <div>
-            <div class="settings-label">Your peer public key</div>
-            <code class="settings-code">${identity?.publicKey || '(loading…)'}</code>
+            <div className="settings-label">Your peer public key</div>
+            <code className="settings-code">${identity?.publicKey || '(loading…)'}</code>
           </div>
         </div>
       </div>
 
       <h2>Moving to a new device?</h2>
-      <p class="subtitle">Your identity lives on this machine. To use the same identity on another computer or after a wipe, write down your 12-word backup phrase. Anyone with the phrase can sign in as you — store it like a password.</p>
-      <div class="settings-card">
-        <div class="settings-row">
+      <p className="subtitle">Your identity lives on this machine. To use the same identity on another computer or after a wipe, write down your 12-word backup phrase. Anyone with the phrase can sign in as you — store it like a password.</p>
+      <div className="settings-card">
+        <div className="settings-row">
           <div>
-            <div class="settings-label">Backup phrase</div>
-            <div class="settings-subtle">${identity?.hasBackupPhrase ? `${identity.mnemonicWordCount}-word BIP-39 mnemonic. Reveal once to write down — never display on a shared screen.` : 'not available'}</div>
+            <div className="settings-label">Backup phrase</div>
+            <div className="settings-subtle">${identity?.hasBackupPhrase ? `${identity.mnemonicWordCount}-word BIP-39 mnemonic. Reveal once to write down — never display on a shared screen.` : 'not available'}</div>
           </div>
-          <button class="btn" onClick=${revealPhrase} disabled=${busy === 'reveal' || !identity?.hasBackupPhrase}>
+          <button className="btn" onClick=${revealPhrase} disabled=${busy === 'reveal' || !identity?.hasBackupPhrase}>
             ${seedPhrase ? 'Hide' : 'Reveal phrase'}
           </button>
         </div>
         ${seedPhrase && html`
-          <pre class="seed-phrase">${seedPhrase}</pre>
-          <div class="settings-warning">Write this down somewhere offline. Anyone with these words controls your identity — and we can't reset it for you.</div>
+          <pre className="seed-phrase">${seedPhrase}</pre>
+          <div className="settings-warning">Write this down somewhere offline. Anyone with these words controls your identity — and we can't reset it for you.</div>
         `}
-        <div class="settings-row">
+        <div className="settings-row">
           <div>
-            <div class="settings-label">Restore from phrase</div>
-            <div class="settings-subtle">Replace this device's identity with one recovered from a saved 12 or 24-word phrase. Use this on a fresh PearBrowser install to bring your existing identity over.</div>
+            <div className="settings-label">Restore from phrase</div>
+            <div className="settings-subtle">Replace this device's identity with one recovered from a saved 12 or 24-word phrase. Use this on a fresh PearBrowser install to bring your existing identity over.</div>
           </div>
-          <button class="btn subtle" onClick=${() => { setShowRestore((v) => !v); setRestoreNotice(''); setErr('') }}
+          <button className="btn subtle" onClick=${() => { setShowRestore((v) => !v); setRestoreNotice(''); setErr('') }}
                   disabled=${busy?.startsWith?.('restore')}>
             ${showRestore ? 'Cancel' : 'Restore…'}
           </button>
         </div>
         ${showRestore && html`
-          <div class="restore-form">
+          <div className="restore-form">
             <textarea
-              class="restore-textarea"
+              className="restore-textarea"
               placeholder="Paste your 12 or 24-word backup phrase here, separated by spaces"
               value=${restoreInput}
               rows="3"
-              spellcheck="false"
-              autocapitalize="none"
+              spellCheck="false"
+              autoCapitalize="none"
               onInput=${(e) => setRestoreInput(e.target.value)}
             ></textarea>
-            <div class="restore-actions">
-              <button class="btn primary" onClick=${validateAndRestore}
+            <div className="restore-actions">
+              <button className="btn primary" onClick=${validateAndRestore}
                       disabled=${!restoreInput.trim() || busy?.startsWith?.('restore')}>
                 ${busy === 'restore-validate' ? 'Checking…' : busy === 'restore-apply' ? 'Restoring…' : 'Restore identity'}
               </button>
             </div>
-            <div class="settings-warning">This destroys the current identity on disk. Make sure you've saved its phrase first.</div>
+            <div className="settings-warning">This destroys the current identity on disk. Make sure you've saved its phrase first.</div>
           </div>
         `}
-        ${restoreNotice && html`<div class="apps-ok">${restoreNotice}</div>`}
+        ${restoreNotice && html`<div className="apps-ok">${restoreNotice}</div>`}
       </div>
 
       <h2>Profile</h2>
-      <p class="subtitle">What apps see when you grant a sign-in. Each field is opt-in — leave blank to share nothing.</p>
+      <p className="subtitle">What apps see when you grant a sign-in. Each field is opt-in — leave blank to share nothing.</p>
       <${ProfileSection} rpc=${rpc} C=${C} />
 
       <h2>Permission Center</h2>
-      <p class="subtitle">Persistent app grants grouped by drive: sign-in, profile fields, contacts, and arbitrary swarm topics.</p>
+      <p className="subtitle">Persistent app grants grouped by drive: sign-in, profile fields, contacts, and arbitrary swarm topics.</p>
       <${PermissionCenterSection} rpc=${rpc} C=${C} />
 
       <h2>Relays</h2>
-      <p class="subtitle">HiveRelay endpoints used for fast first-paint and persistence. Hybrid mode falls back to pure P2P if a relay is down.</p>
+      <p className="subtitle">HiveRelay endpoints used for fast first-paint and persistence. Hybrid mode falls back to pure P2P if a relay is down.</p>
       <${RelaysSection} rpc=${rpc} C=${C} />
 
       <h2>Nostr identity</h2>
-      <p class="subtitle">A portable Nostr key (npub), linked to your pear identity by a mutual, revocable attestation. "Linked (attested)" is a trust assertion the two keys mutually signed — never proof of the same person.</p>
+      <p className="subtitle">A portable Nostr key (npub), linked to your pear identity by a mutual, revocable attestation. "Linked (attested)" is a trust assertion the two keys mutually signed — never proof of the same person.</p>
       <${NostrIdentitySection} rpc=${rpc} C=${C} />
 
       <h2>Nostr feed</h2>
-      <p class="subtitle">Post NIP-01 notes signed with your Nostr key. Toggle "Include trusted contacts" to also see notes a verified contact authored with their attested Nostr key, replicated peer-to-peer.</p>
+      <p className="subtitle">Post NIP-01 notes signed with your Nostr key. Toggle "Include trusted contacts" to also see notes a verified contact authored with their attested Nostr key, replicated peer-to-peer.</p>
       <${NostrFeedSection} rpc=${rpc} C=${C} />
 
       <h2>Name registry</h2>
-      <p class="subtitle">Claim memorable names that resolve to your drives — type the name (or pearname://name) in the URL bar. Owner-signed, durable across devices, first-claim-wins with a homograph guard.</p>
+      <p className="subtitle">Claim memorable names that resolve to your drives or app links — type the name (or pearname://name) in the URL bar. Owner-signed, durable across devices, first-claim-wins with a homograph guard.</p>
       <${NameRegistrySection} rpc=${rpc} C=${C} />
 
       <h2>HiveRelay Network</h2>
-      <div class="settings-card">
-        <div class="settings-row">
+      <div className="settings-card">
+        <div className="settings-row">
           <div>
-            <div class="settings-label">Connected relays</div>
-            <div class="settings-subtle">${status.hiveRelays || 0} HiveRelay(s) reachable via the DHT right now</div>
+            <div className="settings-label">Connected relays</div>
+            <div className="settings-subtle">${status.hiveRelays || 0} HiveRelay(s) reachable via the DHT right now</div>
           </div>
         </div>
-        <div class="settings-row">
+        <div className="settings-row">
           <div>
-            <div class="settings-label">Default replication factor</div>
-            <div class="settings-subtle">3 relays per published site (configurable per-publish in a future release)</div>
+            <div className="settings-label">Default replication factor</div>
+            <div className="settings-subtle">3 relays per published site (configurable per-publish in a future release)</div>
           </div>
         </div>
       </div>
 
       <h2>Live status</h2>
-      <pre class="boot-log">${JSON.stringify(status, null, 2)}</pre>
+      <pre className="boot-log">${JSON.stringify(status, null, 2)}</pre>
 
       <h2>Storage</h2>
-      <div class="settings-card">
-        <div class="settings-row">
+      <div className="settings-card">
+        <div className="settings-row">
           <div>
-            <div class="settings-label">Path</div>
-            <code class="settings-code">${storagePath}</code>
+            <div className="settings-label">Path</div>
+            <code className="settings-code">${storagePath}</code>
           </div>
         </div>
-        <div class="settings-row">
+        <div className="settings-row">
           <div>
-            <div class="settings-label">Usage</div>
-            <div class="settings-subtle">${status.storageUsed ? (status.storageUsed / 1048576).toFixed(1) + ' MB' : '—'} / ${status.storageLimit ? (status.storageLimit / 1048576).toFixed(0) + ' MB' : '—'}</div>
+            <div className="settings-label">Usage</div>
+            <div className="settings-subtle">${status.storageUsed ? (status.storageUsed / 1048576).toFixed(1) + ' MB' : '—'} / ${status.storageLimit ? (status.storageLimit / 1048576).toFixed(0) + ' MB' : '—'}</div>
           </div>
-          <button class="btn subtle" onClick=${clearCache} disabled=${busy === 'cache'}>Clear cache</button>
+          <button className="btn subtle" onClick=${clearCache} disabled=${busy === 'cache'}>Clear cache</button>
         </div>
       </div>
 
       <h2>Experimental</h2>
-      <p class="subtitle">Early features behind a flag. They may change, break, or be removed.</p>
+      <p className="subtitle">Early features behind a flag. They may change, break, or be removed.</p>
       <${ExperimentalSection} rpc=${rpc} C=${C} onDeviceSyncChange=${setDeviceSync} />
 
       ${deviceSync && html`
-        <h2>Device sync <span class="settings-subtle">(experimental)</span></h2>
-        <p class="subtitle">Your bookmarks, encrypted and synced across your own devices — no server, no account. Set up sync here, then pair your other devices with the invite.</p>
+        <h2>Device sync <span className="settings-subtle">(experimental)</span></h2>
+        <p className="subtitle">Your bookmarks, encrypted and synced across your own devices — no server, no account. Set up sync here, then pair your other devices with the invite.</p>
         <${DeviceSync} rpc=${rpc} C=${C} />
       `}
 
       <h2>Danger zone</h2>
-      <div class="settings-card danger">
-        <div class="settings-row">
+      <div className="settings-card danger">
+        <div className="settings-row">
           <div>
-            <div class="settings-label">Reset app data</div>
-            <div class="settings-subtle">Unseeds every published site from HiveRelay first (only possible while your publisher keypair is intact), then wipes local storage and quits. You'll start fresh on next launch. <strong>Copy your drive keys before doing this.</strong></div>
+            <div className="settings-label">Reset app data</div>
+            <div className="settings-subtle">Unseeds every published site from HiveRelay first (only possible while your publisher keypair is intact), then wipes local storage and quits. You'll start fresh on next launch. <strong>Copy your drive keys before doing this.</strong></div>
           </div>
-          <button class="btn subtle danger" onClick=${resetApp} disabled=${busy === 'reset'}>${busy === 'reset' ? 'Resetting…' : 'Reset data'}</button>
+          <button className="btn subtle danger" onClick=${resetApp} disabled=${busy === 'reset'}>${busy === 'reset' ? 'Resetting…' : 'Reset data'}</button>
         </div>
       </div>
 
       <h2>Boot log</h2>
-      <pre class="boot-log">${log.join('\n') || '(events arrived pre-mount — check status above)'}</pre>
+      <pre className="boot-log">${log.join('\n') || '(events arrived pre-mount — check status above)'}</pre>
     </div>
   `
 }
@@ -3875,7 +4119,7 @@ function BlockEditor ({ block, onChange }) {
   switch (block.type) {
     case 'heading':
       return html`
-        <div class="block-fields">
+        <div className="block-fields">
           <select value=${block.level} onChange=${(e) => update({ level: +e.target.value })}>
             ${[1, 2, 3].map((n) => html`<option value=${n}>H${n}</option>`)}
           </select>
@@ -3889,14 +4133,14 @@ function BlockEditor ({ block, onChange }) {
       return html`<textarea rows=${block.type === 'html' ? 8 : (block.type === 'code' ? 4 : 2)} value=${block.text} placeholder=${block.type === 'html' ? 'Paste raw HTML, CSS, or <script> — rendered as part of the page' : ''} onInput=${(e) => update({ text: e.target.value })}></textarea>`
     case 'image':
       return html`
-        <div class="block-fields">
+        <div className="block-fields">
           <input type="text" placeholder="src (https://…)" value=${block.src} onInput=${(e) => update({ src: e.target.value })} />
           <input type="text" placeholder="alt text" value=${block.alt} onInput=${(e) => update({ alt: e.target.value })} />
         </div>
       `
     case 'link':
       return html`
-        <div class="block-fields">
+        <div className="block-fields">
           <input type="text" placeholder="href" value=${block.href} onInput=${(e) => update({ href: e.target.value })} />
           <input type="text" placeholder="text" value=${block.text} onInput=${(e) => update({ text: e.target.value })} />
         </div>
@@ -3904,9 +4148,9 @@ function BlockEditor ({ block, onChange }) {
     case 'list':
       return html`<textarea rows=${Math.max(2, block.items.length)} placeholder="One item per line" value=${block.items.join('\n')} onInput=${(e) => update({ items: e.target.value.split('\n') })}></textarea>`
     case 'divider':
-      return html`<div class="placeholder">— divider —</div>`
+      return html`<div className="placeholder">— divider —</div>`
     default:
-      return html`<div class="placeholder">unknown block: ${block.type}</div>`
+      return html`<div className="placeholder">unknown block: ${block.type}</div>`
   }
 }
 
@@ -3997,69 +4241,69 @@ function SiteEditor ({ site, rpc, C, onBack, onBrowse }) {
   }
 
   return html`
-    <div class="site-editor">
-      <div class="site-editor-bar">
-        <button class="btn subtle" onClick=${onBack}>← Sites</button>
-        <input class="site-name-input" type="text" placeholder="Site name" value=${name} onInput=${(e) => setName(e.target.value)} />
-        <div class="spacer"></div>
-        <label class="btn subtle" title="Upload a site icon (SVG/PNG/JPEG/WebP, ≤512KB) — shows in the browser's site list">
+    <div className="site-editor">
+      <div className="site-editor-bar">
+        <button className="btn subtle" onClick=${onBack}>← Sites</button>
+        <input className="site-name-input" type="text" placeholder="Site name" value=${name} onInput=${(e) => setName(e.target.value)} />
+        <div className="spacer"></div>
+        <label className="btn subtle" title="Upload a site icon (SVG/PNG/JPEG/WebP, ≤512KB) — shows in the browser's site list">
           ${busy === 'icon' ? 'Uploading…' : (iconOk ? '✓ Icon set' : '🖼 Icon')}
           <input type="file" accept="image/svg+xml,image/png,image/jpeg,image/webp" style=${{ display: 'none' }} onChange=${uploadIcon} />
         </label>
-        <button class="btn" onClick=${save} disabled=${busy === 'save'} title="Write block changes to the drive — peers see updates live">${busy === 'save' ? 'Saving…' : 'Save'}</button>
+        <button className="btn" onClick=${save} disabled=${busy === 'save'} title="Write block changes to the drive — peers see updates live">${busy === 'save' ? 'Saving…' : 'Save'}</button>
         ${meta.published
-          ? html`<button class="btn subtle" onClick=${unpublish} disabled=${busy === 'unpublish'}>${busy === 'unpublish' ? 'Unpublishing…' : 'Unpublish'}</button>`
-          : html`<button class="btn primary" onClick=${publish} disabled=${busy === 'publish'} title="Seeds via Hyperswarm and pins to HiveRelay for 24/7 availability">${busy === 'publish' ? 'Publishing…' : 'Publish & Pin'}</button>`}
+          ? html`<button className="btn subtle" onClick=${unpublish} disabled=${busy === 'unpublish'}>${busy === 'unpublish' ? 'Unpublishing…' : 'Unpublish'}</button>`
+          : html`<button className="btn primary" onClick=${publish} disabled=${busy === 'publish'} title="Seeds via Hyperswarm and pins to HiveRelay for 24/7 availability">${busy === 'publish' ? 'Publishing…' : 'Publish & Pin'}</button>`}
       </div>
 
-      ${err && html`<div class="apps-error">${err}</div>`}
+      ${err && html`<div className="apps-error">${err}</div>`}
 
       ${meta.published && meta.keyHex && html`
-        <div class="site-published">
-          <div class="site-published-row">
+        <div className="site-published">
+          <div className="site-published-row">
             <span>Published at</span>
             <code>hyper://${meta.keyHex}/</code>
-            <button class="btn small" onClick=${() => copyText(`hyper://${meta.keyHex}/`)} title="Copy hyper:// URL">📋 Copy</button>
-            <button class="btn" onClick=${() => onBrowse(`hyper://${meta.keyHex}/`)}>Open in Browse</button>
+            <button className="btn small" onClick=${() => copyText(`hyper://${meta.keyHex}/`)} title="Copy hyper:// URL">📋 Copy</button>
+            <button className="btn" onClick=${() => onBrowse(`hyper://${meta.keyHex}/`)}>Open in Browse</button>
           </div>
-          <div class="site-published-row subtle">
+          <div className="site-published-row subtle">
             <span>Drive key</span>
-            <code class="key-mono">${meta.keyHex}</code>
-            <button class="btn small subtle" onClick=${() => copyText(meta.keyHex)} title="Copy raw key">📋 Key</button>
+            <code className="key-mono">${meta.keyHex}</code>
+            <button className="btn small subtle" onClick=${() => copyText(meta.keyHex)} title="Copy raw key">📋 Key</button>
           </div>
-          <div class="site-pin-row ${meta.pin?.replicatedPeers > 0 ? 'ok' : 'warn'}">
+          <div className="site-pin-row ${meta.pin?.replicatedPeers > 0 ? 'ok' : 'warn'}">
             ${meta.pin?.replicatedPeers > 0
               ? html`<span>📌 Replicated to ${meta.pin.replicatedPeers} HiveRelay peer${meta.pin.replicatedPeers === 1 ? '' : 's'} (of ${meta.pin.acceptances} accepted). Safe to close the app — stays online 24/7.</span>`
               : meta.pin?.ok
                 ? html`<span>📡 <strong>${meta.pin.acceptances} relay${meta.pin.acceptances === 1 ? '' : 's'} accepted</strong> your pin request, but none have pulled the content yet. The public HiveRelay network may take minutes or may not replicate at all. Your site is reachable via Hyperswarm as long as this app is running. Share your drive key now; keep the app open until you're sure someone's replicated it.</span>`
                 : html`<span>⚠️ Seeded P2P locally only. ${meta.pin?.connectedRelays > 0 ? `Connected to ${meta.pin.connectedRelays} relay(s) but none accepted the seed request.` : 'No HiveRelays connected yet; retry in a moment.'} Site is reachable while this app is running.</span>`}
           </div>
-          <div class="site-save-warning">
+          <div className="site-save-warning">
             💾 <strong>Save this key now.</strong> It's the only way to recover this site if you reset app data. Anyone with the key can reach your site; only this machine's publisher keypair can unseed it.
           </div>
         </div>
       `}
 
-      <div class="blocks">
-        ${blocks.length === 0 && html`<p class="placeholder">No blocks yet. Add one below.</p>`}
+      <div className="blocks">
+        ${blocks.length === 0 && html`<p className="placeholder">No blocks yet. Add one below.</p>`}
         ${blocks.map((block, i) => html`
-          <div class="block" key=${i}>
-            <div class="block-header">
-              <span class="block-type">${block.type}</span>
-              <div class="spacer"></div>
-              <button class="btn subtle small" onClick=${() => moveBlock(i, -1)} disabled=${i === 0}>↑</button>
-              <button class="btn subtle small" onClick=${() => moveBlock(i, 1)} disabled=${i === blocks.length - 1}>↓</button>
-              <button class="btn subtle small" onClick=${() => removeBlock(i)}>✕</button>
+          <div className="block" key=${i}>
+            <div className="block-header">
+              <span className="block-type">${block.type}</span>
+              <div className="spacer"></div>
+              <button className="btn subtle small" onClick=${() => moveBlock(i, -1)} disabled=${i === 0}>↑</button>
+              <button className="btn subtle small" onClick=${() => moveBlock(i, 1)} disabled=${i === blocks.length - 1}>↓</button>
+              <button className="btn subtle small" onClick=${() => removeBlock(i)}>✕</button>
             </div>
             <${BlockEditor} block=${block} onChange=${(next) => updateBlock(i, next)} />
           </div>
         `)}
       </div>
 
-      <div class="add-block-row">
-        <span class="placeholder">Add:</span>
+      <div className="add-block-row">
+        <span className="placeholder">Add:</span>
         ${Object.keys(BLOCK_TEMPLATES).map((t) => html`
-          <button class="btn subtle small" onClick=${() => addBlock(t)}>${t}</button>
+          <button className="btn subtle small" onClick=${() => addBlock(t)}>${t}</button>
         `)}
       </div>
     </div>
@@ -4093,11 +4337,15 @@ function FederatedSearch ({ rpc, C, onBrowse, placeholder }) {
     } catch (e) { setErr(`search: ${e.message}`) }
     finally { setSearching(false) }
   }
-  const resultUrl = (r) => `hyper://${r.driveKey}${r.path && r.path !== '/' ? r.path : '/'}`
+  const resultUrl = (r) => {
+    if (r && r.link) return r.link
+    if (r && /^(?:pear|file|hyper):\/\//i.test(r.driveKey || '')) return r.driveKey
+    return `hyper://${r.driveKey}${r.path && r.path !== '/' ? r.path : '/'}`
+  }
   const srcBadge = (r) => {
-    if (!r.tier || r.tier === 'self') return html`<span class="src-badge self">you</span>`
-    if (r.tier === 'followed') return html`<span class="src-badge followed">trusted · hop ${r.trustHop ?? 1}</span>`
-    return html`<span class="src-badge other">${r.tier}</span>`
+    if (!r.tier || r.tier === 'self') return html`<span className="src-badge self">you</span>`
+    if (r.tier === 'followed') return html`<span className="src-badge followed">trusted · hop ${r.trustHop ?? 1}</span>`
+    return html`<span className="src-badge other">${r.tier}</span>`
   }
   useEffect(() => {
     const onFederated = (e) => {
@@ -4111,31 +4359,31 @@ function FederatedSearch ({ rpc, C, onBrowse, placeholder }) {
   }, [])
 
   return html`
-    <div class="fed-search">
-      ${err && html`<div class="apps-error">${err}</div>`}
-      <div class="urlbar" style=${{ marginBottom: '10px' }}>
-        <input type="text" class="url-input"
+    <div className="fed-search">
+      ${err && html`<div className="apps-error">${err}</div>`}
+      <div className="urlbar" style=${{ marginBottom: '10px' }}>
+        <input type="text" className="url-input"
           placeholder=${placeholder || "Search the peer-to-peer web…"}
           value=${query}
           onInput=${(e) => setQuery(e.target.value)}
           onKeyDown=${(e) => e.key === 'Enter' && runSearch()} />
-        <button class="btn primary" onClick=${runSearch} disabled=${searching || !query.trim()}>${searching ? 'Searching…' : 'Search'}</button>
+        <button className="btn primary" onClick=${runSearch} disabled=${searching || !query.trim()}>${searching ? 'Searching…' : 'Search'}</button>
       </div>
-      <label class="search-fed-toggle">
+      <label className="search-fed-toggle">
         <input type="checkbox" checked=${federated} onChange=${(e) => setFederated(e.target.checked)} />
-        Include trusted peers${federating ? html` <span class="fed-status">· searching peers…</span>` : ''}
+        Include trusted peers${federating ? html` <span className="fed-status">· searching peers…</span>` : ''}
       </label>
-      ${indexed ? html`<span class="search-indexed" style=${{ marginLeft: '10px', opacity: 0.6, fontSize: '12px' }}>${indexed} page(s) indexed</span>` : ''}
+      ${indexed ? html`<span className="search-indexed" style=${{ marginLeft: '10px', opacity: 0.6, fontSize: '12px' }}>${indexed} page(s) indexed</span>` : ''}
       ${results !== null && (results.length === 0
-        ? html`<p class="placeholder">No matches${indexed === 0 ? ' yet — browse some hyper:// pages first to build your index.' : '.'}</p>`
-        : html`<div class="library-list">
+        ? html`<p className="placeholder">No matches${indexed === 0 ? ' yet — browse some hyper:// pages first to build your index.' : '.'}</p>`
+        : html`<div className="library-list">
             ${results.map((r) => html`
-              <div class="library-row" key=${r.docId || (r.driveKey + r.path)}>
-                <div class="library-row-main">
-                  <div class="library-title">${r.title || resultUrl(r)}${federated ? srcBadge(r) : ''}</div>
-                  <div class="library-url">${resultUrl(r)}</div>
+              <div className="library-row" key=${r.docId || (r.driveKey + r.path)}>
+                <div className="library-row-main">
+                  <div className="library-title">${r.title || resultUrl(r)}${federated ? srcBadge(r) : ''}</div>
+                  <div className="library-url">${resultUrl(r)}</div>
                 </div>
-                <button class="btn small" onClick=${() => onBrowse(resultUrl(r))}>Open</button>
+                <button className="btn small" onClick=${() => onBrowse(resultUrl(r))}>Open</button>
               </div>
             `)}
           </div>`)}
@@ -4169,7 +4417,12 @@ function Sites ({ rpc, C, onBrowse }) {
     try {
       const res = await rpc.request(C.CMD_GET_CATALOG_APPS)
       const apps = Array.isArray(res) ? res : (res?.apps ?? [])
-      setDiscovered(apps.filter((a) => a && typeof a.driveKey === 'string' && /^[0-9a-f]{64}$/i.test(a.driveKey)))
+      // Dedupe by driveKey — the aggregated list carries the same site once per
+      // loaded catalogue (dev seed + live bee), and the backend only collapses
+      // entries that share a stable `id` (the dev seed has none), so without this
+      // every published site renders twice on the Sites page.
+      const sites = apps.filter((a) => a && typeof a.driveKey === 'string' && /^[0-9a-f]{64}$/i.test(a.driveKey))
+      setDiscovered(dedupeApps(sites))
     } catch (e) { /* discovery is best-effort */ }
   }
 
@@ -4211,63 +4464,63 @@ function Sites ({ rpc, C, onBrowse }) {
   }
 
   return html`
-    <div class="sites">
+    <div className="sites">
       <h1>P2P Sites</h1>
-      <p class="subtitle">Search the peer-to-peer web, browse published sites, or create your own — all served 24/7 on the HiveRelay network.</p>
+      <p className="subtitle">Search the peer-to-peer web, browse published sites, or create your own — all served 24/7 on the HiveRelay network.</p>
 
       <h2>Search the P2P web</h2>
       <${FederatedSearch} rpc=${rpc} C=${C} onBrowse=${onBrowse} placeholder="Search the peer-to-peer web…" />
 
       <h2>Published sites${discovered.length ? ` (${discovered.length})` : ''}</h2>
-      <p class="subtitle">Live hyper:// sites pinned on the relay network — open any one in a tab.</p>
+      <p className="subtitle">Live hyper:// sites pinned on the relay network — open any one in a tab.</p>
       ${discovered.length === 0
-        ? html`<p class="placeholder">Loading published sites…</p>`
-        : html`<div class="app-grid">
+        ? html`<p className="placeholder">Loading published sites…</p>`
+        : html`<div className="app-grid">
             ${discovered.map((s) => html`
-              <div class="app-card" key=${s.driveKey}>
+              <div className="app-card" key=${s.driveKey}>
                 <${AppIcon} rpc=${rpc} C=${C} driveKey=${s.driveKey} iconRef=${s.icon} iconData=${s.iconData} name=${s.name} />
-                <div class="app-info">
-                  <div class="app-name">${s.name}</div>
-                  <div class="app-meta">${s.description || ('hyper://' + s.driveKey.slice(0, 10) + '…')}</div>
+                <div className="app-info">
+                  <div className="app-name">${s.name}</div>
+                  <div className="app-meta">${s.description || ('hyper://' + s.driveKey.slice(0, 10) + '…')}</div>
                 </div>
-                <div class="app-actions">
-                  <button class="btn primary" onClick=${() => onBrowse('hyper://' + s.driveKey + '/')}>Open</button>
-                  <button class="btn subtle" onClick=${() => copyText('hyper://' + s.driveKey + '/')}>📋 Copy</button>
+                <div className="app-actions">
+                  <button className="btn primary" onClick=${() => onBrowse('hyper://' + s.driveKey + '/')}>Open</button>
+                  <button className="btn subtle" onClick=${() => copyText('hyper://' + s.driveKey + '/')}>📋 Copy</button>
                 </div>
               </div>
             `)}
           </div>`}
 
       <h2>Your sites</h2>
-      <p class="subtitle">Create and publish your own P2P site — auto-pinned to HiveRelay for 24/7 availability.</p>
-      <div class="catalog-loader">
+      <p className="subtitle">Create and publish your own P2P site — auto-pinned to HiveRelay for 24/7 availability.</p>
+      <div className="catalog-loader">
         <input
-          class="site-name-field"
+          className="site-name-field"
           type="text"
           placeholder="New site name…"
           onKeyDown=${(e) => e.key === 'Enter' && createSite()}
         />
-        <button class="btn primary" onClick=${createSite} disabled=${busy === 'create'}>
+        <button className="btn primary" onClick=${createSite} disabled=${busy === 'create'}>
           ${busy === 'create' ? 'Creating…' : 'Create site'}
         </button>
       </div>
-      ${err && html`<div class="apps-error">${err}</div>`}
+      ${err && html`<div className="apps-error">${err}</div>`}
 
       ${sites.length === 0
-        ? html`<p class="placeholder">No sites yet. Create one above.</p>`
-        : html`<div class="app-grid">
+        ? html`<p className="placeholder">No sites yet. Create one above.</p>`
+        : html`<div className="app-grid">
             ${sites.map((site) => html`
-              <div class="app-card" key=${site.siteId}>
+              <div className="app-card" key=${site.siteId}>
                 <${AppIcon} rpc=${rpc} C=${C} driveKey=${site.keyHex} name=${site.name} />
-                <div class="app-info">
-                  <div class="app-name">${site.name}</div>
-                  <div class="app-meta">${site.published ? 'published · ' + (site.keyHex?.slice(0, 8) ?? '') + '…' : 'draft'}</div>
+                <div className="app-info">
+                  <div className="app-name">${site.name}</div>
+                  <div className="app-meta">${site.published ? 'published · ' + (site.keyHex?.slice(0, 8) ?? '') + '…' : 'draft'}</div>
                 </div>
-                <div class="app-actions">
-                  <button class="btn" onClick=${() => setEditing(site)}>Edit</button>
-                  ${site.published && site.keyHex && html`<button class="btn subtle" onClick=${() => onBrowse(`hyper://${site.keyHex}/`)}>Open</button>`}
-                  ${site.published && site.keyHex && html`<button class="btn subtle" onClick=${() => copyText(`hyper://${site.keyHex}/`)}>📋 Copy</button>`}
-                  <button class="btn subtle" onClick=${() => deleteSite(site)} disabled=${busy === `del:${site.siteId}`}>Delete</button>
+                <div className="app-actions">
+                  <button className="btn" onClick=${() => setEditing(site)}>Edit</button>
+                  ${site.published && site.keyHex && html`<button className="btn subtle" onClick=${() => onBrowse(`hyper://${site.keyHex}/`)}>Open</button>`}
+                  ${site.published && site.keyHex && html`<button className="btn subtle" onClick=${() => copyText(`hyper://${site.keyHex}/`)}>📋 Copy</button>`}
+                  <button className="btn subtle" onClick=${() => deleteSite(site)} disabled=${busy === `del:${site.siteId}`}>Delete</button>
                 </div>
               </div>
             `)}
@@ -4426,24 +4679,24 @@ export function App ({ rpc, C, storagePath }) {
     : `DHT · ${status.peerCount} peer${status.peerCount === 1 ? '' : 's'} · ${status.hiveRelays || 0} relay${status.hiveRelays === 1 ? '' : 's'} · proxy :${status.proxyPort}`
 
   return html`
-    <div class="app">
-      <div class="topbar">
-        <div class="brand">
+    <div className="app">
+      <div className="topbar">
+        <div className="brand">
           <${Logo} size=${22} />
           <${Wordmark} />
         </div>
-        <div class="tabs">
+        <div className="tabs">
           ${Object.entries(TAB_META).map(([id, m]) => html`
-            <button class=${'tab' + (tab === id ? ' active' : '')} onClick=${() => setTab(id)} key=${id}>
-              <span class="tab-icon">${m.icon}</span>
-              <span class="tab-label">${m.label}</span>
+            <button className=${'tab' + (tab === id ? ' active' : '')} onClick=${() => setTab(id)} key=${id}>
+              <span className="tab-icon">${m.icon}</span>
+              <span className="tab-label">${m.label}</span>
             </button>
           `)}
         </div>
-        <div class="topbar-spacer"></div>
+        <div className="topbar-spacer"></div>
       </div>
 
-      <div class=${'panel' + (tab === 'browse' ? ' panel-browse' : '')}>
+      <div className=${'panel' + (tab === 'browse' ? ' panel-browse' : '')}>
         ${tab === 'browse' && html`<${Browse} rpc=${rpc} C=${C} navUrl=${navUrl} onNavigated=${() => setNavUrl(null)} tabs=${tabs} setTabs=${setTabs} activeId=${browseActiveId} setActiveId=${setBrowseActiveId} closedTabs=${closedTabs} setClosedTabs=${setClosedTabs} sessionReady=${tabsRestored} />`}
         ${tab === 'apps' && html`<${Apps} rpc=${rpc} C=${C} onLaunch=${launchInBrowse} />`}
         ${tab === 'sites' && html`<${Sites} rpc=${rpc} C=${C} onBrowse=${launchInBrowse} />`}
@@ -4451,8 +4704,8 @@ export function App ({ rpc, C, storagePath }) {
         ${tab === 'settings' && html`<${Settings} rpc=${rpc} C=${C} status=${status} storagePath=${storagePath} log=${log} />`}
       </div>
 
-      <div class=${'status ' + statusClass}>
-        <span class="dot"></span>${statusText}
+      <div className=${'status ' + statusClass}>
+        <span className="dot"></span>${statusText}
       </div>
 
       ${pendingLogin && html`<${LoginConsent}

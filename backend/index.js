@@ -30,6 +30,7 @@ const { HyperProxy } = require('./hyper-proxy.js')
 const { TabRuntime } = require('./tab-runtime.js')
 const { RelayClient } = require('./relay-client.js')
 const { CatalogManager } = require('./catalog-manager.js')
+const communitySubmit = require('./community-submit.cjs')
 const { AppManager } = require('./app-manager.js')
 const { SiteManager } = require('./site-manager.js')
 const { PearBridge, PEAR_SWARM_V1_SHIM, PEAR_ANONGPT_SHIM } = require('./pear-bridge.js')
@@ -432,6 +433,162 @@ rpc.handle(C.CMD_MYCATALOG_UPDATE_APP, async (data) => {
   return result
 })
 
+// ─── Community app submission + moderation (2026-06-22) ──────────────────────
+// Anyone can submit their app to the COMMUNITY catalogue; the relay queues a pin
+// request in `review` mode; an operator-gated in-app moderator panel reviews the
+// queue and approves/rejects via the relay management API. Pure projection +
+// request shaping live in backend/community-submit.cjs (unit-tested). See the
+// catalogue-unified memory for the two-list (curated f5fb7500 / community
+// 5d961fdc) architecture.
+
+// Operator's relay management endpoint + API key (set via the moderator panel,
+// persisted in userdata settings). Empty until configured.
+async function getModSettings () {
+  try {
+    const s = (await requireUserData().getSettings()) || {}
+    return { baseUrl: s.relayManageUrl || '', apiKey: s.relayManageKey || '' }
+  } catch { return { baseUrl: '', apiKey: '' } }
+}
+
+// Minimal JSON HTTP(S) round-trip for the relay management API. bare-http1 has
+// no TLS, so https:// relays go through bare-https (wraps bare-tls). Returns
+// { status, json, text }.
+function relayManageHttp (spec, timeoutMs = 15000) {
+  return new Promise((resolve, reject) => {
+    let u
+    try { u = new URL(spec.url) } catch { return reject(new Error('Bad relay URL: ' + spec.url)) }
+    const isHttps = u.protocol === 'https:'
+    let lib
+    try { lib = isHttps ? require('bare-https') : require('bare-http1') } catch (e) {
+      return reject(new Error('HTTP client unavailable: ' + (e && e.message)))
+    }
+    const req = lib.request({
+      method: spec.method || 'GET',
+      hostname: u.hostname,
+      port: u.port ? parseInt(u.port) : (isHttps ? 443 : 80),
+      path: u.pathname + u.search,
+      headers: spec.headers || {}
+    }, (res) => {
+      const chunks = []
+      res.on('data', (c) => chunks.push(c))
+      res.on('end', () => {
+        clearTimeout(timer)
+        const text = Buffer.concat(chunks).toString('utf8')
+        let json = null
+        try { json = text ? JSON.parse(text) : null } catch {}
+        resolve({ status: res.statusCode, json, text })
+      })
+      res.on('error', (err) => { clearTimeout(timer); reject(err) })
+    })
+    const timer = setTimeout(() => { try { req.destroy() } catch {} ; reject(new Error('Relay request timed out')) }, timeoutMs)
+    req.on('error', (err) => { clearTimeout(timer); reject(err) })
+    if (spec.body) req.write(spec.body)
+    req.end()
+  })
+}
+
+// Promote an approved app into the community Hyperbee (5d961fdc) + re-pin so
+// desktop community-list readers see it. Implemented in the follow-up pass
+// (opens the operator-configured community-catalog Corestore, writes app!<id>
+// via communitySubmit.communityBeeEntry(), re-pins via HiveRelay). Stubbed here
+// so the approve path is wired end-to-end with no dangling reference.
+async function promoteToCommunityCatalogue (manifest) {
+  return { ok: false, deferred: true, reason: 'community-bee write not yet enabled' }
+}
+
+rpc.handle(C.CMD_SUBMIT_APP, async (data = {}) => {
+  await whenReady()
+  if (!hiveRelay || typeof hiveRelay.publish !== 'function') {
+    throw new Error('Relay client is still starting — try submitting again in a few seconds.')
+  }
+  const submittedBy = (swarm && swarm.keyPair) ? swarm.keyPair.publicKey.toString('hex') : null
+  const built = communitySubmit.buildSubmissionManifest(data, {
+    submittedBy, now: Date.now(), normalizeKey: normalizeDriveKey
+  })
+  if (built.error) throw new Error(built.error)
+  const { manifest, id, driveKey } = built
+
+  // 1) Publish the submission manifest drive (durable metadata: name/desc/icon)
+  //    so the moderator + mobile firehose can read it later. seed:true pins it.
+  let manifestKey = null
+  try {
+    const mdrive = await hiveRelay.publish(
+      [{ path: '/manifest.json', content: JSON.stringify(manifest, null, 2) }],
+      { appId: id, seed: true, replicas: 3, ttlDays: 365 }
+    )
+    if (mdrive && mdrive.key) {
+      manifestKey = Buffer.isBuffer(mdrive.key) ? mdrive.key.toString('hex') : String(mdrive.key)
+    }
+  } catch (err) {
+    console.error('[submit] publish manifest failed:', err && err.message)
+  }
+
+  // 2) Seed the app's CONTENT drive. In `review` mode this queues a pin request
+  //    in the relay's pending queue for the moderator to approve.
+  let acceptances = 0
+  try {
+    const res = await hiveRelay.seed(driveKey, { replicas: 3, ttlDays: 365, timeout: 15000 })
+    acceptances = Array.isArray(res) ? res.length : 0
+  } catch (err) {
+    console.error('[submit] seed app drive failed:', err && err.message)
+  }
+
+  console.log(`[submit] queued "${manifest.name}" (${id}) drive=${driveKey.slice(0, 8)} acceptances=${acceptances}`)
+  return { ok: true, id, driveKey, manifestKey, acceptances, status: 'pending-review', manifest }
+})
+
+rpc.handle(C.CMD_MOD_PENDING, async () => {
+  await whenReady()
+  const { baseUrl, apiKey } = await getModSettings()
+  const spec = communitySubmit.manageRequest('pending', { baseUrl, apiKey })
+  if (spec.error) throw new Error(spec.error)
+  const res = await relayManageHttp(spec)
+  if (res.status === 401) throw new Error('Relay rejected the moderator API key (401). Check it in the Moderator panel.')
+  if (res.status >= 400 || !res.json) throw new Error('Relay pending request failed (HTTP ' + res.status + ').')
+  const requests = Array.isArray(res.json.requests) ? res.json.requests : []
+  const toHex = (v) => typeof v === 'string' ? v : (v ? Buffer.from(v.data || v).toString('hex') : '')
+  const pending = requests.map((r) => ({
+    appKey: toHex(r.appKey),
+    publisherPubkey: toHex(r.publisherPubkey),
+    discoveredAt: r.discoveredAt || null,
+    ttlSeconds: r.ttlSeconds || null,
+    currentRelays: r.currentRelays || 0
+  }))
+  return { ok: true, mode: res.json.mode || null, count: pending.length, pending }
+})
+
+rpc.handle(C.CMD_MOD_APPROVE, async (data = {}) => {
+  await whenReady()
+  const appKey = normalizeDriveKey(String(data.appKey || data.driveKey || ''))
+  const { baseUrl, apiKey } = await getModSettings()
+  const spec = communitySubmit.manageRequest('approve', { baseUrl, apiKey, appKey })
+  if (spec.error) throw new Error(spec.error)
+  const res = await relayManageHttp(spec)
+  if (res.status === 401) throw new Error('Relay rejected the moderator API key (401).')
+  if (res.status >= 400) throw new Error('Relay approve failed (HTTP ' + res.status + ').')
+  // Best-effort promote into the community bee so desktop readers see it.
+  let promoted = null
+  if (data.manifest && typeof data.manifest === 'object') {
+    try { promoted = await promoteToCommunityCatalogue(data.manifest) } catch (err) {
+      console.error('[mod] community-bee write failed:', err && err.message)
+      promoted = { ok: false, error: err && err.message }
+    }
+  }
+  return { ok: true, appKey, promoted }
+})
+
+rpc.handle(C.CMD_MOD_REJECT, async (data = {}) => {
+  await whenReady()
+  const appKey = normalizeDriveKey(String(data.appKey || data.driveKey || ''))
+  const { baseUrl, apiKey } = await getModSettings()
+  const spec = communitySubmit.manageRequest('reject', { baseUrl, apiKey, appKey })
+  if (spec.error) throw new Error(spec.error)
+  const res = await relayManageHttp(spec)
+  if (res.status === 401) throw new Error('Relay rejected the moderator API key (401).')
+  if (res.status >= 400) throw new Error('Relay reject failed (HTTP ' + res.status + ').')
+  return { ok: true, appKey }
+})
+
 // Collaborative (Autobee) catalog authoring — Rollout Phase 3. All gated by
 // the experimentalAutobeeCatalogs flag (server-side, fails closed). NOTE:
 // these deliberately do NOT pin on HiveRelay — the doc's "Do Not Do Yet"
@@ -518,12 +675,9 @@ rpc.handle(C.CMD_PUBLISH_SITE, async (data) => {
       registerHiveRelayDrive(keyHex, site?.drive)
       const connectedRelays = hiveRelay.getRelays ? hiveRelay.getRelays().length : 0
       console.log(`[publish] pinning ${keyHex.slice(0, 8)} to ${connectedRelays} HiveRelay(s)`)
-      // 0.8.5 fix (defence-in-depth): pass `discoveryKey` explicitly so
-      // relays look in the right place on the DHT. The 0.8.5 default
-      // derivation now uses keyed BLAKE2b (matching Hypercore) instead
-      // of the plain BLAKE2b that 0.4.x advertised on the wrong topic.
-      // We pass the actual `drive.discoveryKey` so we don't depend on
-      // the SDK's default — accidental wire-format drift would be silent.
+      // Pass `discoveryKey` explicitly so relays always announce the exact
+      // Hypercore/HiveRelay topic this drive uses. This avoids depending on
+      // SDK-side default derivation if the relay stack evolves again.
       const acceptances = await hiveRelay.seed(keyHex, {
         replicas: 3,
         timeout: 10000,
@@ -532,11 +686,10 @@ rpc.handle(C.CMD_PUBLISH_SITE, async (data) => {
       const acceptCount = Array.isArray(acceptances) ? acceptances.length : 0
       pin = { ok: acceptCount > 0, acceptances: acceptCount, connectedRelays, replicatedPeers: 0, replicationTimedOut: false }
 
-      // Canonical waitForDurable() API from p2p-hiverelay 0.8.5+.
-      // Returns once at least `minPeers` relays have caught up, or
-      // throws on timeout. Replaces the drive.core.peers polling
-      // fallback below (kept only as a safety net for older SDK
-      // versions encountered in the wild).
+      // Canonical waitForDurable() API from current p2p-hiverelay clients.
+      // Returns once at least `minPeers` relays have caught up, or throws on
+      // timeout. The drive.core.peers polling path below remains as a safety
+      // net for older SDKs encountered in the wild.
       if (acceptCount > 0 && typeof hiveRelay.waitForDurable === 'function') {
         try {
           console.log(`[publish] waitForDurable() available — using canonical API`)
@@ -551,8 +704,8 @@ rpc.handle(C.CMD_PUBLISH_SITE, async (data) => {
         }
       } else if (site?.drive?.core && acceptCount > 0) {
         // Legacy fallback: poll drive.core.peers for remote peers that
-        // reach remoteLength >= localLength. Only fires against pre-0.8.5
-        // SDKs that don't expose waitForDurable().
+        // reach remoteLength >= localLength. Only fires against older SDKs
+        // that don't expose waitForDurable().
         const core = site.drive.core
         const startLen = core.length
         const REPL_TIMEOUT = 30000
@@ -1414,7 +1567,7 @@ rpc.handle(C.CMD_NAME_RESOLVE, async ({ name } = {}) => {
     // Tier 2b — trusted contacts' registries (cross-user federation).
     let fed = null
     try { fed = await federatedNameResolver.resolve(name) } catch {}
-    if (fed) resolved = { name: fed.name, key: fed.key, link: null, label: fed.name, provenance: 'contact', source: fed.source, candidates: fed.candidates }
+    if (fed) resolved = { name: fed.name, key: fed.key || null, link: fed.link || null, label: fed.name, provenance: 'contact', source: fed.source, candidates: fed.candidates }
   }
   // Tier 3 — curated bootstrap floor (lowest authority).
   if (!resolved) resolved = resolveName(name, { aliases: true })
@@ -1477,13 +1630,14 @@ rpc.handle(C.CMD_NAMEREG_CLAIM, async ({ name, target } = {}) => {
   // appends a dead op. A name that normalizes to empty (all-invisible) or exceeds
   // MAX_NAME would be silently dropped by the reducer → a confusing {ok, null}.
   const { normalize } = require('./name-normalize.cjs')
-  const { MAX_NAME } = require('./name-registry-ops.cjs')
+  const { MAX_NAME, normalizeTarget } = require('./name-registry-ops.cjs')
   if (typeof name !== 'string' || !name.trim()) throw new Error('name required')
   if (name.length > MAX_NAME || !normalize(name)) throw new Error('invalid name (too long, or empty after normalization)')
-  if (typeof target !== 'string' || !/^[0-9a-f]{64}$/i.test(target)) throw new Error('target must be a 64-hex drive key')
+  const cleanTarget = normalizeTarget(target)
+  if (!cleanTarget) throw new Error('target must be a 64-hex drive key or pear://, hyper://, file:// link')
   const reg = await ensureNameRegistry({ create: true })
   const { owner, ownerSign } = nameRegSigner()
-  await reg.claim({ name, target: target.toLowerCase(), owner }, ownerSign)
+  await reg.claim({ name, target: cleanTarget.target, owner }, ownerSign)
   const resolved = await reg.resolve(name)
   // A null resolve after a well-formed claim means the reducer rejected it —
   // homograph-blocked or already held by someone else. Report it honestly.
@@ -1493,13 +1647,15 @@ rpc.handle(C.CMD_NAMEREG_CLAIM, async ({ name, target } = {}) => {
 
 rpc.handle(C.CMD_NAMEREG_ROTATE, async ({ name, target } = {}) => {
   await whenReady(); await requireNaming()
-  if (typeof target !== 'string' || !/^[0-9a-f]{64}$/i.test(target)) throw new Error('target must be a 64-hex drive key')
+  const { normalizeTarget } = require('./name-registry-ops.cjs')
+  const cleanTarget = normalizeTarget(target)
+  if (!cleanTarget) throw new Error('target must be a 64-hex drive key or pear://, hyper://, file:// link')
   const reg = requireNameRegistryCreated()
   const cur = await reg.resolve(name)
   if (!cur) throw new Error('You don\'t hold that name (claim it first).')
   const { owner, ownerSign } = nameRegSigner()
   if (cur.owner !== owner) throw new Error('You don\'t own that name.')
-  await reg.rotate({ name, target: target.toLowerCase(), owner, version: cur.version + 1 }, ownerSign)
+  await reg.rotate({ name, target: cleanTarget.target, owner, version: cur.version + 1 }, ownerSign)
   return { ok: true, resolved: await reg.resolve(name) }
 })
 
@@ -1605,7 +1761,11 @@ rpc.handle(C.CMD_NOSTR_BIND, async () => {
 })
 rpc.handle(C.CMD_NOSTR_REVOKE, async () => {
   await whenReady()
-  return requireNostrIdentity().revoke()
+  const state = await requireNostrIdentity().revoke()
+  // Re-advertise after unlinking so contacts stop trusting the last published
+  // nostrBind instead of waiting for an unrelated future binding refresh.
+  if (identityBindingPublisher) identityBindingPublisher.publish().catch(() => {})
+  return state
 })
 
 // --- Nostr event store (Phase 2) — author + read your own NIP-01 events --------
@@ -1645,16 +1805,25 @@ async function _ensureNostrEventStoreImpl ({ create = false } = {}) {
 rpc.handle(C.CMD_NOSTR_PUBLISH, async ({ kind, content, tags, created_at } = {}) => {
   await whenReady()
   const id = requireIdentity()
+  const { MAX_CONTENT, MAX_TAGS, MAX_EVENT_BYTES } = require('./nostr-events-ops.cjs')
   if (!Number.isInteger(kind) || kind < 0) throw new Error('kind must be a non-negative integer')
   if (typeof content !== 'string') throw new Error('content must be a string')
+  if (content.length > MAX_CONTENT) throw new Error('content is too large')
   const safeTags = Array.isArray(tags)
-    ? tags.filter((t) => Array.isArray(t) && t.every((x) => typeof x === 'string')).slice(0, 2000)
+    ? tags.filter((t) => Array.isArray(t) && t.every((x) => typeof x === 'string')).slice(0, MAX_TAGS)
     : []
   const nowSec = Math.floor(Date.now() / 1000)
   const ts = Number.isInteger(created_at) && created_at > 0 ? created_at : nowSec
   // reject a future-dated note (anti-spam: keeps your own + contacts' feeds honest
   // once events become contact-replicable; the reducer itself stays clock-free)
   if (ts > nowSec + 900) throw new Error('created_at is too far in the future')
+  try {
+    const draft = { id: '0'.repeat(64), pubkey: id.getNostrPublicKey(), created_at: ts, kind, tags: safeTags, content, sig: '0'.repeat(128) }
+    if (JSON.stringify(draft).length > MAX_EVENT_BYTES) throw new Error('event is too large')
+  } catch (err) {
+    if (err && err.message === 'event is too large') throw err
+    throw new Error('event could not be serialized')
+  }
   const ev = id.nostrSignEvent({ kind, created_at: ts, tags: safeTags, content })
   const { verifyEvent } = require('./nostr-events-apply.cjs')
   if (!verifyEvent(ev).ok) throw new Error('event failed NIP-01 validation (content/tags too large?)')
@@ -2109,6 +2278,21 @@ async function boot () {
   try { await contacts.ready(); console.log('Contacts ready') }
   catch (err) { console.error('Contacts init failed:', err && err.message); contacts = null }
 
+  // NOSTR2 Phase 1 — local cross-curve binding state (npub + attested epoch),
+  // persisted in the PersonalIndex meta namespace. Initialize this before the
+  // Lighthouse binding publisher so boot-time advertisements include any
+  // previously linked Nostr binding.
+  if (personalIndex && identity) {
+    try {
+      const { NostrBindingStore } = require('./nostr-binding-store.cjs')
+      nostrBindingStore = await new NostrBindingStore({ identity, personalIndex }).ready()
+      console.log('NostrBindingStore ready')
+    } catch (err) {
+      console.error('NostrBindingStore init failed:', err && err.message)
+      nostrBindingStore = null
+    }
+  }
+
   // Lighthouse Phase 2 — publish our self-certifying IdentityBinding (root →
   // rotatable search subkey) to the DHT + personal index, so trusted peers can
   // resolve and verify our search postings. Best-effort; never blocks boot.
@@ -2120,10 +2304,11 @@ async function boot () {
         identity, personalIndex, contacts, dht: swarm && swarm.dht,
         // advertise our name-registry key (if created) so contacts can resolve our names
         getNameRegKey: async () => { try { return (await requireUserData().getSettings()).nameRegKey || null } catch { return null } },
-        // Nostr Phase 3: advertise our event-store key + our LINKED nostr-bind so
-        // contacts can replicate + author-verify our notes.
+        // Nostr Phase 3: advertise our event-store key plus current nostr-bind
+        // and revocations so contacts can classify linked/revoked/stale authors.
         getNostrEventKey: async () => { try { return (await requireUserData().getSettings()).nostrEventKey || null } catch { return null } },
-        getNostrBind: async () => { try { const st = nostrBindingStore ? await nostrBindingStore.getState() : null; return (st && st.linked) ? st.binding : null } catch { return null } },
+        getNostrBind: async () => { try { const st = nostrBindingStore ? await nostrBindingStore.getState() : null; return st ? st.binding : null } catch { return null } },
+        getNostrRevocations: async () => { try { return nostrBindingStore ? await nostrBindingStore.getRevocations() : [] } catch { return [] } },
       }).ready()
       identityBindingPublisher.publish().catch((e) => console.error('[binding] publish failed:', e && e.message))
       console.log('IdentityBindingPublisher ready')
@@ -2165,9 +2350,8 @@ async function boot () {
     }
   }
 
-  // NOSTR2 Phase 1 — local cross-curve binding state (npub + attested epoch),
-  // persisted in the PersonalIndex meta namespace. Best-effort; never blocks boot.
-  if (personalIndex && identity) {
+  // Retry Nostr binding setup if the early pre-publisher init failed.
+  if (personalIndex && identity && !nostrBindingStore) {
     try {
       const { NostrBindingStore } = require('./nostr-binding-store.cjs')
       nostrBindingStore = await new NostrBindingStore({ identity, personalIndex }).ready()
@@ -2359,36 +2543,40 @@ async function ensureDevCatalogue () {
   await sc.open(null)
   await sc.join('pearbrowser')
   await sc.update()
-  // Clean up any duplicate rows from earlier boots that seeded before the
-  // idempotent guard existed (dedup by name + link/driveKey, keep the first).
+  // Reconcile the room to EXACTLY mirror SEED_APPS by CONTENT (not just identity)
+  // so field edits — newly-added inline icons, changed links — actually take
+  // effect, and stale/duplicate rows from older boots can't accrete. Earlier
+  // identity-only add/prune missed content changes (icon-less rows persisted).
+  // Gated on a content signature so a room that already matches is left untouched
+  // (no append churn); when it differs we wipe + reseed the whole set.
   let existing = await sc.listApps()
-  const seen = new Set()
-  let removed = 0
-  for (const app of existing) {
-    const k = (app.name || '') + '|' + (app.link || app.driveKey || '')
-    if (seen.has(k)) { try { await sc.deleteApp(app.id); removed++ } catch {} } else seen.add(k)
-  }
-  if (removed) {
-    await sc.update()
-    await new Promise((r) => setTimeout(r, 200))
-    existing = await sc.listApps()
-    console.log('[dev-catalogue] removed ' + removed + ' duplicate rows')
-  }
-  // Idempotent: the room key is stable per store, so only seed an empty room —
-  // otherwise every boot would append duplicate rows.
-  if (existing.length === 0) {
+  const sig = JSON.stringify(SEED_APPS.map((a) => [
+    a.name || '', a.type || '', a.driveKey || '', a.link || '', a.iconData || '',
+    a.author || '', a.description || '', a.verification || '',
+    (Array.isArray(a.categories) ? a.categories : []).join(',')
+  ]))
+  let storedSig = null
+  try { const s = await requireUserData().getSettings(); storedSig = s && s.devCatalogueSig } catch {}
+  if (storedSig === sig && existing.length === SEED_APPS.length) {
+    console.log('[dev-catalogue] up to date (' + existing.length + ' apps)')
+  } else {
+    for (const row of existing) { try { await sc.deleteApp(row.id) } catch {} }
+    if (existing.length) { await sc.update(); await new Promise((r) => setTimeout(r, 200)) }
     const base = Date.now()
+    let added = 0
     for (let i = 0; i < SEED_APPS.length; i++) {
       const ts = base - (SEED_APPS.length - i) * 1000
-      try { await sc.addApp({ ...SEED_APPS[i], publishedAt: ts }, ts) } catch (e) {
+      try { await sc.addApp({ ...SEED_APPS[i], publishedAt: ts }, ts); added++ } catch (e) {
         console.error('[dev-catalogue] seed', SEED_APPS[i].name, e && e.message)
       }
     }
     await sc.update()
     await new Promise((r) => setTimeout(r, 300))
+    try { await requireUserData().setSettings({ devCatalogueSig: sig }) } catch {}
+    console.log('[dev-catalogue] reseeded ' + added + '/' + SEED_APPS.length + ' apps (content changed)')
   }
   const link = await catalogManager.registerSheetsCatalog(sc, 'PearBrowser Apps')
-  console.log('[dev-catalogue] ' + (existing.length ? 'loaded ' + existing.length : 'seeded ' + SEED_APPS.length) + ' apps; sheets://' + link)
+  console.log('[dev-catalogue] registered ' + (await sc.listApps()).length + ' apps; sheets://' + link)
   try { await pinDriveBestEffort(sc.keyHex(), sc.discoveryKey()) } catch {}
 }
 

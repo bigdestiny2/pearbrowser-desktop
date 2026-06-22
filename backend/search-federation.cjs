@@ -117,6 +117,7 @@ function resourceRowToCandidate (row, tf = 1) {
   return {
     docId: sc.docIdFor(driveKey, path),
     driveKey,
+    link: j.link || null,
     path,
     title: j.name || driveKey,
     tf,

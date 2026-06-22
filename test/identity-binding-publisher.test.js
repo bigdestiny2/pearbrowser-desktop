@@ -68,7 +68,7 @@ function fakeDHT () {
   }
 }
 
-async function withPublisher (fn) {
+async function withPublisher (fn, opts = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'binding-pub-'))
   const store = new Corestore(dir)
   await store.ready()
@@ -76,7 +76,7 @@ async function withPublisher (fn) {
   const identity = fakeIdentity()
   const contacts = fakeContacts()
   const dht = fakeDHT()
-  const pub = await new IdentityBindingPublisher({ ib, identity, personalIndex, contacts, dht }).ready()
+  const pub = await new IdentityBindingPublisher({ ib, identity, personalIndex, contacts, dht, ...opts }).ready()
   try { return await fn({ pub, identity, contacts, dht, personalIndex }) }
   finally { await personalIndex.close(); await store.close(); await rm(dir, { recursive: true, force: true }) }
 }
@@ -100,7 +100,7 @@ test('publish() writes a DHT mutable record resolvable to the same key', async (
     const res = await pub.publish()
     const got = await dht.mutableGet(b4a.from(res.dhtPubkey, 'hex'))
     assert.ok(got)
-    assert.equal(got.seq, res.version)
+    assert.equal(got.seq, res.dhtSeq)
     const rec = JSON.parse(b4a.toString(got.value, 'utf-8'))
     assert.equal(rec.kind, 'binding')
     assert.equal(rec.searchPubkey, res.searchPubkey)
@@ -116,6 +116,27 @@ test('publish() is idempotent without rotate (no version churn across boots)', a
     assert.equal(a.version, 1)
     assert.equal(b.version, 1) // re-publish, not re-version
     assert.equal(a.searchPubkey, b.searchPubkey)
+    assert.ok(b.dhtSeq > a.dhtSeq) // wrapper metadata can still refresh
+  })
+})
+
+test('publish() refreshes wrapper metadata without rotating the search binding', async () => {
+  let currentNostrBind = null
+  let currentNostrRevocations = []
+  await withPublisher(async ({ pub, identity, contacts }) => {
+    contacts._add(identity.rootHex)
+    const a = await pub.publish()
+    currentNostrBind = { kind: 'nostr-bind', marker: 'linked' }
+    currentNostrRevocations = [{ kind: 'nostr-revoke', marker: 'revoked' }]
+    const b = await pub.publish()
+    assert.equal(b.version, a.version)
+    assert.ok(b.dhtSeq > a.dhtSeq)
+    const got = await pub.resolve({ contactPubkey: identity.rootHex, dhtPubkey: b.dhtPubkey })
+    assert.deepEqual(got.nostrBind, currentNostrBind)
+    assert.deepEqual(got.nostrRevocations, currentNostrRevocations)
+  }, {
+    getNostrBind: async () => currentNostrBind,
+    getNostrRevocations: async () => currentNostrRevocations,
   })
 })
 

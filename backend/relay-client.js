@@ -6,15 +6,20 @@
  */
 
 const http = require('bare-http1')
+const b4a = require('b4a')
 const { getUserFriendlyError } = require('./hyper-proxy')
 const { mergeRelayDirectory } = require('./relay-directory')
 const { resolveBootstrapRelays } = require('./relay-record')
+
+const ENV = (typeof Bare !== 'undefined' && Bare.env) ||
+  (typeof process !== 'undefined' && process.env) || {}
 
 class RelayClient {
   constructor (opts = {}) {
     this.relays = opts.relays || ['http://127.0.0.1:9100']
     this.timeout = opts.timeout || 5000
     this.enabled = opts.enabled !== false // default on; explicit false disables hybrid fetch
+    this.apiKey = opts.apiKey || ENV.HIVE_RELAY_API_KEY || null
     this._stats = { hits: 0, misses: 0, errors: 0 }
 
     // Circuit breaker state per relay
@@ -196,25 +201,54 @@ class RelayClient {
   }
 
   async requestSeed (keyHex) {
+    if (!keyHex || typeof keyHex !== 'string') {
+      return { ok: false, error: 'requestSeed requires a hex app key' }
+    }
+
+    const headers = { 'Content-Type': 'application/json' }
+    if (this.apiKey) {
+      headers.Authorization = `Bearer ${this.apiKey}`
+      headers['x-api-key'] = this.apiKey
+    }
+
+    const body = JSON.stringify({ appKey: keyHex })
+    let lastError = 'no relays available'
+    let lastStatus = 0
+    let lastRelay = null
+
     for (const relayUrl of this.relays) {
       // Skip if circuit is open
-      if (!this._checkCircuit(relayUrl)) continue
+      if (!this._checkCircuit(relayUrl)) {
+        lastError = 'circuit open'
+        lastRelay = relayUrl
+        continue
+      }
 
+      lastRelay = relayUrl
       try {
         const result = await this._httpPost(
-          `${relayUrl}/v1/seed`,
-          JSON.stringify({ key: keyHex }),
-          5000
+          `${relayUrl}/seed`,
+          body,
+          5000,
+          headers
         )
-        if (result.status === 200) {
+        if (result.status >= 200 && result.status < 300) {
           this._recordSuccess(relayUrl)
           return { ok: true, relay: relayUrl }
         }
-      } catch {
+
         this._recordFailure(relayUrl)
+        lastStatus = result.status
+        const detail = result.body && result.body.length
+          ? b4a.toString(result.body, 'utf8').slice(0, 200)
+          : ''
+        lastError = `relay returned HTTP ${result.status}${detail ? `: ${detail}` : ''}`
+      } catch (err) {
+        this._recordFailure(relayUrl)
+        lastError = err && err.message ? err.message : String(err)
       }
     }
-    return { ok: false }
+    return { ok: false, error: lastError, status: lastStatus, relay: lastRelay }
   }
 
   /**
@@ -256,7 +290,7 @@ class RelayClient {
   /**
    * HTTP POST using bare-http1
    */
-  _httpPost (url, body, timeout) {
+  _httpPost (url, body, timeout, headers = { 'Content-Type': 'application/json' }) {
     return new Promise((resolve, reject) => {
       const parsed = new URL(url)
       const timer = setTimeout(() => reject(new Error(getUserFriendlyError('Timeout'))), timeout)
@@ -265,8 +299,8 @@ class RelayClient {
         method: 'POST',
         hostname: parsed.hostname,
         port: parseInt(parsed.port) || 80,
-        path: parsed.pathname,
-        headers: { 'Content-Type': 'application/json' }
+        path: parsed.pathname + parsed.search,
+        headers
       }, (res) => {
         const chunks = []
         res.on('data', (chunk) => chunks.push(chunk))

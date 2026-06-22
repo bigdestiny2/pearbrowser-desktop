@@ -66,9 +66,10 @@ test('mergeFederated dedup winner is independent of source order (deterministic)
 })
 
 test('resourceRowToCandidate maps a descriptor row to a ranking candidate', () => {
-  const c = resourceRowToCandidate({ json: { name: 'Keet', driveKey: 'dk', path: '/' }, memberkey: 'mk' }, 3)
+  const c = resourceRowToCandidate({ json: { name: 'Keet', driveKey: 'dk', link: 'pear://keet', path: '/' }, memberkey: 'mk' }, 3)
   assert.equal(c.title, 'Keet')
   assert.equal(c.driveKey, 'dk')
+  assert.equal(c.link, 'pear://keet')
   assert.equal(c.tf, 3)
   assert.equal(c.signerPubkey, 'mk')
   assert.match(c.docId, /^[0-9a-f]{16}$/)

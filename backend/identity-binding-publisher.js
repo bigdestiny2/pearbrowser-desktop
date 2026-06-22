@@ -26,6 +26,7 @@ const cmp = require('./search-completeness.cjs')
 const SEARCH_KEY_META = 'searchkey'
 const BINDING_META = 'binding'
 const BINDING_VERSION_META = 'bindingVersion'
+const DHT_SEQ_META = 'bindingDhtSeq'
 // stable per-user key for the binding's DHT mutable record
 const DHT_BINDING_NAMESPACE = 'lighthouse-binding'
 // per-app signing domain for search postings (mirrors PersonalIndex sign hook
@@ -33,7 +34,7 @@ const DHT_BINDING_NAMESPACE = 'lighthouse-binding'
 const DOC_NAMESPACE = 'lighthouse-doc-v2'
 
 class IdentityBindingPublisher {
-  constructor ({ ib, identity, personalIndex, contacts, dht, log, getNameRegKey, getNostrEventKey, getNostrBind } = {}) {
+  constructor ({ ib, identity, personalIndex, contacts, dht, log, getNameRegKey, getNostrEventKey, getNostrBind, getNostrRevocations } = {}) {
     if (!ib) throw new Error('IdentityBindingPublisher requires ib (identity-binding.cjs)')
     if (!identity) throw new Error('IdentityBindingPublisher requires identity')
     if (!personalIndex) throw new Error('IdentityBindingPublisher requires personalIndex')
@@ -47,10 +48,11 @@ class IdentityBindingPublisher {
     // advertised alongside the search binding so contacts resolve it for free.
     this.getNameRegKey = typeof getNameRegKey === 'function' ? getNameRegKey : null
     // Nostr Phase 3 federation: the user's event-store bootstrap key + their
-    // current (linked) nostr-bind record, so a contact can replicate the event
-    // log AND verify which secp256k1 author key is attested to this root.
+    // current nostr-bind record + revocation history, so a contact can replicate
+    // the event log AND verify whether a secp256k1 author key is linked/revoked.
     this.getNostrEventKey = typeof getNostrEventKey === 'function' ? getNostrEventKey : null
     this.getNostrBind = typeof getNostrBind === 'function' ? getNostrBind : null
+    this.getNostrRevocations = typeof getNostrRevocations === 'function' ? getNostrRevocations : null
     this._searchKp = null // cached bound search keypair (Buffers), loaded in ready()
   }
 
@@ -111,6 +113,12 @@ class IdentityBindingPublisher {
 
   async _currentVersion () { return this.personalIndex.getMeta(BINDING_VERSION_META, 0) }
   async getCurrentBinding () { return this.personalIndex.getMeta(BINDING_META, null) }
+  async _nextDhtSeq () {
+    const current = await this.personalIndex.getMeta(DHT_SEQ_META, 0)
+    const next = (Number.isInteger(current) && current >= 0 ? current : 0) + 1
+    await this.personalIndex.putMeta(DHT_SEQ_META, next)
+    return next
+  }
 
   /**
    * Publish (or refresh) the binding for the user's current search key.
@@ -177,20 +185,37 @@ class IdentityBindingPublisher {
     // N5 federation: the user's name-registry bootstrap key (so a contact who
     // resolves this binding can replicate + resolve the user's name claims).
     const nameRegKey = this.getNameRegKey ? await this.getNameRegKey().catch(() => null) : null
-    // Nostr Phase 3: the user's event-store key + linked nostr-bind record.
+    // Nostr Phase 3: the user's event-store key + current nostr-bind record and
+    // any root-signed revocations. Consumers re-verify all records against the
+    // Contacts-held root before trusting or classifying author keys.
     const nostrEventKey = this.getNostrEventKey ? await this.getNostrEventKey().catch(() => null) : null
     const nostrBind = this.getNostrBind ? await this.getNostrBind().catch(() => null) : null
+    const nostrRevocations = this.getNostrRevocations ? await this.getNostrRevocations().catch(() => []) : []
 
     let dhtPubkey = null
+    let dhtSeq = null
     if (this.dht) {
       const dhtKp = this.identity.getAppKeypair(DHT_BINDING_NAMESPACE)
       dhtPubkey = b4a.toString(dhtKp.publicKey, 'hex')
-      const value = b4a.from(JSON.stringify({ ...binding, dhtPubkey, indexKey, anchor, digest, nameRegKey, nostrEventKey, nostrBind }), 'utf-8')
-      // REAL hyperdht signature: mutablePut(keyPair, value, { seq })
-      await this.dht.mutablePut(dhtKp, value, { seq: version })
+      const value = b4a.from(JSON.stringify({
+        ...binding,
+        dhtPubkey,
+        indexKey,
+        anchor,
+        digest,
+        nameRegKey,
+        nostrEventKey,
+        nostrBind,
+        nostrRevocations: Array.isArray(nostrRevocations) ? nostrRevocations : [],
+      }), 'utf-8')
+      // REAL hyperdht signature: mutablePut(keyPair, value, { seq }). The DHT
+      // sequence is wrapper-level, not search-key version-level: name registry,
+      // digest, and Nostr metadata can refresh without rotating the search key.
+      dhtSeq = await this._nextDhtSeq()
+      await this.dht.mutablePut(dhtKp, value, { seq: dhtSeq })
     }
     this.log('[binding] published v' + version + ' search=' + binding.searchPubkey.slice(0, 12) + '…')
-    return { searchPubkey: binding.searchPubkey, version, dhtPubkey, indexKey, anchor, digest }
+    return { searchPubkey: binding.searchPubkey, version, dhtPubkey, dhtSeq, indexKey, anchor, digest }
   }
 
   async _makeAnchor (rootHex, indexKey) {
@@ -232,9 +257,10 @@ class IdentityBindingPublisher {
       digest: rec.digest && typeof rec.digest === 'object' ? rec.digest : null,
       nameRegKey: (typeof rec.nameRegKey === 'string' && /^[0-9a-f]{64}$/i.test(rec.nameRegKey)) ? rec.nameRegKey.toLowerCase() : null,
       nostrEventKey: (typeof rec.nostrEventKey === 'string' && /^[0-9a-f]{64}$/i.test(rec.nostrEventKey)) ? rec.nostrEventKey.toLowerCase() : null,
-      // the nostr-bind record is re-verified against the contact's root by the
-      // consumer (resolveNostrBind), so passing it through untrusted is safe.
+      // the nostr-bind/revocation records are re-verified against the contact's
+      // root by the consumer, so passing them through untrusted is safe.
       nostrBind: (rec.nostrBind && typeof rec.nostrBind === 'object') ? rec.nostrBind : null,
+      nostrRevocations: Array.isArray(rec.nostrRevocations) ? rec.nostrRevocations.filter((r) => r && typeof r === 'object') : [],
     }
   }
 }
