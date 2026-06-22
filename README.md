@@ -4,7 +4,7 @@ A peer-to-peer browser, app store, and site publisher for macOS, Windows, and Li
 
 **No accounts. No DNS. No servers.** Sites are Hyperdrives, addressed by public key, pinned 24/7 on the [HiveRelay](https://github.com/bigdestiny2/P2P-Hiverelay) backbone. The publisher's laptop being offline doesn't matter — the relays carry the bytes.
 
-**Current release:** `v0.4.5` · production length `5440` · pinned on 5+ relays · 365-day TTL · HiveRelay backbone `v0.8.12`.
+**Current release:** `v0.4.5` · production length `5440` · pinned on 5+ relays · 365-day TTL · desktop packages pinned to local [`00-core/hiverelay`](/Users/localllm/Projects/pear-ecosystem/00-core/hiverelay) with runtime docs targeting the live `0.19.x` relay contract.
 
 ## Run it
 
@@ -33,15 +33,16 @@ One install, one key, works on all three desktop platforms — Pear downloads th
 - Load a decentralized catalog Hyperdrive → install / launch / uninstall apps
 - Keep multiple catalogs loaded at once with search, category, and source filters across the aggregated app store
 - **My Catalog:** create a writable personal catalog, add apps from loaded catalogs or installed apps, rename it, edit saved metadata (name, description, version, author, categories), and share the catalog key; copies opened without the writer key stay read-only
-- Default catalog auto-loads on first Apps-tab visit (`hyper://0c35d12fd9b1…/` — featuring PearBrowser, HiveRelay, P2P Builders)
+- Default catalog auto-loads on first Apps-tab visit (the "PearBrowser Network" Hyperbee `hyperbee://f5fb7500bccd…` — PearBrowser, HiveRelay, P2P Builders, Pear Dealroom, Paste, PearPoker, Keet, PearPass, anonGPT, Pear POS, Pear Tickets, HiveWorm), generated from a single source manifest and mirrored into the offline seed
 - Featured apps: **Keet** · **PearPass** · **[HiveWorm](https://github.com/bigdestiny2/hiveworm)** (a multiplayer life-sim that uses `window.pear.swarm.v1` directly)
 
 ### Publish (P2P Sites)
 - Block editor: heading, paragraph, image, link, list, quote, code, raw HTML/CSS/JS, divider
 - One-click publish + auto-pin to HiveRelay
 - Replication confirmation — the editor only reports "published" after `waitForDurable()` confirms at least one relay has actually replicated the drive
-- Drive identified by keyed-BLAKE2b discoveryKey (fixed in HiveRelay 0.8.0; we ship `0.8.12`)
+- Drive identified by the current Hypercore/HiveRelay `discoveryKey` contract
 - Ed25519-signed unseed for revocation
+- Relay-aware publishing: HTTP `/seed`, capability docs at `/.well-known/hiverelay.json`, signed `catalogBeeKey` catalogs when advertised, and optional `indexRoom` discovery for richer directory hydration
 
 ### Library
 - Bookmarks + history stored in a local Hyperbee (private, local-only by default)
@@ -67,7 +68,7 @@ One install, one key, works on all three desktop platforms — Pear downloads th
 - **Identity:** public key, Backup Phrase, Restore from phrase
 - **Profile:** display name, bio, avatar URL, website, email — opt-in fields apps see when you grant a login
 - **Connected Apps:** per-app login grants list, revoke individually or all
-- **Relays:** add / remove / mark-primary URLs · toggle hybrid-fetch vs pure-P2P · live capability advertisement pills showing version + region + transports (`hyperswarm` · `dht-relay-ws`)
+- **Relays:** add / remove / mark-primary URLs · toggle hybrid-fetch vs pure-P2P · live capability advertisement pills showing version + region + transports (`hyperswarm` · `dht-relay-ws`) from `/.well-known/hiverelay.json`
 - **Storage:** path, usage, clear cache, reset data (signed-unseed every pinned site first)
 
 ## Architecture
@@ -82,7 +83,7 @@ One install, one key, works on all three desktop platforms — Pear downloads th
                              ▼
 ┌──────────────────────────────────────────────────────────┐
 │  Bare main process                                       │
-│  ├── HiveRelayClient        (Protomux, signed seed/unseed, 0.8.12)
+│  ├── HiveRelayClient        (Protomux, signed seed/unseed, 0.19-target contract)
 │  ├── Hyperswarm             (HyperDHT + UDX)
 │  ├── Corestore              (auto-managed primaryKey, decoupled from identity)
 │  ├── Hyperdrive             (per-site namespace)
@@ -153,7 +154,7 @@ Code signing is per-platform:
 |---|---|
 | [`bigdestiny2/hyper-fetch`](https://github.com/bigdestiny2/hyper-fetch) | ~5 KB JS library — read `hyper://` drives from any browser via the HiveRelay HTTP gateway. Pair with PearBrowser to embed hyper:// content in regular web pages. |
 | [`bigdestiny2/hiveworm`](https://github.com/bigdestiny2/hiveworm) | Featured multiplayer life-sim. Uses `window.pear.swarm.v1` for direct peer gossip. Live at `pear://d1xbkcpc…`. |
-| [`bigdestiny2/P2P-Hiverelay`](https://github.com/bigdestiny2/P2P-Hiverelay) | The always-on relay backbone keeping the whole network alive (`v0.8.12`). |
+| [`bigdestiny2/P2P-Hiverelay`](https://github.com/bigdestiny2/P2P-Hiverelay) | The always-on relay backbone keeping the whole network alive (targeting the live `0.19.x` contract surface). |
 | [`bigdestiny2/PearBrowser`](https://github.com/bigdestiny2/PearBrowser) | Mobile-focused sibling — iOS / Android port. Bare-kit-based. |
 
 ## Credits
