@@ -74,7 +74,7 @@ module.exports = {
     {
       "name": "Paste",
       "type": "standalone",
-      "driveKey": "4b41b1c1986b2c70ff8f5a374551ddd6820768a50f47036a26729d5a6d001fa3",
+      "driveKey": "25a06bb3dddec8138e9eda606cc4a11e9ebbe47815fd5d22064b30cff752bb5b",
       "link": "pear://qnax5k8ojtod51ci9qwkrawdof1hx5w3a7gqbueoqnzzq9dw5hfo",
       "iconData": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMwYTBkMTIiLz48cmVjdCB4PSIxOCIgeT0iMTYiIHdpZHRoPSIyOCIgaGVpZ2h0PSIzNCIgcng9IjQiIGZpbGw9IiM0YWRlODAiLz48cmVjdCB4PSIyNSIgeT0iMTEiIHdpZHRoPSIxNCIgaGVpZ2h0PSI5IiByeD0iMi41IiBmaWxsPSIjNGFkZTgwIiBzdHJva2U9IiMwYTBkMTIiIHN0cm9rZS13aWR0aD0iMiIvPjxnIHN0cm9rZT0iIzBhMGQxMiIgc3Ryb2tlLXdpZHRoPSIyLjYiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCI+PHBhdGggZD0iTTI0IDMwaDE2TTI0IDM2aDE2TTI0IDQyaDEwIi8+PC9nPjwvc3ZnPg==",
       "author": "defidon",
