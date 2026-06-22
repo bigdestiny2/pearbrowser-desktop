@@ -15,7 +15,7 @@ const SAMPLE = {
   version: 1,
   apps: [
     { id: 'keet', name: 'Keet', description: 'P2P chat', link: 'pear://keetkey', categories: ['chat'], author: 'Holepunch' },
-    { id: 'pearpass', name: 'PearPass', driveKey: 'abc123', version: '2.0' }
+    { id: 'pearpass', name: 'PearPass', driveKey: 'a'.repeat(64), version: '2.0' }
   ]
 }
 
@@ -32,9 +32,16 @@ test('normalizeManifest cleans input and applies defaults', () => {
 
 test('normalizeManifest rejects bad input', () => {
   assert.throws(() => normalizeManifest(null), /JSON object/)
-  assert.throws(() => normalizeManifest({ apps: [] }), /no apps/)
+  assert.throws(() => normalizeManifest({}), /apps must be an array/)
+  assert.throws(() => normalizeManifest({ apps: 'nope' }), /apps must be an array/)
   assert.throws(() => normalizeManifest({ apps: [{}] }), /needs an id/)
-  assert.throws(() => normalizeManifest({ apps: [{ id: 'x' }, { id: 'x' }] }), /duplicate app id/)
+  assert.throws(() => normalizeManifest({ apps: [{ id: 'x', link: 'pear://one' }, { id: 'x', link: 'pear://two' }] }), /duplicate app id/)
+})
+
+test('normalizeManifest allows an explicitly empty community catalog', () => {
+  const n = normalizeManifest({ name: 'Community', apps: [] })
+  assert.equal(n.name, 'Community')
+  assert.equal(n.apps.length, 0)
 })
 
 test('derives an id from driveKey/link when id is absent', () => {
@@ -69,7 +76,7 @@ test('round-trips through a real Hyperbee using the loader query', async () => {
     const byId = Object.fromEntries(data.apps.map((a) => [a.id, a]))
     assert.equal(byId.keet.name, 'Keet')
     assert.equal(byId.keet.link, 'pear://keetkey')
-    assert.equal(byId.pearpass.driveKey, 'abc123')
+    assert.equal(byId.pearpass.driveKey, 'a'.repeat(64))
 
     await store.close()
   } finally {

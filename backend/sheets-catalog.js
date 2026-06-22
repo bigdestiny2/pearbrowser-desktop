@@ -18,6 +18,7 @@
  */
 const z32 = require('z32')
 const b4a = require('b4a')
+const { normalizeCatalogApp } = require('./catalog-safety.cjs')
 
 // The canonical `apps` schema (design §4.1). Created on a fresh room; carries
 // both driveKey (installable) and link (launch-only), plus the run-in-tab type.
@@ -29,6 +30,7 @@ const APPS_SCHEMA = {
     description: { type: 'string', maxLength: 1000 },
     driveKey: { type: 'string', pattern: '^[0-9a-f]{64}$' },
     link: { type: 'string', maxLength: 300 },
+    iconData: { type: 'string', maxLength: 20000 },
     type: { enum: ['standalone', 'hypersite'] },
     author: { type: 'string', maxLength: 200 },
     categories: { type: 'array', items: { type: 'string', maxLength: 60 }, maxItems: 12 },
@@ -103,7 +105,7 @@ function rowToApp (row) {
   if (!row || typeof row.json !== 'object' || row.json === null) return null
   const j = row.json
   const mk = row.memberkey
-  return {
+  return normalizeCatalogApp({
     id: row.uuid,
     name: j.name,
     description: j.description,
@@ -114,9 +116,10 @@ function rowToApp (row) {
     categories: Array.isArray(j.categories) ? j.categories : [],
     version: j.version || null,
     icon: j.iconRef || null,
+    iconData: j.iconData || null,
     verification: j.verification || 'unverified',
     publisherKey: mk ? (b4a.isBuffer(mk) ? b4a.toString(mk, 'hex') : String(mk)) : null
-  }
+  }, { source: 'sheets' })
 }
 
 class SheetsCatalog {

@@ -21,6 +21,8 @@ const OP_ADD_WRITER = 'writer.add'
 const MAX_OP_BYTES = 16 * 1024
 const MAX_STR = 4096
 const MAX_CATEGORIES = 32
+const HEX64_RE = /^[0-9a-f]{64}$/i
+const APP_LINK_RE = /^(?:pear|file):\/\/.+/i
 
 const APP_STRING_FIELDS = ['id', 'name', 'description', 'driveKey', 'link', 'version', 'author']
 const UNSAFE_KEYS = new Set(['__proto__', 'prototype', 'constructor'])
@@ -49,7 +51,17 @@ function opByteLength (op) {
 function sanitizeApp (app) {
   const out = {}
   const src = (app && typeof app === 'object') ? app : {}
-  for (const field of APP_STRING_FIELDS) out[field] = clampStr(src[field])
+  for (const field of APP_STRING_FIELDS) {
+    if (field === 'driveKey') {
+      const key = clampStr(src[field], 64).trim()
+      out[field] = HEX64_RE.test(key) ? key.toLowerCase() : ''
+    } else if (field === 'link') {
+      const link = clampStr(src[field]).trim()
+      out[field] = APP_LINK_RE.test(link) ? link : ''
+    } else {
+      out[field] = clampStr(src[field])
+    }
+  }
   const cats = Array.isArray(src.categories) ? src.categories : []
   out.categories = cats.filter((c) => typeof c === 'string').slice(0, MAX_CATEGORIES).map((c) => clampStr(c, 128))
   return out
@@ -104,8 +116,12 @@ function validateOp (op) {
       const id = String(op.id || '').trim()
       if (!id) return { ok: false, retain: false, reason: 'upsert-needs-id' }
       if (String(op.app.id || '').trim() !== id) return { ok: false, retain: false, reason: 'id-mismatch' }
-      if (!String(op.app.driveKey || '').trim() && !String(op.app.link || '').trim()) {
-        return { ok: false, retain: false, reason: 'missing-drivekey' }
+      const driveKey = String(op.app.driveKey || '').trim()
+      const link = String(op.app.link || '').trim()
+      if (driveKey && !HEX64_RE.test(driveKey)) return { ok: false, retain: false, reason: 'bad-drivekey' }
+      if (link && !APP_LINK_RE.test(link)) return { ok: false, retain: false, reason: 'bad-link' }
+      if (!driveKey && !link) {
+        return { ok: false, retain: false, reason: 'missing-app-target' }
       }
       return { ok: true }
     }

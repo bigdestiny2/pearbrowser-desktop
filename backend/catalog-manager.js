@@ -10,6 +10,13 @@
 const Hyperdrive = require('hyperdrive')
 const Hyperbee = require('hyperbee')
 const { getUserFriendlyError } = require('./hyper-proxy')
+const {
+  aggregateCatalogApps,
+  normalizeCatalogApp,
+  normalizeCatalogData,
+  safeJSONParse,
+  searchAppsList
+} = require('./catalog-safety.cjs')
 
 class CatalogManager {
   constructor (store, swarm) {
@@ -43,7 +50,7 @@ class CatalogManager {
     if (!catalogBuf) throw new Error(getUserFriendlyError('No catalog.json found'))
 
     // SECURITY: Parse JSON with prototype pollution protection
-    const data = this._safeJSONParse(catalogBuf.toString())
+    const data = normalizeCatalogData(this._safeJSONParse(catalogBuf.toString()))
 
     // Load icons for each app
     if (data.apps) {
@@ -89,7 +96,7 @@ class CatalogManager {
       const sc = new SheetsCatalog(this.store, this.swarm)
       await sc.open(link)
       const apps = await sc.listApps()
-      const data = { version: 1, name: 'Sheets Catalogue', apps, writable: false, link: sc.link() }
+      const data = normalizeCatalogData({ version: 1, name: 'Sheets Catalogue', apps, writable: false, link: sc.link() }, { source: 'sheets' })
       this.catalogs.set(cacheKey, { sheets: sc, data, lastRefresh: Date.now(), type: 'sheets' })
       return data
     })()
@@ -105,9 +112,10 @@ class CatalogManager {
   async registerSheetsCatalog (sc, name) {
     const apps = await sc.listApps()
     const cacheKey = `sheets:${sc.keyHex()}`
+    const data = normalizeCatalogData({ version: 1, name: name || 'Apps', apps, writable: true, link: sc.link() }, { source: 'sheets' })
     this.catalogs.set(cacheKey, {
       sheets: sc,
-      data: { version: 1, name: name || 'Apps', apps, writable: true, link: sc.link() },
+      data,
       lastRefresh: Date.now(),
       type: 'sheets'
     })
@@ -149,7 +157,7 @@ class CatalogManager {
       const irc = new IndexRoomClient(this.store, this.swarm, { verify: verifyCapabilityDoc })
       await irc.open(link)
       const apps = await irc.listApps()
-      const data = { version: 1, name: 'Relay Index', apps, writable: false, link: irc.link() }
+      const data = normalizeCatalogData({ version: 1, name: 'Relay Index', apps, writable: false, link: irc.link() }, { source: 'hiveindex' })
       this.catalogs.set(cacheKey, { index: irc, data, lastRefresh: Date.now(), type: 'hiveindex' })
       return data
     })()
@@ -218,14 +226,14 @@ class CatalogManager {
     const nameEntry = await bee.get('meta!name').catch(() => null)
     const versionEntry = await bee.get('meta!version').catch(() => null)
 
-    const data = {
+    const data = normalizeCatalogData({
       version: versionEntry ? versionEntry.value : 1,
       name: nameEntry ? nameEntry.value : 'P2P Catalog',
       source: 'hyperbee',
       sourceKey: keyHex,
       apps,
-      count: { total: apps.length, apps: apps.length },
-    }
+    }, { source: 'hyperbee' })
+    data.count = { total: data.apps.length, apps: data.apps.length }
 
     this.catalogs.set(cacheKey, { bee, data, lastRefresh: Date.now(), type: 'hyperbee' })
     return data
@@ -411,7 +419,7 @@ class CatalogManager {
     if (driveEntry && driveEntry.drive) {
       const catalogBuf = await driveEntry.drive.get('/catalog.json')
       if (catalogBuf) {
-        driveEntry.data = this._safeJSONParse(catalogBuf.toString())
+        driveEntry.data = normalizeCatalogData(this._safeJSONParse(catalogBuf.toString()))
         driveEntry.lastRefresh = Date.now()
       }
       return driveEntry.data
@@ -444,8 +452,11 @@ class CatalogManager {
     const apps = []
     for (const [catalogKey, entry] of this.catalogs) {
       if (entry.data && entry.data.apps) {
+        const catalogName = entry.data.name || 'Catalog'
+        const source = this._catalogEntrySource(entry)
         for (const app of entry.data.apps) {
-          apps.push({ ...app, catalogKey })
+          const normalized = normalizeCatalogApp(app, { source, catalogKey, catalogName })
+          if (normalized) apps.push({ ...normalized, source, catalogKey, catalogName })
         }
       }
     }
@@ -459,25 +470,18 @@ class CatalogManager {
    * catalogs open at once (the curated default + whatever the user has
    * added), and the Apps tab presents them as one searchable store. Each
    * app is tagged with the catalog it came from so the UI can show its
-   * source and filter by it. When the same app id appears in more than one
-   * catalog, the highest-versioned copy wins.
+   * source and filter by it. When multiple rows point at the same stable app
+   * target (driveKey, then normalized link, then id), the same verification
+   * and version winner rules used by the UI's defensive final pass choose the
+   * copy whose metadata is displayed.
    */
   getAggregatedApps () {
-    const byId = new Map()
-    const anon = [] // apps with no stable id — never de-duplicated
-    for (const [catalogKey, entry] of this.catalogs) {
-      if (!entry.data || !Array.isArray(entry.data.apps)) continue
-      const catalogName = entry.data.name || 'Catalog'
-      for (const app of entry.data.apps) {
-        const tagged = { ...app, catalogKey, catalogName }
-        if (app.id == null) { anon.push(tagged); continue }
-        const existing = byId.get(app.id)
-        if (!existing || this._versionGreater(app.version, existing.version)) {
-          byId.set(app.id, tagged)
-        }
-      }
-    }
-    return [...byId.values(), ...anon]
+    return aggregateCatalogApps(this.catalogs, (entry) => this._catalogEntrySource(entry))
+  }
+
+  _catalogEntrySource (entry) {
+    if (entry && entry.type) return entry.type
+    return entry && entry.drive ? 'hyperdrive' : 'catalog'
   }
 
   /**
@@ -492,7 +496,7 @@ class CatalogManager {
         key,
         name: entry.data.name || 'Catalog',
         count: Array.isArray(entry.data.apps) ? entry.data.apps.length : 0,
-        source: entry.type === 'autobee' ? 'autobee' : entry.type === 'hyperbee' ? 'hyperbee' : entry.type === 'sheets' ? 'sheets' : 'hyperdrive',
+        source: entry.type === 'autobee' ? 'autobee' : entry.type === 'hyperbee' ? 'hyperbee' : entry.type === 'sheets' ? 'sheets' : entry.type === 'hiveindex' ? 'hiveindex' : 'hyperdrive',
         writable: !!entry.data.writable,
       })
     }
@@ -538,11 +542,7 @@ class CatalogManager {
    * Search apps by name or description
    */
   searchApps (query) {
-    const q = query.toLowerCase()
-    return this.getAllApps().filter(app =>
-      (app.name && app.name.toLowerCase().includes(q)) ||
-      (app.description && app.description.toLowerCase().includes(q))
-    )
+    return searchAppsList(this.getAllApps(), query)
   }
 
   // --- Catalog authoring (your own publishable catalog) ---------------
@@ -675,7 +675,7 @@ class CatalogManager {
 
   async _readMyCatalogData (drive) {
     const buf = await drive.get('/catalog.json').catch(() => null)
-    const data = buf ? this._safeJSONParse(buf.toString()) : { version: 1, name: 'My Catalog', apps: [] }
+    const data = buf ? normalizeCatalogData(this._safeJSONParse(buf.toString())) : { version: 1, name: 'My Catalog', apps: [] }
     if (!data || typeof data !== 'object' || Array.isArray(data)) {
       return { version: 1, name: 'My Catalog', apps: [] }
     }
@@ -699,9 +699,10 @@ class CatalogManager {
   _updateLoadedCatalogData (keyHex, data) {
     const entry = this.catalogs.get(keyHex)
     if (!entry) return
+    const normalized = normalizeCatalogData(data)
     entry.data = {
-      ...data,
-      apps: Array.isArray(data.apps) ? data.apps.map((app) => ({ ...app })) : [],
+      ...normalized,
+      apps: Array.isArray(normalized.apps) ? normalized.apps.map((app) => ({ ...app })) : [],
     }
     entry.lastRefresh = Date.now()
   }
@@ -723,20 +724,7 @@ class CatalogManager {
    * Parse JSON safely with prototype pollution protection
    */
   _safeJSONParse (str) {
-    const obj = JSON.parse(str)
-    if (obj && typeof obj === 'object') {
-      // Remove dangerous prototype properties
-      delete obj.__proto__
-      delete obj.constructor
-      // Also check nested objects
-      for (const key in obj) {
-        if (obj[key] && typeof obj[key] === 'object') {
-          delete obj[key].__proto__
-          delete obj[key].constructor
-        }
-      }
-    }
-    return obj
+    return safeJSONParse(str)
   }
 
   async close () {
@@ -748,6 +736,7 @@ class CatalogManager {
         else if (entry.bee) await entry.bee.close()
         else if (entry.manager) await entry.manager.close()
         else if (entry.sheets) await entry.sheets.close()
+        else if (entry.index) await entry.index.close()
       } catch {}
     }
     this.catalogs.clear()

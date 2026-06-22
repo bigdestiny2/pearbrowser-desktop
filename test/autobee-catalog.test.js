@@ -9,7 +9,8 @@ import applyMod from '../backend/autobee-catalog-apply.cjs'
 const { upsertOp, removeOp, renameOp, validateOp, sanitizeApp, MAX_OP_BYTES } = opsMod
 const { linearize, applyView, applyTagged, toCatalogData } = applyMod
 
-const app = (id, extra = {}) => ({ id, name: id.toUpperCase(), driveKey: `key-${id}`, ...extra })
+const keyFor = (id) => Buffer.from(String(id)).toString('hex').padEnd(64, '0').slice(0, 64)
+const app = (id, extra = {}) => ({ id, name: id.toUpperCase(), driveKey: keyFor(id), ...extra })
 
 // Tag ops as Autobase would: a writer key + a per-writer sequence number.
 const tag = (writer, seq, op) => ({ writer, seq, op })
@@ -51,14 +52,16 @@ test('conflict rules: later op in order wins for upsert/remove and rename', () =
 })
 
 test('app id and driveKey are stable identity, not editable by metadata', () => {
+  const original = '11'.repeat(32)
+  const hijacked = '22'.repeat(32)
   const v = applyView([
-    upsertOp(app('x', { driveKey: 'original' })),
+    upsertOp(app('x', { driveKey: original })),
     // attempt to change driveKey via a later metadata edit
-    upsertOp({ id: 'x', name: 'Renamed', driveKey: 'hijacked' })
+    upsertOp({ id: 'x', name: 'Renamed', driveKey: hijacked })
   ])
   assert.equal(v.apps.length, 1)
   assert.equal(v.apps[0].name, 'Renamed')       // metadata updates
-  assert.equal(v.apps[0].driveKey, 'original')  // identity is pinned
+  assert.equal(v.apps[0].driveKey, original)    // identity is pinned
 })
 
 test('read-only vs writable is explicit in the DTO; shape matches loader', () => {
@@ -75,19 +78,22 @@ test('malicious / malformed inputs are rejected or retained-but-ignored', () => 
   // giant record → rejected before append
   const huge = upsertOp(app('big', { description: 'z'.repeat(MAX_OP_BYTES + 10) }))
   // sanitize clamps strings, so build an explicitly oversized raw op instead:
-  const rawHuge = { v: 1, type: 'app.upsert', id: 'big', app: { id: 'big', driveKey: 'k', blob: 'z'.repeat(MAX_OP_BYTES) } }
+  const rawHuge = { v: 1, type: 'app.upsert', id: 'big', app: { id: 'big', driveKey: keyFor('big'), blob: 'z'.repeat(MAX_OP_BYTES) } }
   assert.equal(validateOp(rawHuge).ok, false)
   assert.equal(validateOp(rawHuge).retain, false)
 
   // prototype pollution → rejected
-  const polluted = JSON.parse('{"v":1,"type":"app.upsert","id":"x","app":{"id":"x","driveKey":"k","__proto__":{"bad":1}}}')
+  const polluted = JSON.parse(`{"v":1,"type":"app.upsert","id":"x","app":{"id":"x","driveKey":"${keyFor('x')}","__proto__":{"bad":1}}}`)
   assert.equal(validateOp(polluted).ok, false)
 
-  // missing drive key → rejected
+  // missing drive key/link → rejected
   assert.equal(validateOp({ v: 1, type: 'app.upsert', id: 'x', app: { id: 'x' } }).ok, false)
+  assert.equal(validateOp({ v: 1, type: 'app.upsert', id: 'x', app: { id: 'x', driveKey: 'not-a-key' } }).reason, 'bad-drivekey')
+  assert.equal(validateOp({ v: 1, type: 'app.upsert', id: 'x', app: { id: 'x', link: 'javascript:alert(1)' } }).reason, 'bad-link')
+  assert.equal(validateOp({ v: 1, type: 'app.upsert', id: 'x', app: { id: 'x', link: 'pear://app' } }).ok, true)
 
   // unknown op version → retained but ignored (forward-compat)
-  const future = validateOp({ v: 999, type: 'app.upsert', id: 'x', app: { id: 'x', driveKey: 'k' } })
+  const future = validateOp({ v: 999, type: 'app.upsert', id: 'x', app: { id: 'x', driveKey: keyFor('x') } })
   assert.equal(future.ok, false)
   assert.equal(future.retain, true)
 
@@ -96,8 +102,9 @@ test('malicious / malformed inputs are rejected or retained-but-ignored', () => 
   assert.equal(v.apps.length, 1)
 
   // sanitizeApp drops unknown + pollution keys
-  const clean = sanitizeApp({ id: 'a', driveKey: 'k', evil: 'x', categories: ['ok', 42] })
+  const clean = sanitizeApp({ id: 'a', driveKey: keyFor('a'), evil: 'x', categories: ['ok', 42] })
   assert.equal(clean.evil, undefined)
+  assert.equal(clean.driveKey, keyFor('a'))
   assert.deepEqual(clean.categories, ['ok'])
 
   // huge op constructed via upsertOp is clamped (not oversized) — sanity

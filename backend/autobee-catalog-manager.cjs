@@ -74,7 +74,12 @@ class AutobeeCatalogManager {
   get localKey () { return this.base && this.base.local && this.base.local.key ? Buffer.from(this.base.local.key).toString('hex') : '' }
 
   async rename (name) { await this.base.append(renameOp(name)) }
-  async upsertApp (app) { await this.base.append(upsertOp(app)) }
+  async upsertApp (app) {
+    const op = upsertOp(app)
+    const verdict = validateOp(op)
+    if (!verdict.ok) throw new Error('invalid app: ' + (verdict.reason || 'rejected'))
+    await this.base.append(op)
+  }
   async removeApp (id) { await this.base.append(removeOp(id)) }
   async addWriter (localKeyHex) { await this.base.append(addWriterOp(localKeyHex)) }
 

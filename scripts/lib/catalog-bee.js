@@ -8,6 +8,9 @@
 //   bee.get('meta!name'), bee.get('meta!version')
 //   bee.createReadStream({ gte: 'app!', lt: 'app!~' })
 
+import safetyMod from '../../backend/catalog-safety.cjs'
+
+const { normalizeCatalogApp, normalizeCatalogData } = safetyMod
 const APP_RANGE = { gte: 'app!', lt: 'app!~' }
 
 /**
@@ -25,28 +28,37 @@ export function normalizeManifest (manifest, now = Date.now()) {
     : 'P2P Catalog'
   const version = Number.isInteger(manifest.version) ? manifest.version : 1
 
-  const rawApps = Array.isArray(manifest.apps) ? manifest.apps : []
-  if (rawApps.length === 0) throw new Error('catalog has no apps[] — nothing to publish')
+  // An empty apps[] is allowed: a community catalogue starts empty and fills as
+  // submissions are approved (the meta!name/version still publish, so the bee
+  // exists + is loadable). Only a non-array apps is an error.
+  if (!Array.isArray(manifest.apps)) throw new Error('catalog apps must be an array')
+  const rawApps = manifest.apps
 
   const apps = []
   const seenIds = new Set()
   for (const [i, app] of rawApps.entries()) {
     if (!app || typeof app !== 'object') throw new Error(`apps[${i}] is not an object`)
-    const id = (app.id || app.driveKey || app.link || '').toString().trim()
+    const clean = normalizeCatalogApp(app, { source: 'hyperbee' })
+    const id = clean && clean.id ? clean.id : ''
     if (!id) throw new Error(`apps[${i}] needs an id (or driveKey/link to derive one)`)
     if (seenIds.has(id)) throw new Error(`duplicate app id: ${id}`)
     seenIds.add(id)
-    apps.push({
+    const entry = {
       id,
-      name: app.name || id,
-      description: app.description || '',
-      driveKey: app.driveKey || '',
-      link: app.link || '',
-      version: app.version || '',
-      author: app.author || '',
-      categories: Array.isArray(app.categories) ? app.categories : [],
+      name: clean.name || id,
+      description: clean.description || '',
+      driveKey: clean.driveKey || '',
+      link: clean.link || '',
+      version: clean.version || '',
+      author: clean.author || '',
+      categories: clean.categories || [],
+      verification: clean.verification || 'unverified',
       publishedAt: Number.isFinite(app.publishedAt) ? app.publishedAt : now
-    })
+    }
+    // Inline icon (data: URI) — carried so apps WITHOUT a fetchable drive icon
+    // (pear://-only apps, or drives lacking /icon.*) still render a real icon.
+    if (typeof clean.iconData === 'string' && clean.iconData) entry.iconData = clean.iconData
+    apps.push(entry)
   }
   return { name, version, apps }
 }
@@ -77,12 +89,13 @@ export async function readCatalogBee (bee, keyHex = '') {
   }
   const nameEntry = await bee.get('meta!name').catch(() => null)
   const versionEntry = await bee.get('meta!version').catch(() => null)
-  return {
+  const data = normalizeCatalogData({
     version: versionEntry ? versionEntry.value : 1,
     name: nameEntry ? nameEntry.value : 'P2P Catalog',
     source: 'hyperbee',
     sourceKey: keyHex,
-    apps,
-    count: { total: apps.length, apps: apps.length }
-  }
+    apps
+  }, { source: 'hyperbee' })
+  data.count = { total: data.apps.length, apps: data.apps.length }
+  return data
 }

@@ -22,7 +22,12 @@ class AppManager {
    */
   async install (appInfo, onProgress) {
     const { id, driveKey, name, icon, version } = appInfo
-    const keyHex = typeof driveKey === 'string' ? driveKey : driveKey.toString('hex')
+    const keyHex = typeof driveKey === 'string'
+      ? driveKey.trim().toLowerCase()
+      : (driveKey && typeof driveKey.toString === 'function' ? driveKey.toString('hex') : '')
+    if (!/^[0-9a-f]{64}$/.test(keyHex)) {
+      throw new Error('App install requires a valid 64-hex drive key')
+    }
 
     // Open the app's Hyperdrive
     const drive = new Hyperdrive(this.store, Buffer.from(keyHex, 'hex'))

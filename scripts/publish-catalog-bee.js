@@ -41,7 +41,49 @@ import { HiveRelayClient } from 'p2p-hiverelay-client'
 import { mkdtempSync, existsSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import sodium from 'sodium-universal'
+import b4a from 'b4a'
 import { normalizeManifest, catalogEntries } from './lib/catalog-bee.js'
+
+// Signed \x00meta manifest — byte-identical construction to the consumer in
+// PearBrowser/backend/catalog-manager.js (buildSignedDigest/verifyCatalogMeta).
+// Consumers that REQUIRE a signed catalog (mobile's loadSignedCatalogBee) reject
+// a bee without it. Anchored to core.key (the trust anchor); signed by the core's
+// own writer key. For a corestore manifest core, core.key commits to the writer
+// in core.manifest.signers[], so verifying the signer == trusting core.key.
+const SIGNED_META_KEY = '\x00meta'
+function canonicalize (v) {
+  if (Array.isArray(v)) return v.map(canonicalize)
+  if (v && typeof v === 'object') {
+    const o = {}
+    for (const k of Object.keys(v).sort()) o[k] = canonicalize(v[k])
+    return o
+  }
+  return v
+}
+const canonicalJson = (v) => JSON.stringify(canonicalize(v))
+function sha256 (input) {
+  const out = b4a.alloc(sodium.crypto_hash_sha256_BYTES)
+  sodium.crypto_hash_sha256(out, input)
+  return out
+}
+function buildSignedDigest (anchorKey, metaNoSig) {
+  return sha256(b4a.concat([anchorKey, b4a.from(canonicalJson(metaNoSig), 'utf-8')]))
+}
+async function writeSignedMeta (bee, core, metaNoSig) {
+  const anchor = b4a.from(core.key)
+  const secret = core.keyPair && core.keyPair.secretKey
+  const signerPub = core.keyPair && core.keyPair.publicKey
+  if (!secret || !signerPub) throw new Error('core has no writable keyPair — cannot sign \\x00meta')
+  const digest = buildSignedDigest(anchor, metaNoSig)
+  const sig = b4a.alloc(sodium.crypto_sign_BYTES)
+  sodium.crypto_sign_detached(sig, digest, secret)
+  if (!sodium.crypto_sign_verify_detached(sig, digest, signerPub)) {
+    throw new Error('self-verify of \\x00meta failed — refusing to write')
+  }
+  await bee.put(SIGNED_META_KEY, { ...metaNoSig, signature: b4a.toString(sig, 'hex') })
+  return { signerPub: b4a.toString(signerPub, 'hex') }
+}
 
 // Tiny CLI parser — same shape as scripts/publish-and-pin.js (no deps).
 function parseArgs (argv) {
@@ -130,6 +172,11 @@ async function buildBee () {
     await batch.put(key, value)
   }
   await batch.flush()
+
+  // Sign + write the \x00meta manifest so signed-catalog consumers (mobile) accept
+  // this bee. Kept in lock-step with the meta!/app! schema above on every publish.
+  const { signerPub } = await writeSignedMeta(bee, core, { name: catalogName, version: catalogVersion })
+  console.log('   signed \\x00meta — writer pubkey:', signerPub)
 
   return { store, core, bee }
 }
