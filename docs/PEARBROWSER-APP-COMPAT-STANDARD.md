@@ -1,4 +1,4 @@
-# PearBrowser App Compatibility Standard (PBACS) v0.1
+# PearBrowser App Compatibility Standard (PBACS) v0.2
 
 **Status:** Draft standard, v0.1. Grounded against the live `pearbrowser-desktop` and `PearBrowser` repositories as of 2026-06. Requirements that describe **behavior not present in current code** are explicitly tagged **PROPOSED** and are non-binding until implemented.
 
@@ -524,6 +524,14 @@ Run before release. Grouped by tier; **Tier A items are the universal floor**.
 - [ ] Page ships a strict `<meta http-equiv="Content-Security-Policy">` = `default-src 'self'; script-src 'self'; connect-src 'self' <loopback>; object-src 'none'; base-uri 'self'` (self-imposes mobile parity on desktop).
 - [ ] Custom dialogs (replacing blocked native ones) are focus-trapped + Escape-dismissible; WCAG-AA contrast; `prefers-reduced-motion` respected.
 
+### Release & pinning (standalone / `pear://` apps — §13)
+
+- [ ] Published from a **clean `pear touch` key** (no multi-GB dev history), or a stable production key with a persistent seeder (PB-RELEASE-1/6/9).
+- [ ] Staged **lean** (`--compact`) with **all** entrypoints declared (incl. path-spawned workers) and HTML-referenced assets patched back in (PB-RELEASE-2/3/4).
+- [ ] **Test-run** of the staged key boots clean; `hyperbee`/`hypercore`/`corestore`/`autobase` majors aligned (PB-RELEASE-5).
+- [ ] **Durably pinned** (`pin-app-on-hiverelay.js`, `maxStorage` sized to the current checkout) **and** **fresh-peer verified with all local sources stopped** (`verify-app-full.js`) before listing (PB-RELEASE-7/8/10).
+- [ ] Catalogue row carries `type` + icon + `description`/`author`/`version`/`categories`; unified-bee re-published with the persistent `--storage` (PB-RELEASE-11).
+
 ### Tier A — Universal static Hyperdrive (in-tab, both platforms)
 
 - [ ] `/index.html` exists at the drive root; `GET /app/<key>/index.html` returns 200 HTML.
@@ -574,7 +582,37 @@ Run before release. Grouped by tier; **Tier A items are the universal floor**.
 
 ---
 
-## 13. Open Questions / Future Work
+## 13. Release Build, Pinning & Verification Runbook (NORMATIVE — added v0.2)
+
+§9/§10.3 specify *what* a publishable record and a seeded drive look like. This section is the *how* — the end-to-end process to take an app from source to a clean, durably-pinned, catalogue-listed release. Every rule here was validated against the live system 2026-06.
+
+### 13.1 Build a clean, lean release key (desktop standalone / `pear://` apps)
+
+- **PB-RELEASE-1 (MUST).** Publish from a **fresh, history-free key**, not your day-to-day dev/stage key. A Hyperdrive is an **append-only log**: each `pear stage` re-imports the changed bundle forever, so re-staging one key throughout development accumulates **gigabytes of dead history** (observed: a "lightweight" app's dev key at 35 GB blob-core / 480k metadata ops while the live checkout was a fraction of that — dominated by native prebuilds for all platforms re-imported every stage). Relays will **not** fully replicate a history-heavy drive (PB-RELEASE-9) and cold reads must traverse a huge metadata core. Mint a clean key with **`pear touch`** and stage to it once. (`pear init` is removed; current `pear stage` requires a real `pear://` link — bare channel names like `dev` are rejected.)
+- **PB-RELEASE-2 (SHOULD).** Stage **lean**: `pear stage --compact <link> .` tree-shakes to the runtime-reachable file set (dropping devDependencies, build tools, tests, and non-target native prebuilds) — typically a 5–40× size reduction (observed: 2.7 GB→172 MB, 35 GB→413 MB).
+- **PB-RELEASE-3 (MUST, when using --compact).** Declare **every** entry in `package.json` `pear.stage.entrypoints` — including workers spawned **by string path** (e.g. a renderer doing `applink + '/app/backend/worker.js'`). `--compact` follows only the static import graph from declared entrypoints; an undeclared worker (and its entire dependency subtree) is silently dropped → the app boots to `MODULE_NOT_FOUND`.
+- **PB-RELEASE-4 (MUST, when using --compact).** `--compact` follows `<script src>` but **not** `<link href>` CSS or other HTML-referenced assets. After the compact stage, **patch** them back: `pear stage --only /<ui-or-dist-dir> <link> .`. Then confirm every asset `index.html` references actually exists in the drive.
+- **PB-RELEASE-5 (MUST).** **Test-run the staged key** (`pear run <link>`) before releasing — boot logs catch dropped modules, missing assets, and dependency-version bugs that staging alone won't. Keep `hyperbee`/`hypercore`/`corestore`/`autobase` **majors aligned**: hyperbee ≥2.22 requires hypercore 11; a hyperbee 2.27 + hypercore 10 mismatch crashes on boot at `Hyperbee._open` (`setInflightRange` of undefined).
+- **PB-RELEASE-6 (SHOULD).** A production app whose key is the **auto-update identity** users already hold (a `pear release` link) **cannot** be re-keyed to shed history without breaking their upgrade path — keep the stable key and lean on a persistent seeder (PB-RELEASE-9). Re-keying is only for apps not yet distributed.
+
+### 13.2 Pin durably on HiveRelay
+
+- **PB-RELEASE-7 (MUST).** Apps **are** durably HiveRelay-pinnable by **anyone** — not just the author — via a **read-only foreign-key seed**: `HiveRelayClient.seed()` signs the seed-request with the seeder's own swarm keypair, not the drive author's. Tool: `scripts/pin-app-on-hiverelay.js <pear://|hex> --name <x> --maxStorage <MB> --hold <s>` opens the drive, pre-fetches the current checkout (becoming a complete source), broadcasts an archive-tier seed-request, and holds online while relays replicate.
+- **PB-RELEASE-8 (MUST).** Size `maxStorage` to the **current checkout + metadata**, never the (bloated) blob-core byteLength — relays reject multi-GB reservations (256–600 MB requests accepted; 11 GB/140 GB rejected). Relay **acceptances arrive *after*** the initial broadcast window, so confirm over a `--hold` of a few minutes, not the first 15 s.
+- **PB-RELEASE-9 (MUST, large / history-heavy production keys).** If relays accept the pin but each replicates only **part** of a heavy drive (no complete per-relay copy → a fresh peer gets 0 useful peers), the publisher MUST run a **persistent seeder** so the app stays reachable 24/7. Template: `scripts/durable-seed.sh` driven by a launchd/systemd agent with run-at-login + restart-on-crash (`~/Library/LaunchAgents/com.pearbrowser.seed.plist`). For true off-machine durability, run it on an always-on host.
+
+### 13.3 Verify from a fresh peer, then register
+
+- **PB-RELEASE-10 (MUST).** **Prove durability from a fresh peer with every local source stopped** before listing: `scripts/verify-app-full.js --key <hex>` opens the drive from a clean corestore, joins the swarm, and fetches a spread of blobs across the whole tree. 0 peers or any missing blob = not durable — do not list it. (This is the teeth behind PB-AVAIL-2's cold-node check.)
+- **PB-RELEASE-11 (MUST).** Only after a passing fresh-peer verify, publish the catalogue row (§9) and, for the unified Hyperbee, regenerate + re-publish with the persistent `--storage` (PB-DISCOVERYCATALOGUE-18). Cards surface the app's **size and live peer count** from `CMD_GET_DRIVE_INFO`; a row whose drive shows **0 peers** reads as dead.
+
+### 13.4 What a complete catalogue submission carries
+
+Beyond the `APPS_SCHEMA`-required `name`+`type`+(`driveKey`|`link`), a quality submission SHOULD carry `description`, `author`, `version`, `categories`, and an in-drive **icon** (PB-ICON-1). A unified-bee catalogue (not the strict sheets `APPS_SCHEMA`) MAY additionally carry `source`, `license`, `platforms`, and `homepage`. The desktop **My Catalog** publisher form collects these; **`type` is the single most common omission** (PB-DISCOVERYCATALOGUE-2/3) — set it explicitly to `standalone` (own window) or `hypersite` (inline tab).
+
+---
+
+## 14. Open Questions / Future Work
 
 **PROPOSED browser-side changes (not current behavior):**
 
@@ -599,4 +637,4 @@ Run before release. Grouped by tier; **Tier A items are the universal floor**.
 
 ---
 
-*End of PBACS v0.1.*
+*End of PBACS v0.2.*
