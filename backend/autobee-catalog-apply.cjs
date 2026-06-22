@@ -11,6 +11,7 @@
 // retained in the log but ignored in the view.
 
 const { OP_RENAME, OP_UPSERT, OP_REMOVE, validateOp, sanitizeApp } = require('./autobee-catalog-ops.cjs')
+const { normalizeCatalogApp } = require('./catalog-safety.cjs')
 
 const DEFAULT_NAME = 'Collaborative Catalog'
 
@@ -66,14 +67,17 @@ function applyTagged (tagged) {
 
 function toCatalogData (view, keyHex = '', writable = false) {
   const apps = Array.isArray(view && view.apps) ? view.apps : []
+  const normalizedApps = apps
+    .map((app) => normalizeCatalogApp(app, { source: 'autobee' }))
+    .filter(Boolean)
   return {
     version: (view && view.version) != null ? view.version : 1,
     name: (view && view.name) || DEFAULT_NAME,
     source: 'autobee',
     sourceKey: keyHex,
     writable: !!writable,
-    apps,
-    count: { total: apps.length, apps: apps.length }
+    apps: normalizedApps,
+    count: { total: normalizedApps.length, apps: normalizedApps.length }
   }
 }
 
