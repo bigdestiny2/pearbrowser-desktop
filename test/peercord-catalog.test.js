@@ -1,0 +1,29 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { createRequire } from 'node:module'
+import { readFileSync } from 'node:fs'
+
+const require = createRequire(import.meta.url)
+const { SEED_APPS } = require('../backend/catalogue-seed.js')
+
+const PEERCORD_LINK = 'pear://wmir47w7mai3b1skj66mx7fzso6k6o91kipaney7gtt69npimouy'
+
+test('Peercord is seeded as a launchable standalone Pear app', () => {
+  const app = SEED_APPS.find((row) => row.name === 'Peercord')
+  assert.ok(app, 'Peercord seed row missing')
+  assert.equal(app.link, PEERCORD_LINK)
+  assert.equal(app.type, 'standalone')
+  assert.equal(app.driveKey, undefined)
+  assert.equal(app.author, 'Mastercodeon')
+  assert.equal(app.version, '1.0.8')
+  assert.ok(app.categories.includes('featured'))
+  assert.ok(app.description.toLowerCase().includes('discord-style'))
+})
+
+test('Featured Peercord card uses the window launch path until a headless worker exists', () => {
+  const shell = readFileSync(new URL('../ui/shell.js', import.meta.url), 'utf8')
+  const entry = shell.match(/id: 'peercord'[\s\S]*?gradient: 'linear-gradient\([^']+\)'/)
+  assert.ok(entry, 'Peercord featured entry missing')
+  assert.match(entry[0], /type: 'standalone'/)
+  assert.match(entry[0], new RegExp(PEERCORD_LINK.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+})

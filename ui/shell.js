@@ -75,6 +75,19 @@ const FEATURED_APPS = [
     link: 'pear://qnax5k8ojtod51ci9qwkrawdof1hx5w3a7gqbueoqnzzq9dw5hfo',
     initial: '📋',
     gradient: 'linear-gradient(135deg, #4ade80, #22d3ee)'
+  },
+  // Peercord — Discord-style P2P chat. Its current Pear release is
+  // pear.json type:"desktop" (Electron/Pear window class), not a pear-request
+  // terminal worker, so route it through the standalone launch path. Marking it
+  // hypersite would surface "Run in tab" but hang on the headless wrapper.
+  {
+    id: 'peercord',
+    name: 'Peercord',
+    type: 'standalone',
+    tagline: 'Decentralized Discord-style chat with text, voice, video, screen sharing, and P2P file transfer.',
+    link: 'pear://wmir47w7mai3b1skj66mx7fzso6k6o91kipaney7gtt69npimouy',
+    initial: 'P',
+    gradient: 'linear-gradient(135deg, #5865f2, #22d3ee)'
   }
 ]
 

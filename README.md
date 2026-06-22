@@ -37,8 +37,8 @@ One install, one key, works on all three desktop platforms — Pear downloads th
 - Keep multiple catalogs loaded at once with search, category, and source filters across the aggregated app store
 - **My Catalog:** create a writable personal catalog, add apps from loaded catalogs or installed apps, rename it, edit saved metadata (name, description, version, author, categories), and share the catalog key; copies opened without the writer key stay read-only
 - Safe catalogue normalization accepts `apps[]`, `items[]`, or `entries[]`, preserves safe link-only rows (`hyper://`, `pear://`, `file://`), rejects malformed targets, and strips prototype-pollution keys before rendering
-- Default catalog auto-loads on first Apps-tab visit (the "PearBrowser Network" Hyperbee `hyperbee://f5fb7500bccd…` — PearBrowser, HiveRelay, P2P Builders, Pear Dealroom, Paste, PearPoker, Keet, PearPass, anonGPT, Pear POS, Pear Tickets, HiveWorm), generated from a single source manifest and mirrored into the offline seed
-- Featured apps: **Keet** · **PearPass** · **[HiveWorm](https://github.com/bigdestiny2/hiveworm)** (a multiplayer life-sim that uses `window.pear.swarm.v1` directly)
+- Default catalog auto-loads on first Apps-tab visit (the "PearBrowser Network" Hyperbee `hyperbee://f5fb7500bccd…` — PearBrowser, HiveRelay, P2P Builders, Pear Dealroom, Paste, PearPoker, Keet, PearPass, Peercord, anonGPT, Pear POS, Pear Tickets, HiveWorm), generated from a single source manifest and mirrored into the offline seed
+- Featured apps: **Keet** · **PearPass** · **anonGPT** · **Paste** · **[Peercord](https://git.churchofmalware.org/mastercodeon/Peercord)**. Peercord's current Pear release is a full desktop app (`pear.json` `type:"desktop"`), so PearBrowser launches it via the standalone `pear://` window path; it should only move to headless "Run in tab" once Peercord publishes a pear-request worker entry.
 
 ### Publish (P2P Sites)
 - Block editor: heading, paragraph, image, link, list, quote, code, raw HTML/CSS/JS, divider
@@ -177,6 +177,7 @@ Code signing is per-platform:
 |---|---|
 | [`bigdestiny2/hyper-fetch`](https://github.com/bigdestiny2/hyper-fetch) | ~5 KB JS library — read `hyper://` drives from any browser via the HiveRelay HTTP gateway. Pair with PearBrowser to embed hyper:// content in regular web pages. |
 | [`bigdestiny2/hiveworm`](https://github.com/bigdestiny2/hiveworm) | Featured multiplayer life-sim. Uses `window.pear.swarm.v1` for direct peer gossip. Live at `pear://d1xbkcpc…`. |
+| [`mastercodeon/Peercord`](https://git.churchofmalware.org/mastercodeon/Peercord) | Featured decentralized Discord-style chat. Current Pear release: `pear://wmir47w7…`, window-class desktop app. |
 | [`bigdestiny2/P2P-Hiverelay`](https://github.com/bigdestiny2/P2P-Hiverelay) | The always-on relay backbone keeping the whole network alive (targeting the live `0.19.x` contract surface). |
 | [`bigdestiny2/PearBrowser`](https://github.com/bigdestiny2/PearBrowser) | Mobile-focused sibling — iOS / Android port. Bare-kit-based. |
 

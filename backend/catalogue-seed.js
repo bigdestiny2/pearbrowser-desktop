@@ -134,6 +134,21 @@ module.exports = {
       "verification": "relay-listed"
     },
     {
+      "name": "Peercord",
+      "type": "standalone",
+      "link": "pear://wmir47w7mai3b1skj66mx7fzso6k6o91kipaney7gtt69npimouy",
+      "author": "Mastercodeon",
+      "categories": [
+        "chat",
+        "communication",
+        "social",
+        "featured"
+      ],
+      "description": "Decentralized Discord-style chat powered by Pear Runtime and Hyperswarm. Text, voice, video, screen sharing, local identity, and P2P file transfer without central servers.",
+      "version": "1.0.8",
+      "verification": "relay-listed"
+    },
+    {
       "name": "HiveWorm",
       "type": "standalone",
       "link": "hyper://e3f910d11e70044afe361b1cecfb5cfb3c4f61f600cc81c2365ba0e6f58c8d4d/",

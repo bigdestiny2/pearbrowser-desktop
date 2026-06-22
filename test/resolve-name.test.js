@@ -18,6 +18,7 @@ test('bootstrap floor: a bare word resolves on day one (curated)', () => {
 test('curated lookup is normalized + supports alias names', () => {
   assert.equal(resolveName('KEET', { petnames: {} }).provenance, 'curated')  // case-folded
   assert.equal(lookupAlias('pass').label, 'PearPass')                        // alias → PearPass
+  assert.equal(lookupAlias('peercord').link, 'pear://wmir47w7mai3b1skj66mx7fzso6k6o91kipaney7gtt69npimouy')
 })
 
 test('petname HIT works offline and beats the curated floor', () => {
