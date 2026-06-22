@@ -165,12 +165,21 @@ const CMD_SEARCH_FEDERATED = 262          // explicit federated trigger (v1 fold
 
 // Nostr bridge Phase 1 — npub + cross-curve identity binding (NOSTR0-2).
 // See docs/research/nostr-bridge.md. Request/response only (no EVT in Phase 1).
-const CMD_NOSTR_GET_IDENTITY = 188 // { nostrPubkey, npub, epoch, linked, binding }
+const CMD_NOSTR_GET_IDENTITY = 188 // { nostrPubkey, npub, epoch, status, linked, revoked, stale, binding, revocations }
 const CMD_NOSTR_BIND = 189         // mint+persist the binding at epoch+1 → state
 const CMD_NOSTR_REVOKE = 190       // root-signed revoke of the current epoch → state
 // Phase 2 — local event store: author + read your own NIP-01 events.
 const CMD_NOSTR_PUBLISH = 191      // { kind, content, tags? } → sign + store → { event }
 const CMD_NOSTR_QUERY = 192        // { filter } → { events } (NIP-01 filter over your store)
+
+// Community app submission + moderation (2026-06-22). Anyone can submit their
+// app to the COMMUNITY catalogue (5d961fdc…); an in-app moderator panel reviews
+// the relay queue and, on approve, writes the app into the community Hyperbee +
+// re-pins it. See backend/community-submit.js + ui/shell.js (submit form + panel).
+const CMD_SUBMIT_APP = 210   // { name, link|driveKey, description?, author?, categories?, iconData? } → publish manifest + seed → { id, status:'pending-review' }
+const CMD_MOD_PENDING = 211  // → { pending: [...] } pulled from the relay review queue
+const CMD_MOD_APPROVE = 212  // { id } → relay approve + write app into community bee + re-pin
+const CMD_MOD_REJECT = 213   // { id, reason? } → relay reject
 
 // Pear Bridge (WebView → worklet via RN relay)
 const CMD_BRIDGE = 200
@@ -280,6 +289,7 @@ module.exports = {
   CMD_IDENTITY_BINDING_PUBLISH, CMD_IDENTITY_BINDING_RESOLVE, CMD_SEARCH_FEDERATED,
   CMD_NOSTR_GET_IDENTITY, CMD_NOSTR_BIND, CMD_NOSTR_REVOKE,
   CMD_NOSTR_PUBLISH, CMD_NOSTR_QUERY,
+  CMD_SUBMIT_APP, CMD_MOD_PENDING, CMD_MOD_APPROVE, CMD_MOD_REJECT,
   CMD_BRIDGE,
   CMD_STOP,
   EVT_READY, EVT_PEER_COUNT, EVT_ERROR, EVT_INSTALL_PROGRESS, EVT_SITE_PUBLISHED, EVT_BOOT_PROGRESS,

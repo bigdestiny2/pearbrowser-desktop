@@ -24,7 +24,7 @@ function withTimeout (p, ms) {
 class FederatedNostrFeed {
   // deps:
   //   listContacts() -> [{ pubkey (root hex), displayName, verifiedAt, bindingKey }]
-  //   resolveBinding({ contactPubkey, dhtPubkey }) -> { nostrEventKey, nostrBind } | null
+  //   resolveBinding({ contactPubkey, dhtPubkey }) -> { nostrEventKey, nostrBind, nostrRevocations } | null
   //   openEventStore(nostrEventKeyHex, contactPubkey) -> { listEvents() -> [event] } | null
   //   now() -> unix seconds (injectable for tests)
   constructor ({ listContacts, resolveBinding, openEventStore, now, maxContacts, stepTimeoutMs } = {}) {
@@ -53,8 +53,12 @@ class FederatedNostrFeed {
       if (!binding || !binding.nostrEventKey || !binding.nostrBind) return []
       // PER-CONTACT trust set: only THIS contact's attested nostr key is trusted in
       // THEIR store. buildNostrTrustSet re-verifies the nostr-bind (dual-sig) against
-      // the contact's root, so a forged/unverifiable bind yields an empty set.
-      const trust = buildNostrTrustSet([c], () => ({ binds: [binding.nostrBind], revocations: [] }))
+      // the contact's root and applies remote revocations, so a forged, revoked,
+      // or stale bind yields an empty/non-linked set.
+      const trust = buildNostrTrustSet([c], () => ({
+        binds: [binding.nostrBind],
+        revocations: Array.isArray(binding.nostrRevocations) ? binding.nostrRevocations : [],
+      }))
       if (trust.size === 0) return []
       const store = await withTimeout(this.openEventStore(binding.nostrEventKey, c.pubkey), this.stepTimeoutMs)
       if (!store) return []

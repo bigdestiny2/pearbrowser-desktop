@@ -7,6 +7,7 @@
 // (followed name rooms, verify-then-drop) land in N3/N4 behind this same shape.
 const { normalize } = require('./name-normalize.cjs')
 const { lookupAlias } = require('./name-aliases.cjs')
+const { targetToResolution } = require('./name-registry-ops.cjs')
 
 /**
  * @param {string} rawName  the word typed in the URL bar
@@ -32,8 +33,11 @@ function resolveName (rawName, { petnames = {}, registry = {}, aliases = true } 
   // Tier 2 — multi-writer name registry (N5). An owner-signed first-claim, durable
   // across writers. Beats the static curated floor; yields to the user's own petname.
   const reg = registry[n]
-  if (reg && reg.target) {
-    return { name: n, key: reg.target, link: null, label: reg.label || rawName, provenance: 'registry' }
+  if (reg) {
+    const target = targetToResolution(reg.link || reg.key || reg.target)
+    if (target && (target.key || target.link)) {
+      return { name: n, key: target.key || null, link: target.link || null, label: reg.label || rawName, provenance: 'registry' }
+    }
   }
 
   // Tier 3 — curated bootstrap floor. Lowest authority; overridden by anything above.

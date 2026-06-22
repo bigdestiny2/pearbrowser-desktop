@@ -65,11 +65,30 @@ test('resolveNostrBind: highest epoch wins, revoke-wins, forged revoke ignored',
   assert.equal(nb.resolveNostrBind(rootHex, [b1, b2], []), npk('22'.repeat(32)))
 
   const rev = nb.makeNostrRevoke({ rootPubkey: rootHex, nostrPubkey: npk('22'.repeat(32)), epoch: 2 }, rootSigner(root))
-  assert.equal(nb.resolveNostrBind(rootHex, [b1, b2], [rev]), npk('11'.repeat(32)))
+  assert.equal(nb.resolveNostrBind(rootHex, [b1, b2], [rev]), null, 'revoked current epoch must not fall back to stale epoch 1')
 
   const attacker = crypto.keyPair()
   const fakeRev = nb.makeNostrRevoke({ rootPubkey: rootHex, nostrPubkey: npk('22'.repeat(32)), epoch: 2 }, rootSigner(attacker))
   assert.equal(nb.resolveNostrBind(rootHex, [b1, b2], [fakeRev]), npk('22'.repeat(32)))
+})
+
+test('resolveNostrBindState labels linked, revoked, and stale author keys', () => {
+  const root = crypto.keyPair(); const rootHex = hex(root.publicKey)
+  const oldSk = '11'.repeat(32); const newSk = '22'.repeat(32)
+  const oldBind = mkBind(root, oldSk, 1)
+  const newBind = mkBind(root, newSk, 2)
+
+  let st = nb.resolveNostrBindState(rootHex, [oldBind, newBind], [])
+  assert.equal(st.status, 'linked')
+  assert.equal(st.nostrPubkey, npk(newSk))
+  assert.equal(st.bindings.find((b) => b.nostrPubkey === npk(oldSk)).status, 'stale')
+  assert.equal(st.bindings.find((b) => b.nostrPubkey === npk(newSk)).status, 'linked')
+
+  const rev = nb.makeNostrRevoke({ rootPubkey: rootHex, nostrPubkey: npk(newSk), epoch: 2 }, rootSigner(root))
+  st = nb.resolveNostrBindState(rootHex, [oldBind, newBind], [rev])
+  assert.equal(st.status, 'revoked')
+  assert.equal(st.bindings.find((b) => b.nostrPubkey === npk(newSk)).status, 'revoked')
+  assert.equal(st.bindings.find((b) => b.nostrPubkey === npk(oldSk)).status, 'stale')
 })
 
 test('malformed hex fields are rejected explicitly (not coerced) — NOSTR2 review hardening', () => {

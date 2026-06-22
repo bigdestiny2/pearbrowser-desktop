@@ -10,7 +10,7 @@ import secpMod from '../backend/secp256k1-bundle.cjs'
 import nbMod from '../backend/nostr-bind.cjs'
 import ingestMod from '../backend/nostr-ingest.cjs'
 const secp = secpMod; const nb = nbMod
-const { buildNostrTrustSet, partitionByTrust, repartitionQuarantine } = ingestMod
+const { buildNostrTrustSet, getNostrAuthorState, partitionByTrust, repartitionQuarantine } = ingestMod
 
 const hex = (b) => b4a.toString(b, 'hex')
 const rootSigner = (kp) => (msg) => hex(crypto.sign(b4a.from(msg, 'utf-8'), kp.secretKey))
@@ -77,7 +77,10 @@ test('a revoked binding drops the author back to quarantine', () => {
   const contacts = [{ pubkey: rootHex, verifiedAt: 1 }]
   const trust = buildNostrTrustSet(contacts, bindingsFrom({ [rootHex]: { binds: [mkBind(root, sk)], revocations: [rev] } }))
   assert.equal(trust.size, 0)
-  assert.equal(partitionByTrust([ev(sk, 'after revoke')], trust).quarantined.length, 1)
+  assert.equal(getNostrAuthorState(npk(sk), trust).status, 'revoked')
+  const { quarantined } = partitionByTrust([ev(sk, 'after revoke')], trust)
+  assert.equal(quarantined.length, 1)
+  assert.equal(quarantined[0]._trustState, 'revoked')
 })
 
 test('higher-epoch rebind: only the CURRENT attested key is trusted', () => {
@@ -89,9 +92,12 @@ test('higher-epoch rebind: only the CURRENT attested key is trusted', () => {
   }))
   assert.equal(trust.size, 1)
   assert.equal(trust.get(npk(newSk)), rootHex) // epoch 2 wins
+  assert.equal(getNostrAuthorState(npk(oldSk), trust).status, 'stale')
+  assert.equal(getNostrAuthorState(npk(newSk), trust).status, 'linked')
   const { accepted, quarantined } = partitionByTrust([ev(newSk, 'current'), ev(oldSk, 'stale')], trust)
   assert.deepEqual(accepted.map((e) => e.content), ['current'])
   assert.deepEqual(quarantined.map((e) => e.content), ['stale'])
+  assert.equal(quarantined[0]._trustState, 'stale')
 })
 
 test('self binding surfaces the user\'s own posts in their feed', () => {

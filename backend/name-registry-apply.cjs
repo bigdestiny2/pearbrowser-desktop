@@ -36,7 +36,10 @@ function verifyOpAuthenticity (op) {
   const sk = skeleton(op.name)
   const canon = ops.canon(op.type, { name: op.name, normalized, target: op.target, owner: op.owner, version: op.version })
   if (!ed25519Verify(canon, op.sig, op.owner)) return null
-  return { normalized, skeleton: sk }
+  const target = (op.type === ops.CLAIM || op.type === ops.ROTATE)
+    ? ops.normalizeTarget(op.target).target
+    : null
+  return { normalized, skeleton: sk, target }
 }
 
 const NOOP = { write: null }
@@ -91,9 +94,10 @@ function applyView (opList) {
     const auth = verifyOpAuthenticity(op)
     if (!auth) continue
     const { normalized, skeleton: sk } = auth
+    const effectiveOp = auth.target ? { ...op, target: auth.target } : op
     const current = names.get(normalized) || null
     const skelRec = skels.get(sk) || null
-    const d = decide({ current, skelRec, normalized, skeleton: sk }, op)
+    const d = decide({ current, skelRec, normalized, skeleton: sk }, effectiveOp)
     if (!d.write) continue
     names.set(normalized, d.write)
     if (d.skelAdd) {

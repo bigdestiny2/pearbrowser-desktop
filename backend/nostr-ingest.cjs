@@ -15,7 +15,7 @@
 // schnorr sig — so an attacker-forged binding never enters the set. PURE, CommonJS.
 
 const { verifyEvent } = require('./nostr-events-apply.cjs')
-const { resolveNostrBind } = require('./nostr-bind.cjs')
+const { resolveNostrBindState } = require('./nostr-bind.cjs')
 
 const HEX64 = /^[0-9a-f]{64}$/i
 
@@ -26,12 +26,39 @@ const HEX64 = /^[0-9a-f]{64}$/i
 // opts.self?: { rootPubkey, binds, revocations } — include the user's OWN attested
 //   nostr key so their own posts surface in their feed.
 // Returns Map<nostrPubkey, rootPubkey>: the attested authors whose events are trusted.
+function stateEntry (status, rootPubkey = null) {
+  return { status, rootPubkey: rootPubkey ? rootPubkey.toLowerCase() : null }
+}
+
+function rememberAuthorState (states, entry) {
+  if (!entry || typeof entry.nostrPubkey !== 'string') return
+  const key = entry.nostrPubkey.toLowerCase()
+  const prev = states.get(key)
+  // linked is strongest for acceptance, then revoked, then stale, then unverified.
+  const weight = { linked: 4, revoked: 3, stale: 2, unverified: 1 }
+  if (!prev || (weight[entry.status] || 0) >= (weight[prev.status] || 0)) {
+    states.set(key, stateEntry(entry.status, entry.rootPubkey))
+  }
+}
+
 function buildNostrTrustSet (contacts, getBindings, opts = {}) {
   const trust = new Map()
+  const authorStates = new Map()
+  const rootStates = new Map()
   const addFor = (rootPubkey, binds, revocations) => {
     if (typeof rootPubkey !== 'string' || !HEX64.test(rootPubkey)) return
-    const nostrPubkey = resolveNostrBind(rootPubkey, binds || [], revocations || [])
-    if (nostrPubkey) trust.set(nostrPubkey.toLowerCase(), rootPubkey.toLowerCase())
+    const state = resolveNostrBindState(rootPubkey, binds || [], revocations || [])
+    rootStates.set(rootPubkey.toLowerCase(), {
+      status: state.status,
+      rootPubkey: state.rootPubkey,
+      nostrPubkey: state.nostrPubkey,
+      epoch: state.epoch,
+    })
+    for (const entry of state.bindings || []) rememberAuthorState(authorStates, entry)
+    if (state.status === 'linked' && state.nostrPubkey) {
+      trust.set(state.nostrPubkey.toLowerCase(), rootPubkey.toLowerCase())
+      rememberAuthorState(authorStates, { status: 'linked', rootPubkey, nostrPubkey: state.nostrPubkey })
+    }
   }
   for (const c of contacts || []) {
     // fail-closed: only a SIGNATURE-VERIFIED contact (verifiedAt set) confers trust,
@@ -44,11 +71,27 @@ function buildNostrTrustSet (contacts, getBindings, opts = {}) {
   if (opts.self && opts.self.rootPubkey) {
     addFor(opts.self.rootPubkey, opts.self.binds, opts.self.revocations)
   }
+  trust.authorStates = authorStates
+  trust.rootStates = rootStates
   return trust
 }
 
 function isAttested (nostrPubkey, trustSet) {
   return typeof nostrPubkey === 'string' && trustSet instanceof Map && trustSet.has(nostrPubkey.toLowerCase())
+}
+
+function getNostrAuthorState (nostrPubkey, trustSet) {
+  if (typeof nostrPubkey !== 'string' || !(trustSet instanceof Map)) return stateEntry('unverified')
+  const key = nostrPubkey.toLowerCase()
+  if (trustSet.has(key)) return stateEntry('linked', trustSet.get(key))
+  if (trustSet.authorStates instanceof Map && trustSet.authorStates.has(key)) return trustSet.authorStates.get(key)
+  return stateEntry('unverified')
+}
+
+function stripTrustState (ev) {
+  if (!ev || typeof ev !== 'object') return ev
+  const { _trustState, _trustRoot, ...clean } = ev
+  return clean
 }
 
 // Partition a batch of incoming events:
@@ -68,8 +111,10 @@ function partitionByTrust (events, trustSet, opts = {}) {
     if (!v.ok) { dropped.push({ id: ev && ev.id, reason: v.reason }); continue }
     if (known.has(ev.id) || seen.has(ev.id)) continue // dedup: id commits to content
     seen.add(ev.id)
-    if (isAttested(ev.pubkey, trustSet)) accepted.push(ev)
-    else quarantined.push(ev)
+    const state = getNostrAuthorState(ev.pubkey, trustSet)
+    const clean = stripTrustState(ev)
+    if (state.status === 'linked') accepted.push(clean)
+    else quarantined.push({ ...clean, _trustState: state.status, _trustRoot: state.rootPubkey })
   }
   return { accepted, quarantined, dropped }
 }
@@ -81,4 +126,4 @@ function repartitionQuarantine (quarantined, trustSet, opts = {}) {
   return partitionByTrust(quarantined, trustSet, opts)
 }
 
-module.exports = { buildNostrTrustSet, isAttested, partitionByTrust, repartitionQuarantine }
+module.exports = { buildNostrTrustSet, getNostrAuthorState, isAttested, partitionByTrust, repartitionQuarantine }

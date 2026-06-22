@@ -45,6 +45,7 @@ test('miss → null; aliases:false disables the floor', () => {
 // --- Tier 2: the N5 name registry --------------------------------------------
 
 const TKEY = 'aa'.repeat(32)
+const TLINK = 'pear://link-only-app'
 
 test('registry tier resolves a claimed name (target → key, provenance registry)', () => {
   const registry = { alice: { target: TKEY, owner: 'bb'.repeat(32), version: 1, label: 'alice' } }
@@ -53,6 +54,15 @@ test('registry tier resolves a claimed name (target → key, provenance registry
   assert.equal(r.key, TKEY)
   assert.equal(r.link, null)
   assert.equal(r.label, 'alice')
+})
+
+test('registry tier resolves a link-only app target as link', () => {
+  const registry = { keet: { target: TLINK, owner: 'bb'.repeat(32), version: 1, label: 'Keet via registry' } }
+  const r = resolveName('keet', { petnames: {}, registry })
+  assert.equal(r.provenance, 'registry')
+  assert.equal(r.key, null)
+  assert.equal(r.link, TLINK)
+  assert.equal(r.label, 'Keet via registry')
 })
 
 test('a user petname OUTRANKS the registry; the registry OUTRANKS the curated floor', () => {

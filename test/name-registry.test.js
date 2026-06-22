@@ -16,6 +16,9 @@ const owner = (kp) => hex(kp.publicKey)
 const TARGET_A = 'aa'.repeat(32)
 const TARGET_B = 'bb'.repeat(32)
 const TARGET_C = 'cc'.repeat(32)
+const PEAR_LINK = 'pear://keet'
+const HYPER_LINK = `hyper://${TARGET_A}/app`
+const FILE_LINK = 'file:///tmp/pear-app'
 // a confusable squat of "paypal": latin p, CYRILLIC а (U+0430), y, p, cyr а, l →
 // skeleton folds to "paypal" but its normalized form differs.
 const PAYPAL_SQUAT = 'pаypаl'
@@ -33,6 +36,34 @@ test('first-claim-wins: the earlier claim in linear order owns the name', () => 
   ])
   assert.equal(resolve(view, 'alice').owner, owner(a))
   assert.equal(resolve(view, 'alice').target, TARGET_A)
+})
+
+test('claims can target allowed app links, while unsafe schemes are rejected', () => {
+  const a = crypto.keyPair()
+  assert.equal(ops.normalizeTarget(HYPER_LINK).link, HYPER_LINK)
+  assert.equal(ops.normalizeTarget(FILE_LINK).link, FILE_LINK)
+
+  const view = applyView([
+    ops.claimOp({ name: 'keet', target: PEAR_LINK, owner: owner(a) }, signer(a)),
+  ])
+  const r = resolveFromNames(view.names, 'keet')
+  assert.equal(r.target, PEAR_LINK)
+  assert.equal(ops.targetToResolution(r.target).link, PEAR_LINK)
+
+  assert.throws(
+    () => ops.claimOp({ name: 'bad', target: 'javascript:alert(1)', owner: owner(a) }, signer(a)),
+    /target must be/
+  )
+  const badRemote = {
+    type: ops.CLAIM,
+    name: 'bad',
+    normalized: 'bad',
+    target: 'javascript:alert(1)',
+    owner: owner(a),
+    version: 1,
+    sig: signer(a)(ops.canon(ops.CLAIM, { name: 'bad', normalized: 'bad', target: 'javascript:alert(1)', owner: owner(a), version: 1 }))
+  }
+  assert.equal(resolveFromNames(applyView([badRemote]).names, 'bad'), null)
 })
 
 test('a forged claim (tampered signature) is dropped', () => {

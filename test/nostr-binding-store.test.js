@@ -63,12 +63,17 @@ test('initial state: npub present, not linked, epoch 0', () => withStore(async (
   assert.ok(st.npub.startsWith('npub1'))
   assert.equal(st.rootPubkey, id.rootHex)
   assert.equal(st.epoch, 0)
+  assert.equal(st.status, 'unverified')
   assert.equal(st.linked, false)
+  assert.equal(st.revoked, false)
+  assert.equal(st.stale, false)
   assert.equal(st.binding, null)
+  assert.deepEqual(st.revocations, [])
 }))
 
 test('bind links at epoch 1; the stored binding verifies against the root', () => withStore(async ({ store, id }) => {
   const st = await store.bind()
+  assert.equal(st.status, 'linked')
   assert.equal(st.linked, true)
   assert.equal(st.epoch, 1)
   assert.equal(st.binding.epoch, 1)
@@ -86,16 +91,21 @@ test('state persists across a fresh store instance (survives restart)', () => wi
 test('revoke unlinks; re-bind mints a higher epoch that re-links', () => withStore(async ({ store }) => {
   await store.bind() // epoch 1, linked
   let st = await store.revoke()
+  assert.equal(st.status, 'revoked')
   assert.equal(st.linked, false)
+  assert.equal(st.revoked, true)
   assert.equal(st.epoch, 1) // epoch counter unchanged by revoke
+  assert.equal(st.revocations.length, 1)
 
   st = await store.bind() // epoch 2 — higher than the epoch-1 revoke → re-links
+  assert.equal(st.status, 'linked')
   assert.equal(st.linked, true)
   assert.equal(st.epoch, 2)
 }))
 
 test('revoke is idempotent when there is nothing bound', () => withStore(async ({ store }) => {
   const st = await store.revoke()
+  assert.equal(st.status, 'unverified')
   assert.equal(st.linked, false)
   assert.equal(st.epoch, 0)
 }))
@@ -107,6 +117,7 @@ test('a FORGED revocation in the meta store is ignored (fail-closed) → stays l
   const forgedRev = attacker.makeNostrRevocation(1) // root-signed by the wrong key, wrong nostrPubkey too
   await pi.putMeta('nostrRevoke!1', forgedRev)
   const after = await store.getState()
+  assert.equal(after.status, 'linked')
   assert.equal(after.linked, true, 'forged revocation must not unlink')
   assert.equal(after.epoch, 1)
 }))

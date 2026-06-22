@@ -6,7 +6,8 @@
 // key to your root, and a nostr key can't claim a pear root it doesn't control.
 //
 // Monotonic `epoch` + root-signed revocation (you can unilaterally unlink from
-// your pear side); resolve is revoke-wins by (epoch, nostrPubkey). PURE, CommonJS.
+// your pear side); resolve is revoke-wins by current epoch so stale lower-epoch
+// bindings cannot resurrect after a newer revocation. PURE, CommonJS.
 
 const secp = require('./secp256k1-bundle.cjs') // BIP-340 schnorr (nostr side)
 const crypto = require('hypercore-crypto') // ed25519 (root side)
@@ -71,20 +72,101 @@ function verifyNostrRevoke (rev, expectedRootPubkey) {
   return ed25519Verify(canonRevoke(rev.rootPubkey, rev.nostrPubkey, rev.epoch), rev.rootSig, expectedRootPubkey)
 }
 
-// Current attested nostr pubkey for a root: highest-epoch valid bind not revoked.
-// Equal-epoch ties broken deterministically by nostrPubkey (order-independent).
-function resolveNostrBind (expectedRootPubkey, binds, revocations) {
-  const revoked = new Set()
-  for (const r of revocations || []) {
-    if (verifyNostrRevoke(r, expectedRootPubkey)) revoked.add(r.epoch + ':' + r.nostrPubkey)
-  }
-  let best = null
+const bindId = (epoch, nostrPubkey) => epoch + ':' + String(nostrPubkey || '').toLowerCase()
+
+function validNostrBinds (expectedRootPubkey, binds) {
+  const out = []
   for (const b of binds || []) {
-    if (!verifyNostrBind(b, expectedRootPubkey)) continue
-    if (revoked.has(b.epoch + ':' + b.nostrPubkey)) continue
-    if (!best || b.epoch > best.epoch || (b.epoch === best.epoch && b.nostrPubkey < best.nostrPubkey)) best = b
+    if (verifyNostrBind(b, expectedRootPubkey)) out.push({ ...b, nostrPubkey: b.nostrPubkey.toLowerCase(), rootPubkey: b.rootPubkey.toLowerCase() })
   }
-  return best ? best.nostrPubkey : null
+  return out
 }
 
-module.exports = { canonBind, canonRevoke, makeNostrBind, verifyNostrBind, makeNostrRevoke, verifyNostrRevoke, resolveNostrBind }
+function validNostrRevocations (expectedRootPubkey, revocations) {
+  const out = []
+  for (const r of revocations || []) {
+    if (verifyNostrRevoke(r, expectedRootPubkey)) out.push({ ...r, nostrPubkey: r.nostrPubkey.toLowerCase(), rootPubkey: r.rootPubkey.toLowerCase() })
+  }
+  return out
+}
+
+function newestBinding (bindings) {
+  let best = null
+  for (const b of bindings || []) {
+    if (!best || b.epoch > best.epoch || (b.epoch === best.epoch && b.nostrPubkey < best.nostrPubkey)) best = b
+  }
+  return best
+}
+
+// Rich binding state for a root. `status` is the root's current advertised
+// author state; `bindings[]` additionally labels every known author key so a
+// consumer can distinguish old/stale notes from explicitly revoked notes.
+function resolveNostrBindState (expectedRootPubkey, binds, revocations) {
+  const rootPubkey = typeof expectedRootPubkey === 'string' ? expectedRootPubkey.toLowerCase() : null
+  if (!rootPubkey || !HEX64.test(rootPubkey)) {
+    return { status: 'unverified', rootPubkey, nostrPubkey: null, epoch: 0, binding: null, revocation: null, bindings: [], revocations: [] }
+  }
+  const validBinds = validNostrBinds(rootPubkey, binds)
+  const validRevs = validNostrRevocations(rootPubkey, revocations)
+  const revById = new Map()
+  for (const r of validRevs) revById.set(bindId(r.epoch, r.nostrPubkey), r)
+
+  const current = newestBinding(validBinds)
+  const currentId = current ? bindId(current.epoch, current.nostrPubkey) : null
+  const currentRev = currentId ? revById.get(currentId) || null : null
+  const states = []
+  const seen = new Set()
+  for (const b of validBinds) {
+    const id = bindId(b.epoch, b.nostrPubkey)
+    const rev = revById.get(id) || null
+    let status = 'stale'
+    if (id === currentId) status = rev ? 'revoked' : 'linked'
+    else if (rev) status = 'revoked'
+    states.push({ status, rootPubkey, nostrPubkey: b.nostrPubkey, epoch: b.epoch, binding: b, revocation: rev })
+    seen.add(id)
+  }
+  for (const r of validRevs) {
+    const id = bindId(r.epoch, r.nostrPubkey)
+    if (seen.has(id)) continue
+    states.push({ status: 'revoked', rootPubkey, nostrPubkey: r.nostrPubkey, epoch: r.epoch, binding: null, revocation: r })
+  }
+
+  if (current) {
+    return {
+      status: currentRev ? 'revoked' : 'linked',
+      rootPubkey,
+      nostrPubkey: current.nostrPubkey,
+      epoch: current.epoch,
+      binding: current,
+      revocation: currentRev,
+      bindings: states,
+      revocations: validRevs,
+    }
+  }
+
+  const latestRev = newestBinding(validRevs.map((r) => ({ ...r, binding: null })))
+  return {
+    status: latestRev ? 'revoked' : 'unverified',
+    rootPubkey,
+    nostrPubkey: latestRev ? latestRev.nostrPubkey : null,
+    epoch: latestRev ? latestRev.epoch : 0,
+    binding: null,
+    revocation: latestRev || null,
+    bindings: states,
+    revocations: validRevs,
+  }
+}
+
+// Current attested nostr pubkey for a root, or null. Uses the richer state model
+// so an explicitly revoked current binding cannot fall back to a stale older bind.
+function resolveNostrBind (expectedRootPubkey, binds, revocations) {
+  const state = resolveNostrBindState(expectedRootPubkey, binds, revocations)
+  return state.status === 'linked' ? state.nostrPubkey : null
+}
+
+module.exports = {
+  canonBind, canonRevoke,
+  makeNostrBind, verifyNostrBind,
+  makeNostrRevoke, verifyNostrRevoke,
+  resolveNostrBind, resolveNostrBindState,
+}

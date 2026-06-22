@@ -8,6 +8,7 @@
 // local registries. CommonJS.
 
 const { normalize } = require('./name-normalize.cjs')
+const { targetToResolution } = require('./name-registry-ops.cjs')
 
 const DEFAULT_MAX_CONTACTS = 64
 const DEFAULT_STEP_TIMEOUT_MS = 2500
@@ -40,7 +41,7 @@ class FederatedNameResolver {
   }
 
   // Resolve `name` across trusted contacts IN PARALLEL (a slow contact only adds
-  // latency up to stepTimeoutMs, not linearly). Returns { name, key, owner,
+  // latency up to stepTimeoutMs, not linearly). Returns { name, key, link, owner,
   // source, contactPubkey, candidates } or null. `candidates` = how many trusted
   // contacts claimed it (>1 ⇒ ambiguous).
   async resolve (name) {
@@ -59,12 +60,13 @@ class FederatedNameResolver {
       const reg = await withTimeout(this.openRegistry(binding.nameRegKey, c.pubkey), this.stepTimeoutMs)
       if (!reg) return null
       const claim = await withTimeout(reg.resolve(norm), this.stepTimeoutMs)
-      if (!claim || !claim.target) return null
+      const target = claim && targetToResolution(claim.link || claim.key || claim.target)
+      if (!claim || !target || (!target.key && !target.link)) return null
       // MITM defense: trust the claim ONLY if its owner is THIS contact's root
       // (held in Contacts, invite-authenticated). A replicated registry can carry
       // other writers' claims — we ignore those.
       if (claim.owner !== c.pubkey) return null
-      return { contact: c, claim }
+      return { contact: c, claim, target }
     }))
     const candidates = settled.filter((r) => r.status === 'fulfilled' && r.value).map((r) => r.value)
     if (!candidates.length) return null
@@ -76,7 +78,9 @@ class FederatedNameResolver {
     const best = candidates[0]
     return {
       name: norm,
-      key: best.claim.target,
+      key: best.target.key || null,
+      link: best.target.link || null,
+      target: best.claim.target || best.target.link || best.target.key,
       owner: best.claim.owner,
       source: best.contact.displayName || best.contact.pubkey.slice(0, 8),
       contactPubkey: best.contact.pubkey,

@@ -40,6 +40,20 @@ test("resolves a trusted contact's claim (owner == contact root)", async () => {
   assert.equal(res.candidates, 1)
 })
 
+test("resolves a trusted contact's link-only app claim", async () => {
+  const root = K('aa')
+  const link = 'pear://contact-app'
+  const r = stubResolver({
+    contacts: [{ pubkey: root, displayName: 'Bob', verifiedAt: 1, bindingKey: K('bb') }],
+    bindings: { [root]: { nameRegKey: K('cc') } },
+    registries: { [K('cc')]: fakeReg({ app: { target: link, owner: root, version: 1 } }) },
+  })
+  const res = await r.resolve('app')
+  assert.equal(res.key, null)
+  assert.equal(res.link, link)
+  assert.equal(res.source, 'Bob')
+})
+
 test('ignores an UNVERIFIED contact (fail-closed)', async () => {
   const root = K('aa')
   const r = stubResolver({

@@ -40,31 +40,46 @@ class NostrBindingStore {
     return b4a.toString(this.identity.getSigningKeypair().publicKey, 'hex')
   }
 
-  // The revocation persisted for a binding's own epoch (if any), validated
-  // against the root — fail-closed (a malformed/forged stored rev is ignored).
-  async _revocationFor (binding, rootHex) {
-    if (!binding) return null
-    const rev = await this.personalIndex.getMeta(revokeKey(binding.epoch), null)
-    return (rev && nb.verifyNostrRevoke(rev, rootHex)) ? rev : null
+  async _revocationsForRoot (rootHex, maxEpoch) {
+    const out = []
+    const end = Number.isInteger(maxEpoch) && maxEpoch > 0 ? maxEpoch : 0
+    for (let epoch = 1; epoch <= end; epoch++) {
+      const rev = await this.personalIndex.getMeta(revokeKey(epoch), null)
+      if (rev && nb.verifyNostrRevoke(rev, rootHex)) out.push(rev)
+    }
+    return out
+  }
+
+  async getRevocations () {
+    const rootHex = this._rootPubkeyHex()
+    const epoch = await this.personalIndex.getMeta(EPOCH_META, 0)
+    return this._revocationsForRoot(rootHex, epoch)
   }
 
   // Current public state for the UI: npub, the attested epoch, and whether the
-  // binding is currently LINKED (attested · not revoked). Resolved through the
-  // audited resolveNostrBind so the "linked" verdict matches the wire semantics.
+  // binding is linked/revoked/stale/unverified. Resolved through the audited
+  // state resolver so the UI and wire semantics agree.
   async getState () {
     const rootHex = this._rootPubkeyHex()
     const nostrPubkey = this.identity.getNostrPublicKey()
     const binding = await this.personalIndex.getMeta(BINDING_META, null)
     const epoch = await this.personalIndex.getMeta(EPOCH_META, 0)
-    const rev = await this._revocationFor(binding, rootHex)
-    const active = nb.resolveNostrBind(rootHex, binding ? [binding] : [], rev ? [rev] : [])
+    const revocations = await this._revocationsForRoot(rootHex, epoch)
+    const resolved = nb.resolveNostrBindState(rootHex, binding ? [binding] : [], revocations)
+    let status = resolved.status
+    if (status === 'linked' && resolved.nostrPubkey !== nostrPubkey) status = 'stale'
     return {
       nostrPubkey,
       npub: nip19.npubEncode(nostrPubkey),
       rootPubkey: rootHex,
       epoch,
-      linked: active === nostrPubkey,
+      status,
+      linked: status === 'linked',
+      revoked: status === 'revoked',
+      stale: status === 'stale',
       binding: binding || null,
+      revocation: resolved.revocation || null,
+      revocations,
     }
   }
 

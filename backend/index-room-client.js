@@ -15,6 +15,7 @@
 const z32 = require('z32')
 const b4a = require('b4a')
 const { decodeSheetsLink, safeJmesPath, MAX_SHEETS_ROWS } = require('./sheets-catalog')
+const { normalizeCatalogApp } = require('./catalog-safety.cjs')
 
 // Same Bare-bundled schema-sheets the catalogue uses — the index room is the
 // same corestore-7/hypercore-11 generation, so replication is direct.
@@ -79,7 +80,7 @@ function decodeIndexLink (link) {
 function manifestRowToApp (row) {
   if (!row || typeof row.json !== 'object' || row.json === null) return null
   const j = row.json
-  return {
+  return normalizeCatalogApp({
     id: j.appId || row.uuid,
     name: j.name,
     description: null,
@@ -92,7 +93,7 @@ function manifestRowToApp (row) {
     icon: j.icon || null,
     verification: 'relay-listed',
     publisherKey: j.publisherPubkey || null
-  }
+  }, { source: 'hiveindex' })
 }
 
 class IndexRoomClient {

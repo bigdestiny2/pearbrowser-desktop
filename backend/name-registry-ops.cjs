@@ -25,10 +25,30 @@ const TAG = {
 const HEX64 = /^[0-9a-f]{64}$/i
 const HEX128 = /^[0-9a-f]{128}$/i
 const MAX_NAME = 253
+const MAX_TARGET = 300
+const ALLOWED_LINK_RE = /^(?:hyper|pear|file):\/\/.+/i
 // Total serialized op cap (defense-in-depth vs a writer bloating the log — a real
 // op is ~700 bytes: name≤253 + normalized/skeleton + a few 64-hex fields). Mirrors
 // MAX_OP_BYTES in browser-state-ops / autobee-catalog-ops. Oversized → dropped on apply.
 const MAX_OP_BYTES = 4096
+
+function normalizeTarget (target) {
+  const s = String(target || '').trim()
+  if (!s) return null
+  if (HEX64.test(s)) {
+    const key = s.toLowerCase()
+    return { target: key, key, link: null, kind: 'drive' }
+  }
+  if (s.length <= MAX_TARGET && ALLOWED_LINK_RE.test(s)) {
+    return { target: s, key: null, link: s, kind: 'link' }
+  }
+  return null
+}
+
+function targetToResolution (target) {
+  const t = normalizeTarget(target)
+  return t ? { key: t.key, link: t.link } : null
+}
 
 // Canonical signed bytes (sorted keys, NO clock — ordering is the Autobase's
 // linear order, never a forgeable timestamp). The RAW display name `d` is signed
@@ -46,7 +66,7 @@ function isWellFormedOp (op) {
   if (typeof op.owner !== 'string' || !HEX64.test(op.owner)) return false
   if (typeof op.sig !== 'string' || !HEX128.test(op.sig)) return false
   if (op.type === CLAIM || op.type === ROTATE) {
-    if (typeof op.target !== 'string' || !HEX64.test(op.target)) return false
+    if (typeof op.target !== 'string' || !normalizeTarget(op.target)) return false
     if (!Number.isInteger(op.version) || op.version < 1) return false
   }
   // Drop a bloated op (e.g. a hostile writer padding extra fields) so it never
@@ -59,11 +79,15 @@ function isWellFormedOp (op) {
 // owner is the controlling ed25519 pubkey; target is what the name resolves to.
 function claimOp ({ name, target, owner }, ownerSign) {
   const normalized = normalize(name)
-  return { type: CLAIM, name, normalized, skeleton: skeleton(name), target, owner, version: 1, sig: ownerSign(canon(CLAIM, { name, normalized, target, owner, version: 1 })) }
+  const nt = normalizeTarget(target)
+  if (!nt) throw new Error('target must be a 64-hex drive key or pear://, hyper://, file:// link')
+  return { type: CLAIM, name, normalized, skeleton: skeleton(name), target: nt.target, owner, version: 1, sig: ownerSign(canon(CLAIM, { name, normalized, target: nt.target, owner, version: 1 })) }
 }
 function rotateOp ({ name, target, owner, version }, ownerSign) {
   const normalized = normalize(name)
-  return { type: ROTATE, name, normalized, skeleton: skeleton(name), target, owner, version, sig: ownerSign(canon(ROTATE, { name, normalized, target, owner, version })) }
+  const nt = normalizeTarget(target)
+  if (!nt) throw new Error('target must be a 64-hex drive key or pear://, hyper://, file:// link')
+  return { type: ROTATE, name, normalized, skeleton: skeleton(name), target: nt.target, owner, version, sig: ownerSign(canon(ROTATE, { name, normalized, target: nt.target, owner, version })) }
 }
 function releaseOp ({ name, owner }, ownerSign) {
   const normalized = normalize(name)
@@ -75,6 +99,7 @@ function revokeOp ({ name, owner }, ownerSign) {
 }
 
 module.exports = {
-  CLAIM, ROTATE, RELEASE, REVOKE, OP_TYPES, MAX_NAME, MAX_OP_BYTES,
+  CLAIM, ROTATE, RELEASE, REVOKE, OP_TYPES, MAX_NAME, MAX_TARGET, MAX_OP_BYTES,
+  normalizeTarget, targetToResolution,
   canon, isWellFormedOp, claimOp, rotateOp, releaseOp, revokeOp,
 }

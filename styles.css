@@ -595,6 +595,12 @@ p { color: #8b949e; margin-bottom: 12px; }
   gap: 6px;
   flex-shrink: 0;
 }
+.app-actions-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.app-info-copy { min-width: 0; }
 
 /* ─── Site editor ─── */
 

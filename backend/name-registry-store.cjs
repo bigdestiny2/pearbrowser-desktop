@@ -19,18 +19,19 @@ class NameRegistry {
       const auth = verifyOpAuthenticity(op)
       if (!auth) return
       const { normalized, skeleton: sk } = auth
+      const effectiveOp = auth.target ? { ...op, target: auth.target } : op
       const curRec = await view.get('name!' + normalized).catch(() => null)
       const current = curRec ? curRec.value : null
       // skelRec: { owner, names:[...] } of all non-released holders of this skeleton
       // (set-valued, so a sibling-variant release can't free a still-held skeleton).
       const skelRecRec = await view.get('skel!' + sk).catch(() => null)
       const skelRec = skelRecRec ? skelRecRec.value : null
-      const d = decide({ current, skelRec, normalized, skeleton: sk }, op)
+      const d = decide({ current, skelRec, normalized, skeleton: sk }, effectiveOp)
       if (!d.write) return
       await view.put('name!' + normalized, d.write)
       if (d.skelAdd) {
-        const rec = skelRec || { owner: op.owner, names: [] }
-        rec.owner = op.owner
+        const rec = skelRec || { owner: effectiveOp.owner, names: [] }
+        rec.owner = effectiveOp.owner
         if (!rec.names.includes(normalized)) rec.names.push(normalized)
         await view.put('skel!' + sk, rec)
       }
@@ -69,14 +70,34 @@ class NameRegistry {
     const normalized = normalize(name)
     const e = await this.mgr.view.get('name!' + normalized).catch(() => null)
     const v = e && e.value
-    return (v && v.status === 'active') ? { name: v.name, normalized, target: v.target, owner: v.owner, version: v.version } : null
+    if (!v || v.status !== 'active') return null
+    const resolved = ops.targetToResolution(v.target) || {}
+    return {
+      name: v.name,
+      normalized,
+      target: v.target,
+      key: resolved.key || null,
+      link: resolved.link || null,
+      owner: v.owner,
+      version: v.version
+    }
   }
 
-  // Active names as a resolver-ready map { [normalized]: { target, owner, version } }
+  // Active names as a resolver-ready map { [normalized]: { target, key?, link?, owner, version } }
   // — the registry tier injected into resolveName (mirrors Names.petnameMap()).
   async activeMap () {
     const out = {}
-    for (const e of await this.list()) out[e.normalized] = { target: e.target, owner: e.owner, version: e.version, label: e.name }
+    for (const e of await this.list()) {
+      const resolved = ops.targetToResolution(e.target) || {}
+      out[e.normalized] = {
+        target: e.target,
+        key: resolved.key || null,
+        link: resolved.link || null,
+        owner: e.owner,
+        version: e.version,
+        label: e.name
+      }
+    }
     return out
   }
 
@@ -88,7 +109,10 @@ class NameRegistry {
     await this.mgr.update()
     const out = []
     for await (const e of this.mgr.view.createReadStream({ gte: 'name!', lt: 'name"' })) {
-      if (e.value && e.value.status === 'active') out.push(e.value)
+      if (e.value && e.value.status === 'active') {
+        const resolved = ops.targetToResolution(e.value.target) || {}
+        out.push({ ...e.value, key: resolved.key || null, link: resolved.link || null })
+      }
     }
     return out
   }
