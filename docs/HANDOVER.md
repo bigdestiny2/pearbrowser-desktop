@@ -171,7 +171,7 @@ breaking the feature with no error. The drift guard fails CI if they disagree.
 
 ```bash
 npm start          # pear run --dev .   (dev shell)
-npm test           # node --test 'test/*.test.js'   → 402 passing on the release PR branch
+npm test           # node --test 'test/*.test.js'   → 404 passing on the release PR branch
 node scripts/browser-state-sync-smoke.js   # encrypted two-device bookmark sync (no GUI)
 node scripts/autobee-catalog-smoke.js      # collaborative catalog convergence
 node scripts/check-relays.js               # relay reachability over the DHT

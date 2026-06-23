@@ -6,12 +6,12 @@ Scope: desktop PearBrowser, mobile/native PearBrowser, the live PearBrowser Netw
 
 The release is in strong shape for a community launch. The core protocol tests are broad and green after the final catalogue cleanup:
 
-- Desktop: `node --test 'test/*.test.js'` passed `402/402`.
+- Desktop: `node --test 'test/*.test.js'` passed `404/404`.
 - Mobile/native: `npm test` passed `124/124`.
 - Publisher catalogue: `npm run validate` passes with no warnings.
 - Desktop and mobile `git diff --check` are clean.
 - Desktop dependency audit: `npm audit --audit-level=high` found 0 vulnerabilities.
-- Mobile dependency audit: safe `npm audit fix` removed high/critical advisories, `npm audit --audit-level=high` now passes, and the full mobile suite still passes.
+- Mobile dependency audit: safe `npm audit fix` removed high/critical advisories, `npm audit --audit-level=high` now passes, and the full mobile suite still passes. Full `npm audit` still reports 15 moderate inherited Expo/React Native toolchain advisories with only breaking framework fixes offered.
 - Live catalogue Hyperbee republished at `hyperbee://f5fb7500bccd60a976d2b1d24246108f4444a210b9ca591533114dffc089934d`; 5 relay seed requests were accepted.
 - Production browser drive fresh-peer verification passed at length `16898`, with `/CHANGELOG.md` blob fetch proving content blocks are reachable.
 - Live catalogue fresh-peer verification passed at Hyperbee core length `222`, with signed meta present and Peercord/HiveWorm rows matching expected release metadata, including Peercord `type: "standalone"`.
@@ -20,7 +20,7 @@ The release is in strong shape for a community launch. The core protocol tests a
 - PearBrowser homepage, Peercord, and Keet bundle drives were fresh-peer sampled without executing third-party code; all returned peers, file listings, and zero missing sampled blobs.
 - Native simulator/device smoke is mostly cleared: the generated Expo iOS project exposed a real missing native module (`ExpoLinking`), the tracked dependency is now added and autolinked, and the tracked SwiftUI `ios-native` shell now builds, installs, launches, recovers from stale Corestore layout, and reaches a green `Connected` worklet state on the iPhone 17 simulator. Generated Expo iOS Debug and Release simulator builds now pass; the Release helper pins `HERMES_CLI_PATH` to the Pods `hermesc` as an Xcode build setting so the bundle phase does not hang on the node_modules compiler path. Android native now builds a fresh debug APK with a verified JDK 17, installs it on a headless `pp_avd` emulator, launches `com.pearbrowser.app/.MainActivity`, loads `libbare-kit.so`, extracts `backend.android.bundle`, starts the local proxy, and reaches a green `Connected` Home screen. Android native release APK/AAB builds also pass with R8/resource shrink, and the env-driven signing path verifies with a disposable test key (`apksigner` for APK, `jarsigner` for AAB).
 
-One transient desktop `npm test` run reported `401/402`; the immediately repeated compact full run passed `402/402`, and the catalogue-focused subset passed `30/30`. No code change was needed for that blip.
+One earlier desktop `npm test` run reported `401/402`; the immediately repeated compact full run passed `402/402`, and the current release branch now passes `404/404` after the Peercord launch-mode coverage landed. No code change was needed for that earlier blip.
 
 ## Fixes In This Pass
 

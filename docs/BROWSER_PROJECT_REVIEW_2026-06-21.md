@@ -131,7 +131,7 @@ npm test
 
 Original result: 346 tests passed, 0 failed.
 
-2026-06-23 release result: `npm test` passed `402/402`, including the catalogue, Peercord, search, naming, Nostr, sync, and command-mirror additions that landed after this review.
+2026-06-23 release result: `npm test` passed `404/404`, including the catalogue, Peercord, search, naming, Nostr, sync, and command-mirror additions that landed after this review.
 
 Focused desktop checks:
 
