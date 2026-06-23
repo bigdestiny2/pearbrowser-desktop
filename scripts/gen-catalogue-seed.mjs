@@ -2,11 +2,11 @@
 // versioned PearBrowser Network catalogue manifest at
 //   catalog-source/pearbrowser-network.catalog.json
 //
-// This is the unification primitive: the SAME source feeds (1) this offline seed
-// (ensureDevCatalogue), (2) the published Hyperbee catalog (publish-catalog-bee.js),
-// and (3) the relay firehose manifests — so the three can never drift again. The
-// browser's dedupeApps() collapses the offline seed against the live bee by
-// driveKey/link, so an app present in both shows once.
+// This is the unification primitive: the SAME source feeds (1) this offline
+// seed, (2) the published Hyperbee catalog (publish-catalog-bee.js), and (3) the
+// relay firehose manifests — so the three can never drift again. The browser's
+// dedupeApps() collapses the offline seed against the live bee by driveKey/link,
+// so an app present in both shows once.
 //
 //   node scripts/gen-catalogue-seed.mjs
 //   node scripts/gen-catalogue-seed.mjs --source /path/to/catalog.json
@@ -74,11 +74,10 @@ const header = `/**
  * Source of truth: catalog-source/pearbrowser-network.catalog.json
  * Regenerate:      node scripts/gen-catalogue-seed.mjs
  *
- * Until the HiveRelay publishes a canonical schema-sheets catalogue room, the
- * backend seeds one locally on boot (ensureDevCatalogue in index.js) so the Apps
- * store is populated end-to-end offline. The desktop ALSO loads the live Hyperbee
- * catalog (DEFAULT_CATALOG_KEY in ui/shell.js, same source); dedupeApps() collapses
- * the two by driveKey/link, so each app appears once.
+ * The backend can seed this into a local schema-sheets demo room when
+ * PEARBROWSER_DEV_CATALOGUE=1 (ensureDevCatalogue in index.js). Normal release
+ * launches use the curated live Hyperbee catalog plus this offline seed source;
+ * dedupeApps() collapses overlaps by driveKey/link, so each app appears once.
  *
  * Each entry is one \`apps\` row (validated against APPS_SCHEMA): name + type
  * required, driveKey OR link, type ∈ {standalone (window), hypersite (run-in-tab)}.

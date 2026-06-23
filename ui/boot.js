@@ -15,6 +15,7 @@ import { RpcClient } from './rpc-client.js'
 // holding 9876.
 const RPC_PORT_BASE = 9876
 const RPC_PORT_COUNT = 5
+const RPC_PROBE_ID = 900000001
 
 // Must match backend/constants.js exactly (numeric wire codes). This is a
 // COMPLETE mirror — every command/event the renderer can send or receive.
@@ -199,15 +200,82 @@ class WsPipe {
   }
 }
 
-function tryConnect (url, timeoutMs) {
+function frameRpc (msg) {
+  const json = JSON.stringify(msg)
+  return json.length.toString(16).padStart(8, '0') + json
+}
+
+function diagnosticUrlFor (url) {
+  const u = new URL(url)
+  u.pathname = '/status-smoke'
+  u.search = ''
+  u.hash = ''
+  return u.toString()
+}
+
+function parseRpcFrames (state, data) {
+  state.buffer += typeof data === 'string'
+    ? data
+    : new TextDecoder().decode(data)
+  const out = []
+  while (state.buffer.length >= 8) {
+    const len = parseInt(state.buffer.slice(0, 8), 16)
+    if (isNaN(len) || len <= 0 || len > 10_000_000) {
+      throw new Error('invalid rpc frame')
+    }
+    if (state.buffer.length < 8 + len) break
+    const json = state.buffer.slice(8, 8 + len)
+    state.buffer = state.buffer.slice(8 + len)
+    out.push(JSON.parse(json))
+  }
+  return out
+}
+
+function probeBackend (url, timeoutMs) {
   return new Promise((resolve, reject) => {
+    const probeUrl = diagnosticUrlFor(url)
+    const ws = new WebSocket(probeUrl)
+    ws.binaryType = 'arraybuffer'
+    const state = { buffer: '' }
+    let settled = false
+    const t = setTimeout(() => finish(new Error('probe timeout')), timeoutMs)
+
+    function finish (err) {
+      if (settled) return
+      settled = true
+      clearTimeout(t)
+      try { ws.close() } catch {}
+      err ? reject(err) : resolve()
+    }
+
+    ws.addEventListener('open', () => {
+      ws.send(frameRpc({ id: RPC_PROBE_ID, cmd: C.CMD_GET_STATUS, data: {} }))
+    })
+    ws.addEventListener('message', (e) => {
+      let messages
+      try { messages = parseRpcFrames(state, e.data) } catch (err) {
+        finish(err)
+        return
+      }
+      for (const msg of messages) {
+        if (msg?.event === 'backend-boot-failed') return finish(null)
+        if (msg?.id === RPC_PROBE_ID) return msg.error ? finish(new Error(msg.error)) : finish(null)
+      }
+    })
+    ws.addEventListener('error', () => finish(new Error('probe error')))
+    ws.addEventListener('close', () => finish(new Error('probe closed')))
+  })
+}
+
+function tryConnect (url, timeoutMs) {
+  return probeBackend(url, timeoutMs).then(() => new Promise((resolve, reject) => {
     const pipe = new WsPipe(url)
     let settled = false
     const t = setTimeout(() => { if (!settled) { settled = true; reject(new Error('timeout')) } }, timeoutMs)
     pipe.on('open', () => { if (!settled) { settled = true; clearTimeout(t); resolve(pipe) } })
     pipe.on('error', () => { if (!settled) { settled = true; clearTimeout(t); reject(new Error('ws error')) } })
     pipe.on('close', () => { if (!settled) { settled = true; clearTimeout(t); reject(new Error('ws closed')) } })
-  })
+  }))
 }
 
 export async function startBackend () {

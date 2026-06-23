@@ -32,6 +32,43 @@ const assets = require('./tab-assets/assets.js')     // { wrapper, htmx, client 
 const WS_PORT_BASE = 9886
 const WS_PORT_COUNT = 12
 
+function listenWsServer (port, onSocket) {
+  return new Promise((resolve, reject) => {
+    const httpServer = http.createServer((req, res) => {
+      const body = 'WebSocket required'
+      res.writeHead(426, {
+        'Content-Type': 'text/plain',
+        'Content-Length': body.length
+      })
+      res.end(body)
+    })
+    const server = new ws.Server({ server: httpServer }, onSocket)
+    let settled = false
+
+    const cleanup = () => {
+      httpServer.removeListener('error', onError)
+      httpServer.removeListener('listening', onListening)
+    }
+    const onError = (err) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      try { server.close() } catch {}
+      reject(err)
+    }
+    const onListening = () => {
+      if (settled) return
+      settled = true
+      cleanup()
+      resolve(server)
+    }
+
+    httpServer.once('error', onError)
+    httpServer.once('listening', onListening)
+    httpServer.listen(port, '127.0.0.1')
+  })
+}
+
 class TabRuntime {
   constructor (opts = {}) {
     this.pearRun = opts.pearRun || null // (link) => duplex worker pipe
@@ -56,11 +93,7 @@ class TabRuntime {
 
     for (let p = WS_PORT_BASE; p < WS_PORT_BASE + WS_PORT_COUNT; p++) {
       try {
-        this._ws = await new Promise((resolve, reject) => {
-          const s = new ws.Server({ port: p, host: '127.0.0.1' }, (sock) => this._onSocket(sock))
-          s.once('listening', () => resolve(s))
-          s.once('error', reject)
-        })
+        this._ws = await listenWsServer(p, (sock) => this._onSocket(sock))
         this.wsPort = p
         break
       } catch (err) {

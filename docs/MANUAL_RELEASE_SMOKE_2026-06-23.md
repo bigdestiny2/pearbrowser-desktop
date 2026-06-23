@@ -29,6 +29,10 @@ logs next to each checked item before public announcement.
 - [ ] Launch the production browser link:
   - `pear://tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty`
   - Expected: browser opens, backend RPC connects, default page loads.
+  - In a terminal, run `node scripts/runtime-rpc-smoke.mjs`.
+  - Expected: diagnostic RPC reports `dhtConnected: true`, a non-zero
+    `proxyPort`, and at least one configured HiveRelay without becoming the
+    renderer or closing the app.
 - [ ] Browse user story:
   - Open `hyper://1868916a7a282ff0f211b536e9642828c32d3a817a254e1ef7e602709e25d/`.
   - Expected: page renders, About-this-site shows the drive key, reload works.

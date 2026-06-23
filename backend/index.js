@@ -50,6 +50,10 @@ const C = require('./constants.js')
 
 const { IPC } = BareKit
 const storagePath = Bare.argv[0] || './pearbrowser-storage'
+const ENV = (typeof Bare !== 'undefined' && Bare.env) ||
+  (typeof process !== 'undefined' && process.env) || {}
+const ENABLE_DEV_CATALOGUE = ENV.PEARBROWSER_DEV_CATALOGUE === '1'
+const ENABLE_RELAY_INDEX_ROOMS = ENV.PEARBROWSER_RELAY_INDEX_ROOMS === '1'
 
 // Swallow benign races that would otherwise crash Bare with an
 // unhandled rejection — most commonly `Corestore is closed` from
@@ -2593,6 +2597,7 @@ async function boot () {
       const { indexRooms } = await relayClient.bootstrapFromDht(swarm.dht, C.BOOTSTRAP_RELAYS)
       for (const r of indexRooms) {
         if (!r || !r.indexRoom || !catalogManager) continue
+        if (!ENABLE_RELAY_INDEX_ROOMS) continue
         try { await catalogManager.loadCatalogIndexRoom(r.indexRoom) } catch (e) {
           console.error('[iroh] index-room load failed:', e && e.message)
         }
@@ -2669,9 +2674,13 @@ async function boot () {
   // store/swarm after teardown.
   storageTimer = setInterval(() => checkStorageQuota(), STORAGE_CHECK_INTERVAL)
 
-  // Seed + load the dev app catalogue (schema-sheets). Best-effort, off the
-  // critical path. Replaced by the relay's canonical room once it publishes one.
-  ensureDevCatalogue().catch((err) => console.error('[dev-catalogue]', err && err.message))
+  // Seed + load the schema-sheets demo catalogue only when explicitly requested.
+  // The release Apps path uses the curated Hyperbee/offline seed; this local
+  // demo room is useful for schema-sheets development but must not be able to
+  // destabilize a normal browser launch.
+  if (ENABLE_DEV_CATALOGUE) {
+    ensureDevCatalogue().catch((err) => console.error('[dev-catalogue]', err && err.message))
+  }
 
   // Notify React Native
   console.log('Sending READY event')

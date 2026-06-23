@@ -4,11 +4,10 @@
  * Source of truth: catalog-source/pearbrowser-network.catalog.json
  * Regenerate:      node scripts/gen-catalogue-seed.mjs
  *
- * Until the HiveRelay publishes a canonical schema-sheets catalogue room, the
- * backend seeds one locally on boot (ensureDevCatalogue in index.js) so the Apps
- * store is populated end-to-end offline. The desktop ALSO loads the live Hyperbee
- * catalog (DEFAULT_CATALOG_KEY in ui/shell.js, same source); dedupeApps() collapses
- * the two by driveKey/link, so each app appears once.
+ * The backend can seed this into a local schema-sheets demo room when
+ * PEARBROWSER_DEV_CATALOGUE=1 (ensureDevCatalogue in index.js). Normal release
+ * launches use the curated live Hyperbee catalog plus this offline seed source;
+ * dedupeApps() collapses overlaps by driveKey/link, so each app appears once.
  *
  * Each entry is one `apps` row (validated against APPS_SCHEMA): name + type
  * required, driveKey OR link, type ∈ {standalone (window), hypersite (run-in-tab)}.

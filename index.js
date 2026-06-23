@@ -1,6 +1,7 @@
 import Runtime from 'pear-electron'
 import Bridge from 'pear-bridge'
 import ws from 'bare-ws'
+import http from 'bare-http1'
 // ESM-only modules the backend needs but can't dynamic-import from CJS:
 // Bare/Pear's import() resolver has no referrer URL when called from a
 // CommonJS file, so all forms of import() from backend/*.js fail with
@@ -68,12 +69,16 @@ try {
 // Events emitted by the backend before the renderer connects are
 // buffered here so nothing boot-time is missed.
 let client = null
+const diagnostics = new Set()
 const eventBuffer = []
 
 if (backendPipe) {
   backendPipe.on('data', (chunk) => {
     if (client) client.write(chunk)
     else eventBuffer.push(chunk)
+    for (const socket of diagnostics) {
+      try { socket.write(chunk) } catch {}
+    }
   })
 }
 
@@ -86,7 +91,39 @@ function frameEvent (event, data) {
   return json.length.toString(16).padStart(8, '0') + json
 }
 
-const onSocket = (socket) => {
+const onDiagnosticSocket = (socket) => {
+  console.log('[rpc] diagnostic connected')
+  diagnostics.add(socket)
+  socket.on('close', () => {
+    console.log('[rpc] diagnostic disconnected')
+    diagnostics.delete(socket)
+  })
+  socket.on('error', (err) => {
+    console.error('[rpc] diagnostic error:', err.message)
+    diagnostics.delete(socket)
+  })
+
+  if (bootError) {
+    console.log('[rpc] sending backend-boot-failed event to diagnostic')
+    socket.write(frameEvent('backend-boot-failed', {
+      message: bootError.message || String(bootError),
+      code: bootError.code || null,
+      stack: bootError.stack || null
+    }))
+    setTimeout(() => { try { socket.end() } catch {} }, 200)
+    return
+  }
+
+  socket.on('data', (data) => {
+    try { backendPipe?.write(data) } catch {}
+  })
+}
+
+const onSocket = (socket, req) => {
+  if (req?.url && req.url.split('?')[0] === '/status-smoke') {
+    return onDiagnosticSocket(socket)
+  }
+
   if (client) {
     console.log('[rpc] rejecting extra WS connection')
     return socket.end()
@@ -131,13 +168,46 @@ const onSocket = (socket) => {
 
 let rpcServer = null
 let rpcPort = null
+function listenRpcServer (port) {
+  return new Promise((resolve, reject) => {
+    const httpServer = http.createServer((req, res) => {
+      const body = 'WebSocket required'
+      res.writeHead(426, {
+        'Content-Type': 'text/plain',
+        'Content-Length': body.length
+      })
+      res.end(body)
+    })
+    const server = new ws.Server({ server: httpServer }, onSocket)
+    let settled = false
+
+    const cleanup = () => {
+      httpServer.removeListener('error', onError)
+      httpServer.removeListener('listening', onListening)
+    }
+    const onError = (err) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      try { server.close() } catch {}
+      reject(err)
+    }
+    const onListening = () => {
+      if (settled) return
+      settled = true
+      cleanup()
+      resolve(server)
+    }
+
+    httpServer.once('error', onError)
+    httpServer.once('listening', onListening)
+    httpServer.listen(port, '127.0.0.1')
+  })
+}
+
 for (let p = RPC_PORT_BASE; p < RPC_PORT_BASE + RPC_PORT_COUNT; p++) {
   try {
-    rpcServer = await new Promise((resolve, reject) => {
-      const s = new ws.Server({ port: p, host: '127.0.0.1' }, onSocket)
-      s.once('listening', () => resolve(s))
-      s.once('error', (err) => reject(err))
-    })
+    rpcServer = await listenRpcServer(p)
     rpcPort = p
     console.log(`[rpc] WS listening on :${rpcPort}`)
     break

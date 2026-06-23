@@ -170,6 +170,7 @@ node scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --
 | `scripts/verify-pin.js --expect <length>` | Fresh-peer production-drive check: proves the released browser drive is reachable and serving at least the expected length. |
 | `scripts/verify-release-contents.js --expect <length> --missing <path>` | Fresh-peer release metadata scan: proves ignored scratch/docs/scripts/tests paths are absent from the production drive after purge staging. |
 | `scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --expect-app hiveworm` | Fresh-peer Hyperbee catalogue check: proves the live app catalogue key is reachable and contains expected release rows and Peercord launch metadata. |
+| `scripts/runtime-rpc-smoke.mjs` | Runtime GUI smoke: after launching PearBrowser, checks the diagnostic RPC path reports DHT, proxy, relay, peer-count, and storage readiness without becoming the renderer. |
 | `scripts/verify-app-full.js --key <driveKey>` | Deeper fresh-peer blob sampling across a drive's file tree. |
 | `scripts/verify-pear-bundle-contract.js --key <driveKey>` | Metadata-only Pear bundle contract check: reads `pear.json` and selected files from a fresh peer without executing third-party code. |
 | `scripts/release-prod.sh` | The two-step release pipeline above. |
