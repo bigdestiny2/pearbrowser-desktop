@@ -39,6 +39,17 @@ test('Featured Peercord card uses the window launch path until a headless worker
   const entry = shell.match(/id: 'peercord'[\s\S]*?gradient: 'linear-gradient\([^']+\)'/)
   assert.ok(entry, 'Peercord featured entry missing')
   assert.match(entry[0], /type: 'standalone'/)
-  assert.match(entry[0], new RegExp(PEERCORD_LINK.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+  assert.match(shell, new RegExp(`const PEERCORD_LINK = '${PEERCORD_LINK.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}'`))
+  assert.match(entry[0], /link: PEERCORD_LINK/)
   assert.match(shell, /catalogue type is/)
+})
+
+test('Peercord launch shows a first-run standalone trust warning', () => {
+  const shell = readFileSync(new URL('../ui/shell.js', import.meta.url), 'utf8')
+  assert.match(shell, /STANDALONE_PRELAUNCH_WARNINGS/)
+  assert.match(shell, /persistent third-party trust prompt/)
+  assert.match(shell, /Approving it executes third-party code and creates a persistent trust decision/)
+  assert.match(shell, /standaloneLaunchWarningsSeen/)
+  assert.match(shell, /pendingStandaloneLaunch/)
+  assert.match(shell, /app\.type === 'hypersite'/)
 })

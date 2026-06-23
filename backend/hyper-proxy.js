@@ -104,6 +104,29 @@ function sha256ScriptBody (shimHtml) {
   return crypto.createHash('sha256').update(m[1], 'utf8').digest('base64')
 }
 
+const HYPER_LINK_BRIDGE_SHIM = `<script>
+(() => {
+  if (window.__pearBrowserHyperLinkBridge) return
+  window.__pearBrowserHyperLinkBridge = true
+  const handleHyperLink = (event) => {
+    const anchor = event.target && event.target.closest ? event.target.closest('a[href]') : null
+    if (!anchor) return
+    const href = String(anchor.getAttribute('href') || anchor.href || '').trim()
+    if (!/^hyper:\\/\\//i.test(href)) return
+    event.preventDefault()
+    event.stopPropagation()
+    window.parent.postMessage({
+      type: 'pearbrowser:navigate',
+      url: href,
+      openInNewTab: Boolean(event.metaKey || event.ctrlKey || event.shiftKey || event.button === 1 || anchor.target === '_blank')
+    }, '*')
+  }
+  document.addEventListener('click', handleHyperLink, true)
+  document.addEventListener('auxclick', handleHyperLink, true)
+})()
+</script>`
+const HYPER_LINK_BRIDGE_SHIM_HASH = sha256ScriptBody(HYPER_LINK_BRIDGE_SHIM)
+
 /**
  * Modify a page's Content-Security-Policy meta tag to authorize the
  * inline shim scripts we inject. We add `'sha256-…'` tokens to the
@@ -379,6 +402,7 @@ class HyperProxy {
     const headInjection =
       `<base href="${baseHref}">` +
       `<meta name="pear-api-token" content="${apiToken}">` +
+      HYPER_LINK_BRIDGE_SHIM +
       (this._pearSwarmShim || '') +
       (this._pearSyncShim || '') +
       (includeAnongpt ? this._anongptShim : '')
@@ -398,6 +422,7 @@ class HyperProxy {
     // protection against XSS); we add only the exact hashes of the
     // exact scripts we (the authorized runtime) inject.
     const hashesToAuthorize = []
+    if (HYPER_LINK_BRIDGE_SHIM_HASH) hashesToAuthorize.push(HYPER_LINK_BRIDGE_SHIM_HASH)
     if (this._pearSwarmShim && this._pearSwarmShimHash) hashesToAuthorize.push(this._pearSwarmShimHash)
     if (this._pearSyncShim && this._pearSyncShimHash) hashesToAuthorize.push(this._pearSyncShimHash)
     if (includeAnongpt && this._anongptShimHash) hashesToAuthorize.push(this._anongptShimHash)

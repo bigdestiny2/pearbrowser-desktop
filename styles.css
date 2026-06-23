@@ -904,6 +904,54 @@ p { color: #8b949e; margin-bottom: 12px; }
 @keyframes modal-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes modal-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 
+/* --- Standalone app prelaunch warning --- */
+.standalone-prelaunch-card {
+  width: min(420px, 92vw);
+}
+.standalone-prelaunch-kicker {
+  color: #ff9500;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.standalone-prelaunch-card h2 {
+  color: #e6edf3;
+  font-size: 20px;
+  line-height: 1.25;
+  margin: 0 0 10px;
+}
+.standalone-prelaunch-card p {
+  color: #c9d1d9;
+  font-size: 13px;
+  line-height: 1.55;
+  margin: 0 0 10px;
+}
+.standalone-prelaunch-trust {
+  background: rgba(255, 149, 0, 0.08);
+  border: 1px solid rgba(255, 149, 0, 0.24);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.standalone-prelaunch-link {
+  display: block;
+  color: #8b949e;
+  background: #010409;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  font-family: "SF Mono", Menlo, monospace;
+  font-size: 11px;
+  padding: 8px 10px;
+  word-break: break-all;
+}
+.standalone-prelaunch-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
 /* --- Login consent --- */
 .login-consent .login-header {
   display: flex; gap: 12px; align-items: flex-start;
