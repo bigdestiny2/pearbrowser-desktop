@@ -20,20 +20,20 @@ manual gate.
 | macOS machine | `Locals-Mac-Studio.local`, macOS 26.4.1 build 25E253 |
 | iOS simulator/device(s) | Prior simulator proof in `PearBrowser/ios-native/BUILD.md`: iPhone 17 simulator green `Connected`; not rerun in this loop |
 | Android emulator/device(s) | Prior emulator proof in `PearBrowser/android-native/BUILD.md`: headless `pp_avd` green `Connected`; not rerun in this loop |
-| Network/location | Local shell in Asia/Dubai timezone; fresh network verifier reruns blocked by escalation usage limit during this continuation |
+| Network/location | Local shell in Asia/Dubai timezone; 2026-06-24 Pear hotfix release ran with real network access |
 | Notes directory | `pearbrowser-desktop/docs`; `PearBrowser/docs` |
 
 ## Desktop Automated Baseline
 
 | Gate | Expected | Result | Evidence |
 | --- | --- | --- | --- |
-| `npm test` | 427/427 pass | PASS | 2026-06-23 local run: `node --test 'test/*.test.js'`, pass `427/427` |
-| `git diff --check` | clean | PASS | 2026-06-23 local run exited 0 before evidence-log edits |
-| `npm audit --audit-level=high` | 0 high vulnerabilities | PASS | 2026-06-23 local run: `found 0 vulnerabilities` |
+| `npm test` | 432/432 pass | PASS | 2026-06-24 local run: `node --test 'test/*.test.js'`, pass `432/432` |
+| `git diff --check` | clean | PASS | 2026-06-24 local run exited 0 before evidence-log edits |
+| `npm audit --audit-level=high` | 0 high vulnerabilities | PASS | 2026-06-24 local run: `found 0 vulnerabilities` |
 | Desktop CI | install/test/audit success |  |  |
 | `node scripts/check-relays.js` | real-DHT relay reachable |  |  |
-| `node scripts/verify-pin.js --expect 18552 --hiverelay` | length >= 18552, sampled blob present, HiveRelay proof captured when available |  |  |
-| `node scripts/verify-release-contents.js ...` | forbidden paths absent |  |  |
+| `node scripts/verify-pin.js --expect 18640 --hiverelay` | length >= 18640, sampled blob present, HiveRelay proof captured when available | PASS | 2026-06-24 release-prod fresh-peer run: length `18640`, peers `1`, sampled `/backend/anongpt-buyer.js` `11652` bytes; HiveRelay storage-proof route not yet enabled on fleet |
+| `node scripts/verify-release-contents.js ...` | forbidden paths absent | PASS | 2026-06-24 fresh-peer scan: length `18640`, `10233` entries, forbidden paths absent |
 | `node scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --expect-app hiveworm` | signed catalogue, 14 apps, expected rows | PASS | 2026-06-23 real-network run: length `273`, peers `1`, 14 apps, Peercord `standalone`, source URL, `GPL-3.0` |
 | `node scripts/verify-app-full.js` homepage | sampled blobs present |  |  |
 | `node scripts/verify-app-full.js` Peercord | sampled blobs present, no execution |  |  |

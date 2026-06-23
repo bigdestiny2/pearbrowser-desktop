@@ -25,7 +25,7 @@ announcement.
   - `npm audit --audit-level=high`
   - `node scripts/check-relays.js`
   - `node scripts/verify-pin.js --expect 18552 --hiverelay`
-  - `node scripts/verify-release-contents.js --expect 18552 --missing /.landing-seed.mjs --missing /pearbrowser-storage --missing /docs --missing /scripts --missing /examples --missing /test`
+  - `node scripts/verify-release-contents.js --expect 18640 --missing /.landing-seed.mjs --missing /pearbrowser-storage --missing /docs --missing /scripts --missing /examples --missing /test`
   - `node scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --expect-app hiveworm`
 - [ ] After filling `docs/RELEASE_SMOKE_EVIDENCE_LOG_2026-06-23.md`, run
   `npm run check:release-evidence`.
