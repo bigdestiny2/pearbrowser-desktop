@@ -158,6 +158,10 @@ The current 2026-06-23 release audit verified:
 - Live PearBrowser Network catalogue: `hyperbee://f5fb7500bccd60a976d2b1d24246108f4444a210b9ca591533114dffc089934d` reachable from a fresh peer, signed, and carrying 13 apps including Peercord and HiveWorm.
 - Production PearBrowser drive: reachable from a fresh peer at length 16898, with blob sampling proving content blocks replicate.
 - Featured app bundles: Peercord and Keet fresh-peer sampled with zero missing sampled blobs.
-- Feature tracker: 100 user stories, 31 issues, 68 recorded test runs.
-- Focus areas covered: catalogue, search, naming, Nostr bridge, mobile parity,
-  hidden diagnostics, app catalogue safety, bridge gating, and storage cleanup.
+- Focused automated coverage includes catalogue safety, signed Hyperbee
+  catalogues, Peercord catalogue wiring, name resolution, search planning and
+  verification, Nostr binding/events/feed diagnostics, command-surface mirrors,
+  mobile source contracts, bridge consent, sync, and storage cleanup.
+- Historical tracker counts and the step-by-step discovery-surface audit are
+  preserved in
+  [DEEP_AUDIT_CATALOG_SEARCH_NAMING_NOSTR_2026-06-21.md](./DEEP_AUDIT_CATALOG_SEARCH_NAMING_NOSTR_2026-06-21.md).
