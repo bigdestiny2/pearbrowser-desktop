@@ -33,7 +33,7 @@ const { CatalogManager } = require('./catalog-manager.js')
 const communitySubmit = require('./community-submit.cjs')
 const { AppManager } = require('./app-manager.js')
 const { SiteManager } = require('./site-manager.js')
-const { PearBridge, PEAR_SWARM_V1_SHIM, PEAR_ANONGPT_SHIM } = require('./pear-bridge.js')
+const { PearBridge, PEAR_SWARM_V1_SHIM, PEAR_SYNC_SHIM, PEAR_ANONGPT_SHIM } = require('./pear-bridge.js')
 const { HttpBridge } = require('./http-bridge.js')
 const { AnongptBuyer } = require('./anongpt-buyer.js')
 const { UserData } = require('./user-data.js')
@@ -2640,6 +2640,7 @@ async function boot () {
   // text/html response served by the proxy. Pages get it for free; no
   // <script src> required from the page author. See docs/SWARM-V1.md.
   proxy.setPearSwarmShim(PEAR_SWARM_V1_SHIM)
+  proxy.setPearSyncShim(PEAR_SYNC_SHIM)
 
   // anonGPT — page-side shim that exposes window.pear.anongpt.infer
   // ONLY for the anonGPT drive AND only when that drive's manifest.json

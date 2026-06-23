@@ -12,6 +12,11 @@
  * All endpoints are under /api/* on the same port as the hyper proxy.
  */
 
+// hypercore-crypto + b4a work under BOTH Node (tests) and Bare (the app);
+// bare-crypto would throw `require.addon is not a function` under Node.
+const hypercoreCrypto = require('hypercore-crypto')
+const b4a = require('b4a')
+
 class HttpBridge {
   constructor (pearBridge, swarm, getDriveFn, opts = {}) {
     this._bridge = pearBridge
@@ -65,8 +70,16 @@ class HttpBridge {
     }
   }
 
+  // Namespace a page's appId by the drive it was served from, so two apps can't
+  // touch each other's sync data. We HASH `driveKey:appId` to a fixed 64 hex
+  // chars: a plain `driveKey:appId` concat is ≥65 chars and the Autobase bridge
+  // caps appId at 64 (pear-bridge.js _validateAppId), so the un-hashed form made
+  // EVERY sync call fail — which is why pages could only ever run in dev mode.
+  // The hash is deterministic and per-drive, so all users of the same app (same
+  // drive) share a namespace and can discover each other's outboxes, while
+  // different apps stay isolated.
   _scopeAppId (driveKeyHex, appId) {
-    return `${driveKeyHex}:${appId}`
+    return b4a.toString(hypercoreCrypto.data(b4a.from(`${driveKeyHex}:${appId}`)), 'hex')
   }
 
   _requireToken (req, res, urlObj) {

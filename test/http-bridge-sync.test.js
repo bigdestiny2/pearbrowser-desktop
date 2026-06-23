@@ -1,11 +1,17 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
+import hypercoreCrypto from 'hypercore-crypto'
+import b4a from 'b4a'
 
 const { HttpBridge } = (await import('../backend/http-bridge.js')).default
 
 const driveKey = 'a'.repeat(64)
 const appPubkey = 'b'.repeat(64)
+// Mirror HttpBridge._scopeAppId: a per-drive 64-hex HASH, not a `driveKey:appId`
+// concat (which is ≥65 chars and exceeds the Autobase bridge's 64-char appId cap —
+// the bug that silently broke every sync call and forced apps into dev mode).
+const scope = (appId) => b4a.toString(hypercoreCrypto.data(b4a.from(`${driveKey}:${appId}`)), 'hex')
 
 function makeReq (method, path, { headers = {}, body } = {}) {
   const req = new EventEmitter()
@@ -108,7 +114,8 @@ test('HttpBridge sync API requires a token and scopes app IDs to the drive', asy
   })
   assert.equal(create.res.statusCode, 200)
   assert.equal(create.res.json.appId, 'shop')
-  assert.deepEqual(calls, [['createSyncGroup', `${driveKey}:shop`]])
+  assert.ok(scope('shop').length <= 64, 'scoped appId must fit the bridge 64-char limit')
+  assert.deepEqual(calls, [['createSyncGroup', scope('shop')]])
 })
 
 test('HttpBridge routes sync operations and identity through the authenticated app scope', async () => {
@@ -147,10 +154,10 @@ test('HttpBridge routes sync operations and identity through the authenticated a
   })
 
   assert.deepEqual(calls, [
-    ['joinSyncGroup', `${driveKey}:shop`, inviteKey],
-    ['append', `${driveKey}:shop`, { type: 'product:create', data: { id: 'p1' } }],
-    ['get', `${driveKey}:shop`, 'products!p1'],
-    ['list', `${driveKey}:shop`, 'products', { limit: 1000 }],
-    ['status', `${driveKey}:shop`]
+    ['joinSyncGroup', scope('shop'), inviteKey],
+    ['append', scope('shop'), { type: 'product:create', data: { id: 'p1' } }],
+    ['get', scope('shop'), 'products!p1'],
+    ['list', scope('shop'), 'products', { limit: 1000 }],
+    ['status', scope('shop')]
   ])
 })
