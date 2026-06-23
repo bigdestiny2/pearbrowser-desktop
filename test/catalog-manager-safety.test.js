@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import safetyMod from '../backend/catalog-safety.cjs'
 
-const { aggregateCatalogApps, catalogAppSearchText, catalogAppStableKey, normalizeCatalogApp, normalizeCatalogData, safeJSONParse, sanitizePersonalCatalogEntry, searchAppsList } = safetyMod
+const { aggregateCatalogApps, catalogAppSearchText, catalogAppStableKey, normalizeAppType, normalizeCatalogApp, normalizeCatalogData, safeJSONParse, sanitizePersonalCatalogEntry, searchAppsList } = safetyMod
 const key = (ch) => ch.repeat(64)
 
 test('safe catalog JSON parse strips prototype-pollution keys recursively', () => {
@@ -34,7 +34,7 @@ test('safe catalog JSON parse strips prototype-pollution keys recursively', () =
 test('catalog app search tolerates empty and non-string queries', () => {
   const apps = [
     { id: 'one', name: 'PearBrowser', description: 'P2P browser', categories: ['Tools'], catalogName: 'Pear Apps', source: 'sheets', author: 'Holepunch' },
-    { id: 'two', name: 'HiveRelay', description: 'Relay infrastructure', version: '2.1.0', verification: 'relay-listed' },
+    { id: 'two', name: 'HiveRelay', description: 'Relay infrastructure', version: '2.1.0', verification: 'relay-listed' }
   ]
 
   assert.equal(searchAppsList(apps, '').length, 2)
@@ -95,7 +95,7 @@ test('catalog app normalizer drops unsafe targets and keeps allowed app links', 
     name: 'Keet',
     version: '',
     categories: [],
-    verification: 'unverified',
+    verification: 'unverified'
   })
 
   const hyper = normalizeCatalogApp({ link: `hyper://${driveKey}/app`, name: 'Site' })
@@ -126,6 +126,18 @@ test('shared catalog app normalizer builds stable target keys', () => {
 
   assert.equal(catalogAppStableKey({ link: ' PEAR://Demo ' }), 'link:pear://Demo')
   assert.equal(catalogAppStableKey({ id: 'only-id' }), '')
+})
+
+test('catalog app normalizer keeps only supported launch types', () => {
+  assert.equal(normalizeAppType(' standalone '), 'standalone')
+  assert.equal(normalizeAppType('HYPERSITE'), 'hypersite')
+  assert.equal(normalizeAppType('desktop'), '')
+
+  const standalone = normalizeCatalogApp({ name: 'Window App', type: 'standalone', link: 'pear://app' })
+  assert.equal(standalone.type, 'standalone')
+
+  const invalid = normalizeCatalogApp({ name: 'Bad Type App', type: 'desktop', link: 'pear://app' })
+  assert.equal(invalid.type, undefined)
 })
 
 test('personal catalog entry sanitizer accepts link-only apps and rejects targetless rows', () => {

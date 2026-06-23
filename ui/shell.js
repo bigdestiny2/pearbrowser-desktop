@@ -1962,6 +1962,10 @@ function Apps ({ rpc, C, onLaunch }) {
   // htmx UI into a Browse tab (no separate window). The backend returns a local
   // wrapper URL; onLaunch opens it in Browse just like any other page.
   const runInTab = async (app) => {
+    if (app && app.type !== 'hypersite') {
+      setErr(`${app.name || 'This app'} is window-only: its catalogue type is "${app.type || 'standalone'}", not "hypersite".`)
+      return
+    }
     setErr(''); setBusy('run-in-tab'); setLaunched('')
     try {
       const res = await rpc.request(C.CMD_RUN_APP_IN_TAB, { link: app.link }, 30000)

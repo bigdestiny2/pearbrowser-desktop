@@ -180,6 +180,7 @@
     {
       "id": "peercord",
       "name": "Peercord",
+      "type": "standalone",
       "link": "pear://wmir47w7mai3b1skj66mx7fzso6k6o91kipaney7gtt69npimouy",
       "author": "Mastercodeon",
       "categories": [

@@ -14,20 +14,20 @@ const SAMPLE = {
   name: '  Pear Picks  ',
   version: 1,
   apps: [
-    { id: 'keet', name: 'Keet', description: 'P2P chat', link: 'pear://keetkey', categories: ['chat'], author: 'Holepunch' },
+    { id: 'keet', name: 'Keet', type: 'standalone', description: 'P2P chat', link: 'pear://keetkey', categories: ['chat'], author: 'Holepunch' },
     { id: 'pearpass', name: 'PearPass', driveKey: 'a'.repeat(64), version: '2.0' }
   ]
 }
 
 test('normalizeManifest cleans input and applies defaults', () => {
   const n = normalizeManifest(SAMPLE, 1700000000000)
-  assert.equal(n.name, 'Pear Picks')        // trimmed
+  assert.equal(n.name, 'Pear Picks') // trimmed
   assert.equal(n.version, 1)
   assert.equal(n.apps.length, 2)
-  assert.equal(n.apps[0].publishedAt, 1700000000000)  // injected default now
+  assert.equal(n.apps[0].publishedAt, 1700000000000) // injected default now
   assert.deepEqual(n.apps[0].categories, ['chat'])
   assert.equal(n.apps[1].name, 'PearPass')
-  assert.equal(n.apps[1].categories.length, 0)        // default empty
+  assert.equal(n.apps[1].categories.length, 0) // default empty
 })
 
 test('normalizeManifest rejects bad input', () => {
@@ -75,6 +75,7 @@ test('round-trips through a real Hyperbee using the loader query', async () => {
 
     const byId = Object.fromEntries(data.apps.map((a) => [a.id, a]))
     assert.equal(byId.keet.name, 'Keet')
+    assert.equal(byId.keet.type, 'standalone')
     assert.equal(byId.keet.link, 'pear://keetkey')
     assert.equal(byId.pearpass.driveKey, 'a'.repeat(64))
 

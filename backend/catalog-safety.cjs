@@ -85,14 +85,19 @@ function normalizeVerification (value) {
   return v || 'unverified'
 }
 
+function normalizeAppType (value) {
+  const type = trimString(value).toLowerCase()
+  return type === 'standalone' || type === 'hypersite' ? type : ''
+}
+
 function normalizeCatalogApp (app, opts = {}) {
   if (!app || typeof app !== 'object' || Array.isArray(app)) return null
   const out = { ...app }
 
-  const key = trimString(out.driveKey)
-    || trimString(out.appKey)
-    || trimString(out.key)
-    || ''
+  const key = trimString(out.driveKey) ||
+    trimString(out.appKey) ||
+    trimString(out.key) ||
+    ''
   const rawLink = trimString(out.link)
   const link = normalizeCatalogLink(out.link)
   const driveKey = normalizeDriveKey(key) || driveKeyFromHyperLink(link)
@@ -105,6 +110,9 @@ function normalizeCatalogApp (app, opts = {}) {
   else delete out.driveKey
   if (link) out.link = link
   else delete out.link
+  const type = normalizeAppType(out.type)
+  if (type) out.type = type
+  else delete out.type
   out.version = out.version == null ? '' : String(out.version).trim()
   out.categories = normalizeCategories(out.categories)
   out.verification = normalizeVerification(out.verification)
@@ -272,6 +280,7 @@ module.exports = {
   normalizeCatalogApp,
   normalizeCatalogLink,
   normalizeCatalogData,
+  normalizeAppType,
   scrubPrototypeKeys,
   safeJSONParse,
   sanitizePersonalCatalogEntry,

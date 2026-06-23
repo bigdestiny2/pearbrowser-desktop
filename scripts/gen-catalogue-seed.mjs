@@ -37,12 +37,18 @@ const OUT = join(here, '..', 'backend', 'catalogue-seed.js')
 const cat = JSON.parse(readFileSync(SRC, 'utf8'))
 if (!Array.isArray(cat.apps) || cat.apps.length === 0) throw new Error('source manifest has no apps[]')
 
+function manifestType (value) {
+  const type = typeof value === 'string' ? value.trim().toLowerCase() : ''
+  return type === 'standalone' || type === 'hypersite' ? type : ''
+}
+
 // Project a rich manifest entry onto the strict APPS_SCHEMA fields only.
-// type: a launchable Pear app (pear:// link) is 'standalone' (own window); a
-// browsable hyperdrive site is 'hypersite' (run-in-tab). publishedAt is stamped
-// at seed time by ensureDevCatalogue, so it is intentionally omitted here.
+// type: explicit manifest type wins; otherwise a launchable Pear/file app
+// defaults to 'standalone' (own window), while a browsable Hyperdrive-only site
+// defaults to 'hypersite' (tab). publishedAt is stamped at seed time by
+// ensureDevCatalogue, so it is intentionally omitted here.
 function toSeedRow (a) {
-  const row = { name: a.name, type: a.link ? 'standalone' : 'hypersite' }
+  const row = { name: a.name, type: manifestType(a.type) || (a.link ? 'standalone' : 'hypersite') }
   if (a.driveKey && /^[0-9a-f]{64}$/i.test(a.driveKey)) row.driveKey = a.driveKey
   if (a.link) row.link = a.link
   // Inline icon (data: URI) for apps without a fetchable drive icon — rendered

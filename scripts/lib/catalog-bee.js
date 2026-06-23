@@ -55,6 +55,7 @@ export function normalizeManifest (manifest, now = Date.now()) {
       verification: clean.verification || 'unverified',
       publishedAt: Number.isFinite(app.publishedAt) ? app.publishedAt : now
     }
+    if (clean.type === 'standalone' || clean.type === 'hypersite') entry.type = clean.type
     // Inline icon (data: URI) — carried so apps WITHOUT a fetchable drive icon
     // (pear://-only apps, or drives lacking /icon.*) still render a real icon.
     if (typeof clean.iconData === 'string' && clean.iconData) entry.iconData = clean.iconData
