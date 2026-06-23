@@ -7,11 +7,12 @@ Scope: desktop PearBrowser, mobile/native PearBrowser, the live PearBrowser Netw
 The release is in strong shape for a community launch. The core protocol tests are broad and green after the final catalogue cleanup:
 
 - Desktop: `node --test 'test/*.test.js'` passed `404/404`.
-- Mobile/native: `npm test` passed `124/124`.
+- Mobile/native: `npm test` passed `127/127`.
 - Publisher catalogue: `npm run validate` passes with no warnings.
 - Desktop and mobile `git diff --check` are clean.
 - Desktop dependency audit: `npm audit --audit-level=high` found 0 vulnerabilities.
 - Mobile dependency audit: safe `npm audit fix` removed high/critical advisories, `npm audit --audit-level=high` now passes, and the full mobile suite still passes. Full `npm audit` still reports 15 moderate inherited Expo/React Native toolchain advisories with only breaking framework fixes offered.
+- Mobile release preflight is now machine-checkable with `npm run release:preflight`: local structural prerequisites pass (version/package IDs, native worklet bundles, iOS BareKit/addons, Android BareKit AAR, EAS identity), and the remaining failures are the expected external production gates: real Android signing env/keystore, Apple development team signing, TestFlight/App Store Connect validation, and Play/Firebase validation.
 - Desktop source-install reproducibility is now explicit: `npm install` runs `scripts/check-hiverelay-layout.mjs`, which verifies the required sibling HiveRelay workspace packages at `../../00-core/hiverelay/packages/{core,client,verifier}`. Those `0.16.3` packages are not published to npm, so a standalone `pearbrowser-desktop` clone is documented as insufficient until the relay packages are published.
 - Desktop GitHub Actions CI is now present: `.github/workflows/desktop-ci.yml` checks out PearBrowser desktop, `bigdestiny2/PearBrowser@defdaaf`, and `bigdestiny2/P2P-Hiverelay@v0.16.3`, verifies the local workspace layout, runs `npm ci`, runs the desktop test suite, and runs the high-severity dependency audit.
 - Live catalogue Hyperbee republished at `hyperbee://f5fb7500bccd60a976d2b1d24246108f4444a210b9ca591533114dffc089934d`; 5 relay seed requests were accepted.
@@ -38,6 +39,7 @@ One earlier desktop `npm test` run reported `401/402`; the immediately repeated 
 - Added a non-destructive mobile Corestore recovery path in `bigdestiny2/PearBrowser@41a7fb6`: if root app storage belongs to another Corestore, the backend falls back to an identity-scoped `corestore-*` subdirectory instead of failing worklet boot.
 - Fixed Android native first-launch Home behavior in the mobile repo: Home now retries bookmark RPCs across the Binder/worklet boot race, so a clean install no longer shows "Bookmarks are unavailable right now" before the backend reports ready.
 - Added optional env-driven Android release signing to the native shell and R8 rules for unused React Native adapter classes inside `bare-kit.aar`; release APK/AAB builds and disposable-key signing verification now pass.
+- Added mobile `scripts/release-preflight.js`, `npm run release:preflight`, and fixture tests so production mobile signing, bundle IDs, native bundles, BareKit artifacts, and store-distribution validation are a hard gate rather than prose-only release notes.
 
 ## Catalogue And Launch
 
@@ -114,8 +116,9 @@ The mobile app logic is tested, and native simulator/device release smoke is par
 - The tracked SwiftUI `ios-native` shell builds, installs, launches, and reaches green `Connected` on the iPhone 17 simulator. The smoke also verified stale-Corestore recovery: the first launch failed with `Another corestore is stored here`, then the fallback build recovered into an identity-scoped subdirectory and booted the worklet.
 - Android native Gradle inspection, Kotlin/Java compile, and `:app:assembleDebug` pass with Eclipse Temurin 17; Homebrew OpenJDK 17.0.19 hung in AGP's JDK image transform on this machine. The fresh debug APK (`android-native/app/build/outputs/apk/debug/app-debug.apk`, 169 MB diagnostic build with bare-kit/addons and two ARM ABIs) installed and launched on a headless `pp_avd` emulator. The app reached a green `Connected` Home screen after extracting the bundled worklet and starting the local proxy.
 - Android native `:app:assembleRelease` and `:app:bundleRelease` pass with R8/resource shrink after suppressing unused React Native adapter warnings from the local Bare Kit AAR. Env-driven release signing was verified with a disposable test keystore: `app-release.apk` is 142 MB and verifies with certificate `CN=PearBrowserTest, O=PearBrowser, C=US`; `app-release.aab` is 49 MB and passes `jarsigner -verify` with expected self-signed test-certificate warnings.
+- `npm run release:preflight -- --soft` now reports 14 passing structural checks and 4 expected blockers: missing production Android signing env/keystore, blank Apple development team, missing TestFlight/App Store Connect validation marker, and missing Play/Firebase validation marker. The command exits non-zero without `--soft`, making it suitable as the final mobile release gate.
 
-Required before native/mobile distribution: validate Apple and Android production signing with real credentials, run app-store-style distribution checks, and broaden simulator/emulator smoke to real devices. Local Node tests do not prove platform WebView behavior under real OS permissions.
+Required before native/mobile distribution: clear `npm run release:preflight` with real Apple/Android signing and store validation evidence, then broaden simulator/emulator smoke to real devices. Local Node tests do not prove platform WebView behavior under real OS permissions.
 
 ## Release Operations
 
@@ -143,6 +146,7 @@ node --test --test-reporter=spec test/*.test.js
 node --test test/catalog-manager-safety.test.js test/catalog-bee.test.js test/peercord-catalog.test.js test/resolve-name.test.js test/index-room-client.test.js
 git diff --check
 npm test # mobile/native
+npm run release:preflight -- --soft # mobile/native, 14 pass / 4 expected production blockers
 npm ls expo-linking # mobile/native, resolved expo-linking@55.0.15
 npm run bundle-backend-native-ios # mobile/native tracked SwiftUI shell
 npm run bundle-backend-native-android # mobile/native tracked Android shell
@@ -199,5 +203,5 @@ Key live values:
 - Network replication can vary by relay health and NAT conditions. This pass saw reachable relays, a reachable production drive, and a reachable live catalogue, but a second-network spot check remains useful before a high-visibility announcement.
 - Peercord cannot honestly be marketed as headless-in-tab until upstream ships a compatible pear-request worker. The live bundle contract confirms the current packaged app is desktop/window-class, and PearBrowser launches it from the featured catalogue without manual download/update.
 - Public Nostr relay behavior is not part of this release; the shipped feature is the trusted-contact bridge.
-- Native mobile is not app-store-release-cleared yet. The JS/test surface is green, the missing `ExpoLinking` dependency is fixed, generated Expo iOS Debug and Release simulator builds pass, the tracked SwiftUI iOS shell reaches `Connected`, Android native debug APK assembly plus emulator launch pass, and Android release APK/AAB plus disposable-key signing verification pass. Remaining gates are production Apple/Android signing and store validation plus broader real-device validation.
+- Native mobile is not app-store-release-cleared yet. The JS/test surface is green, the missing `ExpoLinking` dependency is fixed, generated Expo iOS Debug and Release simulator builds pass, the tracked SwiftUI iOS shell reaches `Connected`, Android native debug APK assembly plus emulator launch pass, Android release APK/AAB plus disposable-key signing verification pass, and `npm run release:preflight -- --soft` now makes the remaining production gates explicit. Remaining gates are production Apple/Android signing, TestFlight/App Store Connect or Play/Firebase validation, and broader real-device validation.
 - Mobile still reports 15 moderate `npm audit` advisories in Expo/React Native test/tooling transitive dependencies. npm's available fix requires breaking major-version changes, so these should move to the next mobile platform-upgrade lane rather than this release-day hardening pass.
