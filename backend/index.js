@@ -2030,6 +2030,13 @@ async function ensureBrowseDrive (keyHex) {
   if (browseDrives.has(keyHex)) {
     const entry = browseDrives.get(keyHex)
     entry.lastAccess = Date.now()
+    // Re-sync on navigation so a RE-PUBLISHED drive (advanced to a new version)
+    // is picked up on reload. Without this, a cached session stays pinned to the
+    // version it first saw: the page's index.html still loads but its newer
+    // sub-resources (js/app.js …) read a stale file index and 404. Best-effort +
+    // debounced; if the version actually moves we drop the proxy's per-file cache
+    // for this drive so stale bytes can't mask the new release.
+    reSyncBrowseDrive(entry.drive, keyHex)
     return entry.drive
   }
 
@@ -2175,6 +2182,23 @@ async function updateDriveBestEffort (drive, timeoutMs = 2500) {
       new Promise((resolve) => setTimeout(resolve, timeoutMs))
     ])
   } catch {}
+}
+
+// Re-advance a cached browse drive to the latest published version and, if the
+// version actually moved (the author re-published), invalidate the proxy's
+// per-file cache for that drive so a reload serves the new release instead of
+// stale bytes. Fire-and-forget so navigation stays instant; the proxy's own
+// fetch path also self-heals on a miss (see hyper-proxy _fetchP2P).
+function reSyncBrowseDrive (drive, keyHex) {
+  if (!drive || typeof drive.update !== 'function') return
+  const before = drive.version
+  updateDriveBestEffort(drive)
+    .then(() => {
+      if (drive.version !== before && proxy && typeof proxy.invalidateCache === 'function') {
+        proxy.invalidateCache(keyHex)
+      }
+    })
+    .catch(() => {})
 }
 
 function getDrivePeerSnapshot (drive) {
