@@ -9,7 +9,7 @@ Operator evidence log: `docs/RELEASE_SMOKE_EVIDENCE_LOG_2026-06-23.md`.
 
 The release is in strong shape for a community launch. The core protocol tests are broad and green after the final catalogue cleanup:
 
-- Desktop: `npm test` passed `423/423`.
+- Desktop: `npm test` passed `425/425`.
 - Mobile/native: `npm test` passed `136/136`.
 - Mobile evidence was refreshed in `bigdestiny2/PearBrowser@01eb8c7`: release preflight still reports `14 pass / 0 warn / 4 fail` at `2026-06-23T15:51:08.065Z`, with only production signing and store/distribution markers failing.
 - Publisher catalogue: `npm run validate` passes with no warnings.
@@ -29,7 +29,7 @@ The release is in strong shape for a community launch. The core protocol tests a
 - Peercord's live bundle contract was verified without executing third-party code for `by-arch/linux-x64/app/peercord/resources/app` and `by-arch/win32-x64/app/peercord/resources/app`: both packaged roots expose `pear.json` with `type: "desktop"`, `main: "index.js"`, GUI `dist/index.html`, `pre: "pear-electron/pre"`, and `index.js` contains `BrowserWindow` while not containing `Pear.worker.pipe`.
 - Native simulator/device smoke is mostly cleared: the generated Expo iOS project exposed a real missing native module (`ExpoLinking`), the tracked dependency is now added and autolinked, and the tracked SwiftUI `ios-native` shell now builds, installs, launches, recovers from stale Corestore layout, and reaches a green `Connected` worklet state on the iPhone 17 simulator. Generated Expo iOS Debug and Release simulator builds now pass; the Release helper pins `HERMES_CLI_PATH` to the Pods `hermesc` as an Xcode build setting so the bundle phase does not hang on the node_modules compiler path. Android native now builds a fresh debug APK with a verified JDK 17, installs it on a headless `pp_avd` emulator, launches `com.pearbrowser.app/.MainActivity`, loads `libbare-kit.so`, extracts `backend.android.bundle`, starts the local proxy, and reaches a green `Connected` Home screen. Android native release APK/AAB builds also pass with R8/resource shrink, and the env-driven signing path verifies with a disposable test key (`apksigner` for APK, `jarsigner` for AAB). The latest mobile test pass also covers the extracted navigation parser, verified signed-catalog update forwarding, Android native proxy/token bridge guards, and Android Browse share-sheet wiring.
 
-One earlier desktop `npm test` run reported `401/402`; the immediately repeated compact full run passed `402/402`, and the current release branch now passes `423/423` after the Peercord launch-mode, peerit, catalogue-dedupe, naming-target, runtime-smoke, release-doc, release-evidence checker, and live-catalogue provenance coverage landed. No code change was needed for that earlier blip.
+One earlier desktop `npm test` run reported `401/402`; the immediately repeated compact full run passed `402/402`, and the current release branch now passes `425/425` after the Peercord launch-mode, peerit, catalogue-dedupe, naming-target, runtime-smoke, release-doc, release-evidence checker, live-catalogue provenance, and announcement-decision fail-closed coverage landed. No code change was needed for that earlier blip.
 
 ## Fixes In This Pass
 

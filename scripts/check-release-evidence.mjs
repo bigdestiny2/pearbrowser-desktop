@@ -13,6 +13,8 @@ import { pathToFileURL } from 'node:url'
 const DEFAULT_LOG = new URL('../docs/RELEASE_SMOKE_EVIDENCE_LOG_2026-06-23.md', import.meta.url)
 const PASS_STATUSES = new Set(['PASS', 'DEFER'])
 const READY_DECISIONS = new Set(['GO', 'GO DESKTOP ONLY'])
+const NEGATIVE_DECISION_RE = /^(NO|FAIL|FAILED|BLOCKED)\b/
+const READY_ANSWER_RE = /^(YES|PASS|DEFER)\b|OUT OF SCOPE/
 
 function splitRow (line) {
   const trimmed = line.trim()
@@ -142,7 +144,21 @@ export function analyzeReleaseEvidence (markdown) {
           incomplete.push({ section: table.section, item: question, reason: 'answer is blank' })
           continue
         }
-        if (/^Final decision/i.test(question)) finalDecision = normalizeUpper(answer)
+        if (/^Final decision/i.test(question)) {
+          finalDecision = normalizeUpper(answer)
+          continue
+        }
+
+        const upperAnswer = normalizeUpper(answer)
+        if (NEGATIVE_DECISION_RE.test(upperAnswer)) {
+          failures.push({ section: table.section, item: question, reason: `answer is ${upperAnswer}` })
+        } else if (!READY_ANSWER_RE.test(upperAnswer)) {
+          incomplete.push({
+            section: table.section,
+            item: question,
+            reason: 'answer must be yes/pass/defer or explicitly out of scope'
+          })
+        }
       }
 
       if (!finalDecision) {

@@ -85,3 +85,15 @@ test('unexpected gate result is a failure', () => {
   assert.equal(result.ok, false)
   assert.ok(result.failures.some((item) => item.reason === 'result is FAIL'))
 })
+
+test('negative announcement answers block release evidence', () => {
+  const result = analyzeReleaseEvidence(completeLog.replace('Are all required desktop automated gates PASS? | yes', 'Are all required desktop automated gates PASS? | No - network gate pending'))
+  assert.equal(result.ok, false)
+  assert.ok(result.failures.some((item) => item.item === 'Are all required desktop automated gates PASS?' && item.reason === 'answer is NO - NETWORK GATE PENDING'))
+})
+
+test('ambiguous announcement answers remain incomplete', () => {
+  const result = analyzeReleaseEvidence(completeLog.replace('Are all required desktop automated gates PASS? | yes', 'Are all required desktop automated gates PASS? | maybe after review'))
+  assert.equal(result.ok, false)
+  assert.ok(result.incomplete.some((item) => item.item === 'Are all required desktop automated gates PASS?' && item.reason === 'answer must be yes/pass/defer or explicitly out of scope'))
+})

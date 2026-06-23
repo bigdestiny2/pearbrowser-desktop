@@ -12,29 +12,29 @@ manual gate.
 
 | Field | Value |
 | --- | --- |
-| Operator |  |
-| Date/time started |  |
-| Desktop repo/branch/head |  |
-| Desktop PR/CI URL |  |
-| Mobile repo/head |  |
-| macOS machine |  |
-| iOS simulator/device(s) |  |
-| Android emulator/device(s) |  |
-| Network/location |  |
-| Notes directory |  |
+| Operator | Codex local release audit |
+| Date/time started | 2026-06-23T16:36:00Z |
+| Desktop repo/branch/head | `bigdestiny2/pearbrowser-desktop`, `feat/p2p-infra-naming`, branch head containing this evidence log |
+| Desktop PR/CI URL | PR #4: `https://github.com/bigdestiny2/pearbrowser-desktop/pull/4`; latest pushed CI before this local checker change: Desktop CI #43 success on `1e484ae` |
+| Mobile repo/head | `bigdestiny2/PearBrowser`, `main`, `01eb8c7fbfada50672ddbb3ec79aec25621229bb` |
+| macOS machine | `Locals-Mac-Studio.local`, macOS 26.4.1 build 25E253 |
+| iOS simulator/device(s) | Prior simulator proof in `PearBrowser/ios-native/BUILD.md`: iPhone 17 simulator green `Connected`; not rerun in this loop |
+| Android emulator/device(s) | Prior emulator proof in `PearBrowser/android-native/BUILD.md`: headless `pp_avd` green `Connected`; not rerun in this loop |
+| Network/location | Local shell in Asia/Dubai timezone; fresh network verifier reruns blocked by escalation usage limit during this continuation |
+| Notes directory | `pearbrowser-desktop/docs`; `PearBrowser/docs` |
 
 ## Desktop Automated Baseline
 
 | Gate | Expected | Result | Evidence |
 | --- | --- | --- | --- |
-| `npm test` | 423/423 pass |  |  |
-| `git diff --check` | clean |  |  |
-| `npm audit --audit-level=high` | 0 high vulnerabilities |  |  |
+| `npm test` | 425/425 pass | PASS | 2026-06-23 local run: `node --test 'test/*.test.js'`, pass `425/425` |
+| `git diff --check` | clean | PASS | 2026-06-23 local run exited 0 before evidence-log edits |
+| `npm audit --audit-level=high` | 0 high vulnerabilities | PASS | 2026-06-23 local run: `found 0 vulnerabilities` |
 | Desktop CI | install/test/audit success |  |  |
 | `node scripts/check-relays.js` | real-DHT relay reachable |  |  |
 | `node scripts/verify-pin.js --expect 18552` | length >= 18552, sampled blob present |  |  |
 | `node scripts/verify-release-contents.js ...` | forbidden paths absent |  |  |
-| `node scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --expect-app hiveworm` | signed catalogue, 14 apps, expected rows |  |  |
+| `node scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --expect-app hiveworm` | signed catalogue, 14 apps, expected rows | PASS | 2026-06-23 real-network run: length `273`, peers `1`, 14 apps, Peercord `standalone`, source URL, `GPL-3.0` |
 | `node scripts/verify-app-full.js` homepage | sampled blobs present |  |  |
 | `node scripts/verify-app-full.js` Peercord | sampled blobs present, no execution |  |  |
 | `node scripts/verify-app-full.js` Keet | sampled blobs present, no execution |  |  |
@@ -74,15 +74,15 @@ decision. Do not automate approval.
 
 | Gate | Expected | Result | Evidence |
 | --- | --- | --- | --- |
-| `npm test` | 136/136 pass |  |  |
-| `git diff --check` | clean |  |  |
-| `npm audit --audit-level=high` | exit 0 |  |  |
-| `npm run release:preflight -- --soft --json` | 14 pass / 0 warn / 4 expected production blockers before credentials |  |  |
-| Generated Expo iOS Debug simulator build | succeeds |  |  |
-| Generated Expo iOS Release simulator build | succeeds with Pods Hermes compiler path |  |  |
-| Tracked SwiftUI iOS shell | build/install/launch reaches green Connected |  |  |
-| Android debug build/emulator launch | build/install/launch reaches green Connected with known-good JDK |  |  |
-| Android release APK/AAB disposable signing | build/verifies with test key |  |  |
+| `npm test` | 136/136 pass | PASS | 2026-06-23 local run in `PearBrowser`: pass `136/136` |
+| `git diff --check` | clean | PASS | 2026-06-23 local run in `PearBrowser` exited 0 |
+| `npm audit --audit-level=high` | exit 0 | PASS | 2026-06-23 local run exited 0; full audit still reports 15 moderate Expo/React Native toolchain advisories |
+| `npm run release:preflight -- --soft --json` | 14 pass / 0 warn / 4 expected production blockers before credentials | PASS | 2026-06-23 local JSON run: 14 pass, 0 warn, 4 fail for signing/store markers only |
+| Generated Expo iOS Debug simulator build | succeeds | PASS | Recorded in `docs/RELEASE_READINESS_2026-06-23.md`; generated Expo iOS Debug simulator build passes with `ExpoLinking` autolinked |
+| Generated Expo iOS Release simulator build | succeeds with Pods Hermes compiler path | PASS | Recorded in `docs/RELEASE_READINESS_2026-06-23.md`; Release simulator build passes with Pods `hermesc` path |
+| Tracked SwiftUI iOS shell | build/install/launch reaches green Connected | PASS | `PearBrowser/ios-native/BUILD.md` latest smoke: build/install/launch on iPhone 17 simulator reached green `Connected` |
+| Android debug build/emulator launch | build/install/launch reaches green Connected with known-good JDK | PASS | `PearBrowser/android-native/BUILD.md` latest smoke: Temurin 17 debug APK installed on `pp_avd`, green `Connected` |
+| Android release APK/AAB disposable signing | build/verifies with test key | PASS | `PearBrowser/android-native/BUILD.md` release signing section: APK `apksigner` and AAB `jarsigner` verified with disposable test key |
 
 ## Mobile Manual And Distribution Gates
 

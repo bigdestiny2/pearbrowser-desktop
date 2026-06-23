@@ -17,10 +17,10 @@ Current local status from this loop:
 
 - `git diff --check` passed.
 - `npm audit --audit-level=high` passed with `found 0 vulnerabilities`.
-- `npm test` passed: 423 tests, 0 failed.
+- `npm test` passed: 425 tests, 0 failed.
 
 This supersedes older local counts in nearby docs for this checkout. The
-current release-readiness docs and latest rerun agree on 423/423.
+current release-readiness docs and latest rerun agree on 425/425.
 
 ## Fast Local Gates
 
@@ -28,7 +28,7 @@ current release-readiness docs and latest rerun agree on 423/423.
 | --- | --- | --- |
 | `git diff --check` | Whitespace/conflict-marker sanity | Passed |
 | `npm audit --audit-level=high` | High-severity dependency audit for desktop package | Passed, 0 vulnerabilities |
-| `npm test` | Full desktop Node test suite: `node --test 'test/*.test.js'` | Passed, 423/423 |
+| `npm test` | Full desktop Node test suite: `node --test 'test/*.test.js'` | Passed, 425/425 |
 | `npm run check:release-evidence` | Operator evidence-log completeness; fails until required rows are `PASS` or documented `DEFER` | Expected fail until manual gates are filled |
 
 The root package is the only package with test scripts relevant to this desktop
