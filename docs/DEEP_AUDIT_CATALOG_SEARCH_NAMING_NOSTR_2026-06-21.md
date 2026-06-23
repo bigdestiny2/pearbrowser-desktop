@@ -635,8 +635,8 @@ catalogue.
 - Full mobile suite: `npm test` in `PearBrowser`: 124 passed, 0 failed.
 - Live relay check with real DHT access: 1 unique HiveRelay reachable and 8 live
   relay connections.
-- Live catalogue check: signed `PearBrowser Network` Hyperbee at length 206,
-  13 apps, Peercord and HiveWorm rows present.
+- Live catalogue check: signed `PearBrowser Network` Hyperbee at length 222,
+  13 apps, Peercord and HiveWorm rows present, and Peercord marked `standalone`.
 - Production drive check: fresh peer reached length 16898 and fetched 14284
   bytes from `/CHANGELOG.md`.
 - Deep bundle checks: PearBrowser homepage, Peercord, and Keet all returned

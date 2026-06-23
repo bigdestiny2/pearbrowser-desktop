@@ -158,7 +158,7 @@ Original result: 95 tests passed, 0 failed.
 ## Review Notes
 
 - The desktop test suite initially showed one transient failure on the first run, but two later full runs were green. If this recurs, inspect the longer-running Autobase/durability tests first.
-- Live default-catalog availability is now proven by `node scripts/verify-live-catalog.js --expect-app peercord --expect-app hiveworm`: signed Hyperbee metadata present, catalogue length `206`, 13 apps, peers found, Peercord/HiveWorm rows present.
+- Live default-catalog availability is now proven by `node scripts/verify-live-catalog.js --expect-app peercord --expect-app hiveworm`: signed Hyperbee metadata present, catalogue length `222`, 13 apps, peers found, Peercord/HiveWorm rows present, and Peercord carries `type: "standalone"`.
 - Production browser release availability is now proven by `node scripts/verify-pin.js --expect 16898`: drive length `16898`, `/CHANGELOG.md` blob sampled, peers found.
 - Peercord bundle availability is now proven by `node scripts/verify-app-full.js --key a2ea4d769d5e2b90caca4fbcb7f4b7b43caf43f2555b81201d3463ef89b55c26 --name peercord --samples 12 --timeout 90`: 14,730 entries, 12 sampled blobs present, 0 missing.
 - The mobile Browse and catalogue changes pass tests, `ExpoLinking` is now present, generated Expo iOS Debug and Release simulator builds pass, the tracked SwiftUI iOS shell launches to `Connected`, Android native debug APK assembly plus emulator launch pass with Eclipse Temurin 17, and Android release APK/AAB plus disposable-key signing verification pass. Production Apple/Android signing, broader real-device validation, and distribution checks are still required before app-store-style release.

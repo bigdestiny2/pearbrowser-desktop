@@ -30,7 +30,7 @@ function parseArgs (argv) {
     key: DEFAULT_KEY,
     expectApps: [],
     expectCount: 13,
-    expectName: 'PearBrowser Network',
+    expectName: 'PearBrowser Network'
   }
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
@@ -45,7 +45,7 @@ function parseArgs (argv) {
 function withTimeout (promise, ms, label) {
   return Promise.race([
     promise,
-    new Promise((_, reject) => setTimeout(() => reject(new Error(label + ' timed out')), ms)),
+    new Promise((_resolve, reject) => setTimeout(() => reject(new Error(label + ' timed out')), ms))
   ])
 }
 
@@ -115,6 +115,7 @@ async function main () {
   if (peercord) {
     if (peercord.link !== 'pear://wmir47w7mai3b1skj66mx7fzso6k6o91kipaney7gtt69npimouy') fail('Peercord link mismatch')
     if (peercord.driveKey) fail('Peercord should be pear:// standalone without a Hyperdrive driveKey')
+    if (peercord.type !== 'standalone') fail(`Peercord type mismatch: expected standalone, got ${peercord.type || '(missing)'}`)
   }
 
   const hiveworm = byId.get('hiveworm')

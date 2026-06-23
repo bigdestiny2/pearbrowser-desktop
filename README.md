@@ -162,7 +162,7 @@ node scripts/verify-live-catalog.js --expect-app peercord
 | `scripts/list-drive.js <key>` | Diagnose what's inside a drive's manifest. |
 | `scripts/check-relays.js` | Discovery probe — print all HiveRelays reachable via DHT. |
 | `scripts/verify-pin.js --expect <length>` | Fresh-peer production-drive check: proves the released browser drive is reachable and serving at least the expected length. |
-| `scripts/verify-live-catalog.js --expect-app peercord` | Fresh-peer Hyperbee catalogue check: proves the live app catalogue key is reachable and contains expected release rows. |
+| `scripts/verify-live-catalog.js --expect-app peercord` | Fresh-peer Hyperbee catalogue check: proves the live app catalogue key is reachable and contains expected release rows and Peercord launch metadata. |
 | `scripts/verify-app-full.js --key <driveKey>` | Deeper fresh-peer blob sampling across a drive's file tree. |
 | `scripts/release-prod.sh` | The two-step release pipeline above. |
 
