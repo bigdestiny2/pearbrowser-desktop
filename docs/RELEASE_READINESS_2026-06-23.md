@@ -18,6 +18,7 @@ The release is in strong shape for a community launch. The core protocol tests a
 - Desktop GUI runtime is up in dev mode with Pear Runtime renderer connected to the backend RPC socket on `127.0.0.1:9876`.
 - Real-DHT relay health passed with 1 unique HiveRelay reachable and 8 live relay connections. A restricted/sandboxed network run can false-negative DHT discovery, so release checks should run with real network access.
 - PearBrowser homepage, Peercord, and Keet bundle drives were fresh-peer sampled without executing third-party code; all returned peers, file listings, and zero missing sampled blobs.
+- Native simulator/device smoke was attempted but is not cleared: iOS reaches the final CocoaPods framework embed phase after local generated-state fixes, then `Pods-PearBrowser-frameworks.sh` is killed with signal 9; Android Gradle inspection is blocked by a missing Java Runtime in this environment.
 
 One transient desktop `npm test` run reported `401/402`; the immediately repeated compact full run passed `402/402`, and the catalogue-focused subset passed `30/30`. No code change was needed for that blip.
 
@@ -93,14 +94,17 @@ Remaining improvement: public relay client behavior, relay moderation policy, an
 
 ## Mobile/Native Parity
 
-The native tree is clean and tested:
+The mobile app logic is tested, while native simulator/device release smoke still needs a clean rerun:
 
 - TypeScript, backend syntax checks, bridge templates, and native source-contract tests pass.
 - Mobile catalogue normalization preserves safe link-only rows and rejects targetless rows.
 - iOS and Android bridge constants are mirrored for login, profile, connected apps, trusted origins, and `swarm.v1`.
 - Mobile flows cover Home, Browse, Explore, Settings, My Sites, editor, QR scanner, identity backup/restore, and bridge runtime smoke tests.
+- iOS generated CocoaPods metadata in the ignored `ios/` tree had stale nested Expo paths (`node_modules/expo/node_modules/...`) while the current Expo autolinker resolves hoisted packages. Local generated metadata was corrected for EXConstants, ExpoAsset, ExpoDomWebView, ExpoFont, ExpoKeepAwake, and ExpoLogBox, moving the build past missing `PrivacyInfo.xcprivacy`, missing ExpoLogBox sources, and EXConstants header export failures.
+- The simulator build then reached the app target's generated `Pods-PearBrowser-frameworks.sh` step and failed when that framework embed script was killed with signal 9.
+- Android native Gradle inspection is blocked in this environment by a missing Java Runtime.
 
-Remaining improvement: simulator/device smoke should be run before app-store-style distribution, because local Node tests do not prove platform WebView behavior under real OS permissions.
+Required before native/mobile distribution: regenerate dependencies cleanly, rerun the iOS simulator build and launch, and install a JDK before the Android Gradle smoke. Local Node tests do not prove platform WebView behavior under real OS permissions.
 
 ## Release Operations
 
@@ -117,6 +121,7 @@ Required external smoke before a public announcement:
 
 - If time allows, run `node scripts/verify-app-full.js --key 1868916a7a282ff0f211b11b536e9642828c32d3a817a254e1ef7e602709e25d --name pearbrowser --samples 12`.
 - Launch Peercord and one existing featured Pear app from the catalogue after explicitly approving Pear's trust prompt for Peercord.
+- Clear native mobile smoke before any app-store-style mobile announcement: iOS simulator build/launch and Android Gradle inspection with a local JDK.
 
 ## Evidence
 
@@ -140,6 +145,10 @@ node scripts/verify-live-catalog.js --expect-app peercord --expect-app hiveworm
 node scripts/verify-app-full.js --key 1868916a7a282ff0f211b11b536e9642828c32d3a817a254e1ef7e602709e25d --name pearbrowser-homepage --samples 12 --timeout 90
 node scripts/verify-app-full.js --key a2ea4d769d5e2b90caca4fbcb7f4b7b43caf43f2555b81201d3463ef89b55c26 --name peercord --samples 12 --timeout 90
 node scripts/verify-app-full.js --key 82110be69e2a531e840bc886dc7b9cab16729c587815295f55035109b45e4ddb --name keet --samples 12 --timeout 90
+xcodebuild -workspace ios/PearBrowser.xcworkspace -list # mobile/native, succeeded
+xcrun simctl list devices available # mobile/native, selected booted iPhone 17, OS 26.4.1
+./gradlew :app:tasks --all # mobile/native, failed: no Java Runtime
+xcodebuild -workspace ios/PearBrowser.xcworkspace -scheme PearBrowser -configuration Debug -destination 'id=13BEE7B5-1283-4DE4-BE38-8B70356E4A5B' -derivedDataPath ios/build/DerivedData CODE_SIGNING_ALLOWED=NO build # mobile/native, failed at final framework embed script after generated Expo path fixes
 ```
 
 Key live values:
@@ -155,4 +164,5 @@ Key live values:
 - Network replication can vary by relay health and NAT conditions. This pass saw reachable relays, a reachable production drive, and a reachable live catalogue, but a second-network spot check remains useful before a high-visibility announcement.
 - Peercord cannot honestly be marketed as headless-in-tab until upstream ships a compatible pear-request worker. PearBrowser does launch it from the featured catalogue without manual download/update.
 - Public Nostr relay behavior is not part of this release; the shipped feature is the trusted-contact bridge.
+- Native mobile is not app-store-release-cleared yet. The JS/test surface is green, but iOS still needs a clean generated dependency pass plus simulator launch, and Android needs a local JDK before Gradle can be inspected.
 - Mobile still reports 15 moderate `npm audit` advisories in Expo/React Native test/tooling transitive dependencies. npm's available fix requires breaking major-version changes, so these should move to the next mobile platform-upgrade lane rather than this release-day hardening pass.

@@ -1,6 +1,6 @@
 # PearBrowser Desktop — P2P-Infra Handover (master)
 
-**Generated:** 2026-06-19 · **Release-status refreshed:** 2026-06-23 · **Release PR HEAD:** `71d6490` · **Branch:** `feat/p2p-infra-naming` · **Version:** `0.4.5`
+**Generated:** 2026-06-19 · **Release-status refreshed:** 2026-06-23 · **Release PR HEAD:** current branch tip · **Branch:** `feat/p2p-infra-naming` · **Version:** `0.4.5`
 **Scope:** the **P2P-infra build** (the four-track program in [`research/IMPLEMENTATION-PLAN.md`](./research/IMPLEMENTATION-PLAN.md)) **+ the live branch/worktree/stash map.**
 **Audience:** whoever picks up the infra program next — a fresh session, a teammate, or an AI agent.
 **Canonical handover set:** this file (master) + [`SEARCH-HANDOVER.md`](./SEARCH-HANDOVER.md) (search companion).
@@ -67,9 +67,9 @@ shared substrate, so the tracks **reuse it, not rebuild it**:
 
 | Location | State | Role now |
 |---|---|---|
-| `pearbrowser-desktop` | branch `feat/p2p-infra-naming`, PR head `71d6490` | Release-audit branch carrying catalogue, Peercord, search, naming, Nostr, docs, and readiness updates. GitHub PR #4 is `CLEAN` / `MERGEABLE` against `main` and remains draft for review. |
+| `pearbrowser-desktop` | branch `feat/p2p-infra-naming`, PR head is the current branch tip | Release-audit branch carrying catalogue, Peercord, search, naming, Nostr, docs, and readiness updates. GitHub PR #4 is `CLEAN` / `MERGEABLE` against `main` and remains draft for review. |
 | `origin/main` | `1577ad5` at the time of the merge-back | Base branch. Its catalogue-discovery work is merged into the release branch. |
-| `PearBrowser` mobile repo | `main`, clean after `5b80bcb` | Mobile/native README and audit-gate docs are pushed; tests passed `124/124` in the release pass. |
+| `PearBrowser` mobile repo | `main`, clean after `5b80bcb` | Mobile/native README and audit-gate docs are pushed; tests passed `124/124` in the release pass. Native simulator/device smoke is still gated: iOS reached final framework embedding before a signal-9 script kill, and Android Gradle needs a Java Runtime. |
 | Legacy `feat/p2p-infra-naming-n1ui` / `feat/p2p-infra-impl` references below | historical only | Kept as reconciliation provenance. Do not treat old tip SHAs in §4-§6 as the current release head. |
 
 ---
@@ -171,7 +171,7 @@ breaking the feature with no error. The drift guard fails CI if they disagree.
 
 ```bash
 npm start          # pear run --dev .   (dev shell)
-npm test           # node --test 'test/*.test.js'   → 402 passing on release PR HEAD (71d6490)
+npm test           # node --test 'test/*.test.js'   → 402 passing on the release PR branch
 node scripts/browser-state-sync-smoke.js   # encrypted two-device bookmark sync (no GUI)
 node scripts/autobee-catalog-smoke.js      # collaborative catalog convergence
 node scripts/check-relays.js               # relay reachability over the DHT
