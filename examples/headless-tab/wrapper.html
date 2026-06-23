@@ -1,0 +1,44 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>headless tab</title>
+  <script src="/htmx.min.js"></script>
+  <script src="/pear-request-client.bundle.js"></script>
+  <style>body{background:#0b0e14;margin:0}#boot{font:15px system-ui;color:#7a8;margin:40px auto;max-width:560px}</style>
+</head>
+<body>
+  <div id="boot">connecting to headless worker…</div>
+  <script>
+  (function () {
+    // A pipe shim over a WebSocket. The WS bridges to the Pear worker's duplex
+    // pipe on the backend. WS preserves message boundaries, so each frame is
+    // one pear-request message (the framing the client/router already expect).
+    var proto = location.protocol === 'https:' ? 'wss' : 'ws'
+    var ws = new WebSocket(proto + '://' + location.host + '/__pipe' + location.search)
+    ws.binaryType = 'arraybuffer'
+
+    var listeners = {}
+    function on (ev, cb) { (listeners[ev] || (listeners[ev] = [])).push(cb) }
+    var pipe = {
+      write: function (buf) { ws.send(buf); return true },
+      on: on,
+      once: function (ev, cb) { var w = function () { var i = listeners[ev].indexOf(w); if (i >= 0) listeners[ev].splice(i, 1); cb.apply(null, arguments) }; on(ev, w) }
+    }
+    ws.onmessage = function (e) {
+      var data = globalThis.Buffer.from(e.data)
+      ;(listeners.data || []).forEach(function (cb) { cb(data) })
+    }
+    ws.onerror = function () { document.getElementById('boot') && (document.getElementById('boot').textContent = 'worker pipe error') }
+    ws.onclose = function () { var b = document.getElementById('boot'); if (b) b.textContent = 'worker disconnected' }
+    ws.onopen = function () {
+      // swap in the stream-backed XMLHttpRequest, then let htmx pull the app's
+      // root UI from the worker (GET /) into <body>. From here it's all htmx.
+      globalThis.XMLHttpRequest = globalThis.createPearRequest(pipe)
+      window.__PEAR_TAB_READY = true
+      htmx.ajax('GET', '/', { target: 'body', swap: 'innerHTML' })
+    }
+  })()
+  </script>
+</body>
+</html>

@@ -1,11 +1,15 @@
 {
   "name": "pearbrowser-desktop",
-  "version": "0.4.5",
+  "version": "0.5.0",
   "description": "P2P browser + decentralized app store + site builder, desktop Pear fork of PearBrowser (jj10133/Vinjari family)",
   "type": "module",
   "scripts": {
+    "preinstall": "node scripts/check-hiverelay-layout.mjs",
     "start": "pear run --dev .",
-    "run": "pear run ."
+    "run": "pear run .",
+    "check:release-evidence": "node scripts/check-release-evidence.mjs",
+    "smoke:runtime": "node scripts/runtime-rpc-smoke.mjs",
+    "test": "node --test 'test/*.test.js'"
   },
   "pear": {
     "name": "pearbrowser-desktop",
@@ -17,6 +21,7 @@
         "/.github",
         "/.gitignore",
         "/.DS_Store",
+        "/.landing-seed.mjs",
         "**/.DS_Store",
         "/.claude",
         "/CHANGELOG.md",
@@ -25,6 +30,7 @@
         "/docs",
         "/examples",
         "/scripts",
+        "/test",
         "/pearbrowser-storage"
       ]
     },
@@ -41,6 +47,8 @@
     }
   },
   "dependencies": {
+    "@noble/hashes": "^2.2.0",
+    "@noble/secp256k1": "^3.1.0",
     "autobase": "^7.27.3",
     "b4a": "^1.8.0",
     "bare-crypto": "^1.13.4",
@@ -57,13 +65,14 @@
     "hypercore-crypto": "^3.5.0",
     "hyperdrive": "^13.3.2",
     "hyperswarm": "^4.17.0",
-    "p2p-hiverelay": "^0.8.12",
-    "p2p-hiverelay-client": "^0.8.12",
-    "p2p-hiverelay-verifier": "^0.8.12",
+    "p2p-hiverelay": "file:../../00-core/hiverelay/packages/core",
+    "p2p-hiverelay-client": "file:../../00-core/hiverelay/packages/client",
+    "p2p-hiverelay-verifier": "file:../../00-core/hiverelay/packages/verifier",
     "pear-bridge": "latest",
     "pear-electron": "latest",
     "pear-run": "latest",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "schema-sheets": "^3.1.1"
   }
 }

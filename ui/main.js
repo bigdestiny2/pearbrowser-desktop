@@ -9,16 +9,16 @@ const root = createRoot(container)
 
 function Splash ({ message, detail, failed }) {
   return html`
-    <div class="splash">
-      <div class="splash-inner">
+    <div className="splash">
+      <div className="splash-inner">
         <${Logo} size=${96} animated=${!failed} />
         <${Wordmark} />
-        <div class="splash-tagline">P2P browser, app store, and publishing — no servers required.</div>
-        <div class=${'splash-status' + (failed ? ' failed' : '')}>
-          <span class="splash-spinner"></span>
+        <div className="splash-tagline">P2P browser, app store, and publishing — no servers required.</div>
+        <div className=${'splash-status' + (failed ? ' failed' : '')}>
+          <span className="splash-spinner"></span>
           <span>${message}</span>
         </div>
-        ${detail && html`<pre class="splash-detail">${detail}</pre>`}
+        ${detail && html`<pre className="splash-detail">${detail}</pre>`}
       </div>
     </div>
   `

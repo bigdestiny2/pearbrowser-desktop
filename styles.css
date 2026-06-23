@@ -227,6 +227,49 @@ p { color: #8b949e; margin-bottom: 12px; }
   border-bottom: 1px solid #30363d;
 }
 
+/* Naming Phase N1 — provenance chip shown when the URL bar resolved a bare
+   name (e.g. "keet") through the petname/curated resolver. The honest-trust
+   signal (Zooko): the tier label says HOW it resolved, never hiding it. */
+.name-prov-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 14px 0;
+  padding: 3px 10px;
+  width: fit-content;
+  border-radius: 999px;
+  border: 1px solid #30363d;
+  background: rgba(22,27,34,0.6);
+  font-size: 11px;
+}
+.name-prov-chip .name-prov-name { font-weight: 600; color: #e6edf3; }
+.name-prov-chip .name-prov-tier {
+  font-family: "SF Mono", Menlo, monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #8b949e;
+}
+/* Tier-0 petname — the user's own saved alias (highest authority). */
+.name-prov-chip.name-prov-petname { border-color: rgba(46,160,67,0.5); }
+.name-prov-chip.name-prov-petname .name-prov-tier { color: #3fb950; }
+/* Tier-2 multi-writer name registry (owner-signed first-claim; above curated). */
+.name-prov-chip.name-prov-registry { border-color: rgba(163,113,247,0.5); }
+.name-prov-chip.name-prov-registry .name-prov-tier { color: #a371f7; }
+/* Tier-2b a trusted contact's name registry (cross-user federation). */
+.name-prov-chip.name-prov-contact { border-color: rgba(219,109,40,0.5); }
+.name-prov-chip.name-prov-contact .name-prov-tier { color: #db6d28; }
+/* Tier-3 curated bootstrap floor (lowest authority; overridden by anything above). */
+.name-prov-chip.name-prov-curated .name-prov-tier { color: #58a6ff; }
+
+/* Name-registry Settings panel rows. */
+.namereg-list { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+
+/* Nostr feed (Phase 2) — your own notes. */
+.nostr-feed { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.nostr-note { padding: 8px 10px; border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; }
+.nostr-note-content { white-space: pre-wrap; word-break: break-word; color: #e6edf3; margin-bottom: 4px; }
+
 .browse-empty {
   flex: 1;
   display: flex;
@@ -552,6 +595,12 @@ p { color: #8b949e; margin-bottom: 12px; }
   gap: 6px;
   flex-shrink: 0;
 }
+.app-actions-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.app-info-copy { min-width: 0; }
 
 /* ─── Site editor ─── */
 
@@ -763,6 +812,10 @@ p { color: #8b949e; margin-bottom: 12px; }
 }
 .settings-row + .settings-row { border-top: 1px solid #21262d; }
 .settings-row > div:first-child { flex: 1; min-width: 0; }
+/* When a row holds more than one field (e.g. Author + Categories on the Submit
+   form), every .profile-field must flex equally — the :first-child rule above
+   only grows the first, leaving later fields to collapse and overlap. */
+.settings-row > .profile-field { flex: 1; min-width: 0; }
 .settings-label { color: #e6edf3; font-weight: 500; font-size: 13px; margin-bottom: 2px; }
 .settings-subtle { color: #8b949e; font-size: 12px; }
 .settings-code {
@@ -1083,7 +1136,22 @@ p { color: #8b949e; margin-bottom: 12px; }
 }
 .tabchip:hover { background: #21262d; color: #e6edf3; }
 .tabchip.active { background: #0d1117; color: #e6edf3; border-color: #30363d; }
+.tabchip.pinned { border-color: rgba(88, 166, 255, 0.45); min-width: 92px; max-width: 180px; }
 .tabchip-favicon { font-size: 12px; flex-shrink: 0; }
+.tabchip-pin {
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  color: #6e7681;
+  font-size: 9px;
+  flex-shrink: 0;
+  transition: background 0.1s, color 0.1s;
+}
+.tabchip-pin:hover { background: rgba(88, 166, 255, 0.12); color: #58a6ff; }
+.tabchip-pin.on { color: #58a6ff; }
 .tabchip-title {
   flex: 1;
   white-space: nowrap;
@@ -1116,6 +1184,9 @@ p { color: #8b949e; margin-bottom: 12px; }
   flex-shrink: 0;
 }
 .tabchip-new:hover { background: #21262d; color: #e6edf3; }
+.tabchip-new:disabled { opacity: 0.3; cursor: default; }
+.tabchip-new:disabled:hover { background: transparent; color: #6e7681; }
+.tabchip-restore { font-size: 15px; }
 
 /* --- Per-tab iframe stage ------------------------------------------ */
 .browse-stage {
@@ -1165,6 +1236,103 @@ p { color: #8b949e; margin-bottom: 12px; }
   border-top: 1px dashed #21262d;
 }
 .swarm-grant-row:first-of-type { border-top: 1px dashed #21262d; }
+
+/* --- Permission Center -------------------------------------------------- */
+.permission-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.permission-stat {
+  border: 1px solid #21262d;
+  border-radius: 8px;
+  padding: 10px;
+}
+.permission-stat-value {
+  color: #e6edf3;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1;
+}
+.permission-stat-label {
+  color: #8b949e;
+  font-size: 11px;
+  margin-top: 5px;
+}
+.permission-app {
+  border-top: 1px solid #21262d;
+  padding: 14px 0;
+}
+.permission-app:first-of-type { border-top: 0; padding-top: 0; }
+.permission-app-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.permission-cap-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 14px;
+}
+.permission-cap {
+  min-width: 0;
+  border-top: 1px dashed #21262d;
+  padding-top: 8px;
+}
+.permission-cap-label {
+  color: #adbac7;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-bottom: 6px;
+}
+.permission-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.permission-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 2px 8px;
+  border: 1px solid rgba(88, 166, 255, 0.34);
+  border-radius: 999px;
+  color: #79c0ff;
+  background: rgba(56, 139, 253, 0.08);
+  font-size: 11px;
+  line-height: 1.3;
+}
+.permission-chip.warn {
+  color: #f2cc60;
+  border-color: rgba(210, 153, 34, 0.34);
+  background: rgba(210, 153, 34, 0.08);
+}
+.permission-topic {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 0;
+  border-top: 1px dashed #21262d;
+}
+.permission-topic:first-of-type { border-top: 0; }
+@media (max-width: 760px) {
+  .permission-summary,
+  .permission-cap-grid {
+    grid-template-columns: 1fr;
+  }
+  .permission-app-head,
+  .permission-topic {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
 
 /* --- Onboarding (first-launch overlay) -------------------------------- */
 .onboarding-overlay { z-index: 10000; }
@@ -1526,3 +1694,46 @@ p { color: #8b949e; margin-bottom: 12px; }
   color: #ff9500;
   border-color: rgba(255, 149, 0, 0.4);
 }
+
+/* Lighthouse Phase 2 — federated-search provenance: where a result came from
+   (your own index vs a trusted peer) + the include-peers toggle. */
+.src-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 7px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 999px;
+  vertical-align: middle;
+  border: 1px solid #30363d;
+  color: #8b949e;
+}
+.src-badge.self { color: #8b949e; border-color: #30363d; }
+.src-badge.followed { color: #58a6ff; border-color: rgba(88, 166, 255, 0.45); background: rgba(88, 166, 255, 0.10); }
+.src-badge.other { color: #ff9500; border-color: rgba(255, 149, 0, 0.4); background: rgba(255, 149, 0, 0.10); }
+.search-fed-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -4px 0 14px;
+  font-size: 13px;
+  color: #8b949e;
+  cursor: pointer;
+  user-select: none;
+}
+.search-fed-toggle input { cursor: pointer; }
+.search-fed-toggle .fed-status { color: #58a6ff; font-style: italic; }
+
+/* Lighthouse Phase 2 — trusted-peers (contact invite exchange) panel. */
+.trusted-peers { margin: 0 0 16px; border: 1px solid #30363d; border-radius: 8px; background: #0d1117; }
+.trusted-peers summary { padding: 10px 12px; cursor: pointer; font-size: 13px; color: #c9d1d9; user-select: none; }
+.trusted-peers summary:hover { color: #e6edf3; }
+.tp-body { padding: 0 12px 12px; }
+.tp-field { margin-bottom: 10px; }
+.tp-field label { display: block; font-size: 12px; color: #8b949e; margin-bottom: 4px; }
+.tp-row { display: flex; gap: 6px; }
+.tp-row .profile-input { flex: 1; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 11px; }
+.tp-msg { font-size: 12px; color: #58a6ff; margin: 4px 0 8px; }
+.tp-list { list-style: none; padding: 0; margin: 8px 0 0; }
+.tp-list li { display: flex; align-items: center; gap: 6px; padding: 5px 0; font-size: 13px; border-top: 1px solid #21262d; }
+.tp-name { flex: 1; color: #c9d1d9; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

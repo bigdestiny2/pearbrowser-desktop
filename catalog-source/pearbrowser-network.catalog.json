@@ -1,0 +1,291 @@
+{
+  "name": "PearBrowser Network",
+  "description": "Curated entry point for the Pear ecosystem — the browser itself plus its companion sites.",
+  "version": 7,
+  "publishedAt": "2026-06-21T00:00:00Z",
+  "publisher": "bigdestiny2",
+  "apps": [
+    {
+      "id": "pearbrowser-desktop",
+      "name": "PearBrowser Desktop",
+      "description": "P2P browser, decentralized app store, and site publisher. macOS / Windows / Linux. Talks to peers directly over Hyperswarm. Pinned 24/7 on HiveRelay.",
+      "author": "bigdestiny2",
+      "version": "0.4.5",
+      "categories": [
+        "browser",
+        "tools",
+        "p2p"
+      ],
+      "publishedAt": "2026-04-28T00:00:00Z",
+      "pearLink": "pear://tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty",
+      "driveKey": "1868916a7a282ff0f211b11b536e9642828c32d3a817a254e1ef7e602709e25d",
+      "homepage": "hyper://1868916a7a282ff0f211b11b536e9642828c32d3a817a254e1ef7e602709e25d/",
+      "source": "https://github.com/bigdestiny2/pearbrowser-desktop",
+      "license": "MIT",
+      "platforms": [
+        "macos",
+        "windows",
+        "linux"
+      ],
+      "verification": "relay-listed",
+      "link": "pear://tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty"
+    },
+    {
+      "id": "peerit",
+      "name": "peerit",
+      "description": "The front page of the P2P internet — a peer-to-peer Reddit. Communities, posts, threaded comments and votes live in a shared Holepunch log (Autobase + Hyperbee) and replicate directly between peers. No servers, no data center. Runs as a P2P site inside PearBrowser, seeded 24/7 on HiveRelay.",
+      "author": "defidon",
+      "version": "1.0.0",
+      "type": "hypersite",
+      "categories": [
+        "community",
+        "social",
+        "site",
+        "featured"
+      ],
+      "publishedAt": "2026-06-23T00:00:00Z",
+      "link": "hyper://ec6e2d6d9d22b9d6b40e11a9ca3042be3197e4bdca9e9a7f079be6ee830761b4/",
+      "url": "hyper://ec6e2d6d9d22b9d6b40e11a9ca3042be3197e4bdca9e9a7f079be6ee830761b4/",
+      "homepage": "hyper://ec6e2d6d9d22b9d6b40e11a9ca3042be3197e4bdca9e9a7f079be6ee830761b4/",
+      "driveKey": "ec6e2d6d9d22b9d6b40e11a9ca3042be3197e4bdca9e9a7f079be6ee830761b4",
+      "source": "pear-ecosystem/02-apps/peerit",
+      "license": "MIT",
+      "verification": "relay-listed",
+      "iconData": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCIgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0Ij4KICA8ZGVmcz4KICAgIDxsaW5lYXJHcmFkaWVudCBpZD0iZyIgeDE9IjAiIHkxPSIwIiB4Mj0iMSIgeTI9IjEiPgogICAgICA8c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZjZiM2QiLz4KICAgICAgPHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjOWI2Y2ZmIi8+CiAgICA8L2xpbmVhckdyYWRpZW50PgogIDwvZGVmcz4KICA8cmVjdCB3aWR0aD0iNjQiIGhlaWdodD0iNjQiIHJ4PSIxNiIgZmlsbD0idXJsKCNnKSIvPgogIDwhLS0gdGhyZWUgcGVlcnMgY29ubmVjdGVkIGluIGEgbWVzaCwgd2l0aCBhbiB1cHZvdGUgYXJyb3cgLS0+CiAgPGcgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMGEwZTE3IiBzdHJva2Utd2lkdGg9IjMiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+CiAgICA8cGF0aCBkPSJNMjAgNDAgTDQ0IDQwIE0yMCA0MCBMMzIgMjAgTTQ0IDQwIEwzMiAyMCIgb3BhY2l0eT0iMC41Ii8+CiAgPC9nPgogIDxjaXJjbGUgY3g9IjMyIiBjeT0iMjAiIHI9IjYiIGZpbGw9IiMwYTBlMTciLz4KICA8Y2lyY2xlIGN4PSIyMCIgY3k9IjQwIiByPSI2IiBmaWxsPSIjMGEwZTE3Ii8+CiAgPGNpcmNsZSBjeD0iNDQiIGN5PSI0MCIgcj0iNiIgZmlsbD0iIzBhMGUxNyIvPgogIDxwYXRoIGQ9Ik0zMiA1MCBMMzIgMzMgTTMyIDMzIEwyNiAzOSBNMzIgMzMgTDM4IDM5IiBzdHJva2U9IiNmZmYiIHN0cm9rZS13aWR0aD0iMy40IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiIGZpbGw9Im5vbmUiLz4KPC9zdmc+Cg=="
+    },
+    {
+      "id": "hiverelay",
+      "name": "HiveRelay",
+      "description": "Always-on relay infrastructure for the Pear and Hyperswarm ecosystem. Blind peering, NAT traversal, HTTP gateway. Apache-2.0.",
+      "author": "bigdestiny2",
+      "version": "0.16.3",
+      "categories": [
+        "infrastructure",
+        "site"
+      ],
+      "publishedAt": "2026-04-28T00:00:00Z",
+      "url": "hyper://9f2b34aad8cd1a681d5f07d8a76768f0dc92a5008251d02a8600eb0751ad6b5f/",
+      "driveKey": "9f2b34aad8cd1a681d5f07d8a76768f0dc92a5008251d02a8600eb0751ad6b5f",
+      "source": "https://github.com/bigdestiny2/P2P-Hiverelay",
+      "license": "Apache-2.0",
+      "verification": "relay-listed"
+    },
+    {
+      "id": "p2pbuilders",
+      "name": "P2P Builders",
+      "description": "Permissionless peer-to-peer hacker news for anons who build P2P. Runs in your terminal — no servers, no accounts.",
+      "author": "bigdestiny2",
+      "version": "1.0.0",
+      "categories": [
+        "community",
+        "site"
+      ],
+      "publishedAt": "2026-04-28T00:00:00Z",
+      "url": "hyper://8545ce29bedf22d3c6ff682684b626947e4b71e98d874931df7a1d00b70db5b7/",
+      "driveKey": "8545ce29bedf22d3c6ff682684b626947e4b71e98d874931df7a1d00b70db5b7",
+      "source": "https://github.com/bigdestiny2/p2pbuilders",
+      "license": "Apache-2.0",
+      "verification": "relay-listed"
+    },
+    {
+      "id": "pear-dealroom",
+      "name": "Pear Dealroom",
+      "description": "Zero-infrastructure P2P virtual data room for M&A and due diligence. End-to-end encrypted documents, a signed tamper-evident audit trail, and cryptographic access tiers — no cloud, no server, no vendor. Built on Holepunch.",
+      "author": "defidon",
+      "version": "1.0.0",
+      "categories": [
+        "productivity",
+        "security"
+      ],
+      "publishedAt": "2026-06-21T00:00:00Z",
+      "url": "hyper://0724aabf2ad6394983f91c6b24ebd417cb3d25addcf29c98eb246c512dc77f90/",
+      "driveKey": "0724aabf2ad6394983f91c6b24ebd417cb3d25addcf29c98eb246c512dc77f90",
+      "homepage": "hyper://0724aabf2ad6394983f91c6b24ebd417cb3d25addcf29c98eb246c512dc77f90/",
+      "source": "pear-ecosystem/02-apps/pear-dealroom",
+      "license": "MIT",
+      "platforms": [
+        "macos",
+        "windows",
+        "linux"
+      ],
+      "verification": "relay-listed",
+      "link": "pear://7octu5dimjye8rn68raehwuetk5mttzt4zxh6yjw1eqktn49bq7o",
+      "pearLink": "pear://7octu5dimjye8rn68raehwuetk5mttzt4zxh6yjw1eqktn49bq7o",
+      "iconData": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMwYTBkMTIiLz48cGF0aCBkPSJNMzIgMTJsMTYgNnYxMWMwIDExLTcgMTgtMTYgMjMtOS01LTE2LTEyLTE2LTIzVjE4eiIgZmlsbD0iIzU4YTZmZiIvPjxnIHN0cm9rZT0iIzBhMGQxMiIgc3Ryb2tlLXdpZHRoPSIyLjYiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCI+PHBhdGggZD0iTTI2IDI4aDEyTTI2IDM0aDEyTTI2IDQwaDgiLz48L2c+PC9zdmc+"
+    },
+    {
+      "id": "pearpaste",
+      "name": "Paste",
+      "description": "Local-first, end-to-end encrypted notes & clipboard sync for your own devices. No account, no hosted database, no plaintext replication — built on Pear, Holepunch, Hypercore, Hyperbee, Autobase and Hyperswarm. Tap-to-decrypt rows keep secrets sealed until you reveal them. Desktop (macOS / Windows / Linux) + Expo mobile.",
+      "author": "defidon",
+      "version": "0.1.0",
+      "categories": [
+        "productivity",
+        "security",
+        "tools"
+      ],
+      "publishedAt": "2026-06-21T00:00:00Z",
+      "type": "standalone",
+      "link": "pear://qnax5k8ojtod51ci9qwkrawdof1hx5w3a7gqbueoqnzzq9dw5hfo",
+      "pearLink": "pear://qnax5k8ojtod51ci9qwkrawdof1hx5w3a7gqbueoqnzzq9dw5hfo",
+      "homepage": "hyper://25a06bb3dddec8138e9eda606cc4a11e9ebbe47815fd5d22064b30cff752bb5b/",
+      "url": "hyper://25a06bb3dddec8138e9eda606cc4a11e9ebbe47815fd5d22064b30cff752bb5b/",
+      "source": "https://github.com/bigdestiny2/pearpaste",
+      "license": "Apache-2.0",
+      "platforms": [
+        "macos",
+        "windows",
+        "linux"
+      ],
+      "verification": "relay-listed",
+      "iconData": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMwYTBkMTIiLz48cmVjdCB4PSIxOCIgeT0iMTYiIHdpZHRoPSIyOCIgaGVpZ2h0PSIzNCIgcng9IjQiIGZpbGw9IiM0YWRlODAiLz48cmVjdCB4PSIyNSIgeT0iMTEiIHdpZHRoPSIxNCIgaGVpZ2h0PSI5IiByeD0iMi41IiBmaWxsPSIjNGFkZTgwIiBzdHJva2U9IiMwYTBkMTIiIHN0cm9rZS13aWR0aD0iMiIvPjxnIHN0cm9rZT0iIzBhMGQxMiIgc3Ryb2tlLXdpZHRoPSIyLjYiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCI+PHBhdGggZD0iTTI0IDMwaDE2TTI0IDM2aDE2TTI0IDQyaDEwIi8+PC9nPjwvc3ZnPg==",
+      "driveKey": "25a06bb3dddec8138e9eda606cc4a11e9ebbe47815fd5d22064b30cff752bb5b"
+    },
+    {
+      "id": "pearpoker",
+      "name": "PearPoker",
+      "description": "Peer-to-peer poker — play directly between players over Hyperswarm. No server, no house, no rake.",
+      "author": "bigdestiny2",
+      "version": "1.0.0",
+      "categories": [
+        "games",
+        "social",
+        "p2p"
+      ],
+      "publishedAt": "2026-06-21T00:00:00Z",
+      "pearLink": "pear://owr1ukamxhxm1j67p8dkhbm46n1d9qoh7igd8ag9f36x6dzjrjwy",
+      "link": "pear://owr1ukamxhxm1j67p8dkhbm46n1d9qoh7igd8ag9f36x6dzjrjwy",
+      "driveKey": "850929ab0b7f1eb927dd69c6ae057af0a43fba1ced4c33e0df2e7cff0ee92268",
+      "type": "pear-app",
+      "license": "MIT",
+      "platforms": [
+        "macos",
+        "windows",
+        "linux"
+      ],
+      "verification": "relay-listed",
+      "iconData": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMwYTBkMTIiLz48cGF0aCBkPSJNMzIgMTNDMjEgMjUgMTUgMjkgMTUgMzdhOCA4IDAgMCAwIDE0IDVjLTEgNC0zIDYtNiA5aDE4Yy0zLTMtNS01LTYtOWE4IDggMCAwIDAgMTQtNWMwLTgtNi0xMi0xNy0yNHoiIGZpbGw9IiMzZmI5NTAiLz48L3N2Zz4="
+    },
+    {
+      "id": "keet",
+      "name": "Keet",
+      "description": "End-to-end encrypted P2P chat, voice, and video calls.",
+      "author": "Holepunch",
+      "categories": [
+        "chat",
+        "communication",
+        "featured"
+      ],
+      "version": "1.0.0",
+      "publishedAt": "2026-06-21T00:00:00Z",
+      "verification": "relay-listed",
+      "link": "pear://oeeoz3w6fjjt7bym3ndpa6hhicm8f8naxyk11z4iypeoupn6jzpo",
+      "pearLink": "pear://oeeoz3w6fjjt7bym3ndpa6hhicm8f8naxyk11z4iypeoupn6jzpo",
+      "iconData": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMwYTBkMTIiLz48cGF0aCBkPSJNMTQgMjFhNiA2IDAgMCAxIDYtNmgyNGE2IDYgMCAwIDEgNiA2djE1YTYgNiAwIDAgMS02IDZIMjlsLTEwIDh2LThhNiA2IDAgMCAxLTUtNnoiIGZpbGw9IiNmYmJmMjQiLz48ZyBmaWxsPSIjMGEwZDEyIj48Y2lyY2xlIGN4PSIyNSIgY3k9IjI4LjUiIHI9IjIuNiIvPjxjaXJjbGUgY3g9IjMzIiBjeT0iMjguNSIgcj0iMi42Ii8+PGNpcmNsZSBjeD0iNDEiIGN5PSIyOC41IiByPSIyLjYiLz48L2c+PC9zdmc+"
+    },
+    {
+      "id": "pearpass",
+      "name": "PearPass",
+      "description": "Peer-to-peer password manager — synced across devices without a cloud.",
+      "author": "Tether",
+      "categories": [
+        "security",
+        "utilities",
+        "featured"
+      ],
+      "version": "1.0.0",
+      "publishedAt": "2026-06-21T00:00:00Z",
+      "verification": "relay-listed",
+      "link": "pear://tywsat7gz8m65ejx4zjn3773pbdc4j8m66tukis8dgzekraymtzo",
+      "pearLink": "pear://tywsat7gz8m65ejx4zjn3773pbdc4j8m66tukis8dgzekraymtzo",
+      "iconData": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMwYTBkMTIiLz48cmVjdCB4PSIxOCIgeT0iMzAiIHdpZHRoPSIyOCIgaGVpZ2h0PSIyMiIgcng9IjQiIGZpbGw9IiMzZmI5NTAiLz48cGF0aCBkPSJNMjQgMzB2LTZhOCA4IDAgMCAxIDE2IDB2NiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjM2ZiOTUwIiBzdHJva2Utd2lkdGg9IjQiLz48Y2lyY2xlIGN4PSIzMiIgY3k9IjM5IiByPSIzLjQiIGZpbGw9IiMwYTBkMTIiLz48cmVjdCB4PSIzMC41IiB5PSIzOSIgd2lkdGg9IjMiIGhlaWdodD0iOCIgcng9IjEuNSIgZmlsbD0iIzBhMGQxMiIvPjwvc3ZnPg=="
+    },
+    {
+      "id": "peercord",
+      "name": "Peercord",
+      "type": "standalone",
+      "link": "pear://wmir47w7mai3b1skj66mx7fzso6k6o91kipaney7gtt69npimouy",
+      "author": "Mastercodeon",
+      "categories": [
+        "chat",
+        "communication",
+        "social",
+        "featured"
+      ],
+      "description": "Decentralized Discord-style chat powered by Pear Runtime and Hyperswarm. Text, voice, video, screen sharing, local identity, and P2P file transfer without central servers.",
+      "version": "1.0.8",
+      "verification": "relay-listed",
+      "homepage": "https://git.churchofmalware.org/mastercodeon/Peercord",
+      "source": "https://git.churchofmalware.org/mastercodeon/Peercord",
+      "license": "GPL-3.0",
+      "pearLink": "pear://wmir47w7mai3b1skj66mx7fzso6k6o91kipaney7gtt69npimouy",
+      "publishedAt": "2026-06-22T00:00:00Z"
+    },
+    {
+      "id": "hiveworm",
+      "name": "HiveWorm",
+      "description": "Perpetual P2P life-sim — a shared world that syncs directly between players over Hyperswarm. No server.",
+      "author": "HiveWorm",
+      "categories": [
+        "games"
+      ],
+      "version": "1.0.0",
+      "publishedAt": "2026-06-21T00:00:00Z",
+      "verification": "unverified",
+      "link": "hyper://e3f910d11e70044afe361b1cecfb5cfb3c4f61f600cc81c2365ba0e6f58c8d4d/",
+      "iconData": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMwYTBkMTIiLz48ZyBmaWxsPSIjYTM3MWY3Ij48Y2lyY2xlIGN4PSIxOSIgY3k9IjQ0IiByPSI3Ii8+PGNpcmNsZSBjeD0iMjkiIGN5PSI0MCIgcj0iNyIvPjxjaXJjbGUgY3g9IjM5IiBjeT0iMzMiIHI9IjcuNSIvPjxjaXJjbGUgY3g9IjQ2IiBjeT0iMjQiIHI9IjgiLz48L2c+PGcgZmlsbD0iIzBhMGQxMiI+PGNpcmNsZSBjeD0iNDgiIGN5PSIyMiIgcj0iMS43Ii8+PGNpcmNsZSBjeD0iNDQiIGN5PSIyMC41IiByPSIxLjciLz48L2c+PC9zdmc+",
+      "driveKey": "e3f910d11e70044afe361b1cecfb5cfb3c4f61f600cc81c2365ba0e6f58c8d4d",
+      "url": "hyper://e3f910d11e70044afe361b1cecfb5cfb3c4f61f600cc81c2365ba0e6f58c8d4d/"
+    },
+    {
+      "id": "anongpt",
+      "name": "anonGPT",
+      "description": "Private P2P AI chat — pay-per-inference from a HiveMind seller, with signed receipts.",
+      "author": "anonGPT",
+      "categories": [
+        "ai",
+        "featured"
+      ],
+      "version": "1.0.0",
+      "publishedAt": "2026-06-21T00:00:00Z",
+      "verification": "relay-listed",
+      "link": "pear://rpzh3fsgg38kfir9nmae7x3o8ubofddzzixr5js4mxd6a6drb6wo",
+      "pearLink": "pear://rpzh3fsgg38kfir9nmae7x3o8ubofddzzixr5js4mxd6a6drb6wo",
+      "iconData": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMwYTBkMTIiLz48cGF0aCBkPSJNMTQgMjFhNiA2IDAgMCAxIDYtNmgyNGE2IDYgMCAwIDEgNiA2djE1YTYgNiAwIDAgMS02IDZIMjlsLTEwIDh2LThhNiA2IDAgMCAxLTUtNnoiIGZpbGw9IiMyMmQzZWUiLz48cGF0aCBkPSJNMzMgMjBsMi4zIDUuNyA1LjcgMi4zLTUuNyAyLjMtMi4zIDUuNy0yLjMtNS43LTUuNy0yLjMgNS43LTIuM3oiIGZpbGw9IiMwYTBkMTIiLz48L3N2Zz4="
+    },
+    {
+      "id": "pear-pos",
+      "name": "Pear POS",
+      "description": "Peer-to-peer, offline-first point of sale — AI scanning, self-custodial USD₮ & Bitcoin, multi-terminal sync. $0 forever.",
+      "author": "Pear POS",
+      "categories": [
+        "business",
+        "commerce",
+        "featured"
+      ],
+      "version": "1.0.0",
+      "publishedAt": "2026-06-21T00:00:00Z",
+      "verification": "relay-listed",
+      "driveKey": "b776f15f3e6860ecf6d923853c295350e55b708772e67d7124899b96aecfcd43",
+      "link": "pear://myhk94sz7tokqcs58173xe7359c6nd9enwrm7z7xrthy9xsr7ehy",
+      "pearLink": "pear://myhk94sz7tokqcs58173xe7359c6nd9enwrm7z7xrthy9xsr7ehy"
+    },
+    {
+      "id": "pear-tickets",
+      "name": "Pear Tickets",
+      "description": "Offline-capable, signed-Hypercore event ticketing — Lightning, Cashu, and Stripe.",
+      "author": "bigdestiny2",
+      "categories": [
+        "commerce",
+        "productivity"
+      ],
+      "version": "1.0.0",
+      "publishedAt": "2026-06-21T00:00:00Z",
+      "verification": "relay-listed",
+      "driveKey": "ec309f516da659718746fe10ded086e2b6d157718c3e3651f86e07a4df34210a",
+      "link": "pear://gsnmwo4kdopbcif44wgt9k1ysmwwn1erh4o1358kis1ebtwbpouy",
+      "pearLink": "pear://gsnmwo4kdopbcif44wgt9k1ysmwwn1erh4o1358kis1ebtwbpouy",
+      "iconData": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMwYTBkMTIiLz48cGF0aCBkPSJNMTQgMjRoMzZhNCA0IDAgMCAxIDQgNHYxLjVhMy4yIDMuMiAwIDAgMCAwIDYuNFYzN2E0IDQgMCAwIDEtNCA0SDE0YTQgNCAwIDAgMS00LTR2LTEuMWEzLjIgMy4yIDAgMCAwIDAtNi40VjI4YTQgNCAwIDAgMSA0LTR6IiBmaWxsPSIjZmJiZjI0Ii8+PHBhdGggZD0iTTQwIDI2djEzIiBzdHJva2U9IiMwYTBkMTIiIHN0cm9rZS13aWR0aD0iMi40IiBzdHJva2UtZGFzaGFycmF5PSIzIDMiLz48L3N2Zz4="
+    }
+  ]
+}

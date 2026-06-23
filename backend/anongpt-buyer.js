@@ -23,19 +23,13 @@
  *
  * Implementation status:
  *
- *   PHASE 1a (this file as shipped) — implements the real seller dial.
- *     Each call spins up a per-request Hyperswarm + ServiceProtocol,
- *     joins the seller's transport-key topic, awaits channel-open,
- *     and calls `ai.infer`. Returns the seller's actual text + signed
- *     receipt to the page. The `verify` field is returned as
- *     { ok: false, reason: 'verifyReceipt port pending Phase 1b' } so
- *     the page's privacy guard still treats the answer as untrusted
- *     and must surface that explicitly. This is fail-closed by design.
- *
- *   PHASE 1b (next commit) — ports HiveMind's verifyReceipt() + its
- *     canonical.js / identity.js deps using Bare-compatible crypto.
- *     Once that lands, `verify.ok = true` becomes possible and the
- *     UI can show the answer as trusted.
+ *   PHASE 1b — implements the real seller dial AND local receipt
+ *     verification. Each call spins up a per-request Hyperswarm +
+ *     ServiceProtocol, joins the seller's transport-key topic, awaits
+ *     channel-open, calls `ai.infer`, then verifies the seller's signed
+ *     HiveMind receipt in-process before returning. `verify.ok = true`
+ *     is only ever locally computed; receipt/crypto failures stay
+ *     fail-closed as `verify.ok = false`.
  *
  *   PHASE 2 (future) — Offer-based seller discovery (signed offer in
  *     place of pasted sellerPubkey), CircuitRelay fallback when
@@ -48,8 +42,11 @@
  * to a long-lived swarm + protocol with topic add/remove.
  */
 
+const { verifyReceipt, sha256Hex } = require('./anongpt-receipt.cjs')
+
 const DEFAULT_INFER_TIMEOUT_MS = 60_000
 const DEFAULT_DIAL_TIMEOUT_MS = 20_000
+const DEFAULT_RATE_CARD = { perCall: 50, perInputToken: 1, perOutputToken: 4 }
 
 class AnongptBuyer {
   constructor (opts = {}) {
@@ -90,7 +87,7 @@ class AnongptBuyer {
   /**
    * Handle one infer call from the page.
    *
-   * Phase 1a flow:
+   * Phase 1b flow:
    *   1. validate request shape (cheap — pre-network)
    *   2. require sellerPubkey (Phase 2 will accept signed Offers)
    *   3. lazy-load ServiceRegistry/ServiceProtocol/Hyperswarm
@@ -100,9 +97,8 @@ class AnongptBuyer {
    *   7. protocol.request('ai', 'infer', { input, options })
    *      (with inference timeout)
    *   8. cleanup swarm/protocol regardless of outcome
-   *   9. return { ok, result, verify, route } in the dev-bridge shape
-   *
-   * Phase 1b will replace the verify stub with real verifyReceipt().
+   *   9. verify the seller receipt over the raw output and sent prompt
+   *  10. return { ok, result, verify, route } in the dev-bridge shape
    */
   async infer (req) {
     const validation = this._validate(req)
@@ -136,8 +132,12 @@ class AnongptBuyer {
 
     // Wire connection → protocol BEFORE joining so we don't miss the
     // first peer arriving while listeners aren't attached yet.
-    swarm.on('connection', (conn) => {
-      try { protocol.attach(conn) } catch (_) {}
+    swarm.on('connection', (conn, info) => {
+      try {
+        const remote = info && info.publicKey ? b4a.toString(info.publicKey, 'hex') : undefined
+        if (remote) protocol.attach(conn, remote)
+        else protocol.attach(conn)
+      } catch (_) {}
     })
 
     let dialTimer = null
@@ -193,7 +193,7 @@ class AnongptBuyer {
       try {
         serverResult = await Promise.race([
           protocol.request(sellerHex, 'ai', 'infer', inferPayload),
-          new Promise((_, reject) => {
+          new Promise((resolve, reject) => {
             inferTimer = setTimeout(
               () => reject(new Error('infer-timeout: seller did not return within ' + (this._inferTimeoutMs / 1000) + 's')),
               this._inferTimeoutMs
@@ -221,25 +221,40 @@ class AnongptBuyer {
         }
       }
 
-      // Phase 1a: return the answer + receipt as-is, with verify stub.
-      // Privacy contract: verify.ok = false means UI must show the
-      // answer as untrusted (or refuse to show it). The receipt is
-      // preserved so a Phase 1b client can later replay verification.
+      // Verify the seller's signed receipt over the RAW output. The page
+      // may strip/format text for display later, but trust is computed here
+      // against exactly what the seller returned.
+      const imageCommit = (serverResult.image && typeof serverResult.image === 'string')
+        ? 'sha256:' + sha256Hex(serverResult.image)
+        : null
+      const boundOutput = imageCommit ?? serverResult.text
+      if (typeof boundOutput !== 'string') {
+        return {
+          ok: false,
+          code: 'infer-empty-output',
+          message: 'seller returned no bindable output (no text and no image)',
+          route: { kind: 'direct-p2p', sellerPubkey: sellerHex }
+        }
+      }
+      const verify = await verifyReceipt(serverResult.receipt || {}, {
+        input: req.input,
+        output: boundOutput,
+        rateCard: req.rateCard || DEFAULT_RATE_CARD
+      })
+
       return {
         ok: true,
         result: {
           text: serverResult.text,
+          image: serverResult.image,
           promptTokens: serverResult.promptTokens,
           tokens: serverResult.tokens,
           tokensPerSecond: serverResult.tokensPerSecond,
           backendDevice: serverResult.backendDevice,
           receipt: serverResult.receipt
         },
-        verify: {
-          ok: false,
-          reason: 'verifyReceipt-port-pending-phase-1b',
-          detail: 'PearBrowser received a signed receipt but does not yet locally verify it. UI must surface this as "answer present, NOT trusted".'
-        },
+        // LOCALLY computed — never copied from the seller response.
+        verify,
         route: { kind: 'direct-p2p', sellerPubkey: sellerHex }
       }
     } catch (err) {
@@ -263,7 +278,7 @@ class AnongptBuyer {
     if (!req || typeof req !== 'object') {
       return { ok: false, code: 'invalid-request', message: 'request body must be an object' }
     }
-    const { input, sellerPubkey } = req
+    const { input, sellerPubkey, rateCard } = req
     if (typeof input !== 'string' || input.length === 0) {
       return { ok: false, code: 'invalid-request', message: '`input` must be a non-empty string' }
     }
@@ -283,8 +298,20 @@ class AnongptBuyer {
         }
       }
     }
+    if (rateCard != null && !validRateCard(rateCard)) {
+      return {
+        ok: false,
+        code: 'invalid-request',
+        message: '`rateCard` must include non-negative integer perCall, perInputToken, and perOutputToken'
+      }
+    }
     return { ok: true }
   }
+}
+
+function validRateCard (rateCard) {
+  if (!rateCard || typeof rateCard !== 'object') return false
+  return ['perCall', 'perInputToken', 'perOutputToken'].every((k) => Number.isInteger(rateCard[k]) && rateCard[k] >= 0)
 }
 
 module.exports = { AnongptBuyer }

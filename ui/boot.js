@@ -15,6 +15,7 @@ import { RpcClient } from './rpc-client.js'
 // holding 9876.
 const RPC_PORT_BASE = 9876
 const RPC_PORT_COUNT = 5
+const RPC_PROBE_ID = 900000001
 
 // Must match backend/constants.js exactly (numeric wire codes). This is a
 // COMPLETE mirror — every command/event the renderer can send or receive.
@@ -35,6 +36,13 @@ const C = {
   CMD_LOAD_CATALOG_BEE: 16,
   CMD_GET_CATALOG_APPS: 17,
   CMD_UNLOAD_CATALOG: 18,
+  CMD_LOAD_CATALOG_AUTOBEE: 19,
+  CMD_SHEETS_LOAD: 170,
+  CMD_SHEETS_LIST: 171,
+  CMD_SHEETS_LIST_SCHEMAS: 175,
+  CMD_LOAD_CATALOG_INDEX: 176,
+  CMD_SEARCH: 177,
+  CMD_SEARCH_INDEX: 178,
   CMD_CREATE_SITE: 20,
   CMD_UPDATE_SITE: 21,
   CMD_PUBLISH_SITE: 22,
@@ -44,9 +52,12 @@ const C = {
   CMD_LOAD_TEMPLATE: 26,
   CMD_GET_SITE_BLOCKS: 27,
   CMD_LAUNCH_PEAR_LINK: 28,
+  CMD_RUN_APP_IN_TAB: 201,
   CMD_RESET_APP: 29,
   CMD_CLEAR_CACHE: 30,
   CMD_GET_IDENTITY: 31,
+  CMD_GET_APP_ICON: 32,
+  CMD_SET_SITE_ICON: 33,
   CMD_GET_RELAYS: 40,
   CMD_SET_RELAYS: 41,
   CMD_SET_RELAY_ENABLED: 42,
@@ -66,6 +77,7 @@ const C = {
   CMD_IDENTITY_ROTATE: 72,
   CMD_IDENTITY_VALIDATE_PHRASE: 73,
   CMD_IDENTITY_SIGN: 74,
+  CMD_IDENTITY_VERIFY: 75,
   CMD_PROFILE_GET: 80,
   CMD_PROFILE_UPDATE: 81,
   CMD_PROFILE_CLEAR: 82,
@@ -78,6 +90,8 @@ const C = {
   CMD_CONTACTS_ADD: 92,
   CMD_CONTACTS_UPDATE: 93,
   CMD_CONTACTS_REMOVE: 94,
+  CMD_CONTACTS_MY_INVITE: 95,
+  CMD_CONTACTS_ADD_INVITE: 96,
   CMD_STOP: 99,
   CMD_SWARM_RESOLVE: 120,
   CMD_SWARM_LIST_GRANTS: 121,
@@ -89,6 +103,43 @@ const C = {
   CMD_MYCATALOG_REMOVE_APP: 153,
   CMD_MYCATALOG_RENAME: 154,
   CMD_MYCATALOG_UPDATE_APP: 155,
+  CMD_AUTOBEE_CREATE: 160,
+  CMD_AUTOBEE_GET: 161,
+  CMD_AUTOBEE_ADD_APP: 162,
+  CMD_AUTOBEE_REMOVE_APP: 163,
+  CMD_AUTOBEE_RENAME: 164,
+  CMD_AUTOBEE_ADD_WRITER: 165,
+  CMD_SYNC_STATUS: 180,
+  CMD_SYNC_CREATE: 181,
+  CMD_SYNC_JOIN: 182,
+  CMD_SYNC_ADD_WRITER: 183,
+  CMD_SYNC_GET_BOOKMARKS: 184,
+  CMD_SYNC_ADD_BOOKMARK: 185,
+  CMD_SYNC_REMOVE_BOOKMARK: 186,
+  CMD_SYNC_PUSH_LOCAL: 187,
+  CMD_NAME_RESOLVE: 250,
+  CMD_NAME_PETNAME_LIST: 251,
+  CMD_NAME_PETNAME_SET: 252,
+  CMD_NAME_PETNAME_REMOVE: 253,
+  CMD_NAMEREG_CLAIM: 264,
+  CMD_NAMEREG_ROTATE: 265,
+  CMD_NAMEREG_RELEASE: 266,
+  CMD_NAMEREG_REVOKE: 267,
+  CMD_NAMEREG_LIST: 268,
+  CMD_NAMEREG_RESOLVE: 269,
+  CMD_NAMEREG_STATUS: 270,
+  CMD_IDENTITY_BINDING_PUBLISH: 260,
+  CMD_IDENTITY_BINDING_RESOLVE: 261,
+  CMD_SEARCH_FEDERATED: 262,
+  CMD_NOSTR_GET_IDENTITY: 188,
+  CMD_NOSTR_BIND: 189,
+  CMD_NOSTR_REVOKE: 190,
+  CMD_NOSTR_PUBLISH: 191,
+  CMD_NOSTR_QUERY: 192,
+  CMD_SUBMIT_APP: 210,
+  CMD_MOD_PENDING: 211,
+  CMD_MOD_APPROVE: 212,
+  CMD_MOD_REJECT: 213,
   CMD_BRIDGE: 200,
   EVT_READY: 100,
   EVT_PEER_COUNT: 101,
@@ -97,7 +148,10 @@ const C = {
   EVT_SITE_PUBLISHED: 104,
   EVT_BOOT_PROGRESS: 105,
   EVT_LOGIN_REQUEST: 106,
-  EVT_SWARM_REQUEST: 107
+  EVT_SWARM_REQUEST: 107,
+  EVT_SEARCH_FEDERATED: 108,
+  EVT_IDENTITY_BINDING_PUBLISHED: 109,
+  EVT_LAUNCH_PROGRESS: 110
 }
 
 class WsPipe {
@@ -146,15 +200,82 @@ class WsPipe {
   }
 }
 
-function tryConnect (url, timeoutMs) {
+function frameRpc (msg) {
+  const json = JSON.stringify(msg)
+  return json.length.toString(16).padStart(8, '0') + json
+}
+
+function diagnosticUrlFor (url) {
+  const u = new URL(url)
+  u.pathname = '/status-smoke'
+  u.search = ''
+  u.hash = ''
+  return u.toString()
+}
+
+function parseRpcFrames (state, data) {
+  state.buffer += typeof data === 'string'
+    ? data
+    : new TextDecoder().decode(data)
+  const out = []
+  while (state.buffer.length >= 8) {
+    const len = parseInt(state.buffer.slice(0, 8), 16)
+    if (isNaN(len) || len <= 0 || len > 10_000_000) {
+      throw new Error('invalid rpc frame')
+    }
+    if (state.buffer.length < 8 + len) break
+    const json = state.buffer.slice(8, 8 + len)
+    state.buffer = state.buffer.slice(8 + len)
+    out.push(JSON.parse(json))
+  }
+  return out
+}
+
+function probeBackend (url, timeoutMs) {
   return new Promise((resolve, reject) => {
+    const probeUrl = diagnosticUrlFor(url)
+    const ws = new WebSocket(probeUrl)
+    ws.binaryType = 'arraybuffer'
+    const state = { buffer: '' }
+    let settled = false
+    const t = setTimeout(() => finish(new Error('probe timeout')), timeoutMs)
+
+    function finish (err) {
+      if (settled) return
+      settled = true
+      clearTimeout(t)
+      try { ws.close() } catch {}
+      err ? reject(err) : resolve()
+    }
+
+    ws.addEventListener('open', () => {
+      ws.send(frameRpc({ id: RPC_PROBE_ID, cmd: C.CMD_GET_STATUS, data: {} }))
+    })
+    ws.addEventListener('message', (e) => {
+      let messages
+      try { messages = parseRpcFrames(state, e.data) } catch (err) {
+        finish(err)
+        return
+      }
+      for (const msg of messages) {
+        if (msg?.event === 'backend-boot-failed') return finish(null)
+        if (msg?.id === RPC_PROBE_ID) return msg.error ? finish(new Error(msg.error)) : finish(null)
+      }
+    })
+    ws.addEventListener('error', () => finish(new Error('probe error')))
+    ws.addEventListener('close', () => finish(new Error('probe closed')))
+  })
+}
+
+function tryConnect (url, timeoutMs) {
+  return probeBackend(url, timeoutMs).then(() => new Promise((resolve, reject) => {
     const pipe = new WsPipe(url)
     let settled = false
     const t = setTimeout(() => { if (!settled) { settled = true; reject(new Error('timeout')) } }, timeoutMs)
     pipe.on('open', () => { if (!settled) { settled = true; clearTimeout(t); resolve(pipe) } })
     pipe.on('error', () => { if (!settled) { settled = true; clearTimeout(t); reject(new Error('ws error')) } })
     pipe.on('close', () => { if (!settled) { settled = true; clearTimeout(t); reject(new Error('ws closed')) } })
-  })
+  }))
 }
 
 export async function startBackend () {

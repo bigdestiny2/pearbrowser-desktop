@@ -1,5 +1,88 @@
 # Changelog
 
+## v0.5.0 — 2026-06-23
+
+The peer-to-peer platform release. v0.4.x made PearBrowser a browser and
+decentralized app store; v0.5.0 turns it into a full local-first P2P
+platform — a federated search engine, a Nostr bridge, a self-certifying
+naming layer, a unified catalogue, and **peerit**, the front page of the
+P2P internet. Everything that crosses the network is signature-verified
+and fail-closed. Shipped as production pear release length `18552` on the
+same stable key `pear://tco5k7…` — existing installs hot-sync on next
+launch.
+
+### Added
+
+- **peerit — "the front page of the P2P internet"** — a peer-to-peer
+  Reddit (communities, posts, threaded comments, votes in a shared
+  Autobase+Hyperbee log) published as a browsable `hypersite`
+  (`hyper://ec6e2d6d…/`). Opens as the active front tab on every fresh
+  launch alongside the landing page, and is pinned to the top of the
+  Sites discovery grid.
+- **Federated search** — local-first personal index returns first-paint
+  results instantly, then optionally enriches from trusted peers in the
+  background: signed-descriptor federation, `QueryPlanner` +
+  `SearchFanoutBudget`, root→search-key `IdentityBinding`, per-doc lazy
+  `RowVerifier`, digest-first fan-out gating, completeness anchors with
+  truncation/fork detection, and contact-invite exchange. Bounded
+  queries; nothing leaves the device unless the user asks. Hardened
+  across four adversarial-review rounds.
+- **Nostr bridge** (Phases 0–3) — a deterministic secp256k1/BIP-340
+  identity derived from the PearBrowser seed; a verifying event store +
+  reducer; cross-curve identity binding (`pear-nostr-bind`) with
+  revocation; a verify-and-drop ingest gate with a trust frontier;
+  publish + query of your own NIP-01 event log; and a trusted-contact
+  federated feed. Not a general public relay client.
+- **Naming — the N5 name registry** — `pearname://` and typed names
+  resolve through local petnames, owned registry records, trusted-contact
+  federation, and curated defaults, with provenance preserved and
+  Unicode/homograph guardrails. N5 is a scoped, durability-gated
+  multi-writer registry with cross-user federation (resolve a contact's
+  claimed names). Behind an `experimentalNaming` Settings toggle.
+- **Unified catalogue + My Catalog + collaborative catalogs** — one
+  source manifest feeds the offline seed, the published Hyperbee, and the
+  relay firehose, so they can't drift; `dedupeApps()` collapses them by
+  key. Create writable personal catalogs and multi-writer Autobee
+  catalogs; submit apps to the community list (relay-pinned, moderator
+  reviewed). New rows: peerit, Peercord, anonGPT, Pear Dealroom, Pear
+  Tickets, PearPoker, HiveWorm — with per-app icons and run-in-tab for
+  hypersites.
+- **`window.pear.swarm.v1`** — direct Hyperswarm access for `hyper://`
+  pages with three trust tiers, per-app rate limits, and persistent
+  grants.
+- **Open-on-launch** — boots straight into the loaded landing hyperdrive;
+  the first-launch onboarding modal is no longer in the way. Static sites
+  run directly from the catalogue.
+- **Identity & security** — `verify()` / `verifyForApp()`, per-app
+  sub-keys, seed-at-rest encryption (SEC0), a binding `purpose` field for
+  cross-purpose replay defense, ephemeral per-invoice/per-session key
+  derivation, and fail-closed contact-invite signature verification.
+- **anonGPT** buyer flow with signed receipts; **device sync**
+  (experimental Settings panel).
+
+### Changed
+
+- App/site icons render throughout the browser (resolver + upload + dev
+  convention) instead of glyph placeholders.
+- The Apps page separates standalone apps from browsable sites; the P2P
+  Sites tab gained a search box and a published-site list.
+
+### Fixed
+
+- Settings form fields in a multi-field row (e.g. Author + Categories on
+  the Submit form) now flex equally instead of the second collapsing and
+  overlapping the first.
+- Cold-drive first-paint and assorted browser reliability fixes;
+  P2P-first relay race in the hyper-proxy; Sites-page de-duplication.
+
+### Infrastructure
+
+- A durable HiveRelay publisher seeder (launchd) keeps the
+  heavy-history production key reachable 24/7; `release-prod.sh` pins the
+  new length and confirms reachability; relay-directory capability docs
+  are re-verified at consumption; the bern (EU) relay pubkey is baked into
+  the bootstrap set.
+
 ## v0.4.5 — 2026-05-15
 
 Defensive error path for backend boot failures. v0.4.4 introduced the

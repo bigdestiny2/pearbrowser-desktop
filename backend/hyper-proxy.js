@@ -161,6 +161,10 @@ class HyperProxy {
     this._server = null
     this._port = 0
     this._stats = { relayHits: 0, p2pHits: 0, total: 0 }
+    // P2P-first relay race (privacy): wait this long for P2P before contacting
+    // the relay. _relayFirst=true is the kill-switch back to the parallel race.
+    this._relayGraceMs = 500
+    this._relayFirst = false
     this._inFlight = new Map() // key -> Promise
 
     // LRU content cache
@@ -340,7 +344,15 @@ class HyperProxy {
   async _injectHtmlHead (content, driveKeyHex, reqPath) {
     const html = (Buffer.isBuffer(content) ? content : Buffer.from(content)).toString('utf-8')
     const prefix = reqPath.startsWith('/app/') ? '/app/' : '/hyper/'
-    const baseHref = `http://localhost:${this._port}${prefix}${driveKeyHex}/`
+    // Host MUST match the document origin the page is navigated to (CMD_NAVIGATE
+    // loads it from http://127.0.0.1:<port>). `localhost` and `127.0.0.1` are
+    // DIFFERENT origins to the browser, so a `localhost` <base> makes every
+    // relative resource (styles.css, js/app.js) resolve cross-origin to the
+    // 127.0.0.1 document — and any page with a `script-src 'self'` / `style-src
+    // 'self'` CSP then refuses its OWN files: index.html renders but nothing
+    // else loads (the "splash but never boots" bug). Keep this in lockstep with
+    // the host used in index.js CMD_NAVIGATE.
+    const baseHref = `http://127.0.0.1:${this._port}${prefix}${driveKeyHex}/`
     const apiToken = this.issueApiToken(driveKeyHex)
     const includeAnongpt = await this._shouldInjectAnongptShim(driveKeyHex)
     if (includeAnongpt) {
@@ -675,27 +687,22 @@ class HyperProxy {
       resolvedPath = (filePath || '/') + 'index.html'
     }
 
-    // Start both fetches concurrently
-    const relayPromise = this._relay
-      ? this._relay.fetch(keyHex, resolvedPath).catch(() => null)
-      : Promise.resolve(null)
-
-    const p2pPromise = this._fetchP2P(keyHex, resolvedPath).catch(() => null)
-
-    // Race: first successful response wins
-    const result = await Promise.any([
-      relayPromise.then(r => r ? { ...r, source: 'relay' } : Promise.reject(new Error('relay: no content'))),
-      p2pPromise.then(r => r ? { ...r, source: 'p2p' } : Promise.reject(new Error('p2p: no content')))
-    ]).catch((err) => {
-      // Both relay and P2P failed
-      const reasons = err.errors ? err.errors.map(e => e.message).join(', ') : 'all sources unavailable'
-      this._onError(keyHex + resolvedPath, 'Hybrid fetch failed: ' + reasons)
-      return null
+    // P2P-FIRST (privacy): try P2P, only contact the relay if P2P misses or is
+    // slower than _relayGraceMs, so the relay never sees a fetch P2P could have
+    // served. _relayFirst restores the old parallel race.
+    const { p2pFirstFetch } = require('./p2p-first-fetch.js')
+    const { result } = await p2pFirstFetch({
+      fetchP2P: () => this._fetchP2P(keyHex, resolvedPath),
+      fetchRelay: this._relay ? () => this._relay.fetch(keyHex, resolvedPath) : null,
+      graceMs: this._relayGraceMs,
+      relayFirst: this._relayFirst,
     })
 
     if (result) {
       if (result.source === 'relay') this._stats.relayHits++
       else this._stats.p2pHits++
+    } else {
+      this._onError(keyHex + resolvedPath, 'Hybrid fetch failed: all sources unavailable')
     }
 
     return result
@@ -713,10 +720,36 @@ class HyperProxy {
 
     // Use Hyperdrive's built-in wait: true to wait for the specific
     // block we need, with a 15s timeout. No polling.
-    const content = await Promise.race([
+    let content = await Promise.race([
       drive.get(filePath, { wait: true }),
       new Promise(resolve => setTimeout(() => resolve(null), 15000))
     ])
+
+    // Stale-session self-heal: if the fetch missed, the author may have
+    // RE-PUBLISHED the drive (advanced it to a new version) since this
+    // session was opened. A cached session stays pinned to the version it
+    // first saw, so a newer file (e.g. js/app.js after a re-publish) isn't in
+    // the file index this session reads — index.html still loads from the old
+    // version but its scripts 404, and the page hangs. Re-advance once and, ONLY
+    // if the version actually moved, drop this drive's stale per-file cache and
+    // retry — so a re-publish self-heals without making a genuinely-missing file
+    // pay a second 15s wait.
+    if (!content && typeof drive.update === 'function') {
+      const before = drive.version
+      try {
+        await Promise.race([
+          drive.update({ wait: true }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('update-timeout')), 8000))
+        ])
+      } catch {}
+      if (drive.version !== before) {
+        this.invalidateCache(keyHex)
+        content = await Promise.race([
+          drive.get(filePath, { wait: true }),
+          new Promise(resolve => setTimeout(() => resolve(null), 15000))
+        ])
+      }
+    }
 
     if (!content) return null
 

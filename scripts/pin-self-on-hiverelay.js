@@ -31,8 +31,8 @@
  *   PEAR_PROJECT_KEY=<64-hex> node scripts/pin-self-on-hiverelay.js
  */
 
-// v0.8.11 split the monorepo — client SDK moved from `p2p-hiverelay/client`
-// to the dedicated `p2p-hiverelay-client` package. Older imports break.
+// The client SDK lives in the dedicated `p2p-hiverelay-client` package. Keep
+// this script aligned with the current browser dependency pins.
 import { HiveRelayClient } from 'p2p-hiverelay-client'
 import { randomBytes } from 'node:crypto'
 import { mkdtempSync } from 'node:fs'
@@ -89,7 +89,7 @@ async function main () {
     console.error('  ✗ seed error for', key.slice(0, 12) + '…', '—', error && error.message)
   })
 
-  // New in p2p-hiverelay-client 0.8.11+:
+  // Current p2p-hiverelay-client emits:
   //
   // seed-cap-warning: SDK-side check, fires at seed() time if our
   //   declared maxStorage is smaller than the drive bytes the SDK can
@@ -117,10 +117,9 @@ async function main () {
     process.exitCode = 2
   })
 
-  // New in p2p-hiverelay-client 0.8.12+: seed-cap-raised fires when a
-  // re-pin successfully bumps an existing entry's maxStorage. Confirms
-  // the structural fix to the alreadySeeded early-return is working —
-  // the new opts actually took effect and eagerReplicate restarted.
+  // `seed-cap-raised` fires when a re-pin successfully bumps an existing
+  // entry's maxStorage. Confirms the new opts actually took effect and
+  // eagerReplicate restarted.
   client.on('seed-cap-raised', (info) => {
     console.log('  ↑ seed-cap-raised (relay):')
     if (info.previousCap) console.log('     previous cap : ' + info.previousCap)

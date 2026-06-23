@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { html } from 'htm/react'
 import { Logo, Wordmark } from './logo.js'
+import { z32FromHex, hexFromZ32, formatBytes, shortKey, normalizeUrl, driveKeyFromHyperRef, normalizeNameTarget, parseCatalogRef, catalogCacheKeyForRef, looksLikeName, parseSyncInvite, formatSyncInvite, parsePearname } from './lib/keys.js'
+import {
+  MAX_TAB_HISTORY, MAX_CLOSED_TABS,
+  makeTab, cleanTabUrl, cleanTabTitle,
+  normalizeTabHistory, clampHistoryIndex, pushTabHistory,
+  normalizeTabSnapshot, serializeTab, restoreSavedTab, restoreStartupTabs, sortTabsPinnedFirst
+} from './lib/tabs.js'
 
 function copyText (text) {
   try {
@@ -10,10 +17,24 @@ function copyText (text) {
 
 // Vetted against https://github.com/holepunchto/pear-aliases — these
 // are the canonical pear:// keys for Holepunch-ecosystem apps.
+//
+// The `type` field + the window-vs-tab distinction is adopted from
+// Drache93's Pear Browser (https://github.com/Drache93/pear-browser), which
+// pioneered running P2P apps in a tab via pear-request (htmx hooked to a
+// worker pipe). Two kinds of apps, exactly as Drache93 models them:
+//   - 'standalone' : a full Bare app with its own UI (Keet, PearPass …). It
+//                    can only open in its OWN WINDOW — there is no htmx/pipe
+//                    UI to stream into a tab. (Drache93: "Standalone site
+//                    opened in new window".)
+//   - 'hypersite'  : a pear-request/htmx app whose UI IS served over a pipe,
+//                    so it renders HEADLESS in a tab.
+// The UI gates the action on this: standalone → "Open" (window); hypersite →
+// "Run in tab". This removes the confusing "Run in tab" on apps that can't.
 const FEATURED_APPS = [
   {
     id: 'keet',
     name: 'Keet',
+    type: 'standalone',
     tagline: 'End-to-end encrypted P2P chat, voice, and video calls by Holepunch.',
     link: 'pear://oeeoz3w6fjjt7bym3ndpa6hhicm8f8naxyk11z4iypeoupn6jzpo',
     initial: 'K',
@@ -22,31 +43,51 @@ const FEATURED_APPS = [
   {
     id: 'pearpass',
     name: 'PearPass',
+    type: 'standalone',
     tagline: 'Peer-to-peer password manager from Tether — synced across devices without a cloud.',
     link: 'pear://tywsat7gz8m65ejx4zjn3773pbdc4j8m66tukis8dgzekraymtzo',
     initial: 'P',
     gradient: 'linear-gradient(135deg, #3fb950, #58a6ff)'
   },
-  {
-    id: 'hiveworm',
-    name: 'HiveWorm',
-    tagline: 'Perpetual P2P life-sim — runs as a Pear app via swarm.v1.',
-    link: 'pear://d1xbkcpcbi1xa8dexp49rsendra5r67w3qh5a9k8t44oemm4k16y',
-    initial: 'W',
-    gradient: 'linear-gradient(135deg, #a371f7, #d946ef)'
-  },
-  // anonGPT — P2P AI chat. Uses window.pear.anongpt.infer (injected
-  // ONLY for this exact drive when manifest.json declares the privacy
-  // claims). Loaded as a hyper:// site rather than a pear:// app so
-  // PearBrowser hosts the buyer instead of spawning a separate runtime.
-  // See backend/anongpt-buyer.js + anongpt/docs/spec/02-pearbrowser-dev-bridge.md.
+  // anonGPT — private P2P AI chat. A full Pear app: opens in its own window.
+  // (The in-browser window.pear.anongpt buyer shim in backend/anongpt-buyer.js
+  // is a separate hyper:// hosting path, not exercised by this pear:// launch.)
   {
     id: 'anongpt',
     name: 'anonGPT',
-    tagline: 'Private P2P AI chat — buyer runs in PearBrowser, inference from a HiveMind seller, signed receipts.',
-    link: 'hyper://e3cf8b6fae6260608cbfcdf6b82d985c65f5ad1b9c85e777e296e7c521213abc/',
+    type: 'standalone',
+    tagline: 'Private P2P AI chat — pay-per-inference from a HiveMind seller, with signed receipts.',
+    link: 'pear://rpzh3fsgg38kfir9nmae7x3o8ubofddzzixr5js4mxd6a6drb6wo',
     initial: 'A',
     gradient: 'linear-gradient(135deg, #22d3ee, #6366f1)'
+  },
+  // Paste — local-first, E2E-encrypted notes & clipboard sync. A full Pear
+  // app: opens in its own window. Landing page (hyper://25a06bb3…) is in the
+  // default catalog as its homepage. Link MUST match the catalogue entry
+  // (catalog-source/catalog.json id:pearpaste) — the LEAN, compacted key
+  // qnax5k8o (≈432MB). The old u6oyh38 key carried ~35GB of dev-history blob
+  // bloat (see app-pinning notes) and forced a huge first-load download.
+  {
+    id: 'pearpaste',
+    name: 'Paste',
+    type: 'standalone',
+    tagline: 'Local-first, end-to-end encrypted notes & clipboard sync for your own devices — no account, no cloud.',
+    link: 'pear://qnax5k8ojtod51ci9qwkrawdof1hx5w3a7gqbueoqnzzq9dw5hfo',
+    initial: '📋',
+    gradient: 'linear-gradient(135deg, #4ade80, #22d3ee)'
+  },
+  // Peercord — Discord-style P2P chat. Its current Pear release is
+  // pear.json type:"desktop" (Electron/Pear window class), not a pear-request
+  // terminal worker, so route it through the standalone launch path. Marking it
+  // hypersite would surface "Run in tab" but hang on the headless wrapper.
+  {
+    id: 'peercord',
+    name: 'Peercord',
+    type: 'standalone',
+    tagline: 'Decentralized Discord-style chat with text, voice, video, screen sharing, and P2P file transfer.',
+    link: 'pear://wmir47w7mai3b1skj66mx7fzso6k6o91kipaney7gtt69npimouy',
+    initial: 'P',
+    gradient: 'linear-gradient(135deg, #5865f2, #22d3ee)'
   }
 ]
 
@@ -63,24 +104,51 @@ const TAB_META = {
 // and `efd7b0c6c38d…` keys have been unseeded; this is the live one.
 // To update: open the same site in the desktop's Sites editor and
 // republish — block-source lives at /.blocks.json inside the drive.
-const DEFAULT_URL = 'hyper://2d6c2be92f07e10ed5a4b07b5c1286a56f0c1220c79ad3c3293b069f8c946763/'
+const DEFAULT_URL = 'hyper://1868916a7a282ff0f211b11b536e9642828c32d3a817a254e1ef7e602709e25d/'
 
-// Default catalog drive — auto-loads on first Apps-tab visit when the
-// user has not yet pinned a catalog of their own. Curated entry point
-// for the Pear ecosystem; lists pearbrowser-desktop, hiverelay,
-// p2pbuilders. Source under
-// ~/Desktop/pearbrowser-publishers/catalog-source/, signing key under
-// ~/Desktop/pearbrowser-publishers/catalog/. Pinned on 5 HiveRelays.
-const DEFAULT_CATALOG_KEY = '0c35d12fd9b1115dd2d1fb1cd1751817c9173d3196ac7c62ae37d023340dcb75'
+// peerit — "the front page of the P2P internet" (a peer-to-peer Reddit). Opens
+// beside the PearBrowser landing page on launch and is pinned to the top of
+// the Sites discovery grid. Published 2026-06-23,
+// seeded 24/7 on HiveRelay. Source: 02-apps/peerit.
+const PEERIT_DRIVE_KEY = 'ec6e2d6d9d22b9d6b40e11a9ca3042be3197e4bdca9e9a7f079be6ee830761b4'
+const PEERIT_URL = 'hyper://' + PEERIT_DRIVE_KEY + '/'
 
-function normalizeUrl (raw) {
-  const s = raw.trim()
-  if (!s) return null
-  if (s.startsWith('hyper://')) return s
-  if (/^[0-9a-f]{64}$/i.test(s)) return `hyper://${s}/`
-  if (/^[13-9a-km-uw-z]{52}$/i.test(s)) return `hyper://${s}/`
-  if (s.includes('/') || s.startsWith('pear://')) return s
-  return `hyper://${s}`
+// p2pbuilders — "permissionless P2P Hacker News" (the same Hyperdrive-webapp
+// pattern as peerit: signed records + PoW + reputation, runs in the browser via
+// the window.pear bridge). Opens beside the landing page + peerit on launch.
+// Published 2026-06-23, seeded on HiveRelay. Source: 02-apps/p2pbuilders.
+const P2PBUILDERS_DRIVE_KEY = 'ac1977a75cc84b46af0af8bb559cd4ebbe10507eb0f51d863e289d09635f6d74'
+const P2PBUILDERS_URL = 'hyper://' + P2PBUILDERS_DRIVE_KEY + '/'
+
+// Default catalog — auto-loads on first Apps-tab visit when the user has not yet
+// pinned a catalog of their own. The "PearBrowser Network" curated entry point,
+// published as a Hyperbee (the Pear-native, updatable catalog format) from the
+// single source of truth: 03-sites/pearbrowser-publishers/catalog-source/catalog.json
+// (same source backend/catalogue-seed.js is generated from, so the offline seed and
+// this live catalog agree — dedupeApps collapses the overlap by driveKey/link).
+// Signing key under 03-sites/pearbrowser-publishers/catalog/; re-publish with
+// scripts/publish-catalog-bee.js. Supersedes the dead 0c35d12f hyperdrive whose
+// writable secret was unrecoverable (see OLD_DEAD_CATALOG_KEY migration below).
+const DEFAULT_CATALOG_KEY = 'hyperbee://f5fb7500bccd60a976d2b1d24246108f4444a210b9ca591533114dffc089934d'
+// The community catalogue — apps submitted by anyone (Apps tab → "Submit your
+// app") and approved by a moderator land here. Auto-loaded alongside the curated
+// default so the store shows both a Curated list and a Community list. Storage +
+// publisher: 03-sites/pearbrowser-publishers/community-catalog(-source).
+const DEFAULT_COMMUNITY_CATALOG = 'hyperbee://5d961fdc2f56215463e5d4656dd4a3f22bb5e15b93f9bfc8439a63a18f974d75'
+// The previous default: a Hyperdrive that can no longer be updated (lost secret).
+// Existing installs persisted it in recentCatalogs; migrate them to the new key.
+const OLD_DEAD_CATALOG_KEY = '0c35d12fd9b1115dd2d1fb1cd1751817c9173d3196ac7c62ae37d023340dcb75'
+
+// Map a parsed catalog ref (parseCatalogRef) to the RPC command that loads
+// it and the scheme-qualified string to persist, so a relaunch routes to the
+// same loader. Drive keys stay bare (unchanged behavior); hyperbee:// and
+// autobee:// keep their scheme.
+function catalogLoadPlan (parsed, C) {
+  if (parsed.kind === 'sheets') return { cmd: C.CMD_SHEETS_LOAD, payload: { link: parsed.key }, persistRef: `sheets://${parsed.key}` }
+  if (parsed.kind === 'hiveindex') return { cmd: C.CMD_LOAD_CATALOG_INDEX, payload: { link: parsed.key }, persistRef: `hiveindex://${parsed.key}` }
+  if (parsed.autobee) return { cmd: C.CMD_LOAD_CATALOG_AUTOBEE, persistRef: `autobee://${parsed.key}` }
+  if (parsed.bee) return { cmd: C.CMD_LOAD_CATALOG_BEE, persistRef: `hyperbee://${parsed.key}` }
+  return { cmd: C.CMD_LOAD_CATALOG, persistRef: parsed.key }
 }
 
 // --- Multi-tab Browse ---------------------------------------------------
@@ -95,22 +163,6 @@ function normalizeUrl (raw) {
 //   Cmd-Shift-I or Cmd-Alt-I opens the per-iframe devtools via Pear's
 //   Window.openDevTools API when available. Falls back gracefully if
 //   the runtime doesn't expose it.
-
-let _tabIdSeq = 0
-function makeTabId () { _tabIdSeq += 1; return 'tab-' + _tabIdSeq + '-' + Date.now().toString(36) }
-
-function makeTab (initialUrl = '') {
-  return {
-    id: makeTabId(),
-    url: initialUrl,
-    displayUrl: initialUrl,
-    src: null,
-    history: [],
-    histIdx: -1,
-    status: '',
-    title: 'New tab'
-  }
-}
 
 // --- About-this-site panel -----------------------------------------------
 //
@@ -133,10 +185,10 @@ function parseDriveAddress (urlStr) {
   let hex = null, z32Form = null
   if (/^[0-9a-f]{64}$/i.test(raw)) {
     hex = raw.toLowerCase()
-    try { z32Form = require('z32').encode(Buffer.from(hex, 'hex')) } catch {}
+    z32Form = z32FromHex(hex)
   } else if (/^[13-9a-km-uw-z]{52}$/i.test(raw)) {
     z32Form = raw.toLowerCase()
-    try { hex = Buffer.from(require('z32').decode(z32Form)).toString('hex') } catch {}
+    hex = hexFromZ32(z32Form)
   }
   return { proto, raw, hex, z32: z32Form, path: u.pathname || '/', urlStr }
 }
@@ -258,30 +310,34 @@ function AboutSite ({ rpc, C, url, onClose, onBookmarkToggle }) {
   }
 
   const pin = aboutPinStatus(driveInfo, driveInfoErr)
+  const updatedAt = Number(driveInfo?.updatedAt)
+  const updatedText = Number.isFinite(updatedAt) && updatedAt > 0
+    ? new Date(updatedAt).toLocaleTimeString()
+    : ''
 
   return html`
-    <div class="modal-overlay" role="dialog" aria-modal="true"
+    <div className="modal-overlay" role="dialog" aria-modal="true"
          onClick=${(e) => e.target.classList.contains('modal-overlay') && onClose()}>
-      <div class="modal-card about-card">
-        <div class="about-head">
-          <div class="about-title">About this site</div>
-          <button class="about-close" onClick=${onClose} title="Close">×</button>
+      <div className="modal-card about-card">
+        <div className="about-head">
+          <div className="about-title">About this site</div>
+          <button className="about-close" onClick=${onClose} title="Close">×</button>
         </div>
 
-        <div class="about-section-label">FULL URL</div>
-        <div class="about-row">
-          <code class="about-mono">${url || '(no URL loaded)'}</code>
-          <button class="copy-btn-small ${copyState.url ? 'copied' : ''}"
+        <div className="about-section-label">FULL URL</div>
+        <div className="about-row">
+          <code className="about-mono">${url || '(no URL loaded)'}</code>
+          <button className="copy-btn-small ${copyState.url ? 'copied' : ''}"
                   onClick=${() => copy('url', url)} disabled=${!url}>
             ${copyState.url ? '✓' : 'Copy'}
           </button>
         </div>
 
         ${drive && drive.hex && html`
-          <div class="about-section-label">DRIVE KEY (hex)</div>
-          <div class="about-row">
-            <code class="about-mono">${drive.hex}</code>
-            <button class="copy-btn-small ${copyState.hex ? 'copied' : ''}"
+          <div className="about-section-label">DRIVE KEY (hex)</div>
+          <div className="about-row">
+            <code className="about-mono">${drive.hex}</code>
+            <button className="copy-btn-small ${copyState.hex ? 'copied' : ''}"
                     onClick=${() => copy('hex', drive.hex)}>
               ${copyState.hex ? '✓' : 'Copy'}
             </button>
@@ -289,10 +345,10 @@ function AboutSite ({ rpc, C, url, onClose, onBookmarkToggle }) {
         `}
 
         ${drive && drive.z32 && html`
-          <div class="about-section-label">DRIVE KEY (z-base-32)</div>
-          <div class="about-row">
-            <code class="about-mono">${drive.z32}</code>
-            <button class="copy-btn-small ${copyState.z32 ? 'copied' : ''}"
+          <div className="about-section-label">DRIVE KEY (z-base-32)</div>
+          <div className="about-row">
+            <code className="about-mono">${drive.z32}</code>
+            <button className="copy-btn-small ${copyState.z32 ? 'copied' : ''}"
                     onClick=${() => copy('z32', drive.z32)}>
               ${copyState.z32 ? '✓' : 'Copy'}
             </button>
@@ -300,49 +356,72 @@ function AboutSite ({ rpc, C, url, onClose, onBookmarkToggle }) {
         `}
 
         ${drive && html`
-          <div class="about-meta-grid">
+          <div className="about-meta-grid">
             <div>
-              <div class="about-meta-label">Scheme</div>
-              <div class="about-meta-value">${drive.proto}://</div>
+              <div className="about-meta-label">Scheme</div>
+              <div className="about-meta-value">${drive.proto}://</div>
             </div>
             <div>
-              <div class="about-meta-label">Path</div>
-              <div class="about-meta-value">${drive.path}</div>
+              <div className="about-meta-label">Path</div>
+              <div className="about-meta-value">${drive.path}</div>
             </div>
           </div>
         `}
 
         ${drive && drive.hex && html`
-          <div class="about-section-label">LIVE DRIVE</div>
-          <div class="about-meta-grid about-live-grid">
+          <div className="about-section-label">LIVE DRIVE</div>
+          <div className="about-meta-grid about-live-grid">
             <div>
-              <div class="about-meta-label">Version</div>
-              <div class="about-meta-value">${driveInfo ? (driveInfo.version ?? '—') : '…'}</div>
+              <div className="about-meta-label">Version</div>
+              <div className="about-meta-value">${driveInfo ? (driveInfo.version ?? '—') : '…'}</div>
             </div>
             <div>
-              <div class="about-meta-label">Peers</div>
-              <div class="about-meta-value" title=${driveInfo ? `${driveInfo.metadataPeerCount || 0} metadata · ${driveInfo.blobPeerCount || 0} blob` : ''}>
+              <div className="about-meta-label">Peers</div>
+              <div className="about-meta-value" title=${driveInfo ? `${driveInfo.metadataPeerCount || 0} metadata · ${driveInfo.blobPeerCount || 0} blob` : ''}>
                 ${driveInfo ? (driveInfo.peerCount || 0) : '…'}
               </div>
             </div>
             <div>
-              <div class="about-meta-label">Relays</div>
-              <div class="about-meta-value">${driveInfo ? (driveInfo.relay?.connectedRelays || 0) : '…'}</div>
+              <div className="about-meta-label">Relays</div>
+              <div className="about-meta-value">${driveInfo ? (driveInfo.relay?.connectedRelays || 0) : '…'}</div>
+            </div>
+            <div>
+              <div className="about-meta-label">Cached</div>
+              <div className="about-meta-value">${driveInfo ? formatBytes(driveInfo.byteLength) : '…'}</div>
+            </div>
+            <div>
+              <div className="about-meta-label">Mode</div>
+              <div className="about-meta-value">${driveInfo ? (driveInfo.writable ? 'writable' : 'read-only') : '…'}</div>
+            </div>
+            <div>
+              <div className="about-meta-label">Fetch</div>
+              <div className="about-meta-value">${driveInfo ? (driveInfo.relay?.hybridFetchEnabled ? 'hybrid' : 'P2P') : '…'}</div>
             </div>
           </div>
-          <div class=${'about-pin-status ' + pin.tone}>${pin.text}</div>
+          <div className=${'about-pin-status ' + pin.tone}>${pin.text}</div>
         `}
 
-        <div class="about-section-label">YOUR LIBRARY</div>
-        <div class="about-row about-bookmark-row">
+        ${driveInfo && driveInfo.discoveryKey && html`
+          <div className="about-section-label">DISCOVERY KEY</div>
+          <div className="about-row">
+            <code className="about-mono">${driveInfo.discoveryKey}</code>
+            <button className="copy-btn-small ${copyState.discovery ? 'copied' : ''}"
+                    onClick=${() => copy('discovery', driveInfo.discoveryKey)}>
+              ${copyState.discovery ? '✓' : 'Copy'}
+            </button>
+          </div>
+        `}
+
+        <div className="about-section-label">YOUR LIBRARY</div>
+        <div className="about-row about-bookmark-row">
           <div>
             ${bookmarked === null
-              ? html`<span class="settings-subtle">Checking…</span>`
+              ? html`<span className="settings-subtle">Checking…</span>`
               : bookmarked
-                ? html`<span style="color:#ff9500">★ Bookmarked</span>`
-                : html`<span class="settings-subtle">Not in your bookmarks</span>`}
+                ? html`<span style=${{ color: '#ff9500' }}>★ Bookmarked</span>`
+                : html`<span className="settings-subtle">Not in your bookmarks</span>`}
           </div>
-          <button class="btn ${bookmarked ? 'subtle' : 'primary'}"
+          <button className="btn ${bookmarked ? 'subtle' : 'primary'}"
                   onClick=${toggleBookmark}
                   disabled=${busy === 'bookmark' || bookmarked === null || !url}>
             ${busy === 'bookmark' ? '…' : (bookmarked ? 'Remove bookmark' : 'Bookmark this site')}
@@ -350,8 +429,8 @@ function AboutSite ({ rpc, C, url, onClose, onBookmarkToggle }) {
         </div>
 
         ${driveInfo && html`
-          <div class="about-foot">
-            Updated ${new Date(driveInfo.updatedAt).toLocaleTimeString()} ·
+          <div className="about-foot">
+            ${updatedText ? `Updated ${updatedText} · ` : ''}
             ${driveInfo.relay?.hybridFetchEnabled ? 'hybrid relay fetch enabled' : 'pure P2P fetch'}
           </div>
         `}
@@ -360,13 +439,14 @@ function AboutSite ({ rpc, C, url, onClose, onBookmarkToggle }) {
   `
 }
 
-function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActiveId }) {
+function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActiveId, closedTabs, setClosedTabs, sessionReady }) {
   // tabs[] + activeId are now lifted to App-level state and passed in
   // as props. This survives main-tab switches (Browse→Apps→Browse no
   // longer destroys your open tabs) and lets App persist them to
   // user-data settings for cross-launch session restore.
   const inputRef = useRef(null)
   const iframeRefs = useRef({})
+  const autoLoadedRef = useRef(new Set())
   const [editingUrl, setEditingUrl] = useState('')
   // About-this-site modal — true when user clicked the (i) button.
   const [aboutOpen, setAboutOpen] = useState(false)
@@ -400,32 +480,104 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
     if (active) setEditingUrl(active.displayUrl || '')
   }, [active?.id, active?.displayUrl])
 
-  const go = async (url, tabIdOverride) => {
-    const target = normalizeUrl(url)
-    if (!target) return
+  const go = async (url, tabIdOverride, opts = {}) => {
     const id = tabIdOverride || activeId
-    updateTab(id, { status: `resolving ${target}…`, displayUrl: target })
+    const recordHistory = opts.recordHistory !== false
+    const rememberVisit = opts.rememberVisit ?? recordHistory
+
+    // Naming Phase N1 — if the input is a bare name (e.g. "keet"), resolve it
+    // against the local petname store (Tier 0) + curated floor (Tier 3) BEFORE
+    // treating it as a URL. With the experimentalNaming flag off the backend
+    // answers null and we fall straight through to normalizeUrl, so navigation
+    // is byte-for-byte unchanged unless naming is enabled. `prov` (provenance)
+    // drives the honest URL-bar chip; we still navigate the REAL resolved
+    // target, so bookmark/copy/history all carry the actual destination.
+    let target = null
+    let prov = null
+    const raw = String(url ?? '').trim()
+    // A pearname://<name> URL resolves through the registry exactly like a typed
+    // bare word — strip the scheme so both share the CMD_NAME_RESOLVE branch.
+    const pearname = /^pearname:\/\//i.test(raw) ? parsePearname(raw) : null
+    const nameQuery = pearname || (looksLikeName(raw) ? raw : null)
+    if (nameQuery) {
+      try {
+        const { resolved } = await rpc.request(C.CMD_NAME_RESOLVE, { name: nameQuery })
+        if (resolved && (resolved.link || resolved.key)) {
+          const link = resolved.link || `hyper://${resolved.key}/`
+          // A pear:// / file:// target is a full Pear-runtime app (Keet, PearPass,
+          // …) — launch it in its OWN window exactly as the Apps tab does
+          // (CMD_LAUNCH_PEAR_LINK), not through the in-tab web navigate path that
+          // serves /hyper/<key> as a page. The current tab stays put.
+          if (/^(?:pear|file):\/\//i.test(link)) {
+            updateTab(id, { status: `opening ${resolved.label || nameQuery} · ${resolved.provenance}…` })
+            try {
+              await rpc.request(C.CMD_LAUNCH_PEAR_LINK, { link }, 60000)
+              updateTab(id, { status: '' })
+            } catch (err) {
+              updateTab(id, { status: `error: ${err.message}` })
+            }
+            return
+          }
+          // A browsable hyper:// target — navigate it in-tab below, with a chip.
+          target = link
+          prov = { provenance: resolved.provenance, label: resolved.label || nameQuery, name: nameQuery, source: resolved.source || null }
+        }
+      } catch { /* resolver unavailable / disabled — fall through to URL handling */ }
+    }
+    if (!target) target = normalizeUrl(url)
+    if (!target) return
+
+    updateTab(id, { status: `resolving ${prov ? prov.label : target}…`, displayUrl: target })
     try {
       const res = await rpc.request(C.CMD_NAVIGATE, { url: target })
       setTabs((prev) => prev.map((t) => {
         if (t.id !== id) return t
-        const trimmed = t.history.slice(0, t.histIdx + 1)
-        const newHistory = [...trimmed, target]
+        let history = Array.isArray(t.history) ? t.history : []
+        let histIdx = Number.isInteger(t.histIdx) ? t.histIdx : -1
+        if (recordHistory) {
+          const pushed = pushTabHistory(history, histIdx, target)
+          history = pushed.history
+          histIdx = pushed.histIdx
+        } else if (Number.isInteger(opts.historyIndex)) {
+          histIdx = clampHistoryIndex(history, opts.historyIndex)
+        }
         return {
           ...t,
           src: res.localUrl,
           status: '',
-          history: newHistory,
-          histIdx: newHistory.length - 1,
+          history,
+          histIdx,
           url: target,
           displayUrl: target,
-          title: target
+          title: prov ? prov.label : target,
+          nameProv: prov   // { provenance, label, name } or null — drives the URL-bar provenance chip
         }
       }))
-      rpc.request(C.CMD_USERDATA_ADD_HISTORY, { url: target, title: target }).catch(() => {})
+      if (rememberVisit) rpc.request(C.CMD_USERDATA_ADD_HISTORY, { url: target, title: prov ? prov.label : target }).catch(() => {})
     } catch (err) {
       updateTab(id, { status: `error: ${err.message}` })
     }
+  }
+
+  // Lighthouse Phase 0 — feed the local self-search index as you browse. On
+  // each hyper:// page load, extract title + visible text (same-origin via the
+  // proxy; degrades to title-only if blocked) and push it to CMD_SEARCH_INDEX.
+  // Fully best-effort — never throws into the render path.
+  const indexPage = (tab, el) => {
+    try {
+      const u = (tab && (tab.url || tab.displayUrl)) || ''
+      if (!/^hyper:\/\//i.test(u)) return // only index P2P content
+      const rest = u.replace(/^hyper:\/\//i, '')
+      const slash = rest.indexOf('/')
+      const driveKey = slash >= 0 ? rest.slice(0, slash) : rest
+      const path = slash >= 0 ? rest.slice(slash) : '/'
+      let title = ''; let text = ''
+      try {
+        const doc = el && el.contentDocument
+        if (doc) { title = doc.title || ''; text = ((doc.body && doc.body.innerText) || '').slice(0, 200000) }
+      } catch { /* cross-origin / not ready — index by url + title only */ }
+      rpc.request(C.CMD_SEARCH_INDEX, { driveKey, path, title: title || u, text }).catch(() => {})
+    } catch { /* never break browsing */ }
   }
 
   const bookmark = async () => {
@@ -441,18 +593,18 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
   }
 
   const back = () => {
+    const history = active?.history || []
     if (!active || active.histIdx <= 0) return
     const i = active.histIdx - 1
-    const url = active.history[i]
-    updateTab(active.id, { histIdx: i, displayUrl: url })
-    go(url, active.id)
+    const url = history[i]
+    go(url, active.id, { recordHistory: false, rememberVisit: false, historyIndex: i })
   }
   const forward = () => {
-    if (!active || active.histIdx >= active.history.length - 1) return
+    const history = active?.history || []
+    if (!active || active.histIdx >= history.length - 1) return
     const i = active.histIdx + 1
-    const url = active.history[i]
-    updateTab(active.id, { histIdx: i, displayUrl: url })
-    go(url, active.id)
+    const url = history[i]
+    go(url, active.id, { recordHistory: false, rememberVisit: false, historyIndex: i })
   }
   const reload = () => {
     const el = iframeRefs.current[activeId]
@@ -464,31 +616,47 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
     setTabs((prev) => [...prev, t])
     setActiveId(t.id)
     setEditingUrl(url || '')
-    if (url) {
-      // Defer go() until next tick so setActiveId has applied.
-      setTimeout(() => go(url, t.id), 0)
-    }
   }
 
   const closeTab = (id) => {
-    setTabs((prev) => {
-      const idx = prev.findIndex((t) => t.id === id)
-      const remaining = prev.filter((t) => t.id !== id)
-      if (remaining.length === 0) {
-        const fresh = makeTab('')
-        setActiveId(fresh.id)
-        setEditingUrl('')
-        return [fresh]
-      }
-      if (id === activeId) {
-        const next = remaining[Math.min(idx, remaining.length - 1)]
-        setActiveId(next.id)
-        setEditingUrl(next.displayUrl || '')
-      }
-      // Drop the iframe ref so it can GC.
-      delete iframeRefs.current[id]
-      return remaining
-    })
+    const closing = tabs.find((t) => t.id === id)
+    const closed = normalizeTabSnapshot(closing)
+    if (closed) setClosedTabs((prev) => [closed, ...prev].slice(0, MAX_CLOSED_TABS))
+    const idx = tabs.findIndex((t) => t.id === id)
+    if (idx === -1) return
+    const remaining = tabs.filter((t) => t.id !== id)
+    // Drop the iframe ref so it can GC.
+    delete iframeRefs.current[id]
+    if (remaining.length === 0) {
+      const fresh = makeTab('')
+      setTabs([fresh])
+      setActiveId(fresh.id)
+      setEditingUrl('')
+      return
+    }
+    setTabs(remaining)
+    if (id === activeId) {
+      const next = remaining[Math.min(idx, remaining.length - 1)]
+      setActiveId(next.id)
+      setEditingUrl(next.displayUrl || '')
+    }
+  }
+
+  const reopenClosedTab = () => {
+    const closed = closedTabs[0]
+    if (!closed) return
+    const restored = restoreSavedTab(closed)
+    if (!restored) return
+    setClosedTabs((prev) => prev.slice(1))
+    setTabs((prev) => sortTabsPinnedFirst([...prev, restored]))
+    setActiveId(restored.id)
+    setEditingUrl(restored.displayUrl || '')
+  }
+
+  const togglePinned = (id) => {
+    setTabs((prev) => sortTabsPinnedFirst(prev.map((tab) => (
+      tab.id === id ? { ...tab, pinned: !tab.pinned } : tab
+    ))))
   }
 
   // Try to open devtools for the active tab's iframe. pear-electron
@@ -520,8 +688,9 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
       const meta = e.metaKey || e.ctrlKey
       if (!meta) return
       if (e.key === 't' || e.key === 'T') {
-        if (e.shiftKey) return // Cmd-Shift-T (reopen) — not implemented
-        e.preventDefault(); newTab()
+        e.preventDefault()
+        if (e.shiftKey) reopenClosedTab()
+        else newTab()
       } else if (e.key === 'w' || e.key === 'W') {
         e.preventDefault(); closeTab(activeId)
       } else if (e.key === 'l' || e.key === 'L') {
@@ -538,21 +707,50 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [activeId, tabs])
+  }, [activeId, tabs, closedTabs])
 
-  // Auto-navigate to the landing page once on mount.
+  // Auto-load restored tabs on first activation without adding duplicate
+  // entries to the per-tab back/forward list.
   useEffect(() => {
-    if (active && !active.src && active.url) go(active.url, active.id)
+    if (!sessionReady) return
+    if (!active || active.src || !active.url) return
+    const key = `${active.id}:${active.url}`
+    if (autoLoadedRef.current.has(key)) return
+    autoLoadedRef.current.add(key)
+    const hasHistory = Array.isArray(active.history) && active.history.length > 0
+    go(active.url, active.id, {
+      recordHistory: !hasHistory,
+      rememberVisit: !hasHistory,
+      historyIndex: active.histIdx
+    })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [sessionReady, active?.id, active?.url, active?.src])
 
   // External navUrl prop (Apps tab → "open in Browse"). Open in a new
-  // tab if the active tab already has content; otherwise navigate the
+  // tab if the active tab already has an address; otherwise navigate the
   // current empty tab.
   useEffect(() => {
     if (!navUrl) return
-    if (active && active.src) newTab(navUrl)
-    else go(navUrl, active?.id)
+    // Spawn a new tab whenever the active tab already has an address — loaded
+    // (active.src) OR mid-load (active.url set, src still null). The latter is
+    // the first-launch case: the default landing tab (active.url === DEFAULT_URL)
+    // is auto-loading behind the onboarding modal when the user picks a site.
+    // Without the `active.url` guard the navUrl effect would take the else branch
+    // and navigate that single landing tab away to the picked site, so the
+    // landing never finishes loading anywhere. Treating "has an address" as the
+    // new-tab trigger leaves the landing to finish in tab 0.
+    if (active && (active.src || active.url)) {
+      // Open a fresh tab AND navigate it. newTab() alone only sets .url, not
+      // .src, so a second run-in-tab rendered the empty-state until a manual
+      // reload — create the tab here and drive go() so it's one click every time.
+      const t = makeTab(navUrl)
+      setTabs((prev) => [...prev, t])
+      setActiveId(t.id)
+      setEditingUrl(navUrl)
+      go(navUrl, t.id)
+    } else {
+      go(navUrl, active?.id)
+    }
     onNavigated?.()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navUrl])
@@ -641,26 +839,32 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
   }
 
   return html`
-    <div class="browse">
-      <div class="tabstrip">
+    <div className="browse">
+      <div className="tabstrip">
         ${tabs.map((t, i) => html`
           <button
             key=${t.id}
-            class=${'tabchip' + (t.id === activeId ? ' active' : '')}
+            className=${'tabchip' + (t.id === activeId ? ' active' : '') + (t.pinned ? ' pinned' : '')}
             onClick=${() => setActive(t.id)}
             title=${t.displayUrl || 'New tab'}
           >
-            <span class="tabchip-favicon">${t.src ? '🌐' : '🆕'}</span>
-            <span class="tabchip-title">${t.title || (t.displayUrl ? t.displayUrl.replace(/^hyper:\/\//, '').slice(0, 28) : 'New tab')}</span>
-            <span class="tabchip-close" onClick=${(e) => { e.stopPropagation(); closeTab(t.id) }}>×</span>
+            <span className="tabchip-favicon">${t.src ? '🌐' : '🆕'}</span>
+            <span
+              className=${'tabchip-pin' + (t.pinned ? ' on' : '')}
+              title=${t.pinned ? 'Unpin tab' : 'Pin tab'}
+              onClick=${(e) => { e.stopPropagation(); togglePinned(t.id) }}
+            >${t.pinned ? '●' : '○'}</span>
+            <span className="tabchip-title">${t.title || (t.displayUrl ? t.displayUrl.replace(/^hyper:\/\//, '').slice(0, 28) : 'New tab')}</span>
+            <span className="tabchip-close" onClick=${(e) => { e.stopPropagation(); closeTab(t.id) }}>×</span>
           </button>
         `)}
-        <button class="tabchip-new" onClick=${() => newTab()} title="New tab (⌘T)">+</button>
+        <button className="tabchip-new" onClick=${() => newTab()} title="New tab (⌘T)">+</button>
+        <button className="tabchip-new tabchip-restore" onClick=${reopenClosedTab} disabled=${closedTabs.length === 0} title="Reopen closed tab (⌘⇧T)">↺</button>
       </div>
-      <div class="urlbar">
-        <button class="nav" onClick=${back} disabled=${!active || active.histIdx <= 0} title="Back">◀</button>
-        <button class="nav" onClick=${forward} disabled=${!active || active.histIdx >= active.history.length - 1} title="Forward">▶</button>
-        <button class="nav" onClick=${reload} disabled=${!active?.src} title="Reload (⌘R)">⟳</button>
+      <div className="urlbar">
+        <button className="nav" onClick=${back} disabled=${!active || active.histIdx <= 0} title="Back">◀</button>
+        <button className="nav" onClick=${forward} disabled=${!active || active.histIdx >= (active.history || []).length - 1} title="Forward">▶</button>
+        <button className="nav" onClick=${reload} disabled=${!active?.src} title="Reload (⌘R)">⟳</button>
         <input
           ref=${inputRef}
           type="text"
@@ -670,18 +874,18 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
           onBlur=${() => { setTimeout(() => setAutocompleteOpen(false), 120) }}
           onKeyDown=${onUrlKeyDown}
           placeholder="hyper://<key>/path"
-          spellcheck="false"
+          spellCheck="false"
         />
-        <button class="nav" onClick=${bookmark} disabled=${!editingUrl?.trim?.()} title="Bookmark this URL">☆</button>
-        <button class="nav" onClick=${() => setAboutOpen(true)} disabled=${!active?.url} title="About this site">ⓘ</button>
-        <button class="nav" onClick=${openDevtools} disabled=${!active?.src} title="Devtools (⌘⇧I)">⚙</button>
-        <button class="nav go" onClick=${() => go(editingUrl)}>Go</button>
+        <button className="nav" onClick=${bookmark} disabled=${!editingUrl?.trim?.()} title="Bookmark this URL">☆</button>
+        <button className="nav" onClick=${() => setAboutOpen(true)} disabled=${!active?.url} title="About this site">ⓘ</button>
+        <button className="nav" onClick=${openDevtools} disabled=${!active?.src} title="Devtools (⌘⇧I)">⚙</button>
+        <button className="nav go" onClick=${() => go(editingUrl)}>Go</button>
         ${autocompleteOpen && suggestions.length > 0 && html`
-          <div class="urlbar-suggestions">
+          <div className="urlbar-suggestions">
             ${suggestions.map((s, idx) => html`
               <div
                 key=${s.url}
-                class=${'urlbar-suggestion' + (idx === autocompleteIdx ? ' active' : '')}
+                className=${'urlbar-suggestion' + (idx === autocompleteIdx ? ' active' : '')}
                 onMouseDown=${(e) => {
                   // mousedown fires before blur (which closes the dropdown)
                   e.preventDefault()
@@ -692,42 +896,74 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
                 }}
                 onMouseEnter=${() => setAutocompleteIdx(idx)}
               >
-                <span class="urlbar-suggestion-icon">${s.kind === 'bookmark' ? '★' : '🕘'}</span>
-                <div class="urlbar-suggestion-text">
+                <span className="urlbar-suggestion-icon">${s.kind === 'bookmark' ? '★' : '🕘'}</span>
+                <div className="urlbar-suggestion-text">
                   ${s.title && s.title !== s.url
-                    ? html`<div class="urlbar-suggestion-title">${s.title}</div>`
+                    ? html`<div className="urlbar-suggestion-title">${s.title}</div>`
                     : null}
-                  <div class="urlbar-suggestion-url">${s.url}</div>
+                  <div className="urlbar-suggestion-url">${s.url}</div>
                 </div>
               </div>
             `)}
           </div>
         `}
       </div>
-      ${active?.status && html`<div class="browse-status">${active.status}</div>`}
-      <div class="browse-stage">
-        ${tabs.map((t) => t.src
-          ? html`<iframe
-              key=${t.id}
-              ref=${(el) => { if (el) iframeRefs.current[t.id] = el }}
-              class=${'webview' + (t.id === activeId ? '' : ' hidden')}
-              src=${t.src}
-              sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-pointer-lock"
-            ></iframe>`
-          : t.id === activeId
-            ? html`<div class="browse-welcome" key=${t.id}>
-                <div class="browse-welcome-inner">
-                  <div class="browse-welcome-logo">🍐</div>
-                  <h2>The peer-to-peer web starts here</h2>
-                  <p>Paste any <code>hyper://</code> URL above — hex or z-base-32 — and PearBrowser fetches it directly from its peers. No DNS, no servers, no CDN.</p>
-                  <div class="browse-welcome-actions">
-                    <button class="btn primary" onClick=${() => go(DEFAULT_URL)}>Try the PearBrowser site</button>
-                    <button class="btn subtle" onClick=${() => { inputRef.current?.focus(); inputRef.current?.select?.() }}>Focus the URL bar</button>
-                  </div>
-                  <div class="browse-welcome-tip">Tip: <code>⌘T</code> opens a new tab, <code>⌘W</code> closes one, <code>⌘L</code> jumps to the URL bar, <code>⌘1</code>–<code>⌘9</code> switches between tabs.</div>
-                </div>
-              </div>`
-            : null
+      ${active?.status && html`<div className="browse-status">${active.status}</div>`}
+      ${active?.nameProv && html`
+        <div className=${`name-prov-chip name-prov-${active.nameProv.provenance}`}
+             title=${`“${active.nameProv.name}” resolved to ${active.displayUrl}`}>
+          <span className="name-prov-name">${active.nameProv.label}</span>
+          <span className="name-prov-tier">${active.nameProv.provenance === 'petname' ? 'your saved name' : active.nameProv.provenance === 'registry' ? 'name registry' : active.nameProv.provenance === 'contact' ? `from ${active.nameProv.source || 'a contact'}` : 'curated'}</span>
+        </div>
+      `}
+      <div className="browse-stage">
+        ${tabs.map((t) =>
+          t.src
+            ? html`<iframe
+                key=${t.id}
+                ref=${(el) => { if (el) iframeRefs.current[t.id] = el }}
+                className=${'webview' + (t.id === activeId ? '' : ' hidden')}
+                src=${t.src}
+                onLoad=${(e) => indexPage(t, e.target)}
+                sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-pointer-lock"
+              ></iframe>`
+            : t.id === activeId
+              ? (t.url
+                  // A tab with an address but no loaded content yet is mid-fetch —
+                  // show a loading state, NOT the welcome/clickthrough (the default
+                  // landing tab opens straight into the PearBrowser site).
+                  ? html`<div key=${t.id} className="browse-welcome">
+                      <div className="browse-welcome-inner">
+                        <div className="browse-welcome-logo">🍐</div>
+                        ${(t.status && /^error/i.test(t.status))
+                          ? html`<div className="browse-welcome-copy">
+                              <h2>Couldn't load this page</h2>
+                              <p>${String(t.status).replace(/^error:\s*/i, '')}</p>
+                            </div>`
+                          : html`<div className="browse-welcome-copy">
+                              <h2>Loading…</h2>
+                              <p>Fetching <code>${t.url}</code> directly from its peers — first load of a cold drive can take a moment.</p>
+                            </div>`}
+                        <div className="browse-welcome-actions">
+                          <button className="btn primary" onClick=${() => go(t.url, t.id)}>${(t.status && /^error/i.test(t.status)) ? 'Retry' : 'Reload'}</button>
+                          <button className="btn subtle" onClick=${() => { inputRef.current?.focus(); inputRef.current?.select?.() }}>Edit URL</button>
+                        </div>
+                      </div>
+                    </div>`
+                  // A truly blank tab (⌘T) gets the welcome + quick actions.
+                  : html`<div key=${t.id} className="browse-welcome">
+                      <div className="browse-welcome-inner">
+                        <div className="browse-welcome-logo">🍐</div>
+                        <h2>The peer-to-peer web starts here</h2>
+                        <p>Paste any <code>hyper://</code> URL above — hex or z-base-32 — and PearBrowser fetches it directly from its peers. No DNS, no servers, no CDN.</p>
+                        <div className="browse-welcome-actions">
+                          <button className="btn primary" onClick=${() => go(DEFAULT_URL)}>Open the PearBrowser site</button>
+                          <button className="btn subtle" onClick=${() => { inputRef.current?.focus(); inputRef.current?.select?.() }}>Focus the URL bar</button>
+                        </div>
+                        <div className="browse-welcome-tip">Tip: <code>⌘T</code> opens a new tab, <code>⌘⇧T</code> reopens one, <code>⌘W</code> closes one, <code>⌘L</code> jumps to the URL bar, <code>⌘1</code>–<code>⌘9</code> switches between tabs.</div>
+                      </div>
+                    </div>`)
+              : null
         )}
       </div>
       ${aboutOpen && html`<${AboutSite}
@@ -753,14 +989,12 @@ const SCOPE_LABELS = {
   'profile:name': { label: 'Display name', detail: 'Your chosen public name' },
   'profile:avatar': { label: 'Avatar', detail: 'Your profile picture URL' },
   'profile:email': { label: 'Email', detail: 'Email you put in your profile' },
-  'profile:website': { label: 'Website', detail: 'Personal site URL on your profile' }
+  'profile:website': { label: 'Website', detail: 'Personal site URL on your profile' },
+  'profile:read': { label: 'Full profile', detail: 'All filled profile fields' },
+  'profile:contact': { label: 'Contact profile', detail: 'Email and website fields' },
+  'contacts:read': { label: 'Contacts', detail: 'Your saved contacts list' }
 }
 
-function shortKey (k) {
-  if (!k || typeof k !== 'string') return ''
-  if (k.length <= 16) return k
-  return k.slice(0, 8) + '…' + k.slice(-6)
-}
 
 function LoginConsent ({ rpc, C, request, identity, onClose }) {
   const initial = new Set(request.scopes || [])
@@ -796,41 +1030,41 @@ function LoginConsent ({ rpc, C, request, identity, onClose }) {
   const driveLabel = shortKey(request.driveKey)
 
   return html`
-    <div class="modal-overlay" role="dialog" aria-modal="true" onClick=${(e) => e.target.classList.contains('modal-overlay') && decide(false)}>
-      <div class="modal-card login-consent">
-        <div class="login-header">
-          <div class="login-app-icon">🍐</div>
-          <div class="login-header-text">
-            <div class="login-app-name">${appLabel}</div>
-            <div class="login-app-sub">wants to sign you in</div>
-            <div class="login-app-key" title=${request.driveKey}>${driveLabel}</div>
+    <div className="modal-overlay" role="dialog" aria-modal="true" onClick=${(e) => e.target.classList.contains('modal-overlay') && decide(false)}>
+      <div className="modal-card login-consent">
+        <div className="login-header">
+          <div className="login-app-icon">🍐</div>
+          <div className="login-header-text">
+            <div className="login-app-name">${appLabel}</div>
+            <div className="login-app-sub">wants to sign you in</div>
+            <div className="login-app-key" title=${request.driveKey}>${driveLabel}</div>
           </div>
         </div>
 
-        ${request.reason && html`<div class="login-reason">"${request.reason}"</div>`}
+        ${request.reason && html`<div className="login-reason">"${request.reason}"</div>`}
 
-        <div class="login-section-label">SIGNING IN AS</div>
-        <div class="login-identity">
-          <div class="login-identity-avatar">🍐</div>
-          <div class="login-identity-meta">
-            <div class="login-identity-label">You</div>
-            <code class="login-identity-key">${shortKey(identity?.publicKey || '')}</code>
+        <div className="login-section-label">SIGNING IN AS</div>
+        <div className="login-identity">
+          <div className="login-identity-avatar">🍐</div>
+          <div className="login-identity-meta">
+            <div className="login-identity-label">You</div>
+            <code className="login-identity-key">${shortKey(identity?.publicKey || '')}</code>
           </div>
         </div>
 
-        <div class="login-section-label">${appLabel} WILL SEE</div>
-        <div class="login-scopes">
+        <div className="login-section-label">${appLabel} WILL SEE</div>
+        <div className="login-scopes">
           ${(request.scopes || []).length === 0
-            ? html`<div class="login-scope-empty">Nothing — sign-in only confirms it's you.</div>`
+            ? html`<div className="login-scope-empty">Nothing — sign-in only confirms it's you.</div>`
             : (request.scopes || []).map((s) => {
                 const meta = SCOPE_LABELS[s] || { label: s, detail: '' }
                 const on = granted.has(s)
                 return html`
-                  <label class=${'login-scope' + (on ? ' on' : '')} key=${s}>
+                  <label className=${'login-scope' + (on ? ' on' : '')} key=${s}>
                     <input type="checkbox" checked=${on} onChange=${() => toggle(s)} />
-                    <div class="login-scope-meta">
-                      <div class="login-scope-label">${meta.label}</div>
-                      <div class="login-scope-detail">${meta.detail || s}</div>
+                    <div className="login-scope-meta">
+                      <div className="login-scope-label">${meta.label}</div>
+                      <div className="login-scope-detail">${meta.detail || s}</div>
                     </div>
                   </label>
                 `
@@ -838,19 +1072,19 @@ function LoginConsent ({ rpc, C, request, identity, onClose }) {
         </div>
 
         ${request.currentGrant && html`
-          <div class="login-existing">
+          <div className="login-existing">
             You previously granted this app on
             ${' ' + new Date(request.currentGrant.grantedAt).toLocaleDateString()}.
           </div>
         `}
 
-        ${err && html`<div class="apps-error">${err}</div>`}
+        ${err && html`<div className="apps-error">${err}</div>`}
 
-        <div class="login-actions">
-          <button class="btn subtle" onClick=${() => decide(false)} disabled=${busy !== null}>
+        <div className="login-actions">
+          <button className="btn subtle" onClick=${() => decide(false)} disabled=${busy !== null}>
             ${busy === 'deny' ? 'Cancelling…' : 'Cancel'}
           </button>
-          <button class="btn primary" onClick=${() => decide(true)} disabled=${busy !== null}>
+          <button className="btn primary" onClick=${() => decide(true)} disabled=${busy !== null}>
             ${busy === 'approve' ? 'Signing in…' : 'Sign in'}
           </button>
         </div>
@@ -894,55 +1128,55 @@ function SwarmConsent ({ rpc, C, request, identity, onClose }) {
   const topicLabel = shortKey(request.topicHex)
 
   return html`
-    <div class="modal-overlay" role="dialog" aria-modal="true" onClick=${(e) => e.target.classList.contains('modal-overlay') && decide(false)}>
-      <div class="modal-card login-consent">
-        <div class="login-header">
-          <div class="login-app-icon" style=${{ background: 'linear-gradient(135deg, #58a6ff, #a371f7)' }}>📡</div>
-          <div class="login-header-text">
-            <div class="login-app-name">${appLabel}</div>
-            <div class="login-app-sub">wants to connect to peers on a swarm topic</div>
-            <div class="login-app-key" title=${request.driveKey}>${driveLabel}</div>
+    <div className="modal-overlay" role="dialog" aria-modal="true" onClick=${(e) => e.target.classList.contains('modal-overlay') && decide(false)}>
+      <div className="modal-card login-consent">
+        <div className="login-header">
+          <div className="login-app-icon" style=${{ background: 'linear-gradient(135deg, #58a6ff, #a371f7)' }}>📡</div>
+          <div className="login-header-text">
+            <div className="login-app-name">${appLabel}</div>
+            <div className="login-app-sub">wants to connect to peers on a swarm topic</div>
+            <div className="login-app-key" title=${request.driveKey}>${driveLabel}</div>
           </div>
         </div>
 
-        ${request.reason && html`<div class="login-reason">"${request.reason}"</div>`}
+        ${request.reason && html`<div className="login-reason">"${request.reason}"</div>`}
 
-        <div class="login-section-label">SWARM TOPIC</div>
-        <div class="login-identity">
-          <div class="login-identity-avatar">🔑</div>
-          <div class="login-identity-meta">
-            <div class="login-identity-label">${request.protocol || 'pear.swarm.v1'}</div>
-            <code class="login-identity-key">${topicLabel}</code>
+        <div className="login-section-label">SWARM TOPIC</div>
+        <div className="login-identity">
+          <div className="login-identity-avatar">🔑</div>
+          <div className="login-identity-meta">
+            <div className="login-identity-label">${request.protocol || 'pear.swarm.v1'}</div>
+            <code className="login-identity-key">${topicLabel}</code>
           </div>
         </div>
 
-        <div class="login-section-label">WHAT THIS MEANS</div>
-        <div class="login-scopes">
-          <div class="login-scope on">
-            <div class="login-scope-meta">
-              <div class="login-scope-label">Discover peers via DHT</div>
-              <div class="login-scope-detail">Other devices on this topic will see your IP address.</div>
+        <div className="login-section-label">WHAT THIS MEANS</div>
+        <div className="login-scopes">
+          <div className="login-scope on">
+            <div className="login-scope-meta">
+              <div className="login-scope-label">Discover peers via DHT</div>
+              <div className="login-scope-detail">Other devices on this topic will see your IP address.</div>
             </div>
           </div>
-          <div class="login-scope on">
-            <div class="login-scope-meta">
-              <div class="login-scope-label">Send and receive messages directly</div>
-              <div class="login-scope-detail">No relay between your peers and you. Messages aren't logged by PearBrowser.</div>
+          <div className="login-scope on">
+            <div className="login-scope-meta">
+              <div className="login-scope-label">Send and receive messages directly</div>
+              <div className="login-scope-detail">No relay between your peers and you. Messages aren't logged by PearBrowser.</div>
             </div>
           </div>
         </div>
 
-        <div class="login-existing">
+        <div className="login-existing">
           Approving stores a grant for this app + this topic. You can revoke it any time in <strong>Settings → Connected Apps</strong>.
         </div>
 
-        ${err && html`<div class="apps-error">${err}</div>`}
+        ${err && html`<div className="apps-error">${err}</div>`}
 
-        <div class="login-actions">
-          <button class="btn subtle" onClick=${() => decide(false)} disabled=${busy !== null}>
+        <div className="login-actions">
+          <button className="btn subtle" onClick=${() => decide(false)} disabled=${busy !== null}>
             ${busy === 'deny' ? 'Cancelling…' : 'Cancel'}
           </button>
-          <button class="btn primary" onClick=${() => decide(true)} disabled=${busy !== null}>
+          <button className="btn primary" onClick=${() => decide(true)} disabled=${busy !== null}>
             ${busy === 'approve' ? 'Connecting…' : 'Approve & Connect'}
           </button>
         </div>
@@ -994,7 +1228,7 @@ const ONBOARDING_FIRST_SITES = [
     id: 'p2pbuilders',
     title: 'P2P Builders',
     subtitle: 'Permissionless P2P hacker news',
-    url: 'hyper://f0cd01e3565a9eb5d811f3f46f0595ad6b2e87652304789bef3fe4501b3db42a/',
+    url: P2PBUILDERS_URL,
     initial: '🔧',
     gradient: 'linear-gradient(135deg, #ff6600, #fbbf24)'
   }
@@ -1014,85 +1248,85 @@ function Onboarding ({ rpc, C, onPickSite, onClose }) {
   }
 
   return html`
-    <div class="modal-overlay onboarding-overlay" role="dialog" aria-modal="true">
-      <div class="modal-card onboarding-card">
+    <div className="modal-overlay onboarding-overlay" role="dialog" aria-modal="true">
+      <div className="modal-card onboarding-card">
         ${slide === 0 && html`
-          <div class="onb-slide onb-slide-welcome">
-            <div class="onb-hero">
+          <div className="onb-slide onb-slide-welcome">
+            <div className="onb-hero">
               <${Logo} size=${72} />
             </div>
-            <h1 class="onb-title">Welcome to <strong>PearBrowser</strong></h1>
-            <p class="onb-subtitle">The web that doesn't go down.</p>
-            <p class="onb-blurb">
+            <h1 className="onb-title">Welcome to <strong>PearBrowser</strong></h1>
+            <p className="onb-subtitle">The web that doesn't go down.</p>
+            <p className="onb-blurb">
               A peer-to-peer browser, app store, and site publisher. Pages
               live as Hyperdrives, identified by 32-byte keys, replicated
               by their readers. No DNS. No servers. No accounts.
             </p>
-            <div class="onb-actions">
-              <button class="btn primary" onClick=${() => setSlide(1)}>Get started →</button>
+            <div className="onb-actions">
+              <button className="btn primary" onClick=${() => setSlide(1)}>Get started →</button>
             </div>
           </div>
         `}
         ${slide === 1 && html`
-          <div class="onb-slide">
-            <h2 class="onb-stepname">Three things at once</h2>
-            <div class="onb-pitch-grid">
-              <div class="onb-pitch">
-                <div class="onb-pitch-icon">🌐</div>
-                <div class="onb-pitch-title">Browse hyper://</div>
-                <div class="onb-pitch-body">Paste a drive key, fetch from peers, render in-app.</div>
+          <div className="onb-slide">
+            <h2 className="onb-stepname">Three things at once</h2>
+            <div className="onb-pitch-grid">
+              <div className="onb-pitch">
+                <div className="onb-pitch-icon">🌐</div>
+                <div className="onb-pitch-title">Browse hyper://</div>
+                <div className="onb-pitch-body">Paste a drive key, fetch from peers, render in-app.</div>
               </div>
-              <div class="onb-pitch">
-                <div class="onb-pitch-icon">📦</div>
-                <div class="onb-pitch-title">Run Pear apps</div>
-                <div class="onb-pitch-body">Click a pear:// link, the app opens in its own window.</div>
+              <div className="onb-pitch">
+                <div className="onb-pitch-icon">📦</div>
+                <div className="onb-pitch-title">Run Pear apps</div>
+                <div className="onb-pitch-body">Click a pear:// link, the app opens in its own window.</div>
               </div>
-              <div class="onb-pitch">
-                <div class="onb-pitch-icon">✒️</div>
-                <div class="onb-pitch-title">Publish your own</div>
-                <div class="onb-pitch-body">Block editor → publish → pinned 24/7 on HiveRelay.</div>
+              <div className="onb-pitch">
+                <div className="onb-pitch-icon">✒️</div>
+                <div className="onb-pitch-title">Publish your own</div>
+                <div className="onb-pitch-body">Block editor → publish → pinned 24/7 on HiveRelay.</div>
               </div>
             </div>
-            <p class="onb-blurb onb-foot">
+            <p className="onb-blurb onb-foot">
               Your identity is generated automatically and stored on this
               machine. You can back it up later in <em>Settings → Identity</em>
               if you want to use it on another device.
             </p>
-            <div class="onb-actions">
-              <button class="btn subtle" onClick=${() => setSlide(0)}>← Back</button>
-              <button class="btn primary" onClick=${() => setSlide(2)}>Continue →</button>
+            <div className="onb-actions">
+              <button className="btn subtle" onClick=${() => setSlide(0)}>← Back</button>
+              <button className="btn primary" onClick=${() => setSlide(2)}>Continue →</button>
             </div>
           </div>
         `}
         ${slide === 2 && html`
-          <div class="onb-slide">
-            <h2 class="onb-stepname">Try a site</h2>
-            <p class="onb-blurb">Pick one to start with — you can always come back here.</p>
-            <div class="onb-sites">
+          <div className="onb-slide">
+            <h2 className="onb-stepname">Try a site</h2>
+            <p className="onb-blurb">Pick one to start with — you can always come back here.</p>
+            <div className="onb-sites">
               ${ONBOARDING_FIRST_SITES.map((s) => html`
                 <button
-                  class="onb-site-card"
+                  className="onb-site-card"
                   key=${s.id}
                   onClick=${() => finish(s.url)}
                   title=${s.url}
                 >
-                  <div class="onb-site-icon" style=${{ background: s.gradient }}>${s.initial}</div>
-                  <div class="onb-site-text">
-                    <div class="onb-site-title">${s.title}</div>
-                    <div class="onb-site-subtitle">${s.subtitle}</div>
+                  <div className="onb-site-icon" style=${{ background: s.gradient }}>${s.initial}</div>
+                  <div className="onb-site-text">
+                    <div className="onb-site-title">${s.title}</div>
+                    <div className="onb-site-subtitle">${s.subtitle}</div>
                   </div>
                 </button>
               `)}
             </div>
-            <div class="onb-actions">
-              <button class="btn subtle" onClick=${() => setSlide(1)}>← Back</button>
-              <button class="onb-skip" onClick=${() => finish(null)}>Skip — I'll explore</button>
+            <div className="onb-actions">
+              <button className="btn subtle" onClick=${() => setSlide(1)}>← Back</button>
+              <button className="onb-skip" onClick=${() => finish(null)}>Skip — I'll explore</button>
             </div>
           </div>
         `}
-        <div class="onb-dots">
+        <div className="onb-dots">
           ${[0, 1, 2].map((i) => html`
-            <span class=${'onb-dot' + (i === slide ? ' on' : '')} key=${i}></span>
+            <span className=${'onb-dot' + (i === slide ? ' on' : '')} key=${i}></span>
           `)}
         </div>
       </div>
@@ -1110,6 +1344,24 @@ function safeIconSrc (src) {
   return null
 }
 
+// Render an app/site icon: use any catalogue-inlined iconData, else lazily fetch
+// it from the drive (CMD_GET_APP_ICON tries the declared iconRef + well-known
+// paths like /icon.svg, /icon.png, /favicon.*). Falls back to a letter glyph.
+function AppIcon ({ rpc, C, driveKey, iconRef, iconData, name }) {
+  const [src, setSrc] = useState(safeIconSrc(iconData))
+  useEffect(() => {
+    if (src || !driveKey || !/^[0-9a-f]{64}$/i.test(driveKey) || !(C && C.CMD_GET_APP_ICON)) return
+    let alive = true
+    rpc.request(C.CMD_GET_APP_ICON, { driveKey, iconRef })
+      .then((res) => { const s = safeIconSrc(res && res.iconData); if (alive && s) setSrc(s) })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [driveKey, iconRef])
+  return src
+    ? html`<img src=${src} alt="" className="app-icon" />`
+    : html`<div className="app-icon app-icon-fallback">${(name || '?').charAt(0)}</div>`
+}
+
 // Normalize an app's category metadata to a string array. Catalogs in the
 // wild use either `categories: [...]` or a single `category: "..."`.
 function appCategories (app) {
@@ -1118,8 +1370,518 @@ function appCategories (app) {
   return []
 }
 
+function catalogAppSearchText (app) {
+  if (!app || typeof app !== 'object') return ''
+  return [
+    app.name,
+    app.description,
+    app.author,
+    app.id,
+    app.version,
+    app.source,
+    app.catalogName,
+    app.verification,
+    app.link,
+    app.driveKey,
+    ...appCategories(app),
+    ...(Array.isArray(app._sources) ? app._sources : [])
+  ]
+    .filter((value) => value != null && value !== '')
+    .map((value) => String(value).normalize('NFKC').toLowerCase())
+    .join(' ')
+}
+
 function unwrapSettings (res) {
   return (res && typeof res.settings === 'object' && res.settings !== null) ? res.settings : (res || {})
+}
+
+// Experimental collaborative-catalog (Autobee) panel for the Apps tab. Renders
+// nothing unless the experimentalAutobeeCatalogs flag is on (toggled in
+// Settings). Tabs are conditionally mounted, so flipping the flag and
+// reopening the Apps tab reveals it. Lets you create a co-editable catalog,
+// share its autobee:// key, exchange writer keys to invite collaborators, and
+// add/remove apps. The backend enforces the flag and writability.
+function CollaborativeCatalog ({ rpc, C }) {
+  const [enabled, setEnabled] = useState(null) // null = still loading
+  const [cat, setCat] = useState(null)          // { keyHex, shareKey, writerKey, writable, name, apps }
+  const [busy, setBusy] = useState(null)
+  const [err, setErr] = useState('')
+  const [notice, setNotice] = useState('')
+  const [newName, setNewName] = useState('')
+  const [joinKey, setJoinKey] = useState('')
+  const [inviteKey, setInviteKey] = useState('')
+  const [appKey, setAppKey] = useState('')
+  const [appName, setAppName] = useState('')
+  const [copied, setCopied] = useState('')
+
+  useEffect(() => {
+    rpc.request(C.CMD_USERDATA_GET_SETTINGS).then((res) => {
+      const s = unwrapSettings(res)
+      setEnabled(!!s?.experimentalAutobeeCatalogs)
+      const owned = typeof s?.autobeeOwnedKey === 'string' ? s.autobeeOwnedKey : null
+      if (s?.experimentalAutobeeCatalogs && owned) {
+        rpc.request(C.CMD_AUTOBEE_GET, { keyHex: owned }).then(setCat).catch(() => {})
+      }
+    }).catch(() => setEnabled(false))
+  }, [])
+
+  const persistOwned = (keyHex) =>
+    rpc.request(C.CMD_USERDATA_SET_SETTINGS, { updates: { autobeeOwnedKey: keyHex } }).catch(() => {})
+  const flash = (msg) => { setNotice(msg); setTimeout(() => setNotice(''), 1800) }
+  const copy = (text, what) => { try { navigator.clipboard.writeText(text); setCopied(what); setTimeout(() => setCopied(''), 1500) } catch {} }
+
+  const create = async () => {
+    setErr(''); setBusy('create')
+    try {
+      const res = await rpc.request(C.CMD_AUTOBEE_CREATE, { name: newName || 'Collaborative Catalog' }, 60000)
+      setCat(res); setNewName(''); persistOwned(res.keyHex); flash('Catalog created.')
+    } catch (e) { setErr(e.message) } finally { setBusy(null) }
+  }
+
+  const open = async () => {
+    const parsed = parseCatalogRef(joinKey)
+    if (!parsed) return
+    setErr(''); setBusy('open')
+    try {
+      const res = await rpc.request(C.CMD_AUTOBEE_GET, { keyHex: parsed.key }, 60000)
+      setCat(res); setJoinKey(''); persistOwned(res.keyHex)
+      flash(res.writable ? 'Opened — you are a writer.' : 'Opened read-only — share your writer key to be invited.')
+    } catch (e) { setErr(e.message) } finally { setBusy(null) }
+  }
+
+  const invite = async () => {
+    const writerKey = (parseCatalogRef(inviteKey)?.key || inviteKey).trim()
+    setErr(''); setBusy('invite')
+    try {
+      await rpc.request(C.CMD_AUTOBEE_ADD_WRITER, { keyHex: cat.keyHex, writerKey }, 60000)
+      setInviteKey(''); flash('Writer added — they can edit once they sync.')
+    } catch (e) { setErr(e.message) } finally { setBusy(null) }
+  }
+
+  const addApp = async () => {
+    const val = appKey.trim()
+    if (!val) return
+    const app = /^(?:pear|file):\/\//i.test(val)
+      ? { link: val, name: appName || val }
+      : { driveKey: driveKeyFromHyperRef(val), name: appName || val }
+    if (!app.link && !app.driveKey) { setErr('Enter a pear:// link, file:// link, or a valid hyper:// drive key.'); return }
+    setErr(''); setBusy('addapp')
+    try {
+      const res = await rpc.request(C.CMD_AUTOBEE_ADD_APP, { keyHex: cat.keyHex, app }, 60000)
+      setCat(res); setAppKey(''); setAppName(''); flash('App added.')
+    } catch (e) { setErr(e.message) } finally { setBusy(null) }
+  }
+
+  const removeApp = async (id) => {
+    setErr(''); setBusy('rm:' + id)
+    try {
+      const res = await rpc.request(C.CMD_AUTOBEE_REMOVE_APP, { keyHex: cat.keyHex, id }, 60000)
+      setCat(res)
+    } catch (e) { setErr(e.message) } finally { setBusy(null) }
+  }
+
+  if (!enabled) return null // hidden while loading and when the flag is off
+
+  return html`
+    <div className="collab-catalog">
+      <h2>Collaborative catalog <span className="settings-subtle">(experimental)</span></h2>
+      <p className="subtitle">An app catalog several people can co-edit, synced peer-to-peer. Not pinned on relays yet — reachable only while a writer is online.</p>
+      <div className="settings-card">
+        ${err && html`<div className="apps-error">${err}</div>`}
+        ${notice && html`<div className="apps-ok">${notice}</div>`}
+
+        ${!cat && html`
+          <div className="collab-empty">
+            <div className="settings-row">
+              <div className="profile-field">
+                <div className="settings-label">Create a new collaborative catalog</div>
+                <input className="profile-input" placeholder="Catalog name" value=${newName} onInput=${(e) => setNewName(e.target.value)} />
+              </div>
+              <button className="btn primary" onClick=${create} disabled=${busy === 'create'}>${busy === 'create' ? 'Creating…' : 'Create'}</button>
+            </div>
+            <div className="settings-row">
+              <div className="profile-field">
+                <div className="settings-label">…or open one by key</div>
+                <input className="profile-input" placeholder="autobee://… or 64-hex key" value=${joinKey} onInput=${(e) => setJoinKey(e.target.value)} onKeyDown=${(e) => e.key === 'Enter' && open()} />
+              </div>
+              <button className="btn" onClick=${open} disabled=${busy === 'open' || !joinKey.trim()}>${busy === 'open' ? 'Opening…' : 'Open'}</button>
+            </div>
+          </div>
+        `}
+
+        ${cat && html`
+          <div className="collab-open">
+            <div className="settings-row">
+              <div>
+                <div className="settings-label">${cat.name} ${cat.writable ? '' : html`<span className="settings-subtle">· read-only</span>`}</div>
+                <div className="settings-subtle">${cat.apps.length} app(s)</div>
+              </div>
+              <button className="btn subtle" onClick=${() => { setCat(null); persistOwned('') }}>Close</button>
+            </div>
+            <div className="settings-row">
+              <div className="profile-field">
+                <div className="settings-label">Share key — anyone can load this in the Apps tab</div>
+                <code className="settings-code">${cat.shareKey}</code>
+              </div>
+              <button className="btn small" onClick=${() => copy(cat.shareKey, 'share')}>${copied === 'share' ? 'Copied' : 'Copy'}</button>
+            </div>
+            <div className="settings-row">
+              <div className="profile-field">
+                <div className="settings-label">Your writer key — give this to the owner to be invited</div>
+                <code className="settings-code">${cat.writerKey}</code>
+              </div>
+              <button className="btn small" onClick=${() => copy(cat.writerKey, 'writer')}>${copied === 'writer' ? 'Copied' : 'Copy'}</button>
+            </div>
+
+            ${cat.writable && html`
+              <div className="collab-writable">
+                <div className="settings-row">
+                  <div className="profile-field">
+                    <div className="settings-label">Invite a writer (paste their writer key)</div>
+                    <input className="profile-input" placeholder="64-hex writer key" value=${inviteKey} onInput=${(e) => setInviteKey(e.target.value)} />
+                  </div>
+                  <button className="btn" onClick=${invite} disabled=${busy === 'invite' || !inviteKey.trim()}>${busy === 'invite' ? 'Adding…' : 'Invite'}</button>
+                </div>
+                <div className="settings-row">
+                  <div className="profile-field">
+                    <div className="settings-label">Add an app</div>
+                    <input className="profile-input" placeholder="App name (optional)" value=${appName} onInput=${(e) => setAppName(e.target.value)} />
+                    <input className="profile-input" placeholder="hyper:// drive key or pear:// link" value=${appKey} onInput=${(e) => setAppKey(e.target.value)} onKeyDown=${(e) => e.key === 'Enter' && addApp()} />
+                  </div>
+                  <button className="btn primary" onClick=${addApp} disabled=${busy === 'addapp' || !appKey.trim()}>${busy === 'addapp' ? 'Adding…' : 'Add app'}</button>
+                </div>
+              </div>
+            `}
+
+            ${cat.apps.length > 0 && html`
+              <div className="collab-apps">
+                <div className="settings-row"><div className="settings-label">Apps</div></div>
+                ${cat.apps.map((a) => html`
+                  <div className="settings-row" key=${a.id || a.driveKey || a.link || a.name}>
+                    <div>
+                      <div className="settings-label">${a.name || a.id}</div>
+                      <div className="settings-subtle">${a.driveKey || a.link || ''}</div>
+                    </div>
+                    ${cat.writable && html`<button className="btn small subtle" onClick=${() => removeApp(a.id)} disabled=${busy === 'rm:' + a.id}>Remove</button>`}
+                  </div>
+                `)}
+              </div>
+            `}
+          </div>
+        `}
+      </div>
+    </div>
+  `
+}
+
+// "Submit your app" — anyone can propose an app for the COMMUNITY catalogue.
+// CMD_SUBMIT_APP publishes a manifest drive + seeds the app drive via HiveRelay;
+// the relay queues a pin request in `review` mode. The app appears in everyone's
+// Community list once a moderator approves it (ModeratorPanel below).
+function CommunitySubmit ({ rpc, C }) {
+  const [name, setName] = useState('')
+  const [link, setLink] = useState('')
+  const [description, setDescription] = useState('')
+  const [author, setAuthor] = useState('')
+  const [categories, setCategories] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const [ok, setOk] = useState('')
+
+  const submit = async () => {
+    setErr(''); setOk('')
+    if (!name.trim()) { setErr('App name is required.'); return }
+    if (!link.trim()) { setErr('Paste a pear:// link, a hyper:// link, or a drive key.'); return }
+    setBusy(true)
+    try {
+      const res = await rpc.request(C.CMD_SUBMIT_APP, {
+        name: name.trim(), link: link.trim(), description: description.trim(),
+        author: author.trim(), categories
+      }, 90000)
+      setOk(`Submitted "${(res && res.manifest && res.manifest.name) || name.trim()}" for review — it joins the Community list once a moderator approves it.`)
+      setName(''); setLink(''); setDescription(''); setAuthor(''); setCategories('')
+    } catch (e) { setErr((e && e.message) || String(e)) } finally { setBusy(false) }
+  }
+
+  return html`
+    <div className="community-submit">
+      <h2>Submit your app <span className="settings-subtle">→ Community list</span></h2>
+      <p className="subtitle">Add any Pear app or hyperdrive site to the community catalogue. Submissions are pinned on relays and reviewed by a moderator before appearing in everyone's Community list.</p>
+      <div className="settings-card">
+        ${err && html`<div className="apps-error">${err}</div>`}
+        ${ok && html`<div className="apps-ok">${ok}</div>`}
+        <div className="settings-row">
+          <div className="profile-field">
+            <div className="settings-label">App name *</div>
+            <input className="profile-input" placeholder="My Cool App" value=${name} onInput=${(e) => setName(e.target.value)} />
+          </div>
+        </div>
+        <div className="settings-row">
+          <div className="profile-field">
+            <div className="settings-label">Link *</div>
+            <input className="profile-input" placeholder="pear://… or hyper://… (or a 64-hex / z-base-32 key)" value=${link} onInput=${(e) => setLink(e.target.value)} onKeyDown=${(e) => e.key === 'Enter' && submit()} />
+          </div>
+        </div>
+        <div className="settings-row">
+          <div className="profile-field">
+            <div className="settings-label">Description</div>
+            <input className="profile-input" placeholder="What does it do?" value=${description} onInput=${(e) => setDescription(e.target.value)} />
+          </div>
+        </div>
+        <div className="settings-row">
+          <div className="profile-field">
+            <div className="settings-label">Author</div>
+            <input className="profile-input" placeholder="Your name or handle" value=${author} onInput=${(e) => setAuthor(e.target.value)} />
+          </div>
+          <div className="profile-field">
+            <div className="settings-label">Categories</div>
+            <input className="profile-input" placeholder="tools, social" value=${categories} onInput=${(e) => setCategories(e.target.value)} />
+          </div>
+        </div>
+        <div className="settings-row">
+          <button className="btn primary" onClick=${submit} disabled=${busy || !name.trim() || !link.trim()}>${busy ? 'Submitting…' : 'Submit for review'}</button>
+        </div>
+      </div>
+    </div>
+  `
+}
+
+// In-app moderator panel — operator-gated (needs the relay management URL + API
+// key, saved to userdata settings). Lists the relay's pending pin-requests
+// (CMD_MOD_PENDING) and approves/rejects them (CMD_MOD_APPROVE / CMD_MOD_REJECT).
+// Collapsed by default since only the operator needs it. The relay must run in
+// `review` accept mode for submissions to queue here.
+function ModeratorPanel ({ rpc, C }) {
+  const [open, setOpen] = useState(false)
+  const [url, setUrl] = useState('')
+  const [apiKey, setApiKey] = useState('')
+  const [saved, setSaved] = useState(false)
+  const [pending, setPending] = useState(null) // null = not loaded yet
+  const [mode, setMode] = useState(null)
+  const [busy, setBusy] = useState(null)
+  const [err, setErr] = useState('')
+  const [notice, setNotice] = useState('')
+
+  useEffect(() => {
+    rpc.request(C.CMD_USERDATA_GET_SETTINGS).then((res) => {
+      const s = unwrapSettings(res) || {}
+      if (typeof s.relayManageUrl === 'string') setUrl(s.relayManageUrl)
+      if (typeof s.relayManageKey === 'string') setApiKey(s.relayManageKey)
+    }).catch(() => {})
+  }, [])
+
+  const flash = (m) => { setNotice(m); setTimeout(() => setNotice(''), 1800) }
+
+  const saveConfig = async () => {
+    setErr('')
+    try {
+      await rpc.request(C.CMD_USERDATA_SET_SETTINGS, { updates: { relayManageUrl: url.trim(), relayManageKey: apiKey.trim() } })
+      setSaved(true); setTimeout(() => setSaved(false), 1500); flash('Saved.')
+    } catch (e) { setErr(e.message) }
+  }
+
+  const loadPending = async () => {
+    setErr(''); setBusy('load')
+    try {
+      const res = await rpc.request(C.CMD_MOD_PENDING, {}, 30000)
+      setPending(res.pending || []); setMode(res.mode || null)
+    } catch (e) { setErr(e.message); setPending([]) } finally { setBusy(null) }
+  }
+
+  const decide = async (appKey, approve) => {
+    setErr(''); setBusy((approve ? 'a:' : 'r:') + appKey)
+    try {
+      await rpc.request(approve ? C.CMD_MOD_APPROVE : C.CMD_MOD_REJECT, { appKey }, 60000)
+      setPending((list) => (list || []).filter((p) => p.appKey !== appKey))
+      flash(approve ? 'Approved + pinned.' : 'Rejected.')
+    } catch (e) { setErr(e.message) } finally { setBusy(null) }
+  }
+
+  return html`
+    <div className="moderator-panel">
+      <h2>
+        <button className="btn subtle small" onClick=${() => setOpen((v) => !v)} style=${{ marginRight: '8px' }}>${open ? '▾' : '▸'}</button>
+        Moderator tools <span className="settings-subtle">(operator)</span>
+      </h2>
+      ${open && html`
+        <div className="settings-card">
+          ${err && html`<div className="apps-error">${err}</div>`}
+          ${notice && html`<div className="apps-ok">${notice}</div>`}
+          <p className="subtitle">Review apps submitted to the Community list. Needs your relay's management URL + operator API key. The relay must run in <code>review</code> accept mode.</p>
+          <div className="settings-row">
+            <div className="profile-field">
+              <div className="settings-label">Relay management URL</div>
+              <input className="profile-input" placeholder="https://relay-eu.p2phiverelay.xyz or http://127.0.0.1:9100" value=${url} onInput=${(e) => setUrl(e.target.value)} />
+            </div>
+          </div>
+          <div className="settings-row">
+            <div className="profile-field">
+              <div className="settings-label">Operator API key</div>
+              <input className="profile-input" type="password" placeholder="Bearer token" value=${apiKey} onInput=${(e) => setApiKey(e.target.value)} />
+            </div>
+            <button className="btn" onClick=${saveConfig}>${saved ? 'Saved' : 'Save'}</button>
+          </div>
+          <div className="settings-row">
+            <button className="btn primary" onClick=${loadPending} disabled=${busy === 'load' || !url.trim()}>${busy === 'load' ? 'Loading…' : 'Load pending'}</button>
+            ${mode && html`<span className="settings-subtle">relay mode: ${mode}</span>`}
+          </div>
+          ${pending && pending.length === 0 && html`<div className="settings-subtle" style=${{ padding: '6px 0' }}>No pending submissions.</div>`}
+          ${pending && pending.length > 0 && html`
+            <div className="mod-pending">
+              ${pending.map((p) => html`
+                <div className="settings-row" key=${p.appKey}>
+                  <div style=${{ minWidth: 0 }}>
+                    <div className="settings-label" style=${{ fontFamily: 'monospace' }}>${(p.appKey || '').slice(0, 16)}…</div>
+                    <div className="settings-subtle">by ${(p.publisherPubkey || 'unknown').slice(0, 12)}…${p.currentRelays ? ` · ${p.currentRelays} relay(s)` : ''}</div>
+                  </div>
+                  <div style=${{ display: 'flex', gap: '6px' }}>
+                    <button className="btn small primary" onClick=${() => decide(p.appKey, true)} disabled=${!!busy}>${busy === 'a:' + p.appKey ? '…' : 'Approve'}</button>
+                    <button className="btn small subtle" onClick=${() => decide(p.appKey, false)} disabled=${!!busy}>${busy === 'r:' + p.appKey ? '…' : 'Reject'}</button>
+                  </div>
+                </div>
+              `)}
+            </div>
+          `}
+        </div>
+      `}
+    </div>
+  `
+}
+
+// Browser-side defensive dedup. The backend aggregate now collapses by stable
+// identity (driveKey, else link, else id), but keep this final pass for stale
+// backends and local state restored from older versions. It mirrors the backend
+// winner rule: verification first, then version, while recording source names.
+const VERIFICATION_RANK = { 'author-signed': 3, 'relay-listed': 2, unverified: 1 }
+function appVersionGreater (a, b) {
+  const pa = String(a || '0').split('.').map((n) => parseInt(n, 10) || 0)
+  const pb = String(b || '0').split('.').map((n) => parseInt(n, 10) || 0)
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] || 0; const y = pb[i] || 0
+    if (x !== y) return x > y
+  }
+  return false
+}
+function betterApp (a, b) {
+  const va = VERIFICATION_RANK[a.verification] || 1
+  const vb = VERIFICATION_RANK[b.verification] || 1
+  if (va !== vb) return va > vb ? a : b
+  if (appVersionGreater(a.version, b.version)) return a
+  if (appVersionGreater(b.version, a.version)) return b
+  return b
+}
+function normalizeAppLinkForKey (raw) {
+  const s = String(raw || '').trim()
+  if (!s) return ''
+  return s.replace(/^([a-z][a-z0-9+.-]*):\/\//i, (_, scheme) => scheme.toLowerCase() + '://')
+}
+function appStableDedupeKey (app) {
+  if (!app || typeof app !== 'object') return ''
+  const driveKey = /^[0-9a-f]{64}$/i.test(String(app.driveKey || '').trim())
+    ? String(app.driveKey).trim().toLowerCase()
+    : ''
+  const link = normalizeAppLinkForKey(app.link)
+  const hyperKey = /^hyper:\/\//i.test(link) ? driveKeyFromHyperRef(link) : ''
+  if (driveKey || hyperKey) return 'drive:' + (driveKey || hyperKey)
+  if (/^(?:hyper|pear|file):\/\/.+/i.test(link)) return 'link:' + link
+  const id = String(app.id || '').trim()
+  return id ? 'id:' + id : ''
+}
+function dedupeApps (list) {
+  const byKey = new Map()
+  const anon = []
+  for (const app of list) {
+    const key = appStableDedupeKey(app)
+    if (!key) {
+      anon.push(app)
+      continue
+    }
+    const existing = byKey.get(key)
+    if (!existing) {
+      byKey.set(key, { ...app, _sources: app.catalogName ? [app.catalogName] : [] })
+      continue
+    }
+    const sources = [...new Set([...(existing._sources || []), app.catalogName].filter(Boolean))]
+    // Keep the most-trustworthy copy's metadata, but backfill presentation-only
+    // fields (icon) from the other copy — so an app whose winning entry lacks an
+    // icon still shows one if ANY catalogue carries it (e.g. the offline seed
+    // wins on verification but only the published bee carries the inline icon).
+    const winner = betterApp(app, existing)
+    const other = winner === app ? existing : app
+    const merged = { ...winner }
+    if (!merged.iconData && other.iconData) merged.iconData = other.iconData
+    if (!merged.icon && other.icon) merged.icon = other.icon
+    byKey.set(key, { ...merged, _sources: sources })
+  }
+  return [...byKey.values(), ...anon]
+}
+
+// Decode an app's bundle drive key from its pear:// link (z-base-32 host,
+// tolerating a versioned `N.M.<z32>` form), falling back to its driveKey.
+// Used for live size/peers and to correlate launch-progress events.
+function appBundleKey (app) {
+  if (app && typeof app.link === 'string' && /^pear:\/\//.test(app.link)) {
+    const host = app.link.replace(/^pear:\/\//, '').split('/')[0].split('.').pop()
+    try { const k = hexFromZ32(host); if (/^[0-9a-f]{64}$/i.test(k)) return k.toLowerCase() } catch {}
+  }
+  if (app && /^[0-9a-f]{64}$/i.test(app.driveKey || '')) return app.driveKey.toLowerCase()
+  return null
+}
+
+// A card footer: the app's pear:// (or hyper://) address (click to copy), its
+// size, and a live peer count — all from CMD_GET_DRIVE_INFO on the bundle key.
+function AppMeta ({ rpc, C, app }) {
+  const bundleKey = appBundleKey(app)
+  const addr = (app && app.link) ? app.link : (app && /^[0-9a-f]{64}$/i.test(app.driveKey || '') ? ('hyper://' + app.driveKey + '/') : null)
+  const [info, setInfo] = useState(null)
+  useEffect(() => {
+    if (!bundleKey || !(C && C.CMD_GET_DRIVE_INFO)) { setInfo(null); return }
+    let cancelled = false
+    const load = async () => {
+      try { const r = await rpc.request(C.CMD_GET_DRIVE_INFO, { keyHex: bundleKey }, 12000); if (!cancelled) setInfo(r) } catch { /* best-effort */ }
+    }
+    load()
+    const t = setInterval(load, 15000)
+    return () => { cancelled = true; clearInterval(t) }
+  }, [bundleKey, rpc, C])
+  if (!addr) return null
+  const shortAddr = addr.length > 30 ? (addr.slice(0, 20) + '…' + addr.slice(-6)) : addr
+  const peers = info ? (info.peerCount || 0) : null
+  const size = info && info.byteLength ? formatBytes(info.byteLength) : null
+  return html`
+    <div className="app-p2p-meta" style=${{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px', marginTop: '5px', fontSize: '11px' }}>
+      <button title=${'Copy ' + addr} onClick=${(e) => { e.stopPropagation(); copyText(addr) }} style=${{ background: 'none', border: 'none', padding: 0, color: '#6e7681', cursor: 'pointer', fontFamily: 'ui-monospace, monospace', fontSize: '11px' }}>${shortAddr} ⧉</button>
+      ${size ? html`<span style=${{ color: '#8b949e' }}>${size}</span>` : ''}
+      <span title="Peers currently serving this app" style=${{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: peers > 0 ? '#3fb950' : '#6e7681' }}>
+        <span style=${{ width: '6px', height: '6px', borderRadius: '50%', background: peers > 0 ? '#3fb950' : '#484f58', display: 'inline-block' }}></span>
+        ${peers == null ? '…' : (peers + ' ' + (peers === 1 ? 'peer' : 'peers'))}
+      </span>
+    </div>
+  `
+}
+
+// Inline download-progress bar shown in place of a card's Run-app button while
+// the bundle is being pulled (driven by EVT_LAUNCH_PROGRESS).
+function LaunchBar ({ prog, onRetry }) {
+  if (!prog) return null
+  if (prog.phase === 'error') {
+    return html`<div style=${{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: '#f85149', width: '100%' }}>
+      <span>Launch failed${prog.error ? ': ' + prog.error : ''}</span>
+      <button className="btn subtle" onClick=${onRetry}>Retry</button>
+    </div>`
+  }
+  const pct = Math.max(0, Math.min(100, prog.phase === 'launching' ? 100 : (prog.percent || 0)))
+  const label = prog.phase === 'connecting' ? ('Finding peers… ' + (prog.peers || 0))
+    : prog.phase === 'launching' ? 'Launching…'
+    : (formatBytes(prog.downloaded || 0) + ' / ' + formatBytes(prog.total || 0) + ' · ' + (prog.peers || 0) + ' peers · ' + pct + '%')
+  return html`
+    <div style=${{ width: '100%' }}>
+      <div style=${{ height: '6px', borderRadius: '3px', background: '#21262d', overflow: 'hidden' }}>
+        <div style=${{ height: '100%', width: pct + '%', background: 'linear-gradient(90deg,#58a6ff,#3fb950)', transition: 'width .25s ease' }}></div>
+      </div>
+      <div style=${{ marginTop: '4px', fontSize: '11px', color: '#8b949e' }}>${label}</div>
+    </div>
+  `
 }
 
 function Apps ({ rpc, C, onLaunch }) {
@@ -1130,6 +1892,8 @@ function Apps ({ rpc, C, onLaunch }) {
   // `loadedCatalogs` is the metadata behind the source-facet chips.
   const [apps, setApps] = useState([])
   const [loadedCatalogs, setLoadedCatalogs] = useState([])
+  // The app whose detail "product page" is open (null = closed).
+  const [detailApp, setDetailApp] = useState(null)
   // Discovery facets: free-text search, category, and source catalog;
   // plus a map of appId → available newer version (from CMD_CHECK_UPDATES).
   const [query, setQuery] = useState('')
@@ -1153,18 +1917,39 @@ function Apps ({ rpc, C, onLaunch }) {
   const [autoLoadAttempted, setAutoLoadAttempted] = useState(false)
   const [pearLink, setPearLink] = useState('')
   const [launched, setLaunched] = useState('')
+  // Live download/launch progress per bundle key, fed by EVT_LAUNCH_PROGRESS.
+  const [launchProg, setLaunchProg] = useState({})
+  useEffect(() => {
+    if (!(rpc && C && C.EVT_LAUNCH_PROGRESS)) return
+    const onProg = (e) => {
+      const d = (e && e.detail) || {}
+      const k = d.key || d.link
+      if (!k) return
+      setLaunchProg((prev) => {
+        const next = { ...prev, [k]: d }
+        if (d.phase === 'done') setTimeout(() => setLaunchProg((p) => { const n = { ...p }; delete n[k]; return n }), 1200)
+        return next
+      })
+    }
+    rpc.addEventListener(`event:${C.EVT_LAUNCH_PROGRESS}`, onProg)
+    return () => rpc.removeEventListener(`event:${C.EVT_LAUNCH_PROGRESS}`, onProg)
+  }, [rpc, C])
 
   const launchPearLink = async (overrideLink) => {
     const link = (typeof overrideLink === 'string' ? overrideLink : pearLink).trim()
     if (!link) return
+    const keyHex = appBundleKey({ link })
     setErr(''); setBusy('pear-link'); setLaunched('')
+    if (keyHex) setLaunchProg((p) => ({ ...p, [keyHex]: { phase: 'connecting', percent: 0, peers: 0, downloaded: 0, total: 0 } }))
     try {
-      await rpc.request(C.CMD_LAUNCH_PEAR_LINK, { link }, 60000)
-      setLaunched(`Launched ${link.slice(0, 60)}${link.length > 60 ? '…' : ''} in a new window.`)
+      await rpc.request(C.CMD_LAUNCH_PEAR_LINK, { link, keyHex }, 60000)
       setPearLink('')
-      setTimeout(() => setLaunched(''), 4000)
+      // pear:// launches show progress inline via EVT_LAUNCH_PROGRESS; file://
+      // and others have no bundle to track, so keep the toast for them.
+      if (!keyHex) { setLaunched(`Launched ${link.slice(0, 60)}${link.length > 60 ? '…' : ''} in a new window.`); setTimeout(() => setLaunched(''), 4000) }
     } catch (e) {
       setErr(`launch: ${e.message}`)
+      if (keyHex) setLaunchProg((p) => ({ ...p, [keyHex]: { phase: 'error', error: e.message } }))
     } finally {
       setBusy(null)
     }
@@ -1209,6 +1994,38 @@ function Apps ({ rpc, C, onLaunch }) {
     setErr(`launch: unsupported scheme for featured app "${app.name}" — ${link.slice(0, 32)}`)
   }
 
+  // Run in tab: spawn the app as a HEADLESS pear-request worker and stream its
+  // htmx UI into a Browse tab (no separate window). The backend returns a local
+  // wrapper URL; onLaunch opens it in Browse just like any other page.
+  const runInTab = async (app) => {
+    if (app && app.type !== 'hypersite') {
+      setErr(`${app.name || 'This app'} is window-only: its catalogue type is "${app.type || 'standalone'}", not "hypersite".`)
+      return
+    }
+    setErr(''); setBusy('run-in-tab'); setLaunched('')
+    try {
+      const res = await rpc.request(C.CMD_RUN_APP_IN_TAB, { link: app.link }, 30000)
+      onLaunch?.(res.url)
+      setLaunched(`Running ${app.name} headless in a tab.`)
+      setTimeout(() => setLaunched(''), 4000)
+    } catch (e) {
+      setErr(`run in tab: ${e.message}`)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // A static hyperdrive site (driveKey, no pear-request link) "runs" by opening
+  // in a Browse tab — its HTML renders directly. (pear-request hypersites use
+  // runInTab; standalone apps open in their own window via launchFeaturedApp.)
+  const openSite = (app) => {
+    if (!app || !app.driveKey) return
+    setErr(''); setLaunched('')
+    onLaunch?.('hyper://' + app.driveKey + '/')
+    setLaunched(`Opened ${app.name}.`)
+    setTimeout(() => setLaunched(''), 3500)
+  }
+
   const refreshInstalled = async () => {
     try {
       const list = await rpc.request(C.CMD_LIST_INSTALLED)
@@ -1243,7 +2060,11 @@ function Apps ({ rpc, C, onLaunch }) {
     await refreshUpdates()
   }
 
-  const inMyCatalog = (id) => !!(myCatalog && id && Array.isArray(myCatalog.apps) && myCatalog.apps.some((a) => a.id === id || a.driveKey === id))
+  const inMyCatalog = (target) => {
+    const targets = Array.isArray(target) ? target.filter(Boolean) : [target].filter(Boolean)
+    if (!myCatalog || !targets.length || !Array.isArray(myCatalog.apps)) return false
+    return myCatalog.apps.some((a) => targets.some((id) => a.id === id || a.driveKey === id || a.link === id))
+  }
   const canEditMyCatalog = !!(myCatalog && myCatalog.writable)
 
   const copyKey = (k) => {
@@ -1277,7 +2098,7 @@ function Apps ({ rpc, C, onLaunch }) {
       setErr('This catalog is not editable on this device.')
       return
     }
-    const id = app.id || app.driveKey
+    const id = app.id || app.driveKey || app.link
     setErr(''); setBusy(`addcat:${id}`)
     try {
       const res = await rpc.request(C.CMD_MYCATALOG_ADD_APP, { keyHex: myCatalog.keyHex, app }, 60000)
@@ -1344,15 +2165,17 @@ function Apps ({ rpc, C, onLaunch }) {
   }
 
   const startEditMyCatalogApp = (app) => {
-    const id = app.id || app.driveKey
+    const id = app.id || app.driveKey || app.link
     if (!id) return
     setEditingAppId(id)
     setAppDraft({
       name: app.name || '',
+      type: app.type || 'standalone',
       description: app.description || '',
       version: app.version || '',
       author: app.author || '',
-      categories: appCategories(app).join(', ')
+      categories: appCategories(app).join(', '),
+      icon: app.icon || app.iconRef || ''
     })
   }
 
@@ -1382,10 +2205,12 @@ function Apps ({ rpc, C, onLaunch }) {
         id,
         app: {
           name: appDraft.name,
+          type: appDraft.type,
           description: appDraft.description,
           version: appDraft.version,
           author: appDraft.author,
-          categories
+          categories,
+          icon: appDraft.icon
         }
       }, 60000)
       setMyCatalog(res)
@@ -1416,19 +2241,23 @@ function Apps ({ rpc, C, onLaunch }) {
   // Add a catalog to the set (does not replace existing ones), persist it
   // as recent, then re-aggregate.
   const loadCatalog = async (overrideKey) => {
-    const key = (typeof overrideKey === 'string' ? overrideKey : catalogKey).trim()
-    if (!key) return
+    const raw = (typeof overrideKey === 'string' ? overrideKey : catalogKey).trim()
+    const parsed = parseCatalogRef(raw)
+    if (!parsed) return
     setErr(''); setBusy('catalog')
     try {
-      await rpc.request(C.CMD_LOAD_CATALOG, { keyHex: key }, 60000)
+      // Route by scheme: hyper(drive) / hyperbee:// / autobee:// / sheets:// / hiveindex://.
+      const { cmd, payload, persistRef } = catalogLoadPlan(parsed, C)
+      await rpc.request(cmd, payload || { keyHex: parsed.key }, 60000)
       setCatalogKey('')
       await refreshAggregate()
       refreshUpdates()
-      // Pin as recent + persist for next launch.
+      // Pin as recent + persist the scheme-qualified ref so the next launch
+      // routes to the same loader.
       setRecentCatalogs((prev) => {
-        const next = [key, ...prev.filter((k) => k !== key)].slice(0, 8)
+        const next = [persistRef, ...prev.filter((k) => k !== persistRef)].slice(0, 8)
         rpc.request(C.CMD_USERDATA_SET_SETTINGS, {
-          updates: { lastCatalogKey: key, recentCatalogs: next }
+          updates: { lastCatalogKey: persistRef, recentCatalogs: next }
         }).catch(() => {})
         return next
       })
@@ -1447,8 +2276,9 @@ function Apps ({ rpc, C, onLaunch }) {
       await rpc.request(C.CMD_UNLOAD_CATALOG, { keyHex: key })
       if (source === key) setSource('all')
       await refreshAggregate()
+      const removed = catalogCacheKeyForRef(key)
       setRecentCatalogs((prev) => {
-        const next = prev.filter((k) => k !== key && `bee:${k}` !== key)
+        const next = prev.filter((k) => catalogCacheKeyForRef(k) !== removed)
         rpc.request(C.CMD_USERDATA_SET_SETTINGS, { updates: { recentCatalogs: next } }).catch(() => {})
         return next
       })
@@ -1461,23 +2291,74 @@ function Apps ({ rpc, C, onLaunch }) {
   // the aggregated store is populated, not just the most recent one.
   useEffect(() => {
     refreshInstalled()
+    // Pull the aggregated store immediately so backend-registered catalogues
+    // (e.g. the default schema-sheets catalogue, seeded on boot) show up without
+    // waiting on a recent/relay catalog load to resolve.
+    refreshAggregate()
     ;(async () => {
       try {
         const settings = unwrapSettings(await rpc.request(C.CMD_USERDATA_GET_SETTINGS))
-        const recent = Array.isArray(settings?.recentCatalogs) ? settings.recentCatalogs : []
+        const recentRaw = Array.isArray(settings?.recentCatalogs) ? settings.recentCatalogs : []
         // Back-compat: older builds persisted only a single lastCatalogKey.
         const last = settings?.lastCatalogKey
         const myKey = typeof settings?.myCatalogKey === 'string' ? settings.myCatalogKey : null
-        const keys = [...new Set([...recent, ...(last ? [last] : []), ...(myKey ? [myKey] : [])])]
+        // Migrate installs stuck on the dead 0c35 hyperdrive (its writable secret was
+        // unrecoverable) → the live PearBrowser Network bee. Handles bare + hyper:// forms.
+        const migrateKey = (k) => (parseCatalogRef(k)?.key === OLD_DEAD_CATALOG_KEY ? DEFAULT_CATALOG_KEY : k)
+        const recent = recentRaw.map(migrateKey)
+        if (recent.some((k, i) => k !== recentRaw[i])) {
+          rpc.request(C.CMD_USERDATA_SET_SETTINGS, { updates: { recentCatalogs: recent } }).catch(() => {})
+        }
+        const keys = [...new Set([...recent, ...(last ? [migrateKey(last)] : []), ...(myKey ? [myKey] : [])])]
         if (recent.length) setRecentCatalogs(recent)
         if (myKey) {
           rpc.request(C.CMD_MYCATALOG_GET, { keyHex: myKey }).then(setMyCatalog).catch(() => {})
         }
-        if (keys.length) {
+        // Fresh install: nothing saved yet. Seed the curated default catalog
+        // once so the Apps tab shows apps on first visit instead of an empty
+        // store. We only seed a single time (defaultCatalogSeeded) so that if
+        // the user later unloads everything we respect that rather than
+        // re-adding the default on every launch.
+        const seeded = settings?.defaultCatalogSeeded === true
+        const communitySeeded = settings?.communityCatalogSeeded === true
+        const comKey = parseCatalogRef(DEFAULT_COMMUNITY_CATALOG)?.key
+        const hasCommunity = keys.some((k) => parseCatalogRef(k)?.key === comKey)
+        // Fresh install → load BOTH defaults (curated + community). An install that
+        // predates the community list → add it once (communityCatalogSeeded), so a
+        // later manual unload is still respected rather than re-added every launch.
+        let toLoad = keys.length ? [...keys] : (seeded ? [] : [DEFAULT_CATALOG_KEY, DEFAULT_COMMUNITY_CATALOG])
+        const addCommunity = !hasCommunity && !communitySeeded
+        if (addCommunity) toLoad = [...new Set([...toLoad, DEFAULT_COMMUNITY_CATALOG])]
+        if (toLoad.length) {
           setBusy('catalog')
           await Promise.allSettled(
-            keys.map((k) => rpc.request(C.CMD_LOAD_CATALOG, { keyHex: k }, 60000))
+            toLoad.map((k) => {
+              const parsed = parseCatalogRef(k)
+              if (!parsed) return Promise.resolve()
+              const { cmd, payload } = catalogLoadPlan(parsed, C)
+              // The community bee's durability is best-effort; cap its load so an
+              // unreachable community catalog can't delay the curated list or the
+              // aggregate refresh. The backend now also bounds the read itself.
+              const isCommunity = parseCatalogRef(DEFAULT_COMMUNITY_CATALOG)?.key === parsed.key
+              return rpc.request(cmd, payload || { keyHex: parsed.key }, isCommunity ? 25000 : 60000)
+            })
           )
+          const updates = {}
+          if (!keys.length && !seeded) {
+            const fresh = [DEFAULT_CATALOG_KEY, DEFAULT_COMMUNITY_CATALOG]
+            setRecentCatalogs(fresh)
+            updates.recentCatalogs = fresh
+            updates.defaultCatalogSeeded = true
+            updates.communityCatalogSeeded = true
+          } else if (addCommunity) {
+            const next = [...new Set([...recent, DEFAULT_COMMUNITY_CATALOG])]
+            setRecentCatalogs(next)
+            updates.recentCatalogs = next
+            updates.communityCatalogSeeded = true
+          }
+          if (Object.keys(updates).length) {
+            rpc.request(C.CMD_USERDATA_SET_SETTINGS, { updates }).catch(() => {})
+          }
           await refreshAggregate()
           refreshUpdates()
           setBusy(null)
@@ -1539,16 +2420,23 @@ function Apps ({ rpc, C, onLaunch }) {
   }, [apps])
 
   const filteredApps = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    return apps.filter((a) => {
+    const q = query.normalize('NFKC').trim().toLowerCase()
+    const matched = apps.filter((a) => {
+      // Apps page = runnable apps only. A `link` (launchable pear://|file:// app,
+      // or a pear-request hypersite) means runnable; pure static sites (driveKey,
+      // no link) live on the P2P Sites tab, not here.
+      if (!a || !a.link) return false
       if (source !== 'all' && a.catalogKey !== source) return false
       if (category !== 'all' && !appCategories(a).includes(category)) return false
       if (!q) return true
-      return (a.name && a.name.toLowerCase().includes(q)) ||
-        (a.description && a.description.toLowerCase().includes(q)) ||
-        (a.author && String(a.author).toLowerCase().includes(q))
+      return catalogAppSearchText(a).includes(q)
     })
+    // Collapse the same app across catalogues / duplicate rows.
+    return dedupeApps(matched)
   }, [apps, query, category, source])
+
+  // Total unique-app count (deduped, ignoring search/category) for the headers.
+  const uniqueAppCount = useMemo(() => dedupeApps(apps.filter((a) => a && a.link)).length, [apps])
 
   const renderMyCatalogApp = (app) => {
     const savedId = app.id || app.driveKey || app.name || 'untitled'
@@ -1556,55 +2444,75 @@ function Apps ({ rpc, C, onLaunch }) {
     const editing = editingAppId === editableId && appDraft
     const canSave = !!(appDraft && String(appDraft.name || '').trim())
     return html`
-      <div class=${'app-card' + (editing ? ' editing' : '')} key=${savedId}>
-        <div class="app-icon app-icon-fallback">${(app.name || '?').charAt(0)}</div>
-        <div class="app-info">
+      <div className=${'app-card' + (editing ? ' editing' : '')} key=${savedId}>
+        <${AppIcon} rpc=${rpc} C=${C} driveKey=${app.driveKey} iconRef=${app.icon} iconData=${app.iconData} name=${app.name} />
+        <div className="app-info">
           ${editing
             ? html`
-              <div class="catalog-edit-form">
-                <label>
-                  Name
-                  <input type="text" value=${appDraft.name} onInput=${(e) => updateAppDraft('name', e.target.value)} />
-                </label>
-                <label>
-                  Description
-                  <textarea rows="3" value=${appDraft.description} onInput=${(e) => updateAppDraft('description', e.target.value)}></textarea>
-                </label>
-                <div class="catalog-form-grid">
+              <div className="catalog-edit-wrap">
+                <div className="catalog-edit-form">
                   <label>
-                    Version
-                    <input type="text" value=${appDraft.version} onInput=${(e) => updateAppDraft('version', e.target.value)} />
+                    Name
+                    <input type="text" value=${appDraft.name} onInput=${(e) => updateAppDraft('name', e.target.value)} />
                   </label>
                   <label>
-                    Author
-                    <input type="text" value=${appDraft.author} onInput=${(e) => updateAppDraft('author', e.target.value)} />
+                    Type <span style=${{ opacity: 0.6, fontWeight: 'normal' }}>(how it launches — required)</span>
+                    <select value=${appDraft.type || 'standalone'} onChange=${(e) => updateAppDraft('type', e.target.value)} style=${{ width: '100%', padding: '8px', borderRadius: '6px', background: '#0d1117', color: '#c9d1d9', border: '1px solid #30363d' }}>
+                      <option value="standalone">standalone — opens in its own window (pear:// app)</option>
+                      <option value="hypersite">hypersite — runs inline in a tab (pear-request / static)</option>
+                    </select>
                   </label>
+                  <label>
+                    Description
+                    <textarea rows="3" value=${appDraft.description} onInput=${(e) => updateAppDraft('description', e.target.value)}></textarea>
+                  </label>
+                  <div className="catalog-form-grid">
+                    <label>
+                      Version
+                      <input type="text" value=${appDraft.version} onInput=${(e) => updateAppDraft('version', e.target.value)} />
+                    </label>
+                    <label>
+                      Author
+                      <input type="text" value=${appDraft.author} onInput=${(e) => updateAppDraft('author', e.target.value)} />
+                    </label>
+                  </div>
+                  <label>
+                    Categories
+                    <input type="text" value=${appDraft.categories} onInput=${(e) => updateAppDraft('categories', e.target.value)} />
+                  </label>
+                  <label>
+                    Icon <span style=${{ opacity: 0.6, fontWeight: 'normal' }}>(path inside your drive, e.g. /icon.svg)</span>
+                    <input type="text" placeholder="/icon.svg" value=${appDraft.icon || ''} onInput=${(e) => updateAppDraft('icon', e.target.value)} />
+                  </label>
+                  ${(app.link || app.driveKey) && html`<div className="app-meta" style=${{ marginTop: '2px', fontFamily: 'ui-monospace, monospace', fontSize: '11px', color: '#6e7681', wordBreak: 'break-all' }}>launch: ${app.link || ('hyper://' + app.driveKey + '/')}</div>`}
                 </div>
-                <label>
-                  Categories
-                  <input type="text" value=${appDraft.categories} onInput=${(e) => updateAppDraft('categories', e.target.value)} />
-                </label>
               </div>
             `
             : html`
-              <div class="app-name">${app.name || app.id}</div>
-              <div class="app-desc">${app.description || ''}</div>
-              <div class="app-meta">${app.version ? 'v' + app.version : ''} ${app.author ? '· ' + app.author : ''}</div>
+              <div className="app-info-copy">
+                <div className="app-name">${app.name || app.id}</div>
+                <div className="app-desc">${app.description || ''}</div>
+                <div className="app-meta">${app.version ? 'v' + app.version : ''} ${app.author ? '· ' + app.author : ''}</div>
+              </div>
             `}
         </div>
-        <div class="app-actions">
+        <div className="app-actions">
           ${editing
             ? html`
-              <button class="btn primary" onClick=${() => saveMyCatalogApp(editableId)} disabled=${busy === `editcat:${editableId}` || !canSave}>
-                ${busy === `editcat:${editableId}` ? 'Saving…' : 'Save'}
-              </button>
-              <button class="btn subtle" onClick=${cancelEditMyCatalogApp} disabled=${busy === `editcat:${editableId}`}>Cancel</button>
+              <div className="app-actions-group">
+                <button key="save" className="btn primary" onClick=${() => saveMyCatalogApp(editableId)} disabled=${busy === `editcat:${editableId}` || !canSave}>
+                  ${busy === `editcat:${editableId}` ? 'Saving…' : 'Save'}
+                </button>
+                <button key="cancel" className="btn subtle" onClick=${cancelEditMyCatalogApp} disabled=${busy === `editcat:${editableId}`}>Cancel</button>
+              </div>
             `
             : html`
-              ${canEditMyCatalog && editableId && html`
-                <button class="btn subtle" onClick=${() => startEditMyCatalogApp(app)} disabled=${busy === `rmcat:${editableId}`}>Edit</button>
-                <button class="btn subtle" onClick=${() => removeFromMyCatalog(editableId)} disabled=${busy === `rmcat:${editableId}`}>Remove</button>
-              `}
+              <div className="app-actions-group">
+                ${canEditMyCatalog && editableId && html`
+                  <button key="edit" className="btn subtle" onClick=${() => startEditMyCatalogApp(app)} disabled=${busy === `rmcat:${editableId}`}>Edit</button>
+                  <button key="remove" className="btn subtle" onClick=${() => removeFromMyCatalog(editableId)} disabled=${busy === `rmcat:${editableId}`}>Remove</button>
+                `}
+              </div>
             `}
         </div>
       </div>
@@ -1612,88 +2520,90 @@ function Apps ({ rpc, C, onLaunch }) {
   }
 
   return html`
-    <div class="apps">
+    <div className="apps">
       <h1>Apps</h1>
-      <p class="subtitle">Launch any Pear app by link, or browse a HiveRelay catalog.</p>
+      <p className="subtitle">Launch any Pear app by link, or browse a HiveRelay catalog.</p>
 
       <h2>Featured</h2>
-      <div class="app-grid">
+      <div className="app-grid">
         ${FEATURED_APPS.map((app) => html`
-          <div class="app-card" key=${app.id}>
-            <div class="app-icon app-icon-fallback" style=${{ background: app.gradient, color: '#0b0e14' }}>${app.initial}</div>
-            <div class="app-info">
-              <div class="app-name">${app.name}</div>
-              <div class="app-desc">${app.tagline}</div>
-              <div class="app-meta" title=${app.link}>${app.link.slice(0, 20)}…${app.link.slice(-6)}</div>
+          <div className="app-card" key=${app.id}>
+            <div className="app-icon app-icon-fallback" style=${{ background: app.gradient, color: '#0b0e14' }}>${app.initial}</div>
+            <div className="app-info">
+              <div className="app-name">${app.name}</div>
+              <div className="app-desc">${app.tagline}</div>
+              <div className="app-meta" title=${app.link}>${app.link.slice(0, 20)}…${app.link.slice(-6)}</div>
             </div>
-            <div class="app-actions">
-              <button class="btn primary" onClick=${() => launchFeaturedApp(app)} disabled=${busy === 'pear-link'}>Launch</button>
+            <div className="app-actions">
+              ${app.type === 'hypersite'
+                ? html`<button key="run-featured" className="btn primary" onClick=${() => runInTab(app)} disabled=${busy === 'run-in-tab'} title="Run headless — the app's UI streams into a tab over a pipe">Run in tab</button>`
+                : html`<button key="open-featured" className="btn primary" onClick=${() => launchFeaturedApp(app)} disabled=${busy === 'pear-link'} title="Full Pear app — opens in its own window">Open</button>`}
             </div>
           </div>
         `)}
       </div>
 
       <h2>Launch a Pear app</h2>
-      <div class="catalog-loader">
+      <div className="catalog-loader">
         <input
           type="text"
           placeholder=${'pear://<key> — opens in a new window'}
           value=${pearLink}
           onInput=${(e) => setPearLink(e.target.value)}
           onKeyDown=${(e) => e.key === 'Enter' && launchPearLink()}
-          spellcheck="false"
+          spellCheck="false"
         />
-        <button class="btn primary" onClick=${launchPearLink} disabled=${!pearLink || busy === 'pear-link'}>
+        <button className="btn primary" onClick=${launchPearLink} disabled=${!pearLink || busy === 'pear-link'}>
           ${busy === 'pear-link' ? 'Launching…' : 'Launch'}
         </button>
       </div>
-      ${launched && html`<div class="apps-ok">${launched}</div>`}
+      ${launched && html`<div className="apps-ok">${launched}</div>`}
 
       <h2>App Catalog</h2>
-      <div class="catalog-loader">
+      <div className="catalog-loader">
         <input
           type="text"
-          placeholder="Catalog drive key (hex or z32)"
+          placeholder="Catalog key: hex, z32, hyperbee://…, autobee://…, sheets://… or hiveindex://…"
           value=${catalogKey}
           onInput=${(e) => setCatalogKey(e.target.value)}
           onKeyDown=${(e) => e.key === 'Enter' && loadCatalog()}
-          spellcheck="false"
+          spellCheck="false"
         />
-        <button class="btn primary" onClick=${() => loadCatalog()} disabled=${!catalogKey || busy === 'catalog'}>
+        <button className="btn primary" onClick=${() => loadCatalog()} disabled=${!catalogKey || busy === 'catalog'}>
           ${busy === 'catalog' ? 'Loading…' : 'Add catalog'}
         </button>
       </div>
 
       ${loadedCatalogs.length > 0 && html`
-        <div class="catalog-sources">
+        <div className="catalog-sources">
           <button
-            class=${'catalog-chip' + (source === 'all' ? ' active' : '')}
+            className=${'catalog-chip' + (source === 'all' ? ' active' : '')}
             onClick=${() => setSource('all')}
-          >All · ${apps.length}</button>
+          >All · ${uniqueAppCount}</button>
           ${loadedCatalogs.map((cat) => html`
-            <span class="catalog-source" key=${cat.key}>
+            <span className="catalog-source" key=${cat.key}>
               <button
-                class=${'catalog-chip' + (source === cat.key ? ' active' : '')}
+                className=${'catalog-chip' + (source === cat.key ? ' active' : '')}
                 title=${cat.key}
                 onClick=${() => setSource(cat.key)}
               >${cat.name} · ${cat.count}</button>
-              <button class="catalog-source-x" title="Remove this catalog" onClick=${() => unloadCatalog(cat.key)}>×</button>
+              <button className="catalog-source-x" title="Remove this catalog" onClick=${() => unloadCatalog(cat.key)}>×</button>
             </span>
           `)}
         </div>
       `}
 
-      ${err && html`<div class="apps-error">${err}</div>`}
+      ${err && html`<div className="apps-error">${err}</div>`}
 
       ${busy === 'catalog' && apps.length === 0 && html`
-        <div class="catalog-loading">
-          <span class="spinner"></span>
+        <div className="catalog-loading">
+          <span className="spinner"></span>
           <span>Loading catalogs from peers…</span>
         </div>
       `}
 
       ${autoLoadAttempted && apps.length === 0 && !busy && !err && html`
-        <div class="catalog-empty">
+        <div className="catalog-empty">
           <strong>No catalogs loaded.</strong>
           Paste a catalog drive key above, or use one of the featured Pear apps to launch directly.
           The browser remembers catalogs you've loaded before — they'll reload here next time.
@@ -1701,99 +2611,108 @@ function Apps ({ rpc, C, onLaunch }) {
       `}
 
       ${apps.length > 0 && html`
-        <h2>All apps · ${apps.length}${loadedCatalogs.length ? ` across ${loadedCatalogs.length} ${loadedCatalogs.length === 1 ? 'catalog' : 'catalogs'}` : ''}</h2>
+        <div className="catalog-results">
+          <h2>All apps · ${uniqueAppCount}${loadedCatalogs.length ? ` across ${loadedCatalogs.length} ${loadedCatalogs.length === 1 ? 'catalog' : 'catalogs'}` : ''}</h2>
 
-        <div class="catalog-filter">
-          <input
-            type="text"
-            class="catalog-search"
-            placeholder="Search apps by name, description, or author…"
-            value=${query}
-            onInput=${(e) => setQuery(e.target.value)}
-            spellcheck="false"
-          />
-          ${categories.length > 1 && html`
-            <div class="catalog-categories">
-              ${categories.map((c) => html`
-                <button
-                  class=${'catalog-chip' + (c === category ? ' active' : '')}
-                  key=${c}
-                  onClick=${() => setCategory(c)}
-                >${c === 'all' ? 'All' : c}</button>
-              `)}
+          <div className="catalog-filter">
+            <input
+              type="text"
+              className="catalog-search"
+              placeholder="Search apps by name, category, catalogue, or author…"
+              value=${query}
+              onInput=${(e) => setQuery(e.target.value)}
+              spellCheck="false"
+            />
+            ${categories.length > 1 && html`
+              <div className="catalog-categories">
+                ${categories.map((c) => html`
+                  <button
+                    className=${'catalog-chip' + (c === category ? ' active' : '')}
+                    key=${c}
+                    onClick=${() => setCategory(c)}
+                  >${c === 'all' ? 'All' : c}</button>
+                `)}
+              </div>
+            `}
+          </div>
+
+          ${filteredApps.length === 0
+            ? html`<p className="placeholder">No apps match ${query ? `"${query}"` : 'this filter'}.</p>`
+            : html`<div className="app-grid">
+              ${filteredApps.map((app) => html`
+              <div className="app-card" key=${app.id}>
+                <${AppIcon} rpc=${rpc} C=${C} driveKey=${app.driveKey} iconRef=${app.icon} iconData=${app.iconData} name=${app.name} />
+                <div className="app-info" onClick=${() => setDetailApp(app)} style=${{ cursor: 'pointer' }} title="View details">
+                  <div className="app-name">
+                    ${app.name || app.id || 'Untitled app'}
+                    ${app.verification === 'relay-listed' ? html`<span title="Relay-listed" style=${{ marginLeft: '5px', color: '#58a6ff', fontSize: '12px' }}>✓</span>` : ''}
+                    ${app.verification === 'author-signed' ? html`<span title="Author-signed" style=${{ marginLeft: '5px', color: '#3fb950', fontSize: '12px' }}>✦</span>` : ''}
+                  </div>
+                  <div className="app-desc">${app.description || ''}</div>
+                  <div className="app-meta">
+                    ${app.version ? 'v' + app.version : ''} ${app.author ? '· ' + app.author : ''}
+                    ${app.type === 'hypersite' ? html`<span style=${{ marginLeft: '6px', opacity: 0.75 }}>· ${app.driveKey && !app.link ? 'opens in a tab' : 'runs in a tab'}</span>` : (app.link && !app.driveKey ? html`<span style=${{ marginLeft: '6px', opacity: 0.75 }}>· opens in a window</span>` : '')}
+                  </div>
+                  ${app.catalogName && html`<div className="app-source-tag">${app.catalogName}</div>`}
+                  <${AppMeta} rpc=${rpc} C=${C} app=${app} />
+                </div>
+                <div className="app-actions">
+                  ${(() => {
+                    const bk = appBundleKey(app)
+                    const prog = bk && launchProg[bk]
+                    if (prog && prog.phase !== 'done') {
+                      return html`<${LaunchBar} prog=${prog} onRetry=${() => (app.type === 'hypersite' ? runInTab(app) : launchFeaturedApp(app))} />`
+                    }
+                    return html`
+                      ${app.driveKey && /^[0-9a-f]{64}$/i.test(app.driveKey)
+                        ? html`<button key="open-page" className="btn subtle" onClick=${() => openSite(app)} title="Open this app's P2P page in a tab">Open page</button>`
+                        : ''}
+                      ${app.type === 'hypersite'
+                        ? html`<button key="run-in-tab" className="btn primary" onClick=${() => runInTab(app)} disabled=${busy === 'run-in-tab'} title="Run headless — the app's UI streams into a tab">Run app</button>`
+                        : html`<button key="run-window" className="btn primary" onClick=${() => launchFeaturedApp(app)} disabled=${busy === 'pear-link'} title="Open the app in its own window">Run app</button>`}
+                      ${canEditMyCatalog && app.catalogKey !== myCatalog.keyHex && !inMyCatalog([app.id, app.driveKey, app.link]) && html`
+                        <button key="add-catalog" className="btn subtle" title="Add to my catalog" onClick=${() => addToMyCatalog(app)} disabled=${busy === `addcat:${app.id || app.driveKey || app.link}`}>+ Catalog</button>
+                      `}
+                    `
+                  })()}
+                </div>
+              </div>
+            `)}
             </div>
           `}
         </div>
-
-        ${filteredApps.length === 0
-          ? html`<p class="placeholder">No apps match ${query ? `"${query}"` : 'this filter'}.</p>`
-          : html`<div class="app-grid">
-            ${filteredApps.map((app) => html`
-            <div class="app-card" key=${app.id}>
-              ${safeIconSrc(app.iconData)
-                ? html`<img src=${safeIconSrc(app.iconData)} alt="" class="app-icon" />`
-                : html`<div class="app-icon app-icon-fallback">${(app.name || '?').charAt(0)}</div>`}
-              <div class="app-info">
-                <div class="app-name">${app.name || app.id || 'Untitled app'}</div>
-                <div class="app-desc">${app.description || ''}</div>
-                <div class="app-meta">${app.version ? 'v' + app.version : ''} ${app.author ? '· ' + app.author : ''}</div>
-                ${app.catalogName && html`<div class="app-source-tag">${app.catalogName}</div>`}
-              </div>
-              <div class="app-actions">
-                ${isInstalled(app.id)
-                  ? html`
-                    ${updates[app.id] && html`
-                      <button class="btn primary" onClick=${() => updateApp(app.id)} disabled=${busy === `install:${app.id}`}>
-                        ${busy === `install:${app.id}` ? 'Updating…' : `Update → v${updates[app.id]}`}
-                      </button>
-                    `}
-                    <button class="btn" onClick=${() => launchApp(app)} disabled=${busy === `launch:${app.id}`}>Launch</button>
-                    <button class="btn subtle" onClick=${() => uninstallApp(app)} disabled=${busy === `uninstall:${app.id}`}>Uninstall</button>
-                  `
-                  : html`
-                    <button class="btn primary" onClick=${() => installApp(app)} disabled=${busy === `install:${app.id}`}>
-                      ${busy === `install:${app.id}` ? 'Installing…' : 'Install'}
-                    </button>
-                  `}
-                ${canEditMyCatalog && app.catalogKey !== myCatalog.keyHex && !inMyCatalog(app.id || app.driveKey) && html`
-                  <button class="btn subtle" title="Add to my catalog" onClick=${() => addToMyCatalog(app)} disabled=${busy === `addcat:${app.id || app.driveKey}`}>+ Catalog</button>
-                `}
-              </div>
-            </div>
-          `)}
-          </div>`}
       `}
 
       <h2>My Catalog</h2>
       ${!myCatalog
         ? html`
-          <div class="catalog-empty">
+          <div className="catalog-empty">
             <strong>Publish your own catalog.</strong>
             Create a catalog, add apps you want to share, then hand out its key — anyone can load it above to discover your picks. It's pinned to the relays, so it stays reachable even when you're offline.
-            <div class="catalog-loader" style=${{ marginTop: '10px' }}>
+            <div className="catalog-loader" style=${{ marginTop: '10px' }}>
               <input
                 type="text"
                 placeholder="Catalog name (e.g. My Picks)"
                 value=${newCatalogName}
                 onInput=${(e) => setNewCatalogName(e.target.value)}
                 onKeyDown=${(e) => e.key === 'Enter' && createMyCatalog()}
-                spellcheck="false"
+                spellCheck="false"
               />
-              <button class="btn primary" onClick=${createMyCatalog} disabled=${busy === 'mycatalog'}>
+              <button className="btn primary" onClick=${createMyCatalog} disabled=${busy === 'mycatalog'}>
                 ${busy === 'mycatalog' ? 'Creating…' : 'Create catalog'}
               </button>
             </div>
           </div>
         `
         : html`
-          <div class="mycatalog">
-            <div class="mycatalog-head">
-              <div class="mycatalog-title">
+          <div className="mycatalog">
+            <div className="mycatalog-head">
+              <div className="mycatalog-title">
                 ${editingCatalogName
                   ? html`
-                    <div class="mycatalog-title-edit">
+                    <div className="mycatalog-title-edit">
                       <input
-                        class="mycatalog-title-input"
+                        className="mycatalog-title-input"
                         type="text"
                         value=${catalogNameDraft}
                         onInput=${(e) => setCatalogNameDraft(e.target.value)}
@@ -1801,29 +2720,29 @@ function Apps ({ rpc, C, onLaunch }) {
                           if (e.key === 'Enter') saveMyCatalogName()
                           if (e.key === 'Escape') setEditingCatalogName(false)
                         }}
-                        spellcheck="false"
+                        spellCheck="false"
                         autoFocus
                       />
-                      <button class="btn primary small" onClick=${saveMyCatalogName} disabled=${busy === 'renamecat' || !catalogNameDraft.trim()}>
-                        ${busy === 'renamecat' ? 'Saving…' : 'Save'}
-                      </button>
-                      <button class="btn subtle small" onClick=${() => setEditingCatalogName(false)} disabled=${busy === 'renamecat'}>Cancel</button>
+                    <button key="save-name" className="btn primary small" onClick=${saveMyCatalogName} disabled=${busy === 'renamecat' || !catalogNameDraft.trim()}>
+                      ${busy === 'renamecat' ? 'Saving…' : 'Save'}
+                    </button>
+                    <button key="cancel-name" className="btn subtle small" onClick=${() => setEditingCatalogName(false)} disabled=${busy === 'renamecat'}>Cancel</button>
                     </div>
                   `
                   : html`
-                    <div class="mycatalog-title-row">
-                      <div class="app-name">${myCatalog.name}</div>
-                      ${canEditMyCatalog && html`<button class="btn subtle small" onClick=${startRenameMyCatalog}>Rename</button>`}
+                    <div className="mycatalog-title-row">
+                      <div className="app-name">${myCatalog.name}</div>
+                      ${canEditMyCatalog && html`<button key="rename" className="btn subtle small" onClick=${startRenameMyCatalog}>Rename</button>`}
                     </div>
                   `}
-                <div class="app-meta">${myCatalog.apps.length} app${myCatalog.apps.length === 1 ? '' : 's'}${myCatalog.writable ? '' : ' · read-only on this device'}</div>
+                <div className="app-meta">${myCatalog.apps.length} app${myCatalog.apps.length === 1 ? '' : 's'}${myCatalog.writable ? '' : ' · read-only on this device'}</div>
               </div>
-              <button class="btn subtle" onClick=${() => copyKey(myCatalog.keyHex)}>${copied ? 'Copied!' : 'Copy share key'}</button>
+              <button className="btn subtle" onClick=${() => copyKey(myCatalog.keyHex)}>${copied ? 'Copied!' : 'Copy share key'}</button>
             </div>
-            <div class="mycatalog-key" title=${myCatalog.keyHex}>${myCatalog.keyHex}</div>
+            <div className="mycatalog-key" title=${myCatalog.keyHex}>${myCatalog.keyHex}</div>
             ${myCatalog.apps.length === 0
-              ? html`<p class="placeholder">${myCatalog.writable ? 'No apps yet. Use + Catalog on any app above to add it.' : 'This catalog has no saved apps.'}</p>`
-              : html`<div class="app-grid">
+              ? html`<p className="placeholder">${myCatalog.writable ? 'No apps yet. Use + Catalog on any app above to add it.' : 'This catalog has no saved apps.'}</p>`
+              : html`<div className="app-grid">
                   ${myCatalog.apps.map(renderMyCatalogApp)}
                 </div>`}
           </div>
@@ -1831,38 +2750,231 @@ function Apps ({ rpc, C, onLaunch }) {
 
       <h2>Installed</h2>
       ${installed.length === 0
-        ? html`<p class="placeholder">No apps installed yet.</p>`
-        : html`<div class="app-grid">
+        ? html`<p className="placeholder">No apps installed yet.</p>`
+        : html`<div className="app-grid">
             ${installed.map((app) => html`
-              <div class="app-card" key=${app.id}>
-                <div class="app-icon app-icon-fallback">${(app.name || '?').charAt(0)}</div>
-                <div class="app-info">
-                  <div class="app-name">${app.name}</div>
-                  <div class="app-meta">v${app.version || '?'}${updates[app.id] ? ` · update available → v${updates[app.id]}` : ''}</div>
+              <div className="app-card" key=${app.id}>
+                <${AppIcon} rpc=${rpc} C=${C} driveKey=${app.driveKey} iconRef=${app.icon} iconData=${app.iconData} name=${app.name} />
+                <div className="app-info">
+                  <div className="app-name">${app.name}</div>
+                  <div className="app-meta">v${app.version || '?'}${updates[app.id] ? ` · update available → v${updates[app.id]}` : ''}</div>
                 </div>
-                <div class="app-actions">
+                <div className="app-actions">
                   ${updates[app.id] && html`
-                    <button class="btn primary" onClick=${() => updateApp(app.id)} disabled=${busy === `install:${app.id}`}>
+                    <button key="update" className="btn primary" onClick=${() => updateApp(app.id)} disabled=${busy === `install:${app.id}`}>
                       ${busy === `install:${app.id}` ? 'Updating…' : 'Update'}
                     </button>
                   `}
-                  <button class="btn" onClick=${() => launchApp(app)} disabled=${busy === `launch:${app.id}`}>Launch</button>
-                  <button class="btn subtle" onClick=${() => uninstallApp(app)} disabled=${busy === `uninstall:${app.id}`}>Uninstall</button>
-                  ${canEditMyCatalog && !inMyCatalog(app.id || app.driveKey) && html`
-                    <button class="btn subtle" title="Add to my catalog" onClick=${() => addToMyCatalog(app)} disabled=${busy === `addcat:${app.id || app.driveKey}`}>+ Catalog</button>
+                  <button key="launch" className="btn" onClick=${() => launchApp(app)} disabled=${busy === `launch:${app.id}`}>Launch</button>
+                  <button key="uninstall" className="btn subtle" onClick=${() => uninstallApp(app)} disabled=${busy === `uninstall:${app.id}`}>Uninstall</button>
+                  ${canEditMyCatalog && !inMyCatalog([app.id, app.driveKey, app.link]) && html`
+                    <button key="add-installed" className="btn subtle" title="Add to my catalog" onClick=${() => addToMyCatalog(app)} disabled=${busy === `addcat:${app.id || app.driveKey || app.link}`}>+ Catalog</button>
                   `}
                 </div>
               </div>
             `)}
           </div>`}
+
+      <${CommunitySubmit} rpc=${rpc} C=${C} />
+
+      <${CollaborativeCatalog} rpc=${rpc} C=${C} />
+
+      <${ModeratorPanel} rpc=${rpc} C=${C} />
+
+      ${detailApp && html`
+        <div onClick=${() => setDetailApp(null)} style=${{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '24px' }}>
+          <div onClick=${(e) => e.stopPropagation()} style=${{ background: '#11161f', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '14px', padding: '20px 24px 24px', maxWidth: '480px', width: '100%', maxHeight: '82vh', overflowY: 'auto' }}>
+            <div style=${{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button className="btn subtle" title="Close" onClick=${() => setDetailApp(null)} style=${{ padding: '2px 9px' }}>✕</button>
+            </div>
+            <div style=${{ display: 'flex', gap: '14px', alignItems: 'center', marginBottom: '14px' }}>
+              ${safeIconSrc(detailApp.iconData)
+                ? html`<img src=${safeIconSrc(detailApp.iconData)} alt="" style=${{ width: '56px', height: '56px', borderRadius: '12px' }} />`
+                : html`<div style=${{ width: '56px', height: '56px', borderRadius: '12px', background: '#1f2733', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px', fontWeight: 600 }}>${(detailApp.name || '?').charAt(0)}</div>`}
+              <div style=${{ minWidth: 0 }}>
+                <div style=${{ fontSize: '18px', fontWeight: 600 }}>
+                  ${detailApp.name || 'Untitled app'}
+                  ${detailApp.verification === 'relay-listed' ? html`<span title="Relay-listed" style=${{ marginLeft: '6px', color: '#58a6ff', fontSize: '14px' }}>✓</span>` : ''}
+                  ${detailApp.verification === 'author-signed' ? html`<span title="Author-signed" style=${{ marginLeft: '6px', color: '#3fb950', fontSize: '14px' }}>✦</span>` : ''}
+                </div>
+                <div style=${{ color: '#8b949e', fontSize: '13px' }}>${detailApp.author || ''}</div>
+              </div>
+            </div>
+            <p style=${{ color: '#c9d1d9', lineHeight: 1.6, margin: '0 0 14px' }}>${detailApp.description || 'No description.'}</p>
+            ${(detailApp.categories && detailApp.categories.length) ? html`
+              <div style=${{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '14px' }}>
+                ${detailApp.categories.map((c) => html`<span key=${c} style=${{ fontSize: '12px', padding: '2px 9px', borderRadius: '8px', background: 'rgba(255,255,255,0.06)', color: '#8b949e' }}>${c}</span>`)}
+              </div>` : ''}
+            <div style=${{ fontSize: '13px', color: '#8b949e', display: 'grid', gap: '6px', marginBottom: '18px' }}>
+              <div><strong style=${{ color: '#c9d1d9' }}>Runs:</strong> ${detailApp.type === 'hypersite' ? 'headless in a tab' : 'in its own window'}</div>
+              ${detailApp.version ? html`<div><strong style=${{ color: '#c9d1d9' }}>Version:</strong> v${detailApp.version}</div>` : ''}
+              <div><strong style=${{ color: '#c9d1d9' }}>Verification:</strong> ${detailApp.verification || 'unverified'}</div>
+              ${detailApp.homepage ? html`<div style=${{ wordBreak: 'break-all' }}><strong style=${{ color: '#c9d1d9' }}>Homepage:</strong> ${detailApp.homepage}</div>` : ''}
+              ${detailApp.sourceUrl ? html`<div style=${{ wordBreak: 'break-all' }}><strong style=${{ color: '#c9d1d9' }}>Source:</strong> ${detailApp.sourceUrl}</div>` : ''}
+              ${detailApp.license ? html`<div><strong style=${{ color: '#c9d1d9' }}>License:</strong> ${detailApp.license}</div>` : ''}
+              ${detailApp.link ? html`<div style=${{ wordBreak: 'break-all' }}><strong style=${{ color: '#c9d1d9' }}>Link:</strong> ${detailApp.link}</div>` : ''}
+              ${detailApp.driveKey ? html`<div style=${{ wordBreak: 'break-all' }}><strong style=${{ color: '#c9d1d9' }}>Drive:</strong> ${detailApp.driveKey}</div>` : ''}
+              ${(detailApp._sources && detailApp._sources.length)
+                ? html`<div><strong style=${{ color: '#c9d1d9' }}>Catalogue${detailApp._sources.length > 1 ? 's' : ''}:</strong> ${detailApp._sources.join(', ')}</div>`
+                : (detailApp.catalogName ? html`<div><strong style=${{ color: '#c9d1d9' }}>Catalogue:</strong> ${detailApp.catalogName}</div>` : '')}
+              ${detailApp.publisherKey ? html`<div style=${{ wordBreak: 'break-all' }}><strong style=${{ color: '#c9d1d9' }}>Publisher:</strong> ${shortKey(detailApp.publisherKey)}</div>` : ''}
+            </div>
+            <div style=${{ display: 'flex', gap: '8px' }}>
+              ${detailApp.type === 'hypersite'
+                ? (detailApp.driveKey && !detailApp.link
+                    ? html`<button key="detail-open-site" className="btn primary" onClick=${() => { openSite(detailApp); setDetailApp(null) }}>Open</button>`
+                    : html`<button key="detail-run-tab" className="btn primary" onClick=${() => { runInTab(detailApp); setDetailApp(null) }}>Run in tab</button>`)
+                : (detailApp.link && !detailApp.driveKey)
+                  ? html`<button key="detail-open-window" className="btn primary" onClick=${() => { launchFeaturedApp(detailApp); setDetailApp(null) }}>Open</button>`
+                  : (isInstalled(detailApp.id)
+                    ? html`<button key="detail-launch" className="btn primary" onClick=${() => { launchApp(detailApp); setDetailApp(null) }}>Launch</button>`
+                    : html`<button key="detail-install" className="btn primary" onClick=${() => { installApp(detailApp); setDetailApp(null) }}>Install</button>`)}
+              <button key="detail-close" className="btn" onClick=${() => setDetailApp(null)}>Close</button>
+            </div>
+          </div>
+        </div>
+      `}
     </div>
   `
+}
+
+// Lighthouse Phase 2 — exchange contact invites (carrying each peer's binding
+// DHT key) so federated search can resolve + verify a peer's index. Share your
+// invite; paste a peer's. Their results are signature-verified before display.
+function TrustedPeers ({ rpc, C }) {
+  const [invite, setInvite] = useState(null)
+  const [peers, setPeers] = useState([])
+  const [addUrl, setAddUrl] = useState('')
+  const [msg, setMsg] = useState('')
+  const [copied, setCopied] = useState(false)
+
+  const load = async () => {
+    try {
+      setInvite(await rpc.request(C.CMD_CONTACTS_MY_INVITE))
+      const res = await rpc.request(C.CMD_CONTACTS_LIST, { limit: 200 })
+      setPeers(Array.isArray(res?.contacts) ? res.contacts : [])
+    } catch (e) { setMsg(e.message) }
+  }
+  useEffect(() => { load() }, [])
+
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(invite.url); setCopied(true); setTimeout(() => setCopied(false), 1500) } catch {}
+  }
+  const add = async () => {
+    const url = addUrl.trim()
+    if (!url) return
+    setMsg('')
+    try {
+      const res = await rpc.request(C.CMD_CONTACTS_ADD_INVITE, { url })
+      const c = res?.contact || {}
+      setAddUrl('')
+      setMsg(`Added ${c.displayName || (c.pubkey ? c.pubkey.slice(0, 12) + '…' : 'contact')}${c.bindingKey ? ' — searchable' : ''}`)
+      load()
+    } catch (e) { setMsg(`Couldn't add: ${e.message}`) }
+  }
+
+  return html`
+    <details className="trusted-peers">
+      <summary>Trusted peers for federated search (${peers.length})</summary>
+      <div className="tp-body">
+        <p className="subtitle">Share your invite so a peer can add you; paste theirs to search their content. Peer results are cryptographically verified before they're shown.</p>
+        ${invite && html`
+          <div className="tp-field">
+            <label>Your invite</label>
+            <div className="tp-row">
+              <input className="profile-input" readOnly value=${invite.url} onClick=${(e) => e.target.select()} />
+              <button className="btn small" onClick=${copy}>${copied ? 'Copied' : 'Copy'}</button>
+            </div>
+          </div>`}
+        <div className="tp-field">
+          <label>Add a peer</label>
+          <div className="tp-row">
+            <input className="profile-input" placeholder="Paste a pear://contact invite…" value=${addUrl}
+                   onInput=${(e) => setAddUrl(e.target.value)} onKeyDown=${(e) => e.key === 'Enter' && add()} />
+            <button className="btn small primary" onClick=${add} disabled=${!addUrl.trim()}>Add</button>
+          </div>
+        </div>
+        ${msg && html`<div className="tp-msg">${msg}</div>`}
+        ${peers.length > 0 && html`
+          <ul className="tp-list">
+            ${peers.map((p) => html`
+              <li key=${p.pubkey}>
+                <span className="tp-name">${p.displayName || (p.pubkey.slice(0, 16) + '…')}</span>
+                ${p.verifiedAt ? html`<span className="src-badge followed">verified</span>` : html`<span className="src-badge other">unverified</span>`}
+                ${p.bindingKey ? html`<span className="src-badge self">searchable</span>` : ''}
+              </li>`)}
+          </ul>`}
+      </div>
+    </details>`
+}
+
+function SearchProvenanceBadges ({ meta }) {
+  const p = meta && (meta.provenance || meta)
+  if (!p) return null
+  return html`<span className="search-provenance">
+    ${p.digestHit ? html`<span className="src-badge self">digest hit</span>` : ''}
+    ${p.fallbackPull ? html`<span className="src-badge other">fallback pull</span>` : ''}
+    ${p.partial ? html`<span className="src-badge other">partial</span>` : ''}
+    ${meta.verifyBudgetExhausted ? html`<span className="src-badge other">verify budget</span>` : ''}
+  </span>`
 }
 
 function Library ({ rpc, C, onBrowse }) {
   const [bookmarks, setBookmarks] = useState([])
   const [history, setHistory] = useState([])
   const [err, setErr] = useState('')
+  // Lighthouse Phase 0 — local self-search over everything you've browsed.
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState(null) // null = not searched yet
+  const [indexed, setIndexed] = useState(0)
+  const [searching, setSearching] = useState(false)
+  // Lighthouse Phase 2 — opt-in federated search across trusted peers. Local
+  // results paint immediately; the enriched peer set arrives via
+  // EVT_SEARCH_FEDERATED, correlated by queryId so a stale reply can't clobber a
+  // newer search.
+  const [federated, setFederated] = useState(false)
+  const [federating, setFederating] = useState(false)
+  const [searchMeta, setSearchMeta] = useState(null)
+  const searchIdRef = useRef(0)
+
+  const runSearch = async () => {
+    const q = query.trim()
+    if (!q) { setResults(null); setFederating(false); setSearchMeta(null); return }
+    setSearching(true)
+    setFederating(false)
+    setSearchMeta(null)
+    try {
+      const res = await rpc.request(C.CMD_SEARCH, { query: q, limit: 50, federated })
+      searchIdRef.current = res?.queryId || 0
+      setResults(Array.isArray(res?.results) ? res.results : [])
+      setIndexed(res?.stats?.docs || 0)
+      if (res?.federating) setFederating(true) // peer results arrive asynchronously
+    } catch (e) { setErr(`search: ${e.message}`) }
+    finally { setSearching(false) }
+  }
+  const resultUrl = (r) => {
+    if (r && r.link) return r.link
+    if (r && /^(?:pear|file|hyper):\/\//i.test(r.driveKey || '')) return r.driveKey
+    return `hyper://${r.driveKey}${r.path && r.path !== '/' ? r.path : '/'}`
+  }
+  const srcBadge = (r) => {
+    if (!r.tier || r.tier === 'self') return html`<span className="src-badge self">you</span>`
+    if (r.tier === 'followed') return html`<span className="src-badge followed">trusted · hop ${r.trustHop ?? 1}</span>`
+    return html`<span className="src-badge other">${r.tier}</span>`
+  }
+
+  // Enriched federated results push (Lighthouse Phase 2).
+  useEffect(() => {
+    const onFederated = (e) => {
+      const d = (e && e.detail) || {}
+      if (d.queryId !== searchIdRef.current) return // superseded by a newer query
+      if (Array.isArray(d.results)) setResults(d.results)
+      setSearchMeta(d)
+      setFederating(false)
+    }
+    rpc.addEventListener(`event:${C.EVT_SEARCH_FEDERATED}`, onFederated)
+    return () => rpc.removeEventListener(`event:${C.EVT_SEARCH_FEDERATED}`, onFederated)
+  }, [])
 
   const refresh = async () => {
     try {
@@ -1897,41 +3009,74 @@ function Library ({ rpc, C, onBrowse }) {
   }
 
   return html`
-    <div class="library">
+    <div className="library">
       <h1>Library</h1>
-      <p class="subtitle">Your saved bookmarks and recent browsing history, stored locally in your Hyperbee.</p>
-      ${err && html`<div class="apps-error">${err}</div>`}
+      <p className="subtitle">Your saved bookmarks and recent browsing history, stored locally in your Hyperbee.</p>
+      ${err && html`<div className="apps-error">${err}</div>`}
+
+      <h2>Search your P2P content</h2>
+      <p className="subtitle">Full-text search over everything you've browsed, fully local — no query ever leaves your device.${indexed ? ` ${indexed} page(s) indexed.` : ''}</p>
+      <div className="urlbar" style=${{ marginBottom: '12px' }}>
+        <input
+          type="text"
+          className="url-input"
+          placeholder="Search pages you've visited…"
+          value=${query}
+          onInput=${(e) => setQuery(e.target.value)}
+          onKeyDown=${(e) => e.key === 'Enter' && runSearch()}
+        />
+        <button className="btn primary" onClick=${runSearch} disabled=${searching || !query.trim()}>${searching ? 'Searching…' : 'Search'}</button>
+      </div>
+      <label className="search-fed-toggle">
+        <input type="checkbox" checked=${federated} onChange=${(e) => setFederated(e.target.checked)} />
+        Include trusted peers${federating ? html` <span className="fed-status">· searching peers…</span>` : ''}
+        <${SearchProvenanceBadges} meta=${searchMeta} />
+      </label>
+      <${TrustedPeers} rpc=${rpc} C=${C} />
+      ${results !== null && (results.length === 0
+        ? html`<p className="placeholder">No matches${indexed === 0 ? ' yet — browse some hyper:// pages first to build your index.' : '.'}</p>`
+        : html`<div className="library-list">
+            ${results.map((r) => html`
+              <div className="library-row" key=${r.docId || (r.driveKey + r.path)}>
+                <div className="library-row-main">
+                  <div className="library-title">${r.title || resultUrl(r)}${federated ? srcBadge(r) : ''}</div>
+                  <div className="library-url">${resultUrl(r)}</div>
+                </div>
+                <button className="btn small" onClick=${() => onBrowse(resultUrl(r))}>Open</button>
+              </div>
+            `)}
+          </div>`)}
 
       <h2>Bookmarks (${bookmarks.length})</h2>
       ${bookmarks.length === 0
-        ? html`<p class="placeholder">No bookmarks yet. In the Browse tab, right-click the URL bar to bookmark the current page (coming soon) — or use the button on a hyperdrive page.</p>`
-        : html`<div class="library-list">
+        ? html`<p className="placeholder">No bookmarks yet. Use the star button in Browse, or open About this site and choose Bookmark this site.</p>`
+        : html`<div className="library-list">
             ${bookmarks.map((b) => html`
-              <div class="library-row" key=${b.url}>
-                <div class="library-row-main">
-                  <div class="library-title">${b.title || b.url}</div>
-                  <div class="library-url">${b.url}</div>
+              <div className="library-row" key=${b.url}>
+                <div className="library-row-main">
+                  <div className="library-title">${b.title || b.url}</div>
+                  <div className="library-url">${b.url}</div>
                 </div>
-                <button class="btn small" onClick=${() => onBrowse(b.url)}>Open</button>
-                <button class="btn small subtle" onClick=${() => removeBookmark(b.url)}>Remove</button>
+                <button className="btn small" onClick=${() => onBrowse(b.url)}>Open</button>
+                <button className="btn small subtle" onClick=${() => removeBookmark(b.url)}>Remove</button>
               </div>
             `)}
           </div>`}
 
-      <div class="library-history-head">
+      <div className="library-history-head">
         <h2>History (${history.length})</h2>
-        ${history.length > 0 && html`<button class="btn small subtle" onClick=${clearHistory}>Clear history</button>`}
+        ${history.length > 0 && html`<button className="btn small subtle" onClick=${clearHistory}>Clear history</button>`}
       </div>
       ${history.length === 0
-        ? html`<p class="placeholder">No browsing history yet.</p>`
-        : html`<div class="library-list">
+        ? html`<p className="placeholder">No browsing history yet.</p>`
+        : html`<div className="library-list">
             ${history.slice(0, 100).map((h, i) => html`
-              <div class="library-row" key=${(h.url || '') + ':' + i}>
-                <div class="library-row-main">
-                  <div class="library-title">${h.title || h.url}</div>
-                  <div class="library-url">${h.url} ${h.visitedAt ? '· ' + new Date(h.visitedAt).toLocaleString() : ''}</div>
+              <div className="library-row" key=${(h.url || '') + ':' + i}>
+                <div className="library-row-main">
+                  <div className="library-title">${h.title || h.url}</div>
+                  <div className="library-url">${h.url} ${h.visitedAt ? '· ' + new Date(h.visitedAt).toLocaleString() : ''}</div>
                 </div>
-                <button class="btn small" onClick=${() => onBrowse(h.url)}>Open</button>
+                <button className="btn small" onClick=${() => onBrowse(h.url)}>Open</button>
               </div>
             `)}
           </div>`}
@@ -1941,23 +3086,57 @@ function Library ({ rpc, C, onBrowse }) {
 
 // --- Settings sub-sections -----------------------------------------------
 //
-// Three additions that surface backend power that's been there for a while:
+// Settings additions that surface backend power that's been there for a while:
 //
 //   - ProfileSection      Edit display name / bio / avatar URL / website /
 //                         email — what apps see when you grant a login.
-//   - ConnectedAppsSection View per-app login grants and revoke them
-//                         individually or all at once.
+//   - PermissionCenter    View per-app login/profile/contact/swarm grants
+//                         and revoke them individually or per app.
 //   - RelaysSection       Add/remove/reorder relay URLs, toggle hybrid fetch.
 //
-// All three call CMD_* handlers that already live in backend/index.js.
+// These call CMD_* handlers that already live in backend/index.js.
 
 const PROFILE_FIELDS = [
-  { key: 'name', label: 'Display name', placeholder: 'How apps will refer to you' },
+  { key: 'displayName', label: 'Display name', placeholder: 'How apps will refer to you' },
   { key: 'bio', label: 'Bio', placeholder: 'A short bio (optional)', textarea: true },
   { key: 'avatar', label: 'Avatar URL', placeholder: 'https://… or hyper://… (optional)' },
   { key: 'website', label: 'Website', placeholder: 'https://your.site (optional)' },
   { key: 'email', label: 'Email', placeholder: 'name@example.com (optional)' }
 ]
+
+function normalizeProfile (profile) {
+  const p = { ...(profile || {}) }
+  if (!p.displayName && p.name) p.displayName = p.name
+  return p
+}
+
+function normalizeLoginGrant (grant) {
+  const driveKey = grant?.driveKey || grant?.driveKeyHex || ''
+  return { ...(grant || {}), driveKey, driveKeyHex: driveKey }
+}
+
+function scopeMeta (scope) {
+  return SCOPE_LABELS[scope] || { label: scope, detail: scope }
+}
+
+function scopeLabels (scopes) {
+  return (Array.isArray(scopes) ? scopes : []).map((scope) => scopeMeta(scope).label)
+}
+
+function profileFieldsForScopes (scopes) {
+  const set = new Set(Array.isArray(scopes) ? scopes : [])
+  if (set.has('profile:read')) return ['Display name', 'Avatar', 'Bio', 'Email', 'Website', 'Pronouns', 'Location']
+  const fields = []
+  if (set.has('profile:name')) fields.push('Display name')
+  if (set.has('profile:avatar')) fields.push('Avatar')
+  if (set.has('profile:email')) fields.push('Email')
+  if (set.has('profile:website')) fields.push('Website')
+  if (set.has('profile:contact')) {
+    if (!fields.includes('Email')) fields.push('Email')
+    if (!fields.includes('Website')) fields.push('Website')
+  }
+  return fields
+}
 
 function ProfileSection ({ rpc, C }) {
   const [profile, setProfile] = useState({})
@@ -1970,7 +3149,7 @@ function ProfileSection ({ rpc, C }) {
     setErr('')
     try {
       const res = await rpc.request(C.CMD_PROFILE_GET)
-      const p = res?.profile || {}
+      const p = normalizeProfile(res?.profile || {})
       setProfile(p); setDraft(p)
     } catch (e) { setErr(`profile: ${e.message}`) }
   }
@@ -2008,16 +3187,16 @@ function ProfileSection ({ rpc, C }) {
   }
 
   return html`
-    <div class="settings-card">
-      ${err && html`<div class="apps-error">${err}</div>`}
-      ${notice && html`<div class="apps-ok">${notice}</div>`}
+    <div className="settings-card">
+      ${err && html`<div className="apps-error">${err}</div>`}
+      ${notice && html`<div className="apps-ok">${notice}</div>`}
       ${PROFILE_FIELDS.map(({ key, label, placeholder, textarea }) => html`
-        <div class="settings-row" key=${key}>
-          <div class="profile-field">
-            <div class="settings-label">${label}</div>
+        <div className="settings-row" key=${key}>
+          <div className="profile-field">
+            <div className="settings-label">${label}</div>
             ${textarea
               ? html`<textarea
-                  class="profile-input"
+                  className="profile-input"
                   rows="2"
                   placeholder=${placeholder}
                   value=${draft[key] || ''}
@@ -2025,7 +3204,7 @@ function ProfileSection ({ rpc, C }) {
                 ></textarea>`
               : html`<input
                   type="text"
-                  class="profile-input"
+                  className="profile-input"
                   placeholder=${placeholder}
                   value=${draft[key] || ''}
                   onInput=${(e) => setDraft({ ...draft, [key]: e.target.value })}
@@ -2033,11 +3212,11 @@ function ProfileSection ({ rpc, C }) {
           </div>
         </div>
       `)}
-      <div class="settings-row settings-row-actions">
-        <button class="btn subtle" onClick=${clearAll} disabled=${busy !== null}>
+      <div className="settings-row settings-row-actions">
+        <button className="btn subtle" onClick=${clearAll} disabled=${busy !== null}>
           ${busy === 'clear' ? 'Clearing…' : 'Clear all'}
         </button>
-        <button class="btn primary" onClick=${save} disabled=${!dirty || busy !== null}>
+        <button className="btn primary" onClick=${save} disabled=${!dirty || busy !== null}>
           ${busy === 'save' ? 'Saving…' : 'Save profile'}
         </button>
       </div>
@@ -2045,11 +3224,10 @@ function ProfileSection ({ rpc, C }) {
   `
 }
 
-function ConnectedAppsSection ({ rpc, C }) {
-  // Login grants — apps the user has signed into.
-  const [grants, setGrants] = useState([])
-  // Swarm grants — apps that hold persisted Tier C topic-join consents.
+function PermissionCenterSection ({ rpc, C }) {
+  const [loginGrants, setLoginGrants] = useState([])
   const [swarmGrants, setSwarmGrants] = useState([])
+  const [contacts, setContacts] = useState([])
   const [busy, setBusy] = useState(null)
   const [err, setErr] = useState('')
   const [loaded, setLoaded] = useState(false)
@@ -2057,121 +3235,229 @@ function ConnectedAppsSection ({ rpc, C }) {
   const load = async () => {
     setErr('')
     try {
-      const [loginRes, swarmRes] = await Promise.all([
-        rpc.request(C.CMD_LOGIN_LIST_GRANTS),
-        rpc.request(C.CMD_SWARM_LIST_GRANTS).catch(() => ({ grants: [] }))
+      const [loginRes, swarmRes, contactsRes] = await Promise.all([
+        rpc.request(C.CMD_LOGIN_LIST_GRANTS).catch((e) => ({ error: e })),
+        rpc.request(C.CMD_SWARM_LIST_GRANTS).catch(() => ({ grants: [] })),
+        rpc.request(C.CMD_CONTACTS_LIST, { limit: 1000 }).catch(() => ({ contacts: [] }))
       ])
-      setGrants(Array.isArray(loginRes?.grants) ? loginRes.grants : [])
-      setSwarmGrants(Array.isArray(swarmRes?.grants) ? swarmRes.grants : [])
-    } catch (e) { setErr(`grants: ${e.message}`) }
+      if (loginRes?.error) throw loginRes.error
+      setLoginGrants((Array.isArray(loginRes?.grants) ? loginRes.grants : []).map(normalizeLoginGrant).filter((g) => g.driveKey))
+      setSwarmGrants(Array.isArray(swarmRes?.grants) ? swarmRes.grants.filter((g) => g?.driveKey) : [])
+      setContacts(Array.isArray(contactsRes?.contacts) ? contactsRes.contacts : [])
+    } catch (e) { setErr(`permissions: ${e.message}`) }
     finally { setLoaded(true) }
   }
   useEffect(() => { load() }, [])
 
-  const revoke = async (grant) => {
+  const apps = useMemo(() => {
+    const map = new Map()
+    const ensure = (driveKey) => {
+      if (!map.has(driveKey)) map.set(driveKey, { driveKey, appName: null, login: null, swarm: [] })
+      return map.get(driveKey)
+    }
+    for (const grant of loginGrants) {
+      const app = ensure(grant.driveKey)
+      app.login = grant
+      app.appName = grant.appName || app.appName
+    }
+    for (const grant of swarmGrants) {
+      const app = ensure(grant.driveKey)
+      app.swarm.push(grant)
+      app.appName = app.appName || grant.appName
+    }
+    return [...map.values()].sort((a, b) => {
+      const at = Math.max(a.login?.grantedAt || 0, ...a.swarm.map((g) => g.grantedAt || 0))
+      const bt = Math.max(b.login?.grantedAt || 0, ...b.swarm.map((g) => g.grantedAt || 0))
+      return bt - at
+    })
+  }, [loginGrants, swarmGrants])
+
+  const contactReaders = loginGrants.filter((g) => (g.scopes || []).includes('contacts:read'))
+  const profileReaders = loginGrants.filter((g) => profileFieldsForScopes(g.scopes).length > 0)
+
+  const revokeLogin = async (grant) => {
     const label = grant.appName || shortKey(grant.driveKey)
-    if (!confirm(`Revoke ${label}? Next time it tries to sign in you'll be asked again.`)) return
-    setErr(''); setBusy(`revoke:${grant.driveKey}`)
+    if (!confirm(`Revoke sign-in for ${label}? It will need to ask again next time.`)) return
+    setErr(''); setBusy(`login:${grant.driveKey}`)
     try {
       await rpc.request(C.CMD_LOGIN_REVOKE_GRANT, { driveKeyHex: grant.driveKey })
       await load()
-    } catch (e) { setErr(`revoke: ${e.message}`) }
+    } catch (e) { setErr(`revoke sign-in: ${e.message}`) }
     finally { setBusy(null) }
   }
 
-  const revokeAll = async () => {
-    if (grants.length === 0) return
-    if (!confirm(`Revoke ALL ${grants.length} grant(s)? Every connected app will need to ask for sign-in again.`)) return
-    setErr(''); setBusy('revoke-all')
+  const revokeSwarmGrant = async (grant) => {
+    const label = grant.appName || shortKey(grant.driveKey)
+    if (!confirm(`Revoke ${label}'s access to topic ${shortKey(grant.topicHex)}?`)) return
+    setErr(''); setBusy(`swarm:${grant.driveKey}:${grant.topicHex}`)
+    try {
+      await rpc.request(C.CMD_SWARM_REVOKE_GRANT, { driveKey: grant.driveKey, topicHex: grant.topicHex })
+      await load()
+    } catch (e) { setErr(`revoke topic: ${e.message}`) }
+    finally { setBusy(null) }
+  }
+
+  const revokeAppSwarm = async (app) => {
+    if (!app.swarm.length) return
+    const label = app.appName || shortKey(app.driveKey)
+    if (!confirm(`Revoke all ${app.swarm.length} swarm topic grant(s) for ${label}?`)) return
+    setErr(''); setBusy(`swarm-all:${app.driveKey}`)
+    try {
+      await rpc.request(C.CMD_SWARM_REVOKE_ALL_FOR_APP, { driveKey: app.driveKey })
+      await load()
+    } catch (e) { setErr(`revoke topics: ${e.message}`) }
+    finally { setBusy(null) }
+  }
+
+  const revokeEverythingForApp = async (app) => {
+    const label = app.appName || shortKey(app.driveKey)
+    if (!confirm(`Revoke every stored permission for ${label}?`)) return
+    setErr(''); setBusy(`app:${app.driveKey}`)
+    try {
+      if (app.login) await rpc.request(C.CMD_LOGIN_REVOKE_GRANT, { driveKeyHex: app.driveKey })
+      if (app.swarm.length) await rpc.request(C.CMD_SWARM_REVOKE_ALL_FOR_APP, { driveKey: app.driveKey })
+      await load()
+    } catch (e) { setErr(`revoke app: ${e.message}`) }
+    finally { setBusy(null) }
+  }
+
+  const revokeAllLogin = async () => {
+    if (!loginGrants.length) return
+    if (!confirm(`Revoke all ${loginGrants.length} sign-in grant(s)?`)) return
+    setErr(''); setBusy('login-all')
     try {
       await rpc.request(C.CMD_LOGIN_REVOKE_ALL)
       await load()
-    } catch (e) { setErr(`revoke-all: ${e.message}`) }
+    } catch (e) { setErr(`revoke all sign-ins: ${e.message}`) }
     finally { setBusy(null) }
-  }
-
-  const revokeSwarmGrant = async (g) => {
-    const label = g.appName || shortKey(g.driveKey)
-    if (!confirm(`Revoke ${label}'s access to topic ${shortKey(g.topicHex)}? It will need to ask again on next join.`)) return
-    setErr(''); setBusy(`swarm-revoke:${g.driveKey}:${g.topicHex}`)
-    try {
-      await rpc.request(C.CMD_SWARM_REVOKE_GRANT, { driveKey: g.driveKey, topicHex: g.topicHex })
-      await load()
-    } catch (e) { setErr(`swarm-revoke: ${e.message}`) }
-    finally { setBusy(null) }
-  }
-
-  // Group swarm grants by app for a tighter visual.
-  const swarmByApp = new Map()
-  for (const g of swarmGrants) {
-    const key = g.driveKey
-    if (!swarmByApp.has(key)) swarmByApp.set(key, [])
-    swarmByApp.get(key).push(g)
   }
 
   return html`
-    <div class="settings-card">
-      ${err && html`<div class="apps-error">${err}</div>`}
+    <div className="settings-card permission-center">
+      ${err && html`<div className="apps-error">${err}</div>`}
 
-      <div class="settings-subsection-label">Sign-in grants</div>
-      ${!loaded
-        ? html`<div class="settings-subtle">Loading…</div>`
-        : grants.length === 0
-          ? html`<div class="settings-subtle">No apps have asked you to sign in yet.</div>`
-          : html`
-            ${grants.map((g) => html`
-              <div class="settings-row" key=${g.driveKey}>
-                <div>
-                  <div class="settings-label">${g.appName || shortKey(g.driveKey)}</div>
-                  <div class="settings-subtle">
-                    <code class="settings-code">${shortKey(g.driveKey)}</code>
-                    · ${(g.scopes || []).join(', ') || 'sign-in only'}
-                    ${g.expiresAt ? html` · expires ${new Date(g.expiresAt).toLocaleDateString()}` : ''}
-                  </div>
-                </div>
-                <button class="btn subtle danger" onClick=${() => revoke(g)}
-                        disabled=${busy === `revoke:${g.driveKey}`}>
-                  ${busy === `revoke:${g.driveKey}` ? 'Revoking…' : 'Revoke'}
-                </button>
-              </div>
-            `)}
-            <div class="settings-row settings-row-actions">
-              <button class="btn subtle danger" onClick=${revokeAll} disabled=${busy === 'revoke-all'}>
-                ${busy === 'revoke-all' ? 'Revoking all…' : 'Revoke all'}
-              </button>
-            </div>
-          `}
+      <div className="permission-summary">
+        <div className="permission-stat">
+          <div className="permission-stat-value">${loginGrants.length}</div>
+          <div className="permission-stat-label">sign-in grants</div>
+        </div>
+        <div className="permission-stat">
+          <div className="permission-stat-value">${profileReaders.length}</div>
+          <div className="permission-stat-label">profile readers</div>
+        </div>
+        <div className="permission-stat">
+          <div className="permission-stat-value">${contactReaders.length}</div>
+          <div className="permission-stat-label">contact readers</div>
+        </div>
+        <div className="permission-stat">
+          <div className="permission-stat-value">${swarmGrants.length}</div>
+          <div className="permission-stat-label">swarm topics</div>
+        </div>
+      </div>
 
-      <div class="settings-subsection-label">Swarm topic grants</div>
+      <div className="settings-subsection-label">Apps and sites</div>
       ${!loaded
-        ? html`<div class="settings-subtle">Loading…</div>`
-        : swarmGrants.length === 0
-          ? html`<div class="settings-subtle">No swarm topic grants. Apps using only drive-derived (Tier A) topics never appear here.</div>`
-          : html`
-            ${[...swarmByApp.entries()].map(([driveKey, list]) => html`
-              <div class="swarm-grant-app" key=${driveKey}>
-                <div class="settings-label">${list[0].appName || shortKey(driveKey)}</div>
-                <div class="settings-subtle"><code class="settings-code">${shortKey(driveKey)}</code> — ${list.length} topic${list.length === 1 ? '' : 's'}</div>
-                ${list.map((g) => html`
-                  <div class="settings-row swarm-grant-row" key=${g.topicHex}>
+        ? html`<div className="settings-subtle">Loading…</div>`
+        : apps.length === 0
+          ? html`<div className="settings-subtle">No stored app permissions yet.</div>`
+          : apps.map((app) => {
+              const profileFields = profileFieldsForScopes(app.login?.scopes || [])
+              const contactAccess = (app.login?.scopes || []).includes('contacts:read')
+              return html`
+                <div className="permission-app" key=${app.driveKey}>
+                  <div className="permission-app-head">
                     <div>
-                      <code class="settings-code">${g.protocol || 'pear.swarm.v1'} · ${shortKey(g.topicHex)}</code>
-                      <div class="settings-subtle">
-                        Granted ${new Date(g.grantedAt).toLocaleDateString()}
-                        ${g.lastUsedAt && g.lastUsedAt !== g.grantedAt ? html` · last used ${new Date(g.lastUsedAt).toLocaleDateString()}` : ''}
-                      </div>
+                      <div className="settings-label">${app.appName || shortKey(app.driveKey)}</div>
+                      <code className="settings-code">${shortKey(app.driveKey)}</code>
                     </div>
-                    <button class="btn subtle danger" onClick=${() => revokeSwarmGrant(g)}
-                            disabled=${busy === `swarm-revoke:${g.driveKey}:${g.topicHex}`}>
-                      ${busy === `swarm-revoke:${g.driveKey}:${g.topicHex}` ? 'Revoking…' : 'Revoke'}
+                    <button className="btn subtle danger" onClick=${() => revokeEverythingForApp(app)}
+                            disabled=${busy === `app:${app.driveKey}`}>
+                      ${busy === `app:${app.driveKey}` ? 'Revoking…' : 'Revoke app'}
                     </button>
                   </div>
-                `)}
-              </div>
-            `)}
-          `}
+
+                  <div className="permission-cap-grid">
+                    <div className="permission-cap">
+                      <div className="permission-cap-label">Sign-in</div>
+	                      ${app.login
+	                        ? html`<div className="permission-cap-body">
+	                          <div className="permission-chip-row">
+	                            ${(scopeLabels(app.login.scopes).length ? scopeLabels(app.login.scopes) : ['sign-in only']).map((label) => html`
+	                              <span className="permission-chip" key=${label}>${label}</span>
+	                            `)}
+	                          </div>
+                          <div className="settings-subtle">
+                            Granted ${new Date(app.login.grantedAt).toLocaleDateString()}
+                            ${app.login.expiresAt ? html` · expires ${new Date(app.login.expiresAt).toLocaleDateString()}` : ''}
+	                          </div>
+	                          <button className="btn subtle danger small" onClick=${() => revokeLogin(app.login)}
+	                                  disabled=${busy === `login:${app.driveKey}`}>Revoke sign-in</button>
+	                        </div>`
+	                        : html`<div className="settings-subtle">No sign-in grant.</div>`}
+                    </div>
+
+                    <div className="permission-cap">
+                      <div className="permission-cap-label">Profile fields</div>
+                      ${profileFields.length
+                        ? html`<div className="permission-chip-row">
+                            ${profileFields.map((label) => html`<span className="permission-chip" key=${label}>${label}</span>`)}
+                          </div>`
+                        : html`<div className="settings-subtle">No profile fields shared.</div>`}
+                    </div>
+
+                    <div className="permission-cap">
+                      <div className="permission-cap-label">Contacts</div>
+	                      ${contactAccess
+	                        ? html`<div className="permission-cap-body">
+	                          <div className="permission-chip-row"><span className="permission-chip warn">contacts:read</span></div>
+	                          <div className="settings-subtle">${contacts.length} saved contact${contacts.length === 1 ? '' : 's'} visible through this scope.</div>
+	                        </div>`
+	                        : html`<div className="settings-subtle">No contact access.</div>`}
+                    </div>
+
+                    <div className="permission-cap">
+                      <div className="permission-cap-label">Swarm topics</div>
+	                      ${app.swarm.length
+	                        ? html`<div className="permission-cap-body">
+	                          <div className="settings-subtle">${app.swarm.length} persisted topic${app.swarm.length === 1 ? '' : 's'}.</div>
+	                          ${app.swarm.map((grant) => html`
+	                            <div className="permission-topic" key=${grant.topicHex}>
+	                              <div>
+	                                <code className="settings-code">${grant.protocol || 'pear.swarm.v1'} · ${shortKey(grant.topicHex)}</code>
+                                <div className="settings-subtle">
+                                  Granted ${new Date(grant.grantedAt).toLocaleDateString()}
+                                  ${grant.lastUsedAt && grant.lastUsedAt !== grant.grantedAt ? html` · last used ${new Date(grant.lastUsedAt).toLocaleDateString()}` : ''}
+                                </div>
+                              </div>
+                              <button className="btn subtle danger small" onClick=${() => revokeSwarmGrant(grant)}
+                                      disabled=${busy === `swarm:${grant.driveKey}:${grant.topicHex}`}>Revoke</button>
+                            </div>
+	                          `)}
+	                          <button className="btn subtle danger small" onClick=${() => revokeAppSwarm(app)}
+	                                  disabled=${busy === `swarm-all:${app.driveKey}`}>Revoke all topics</button>
+	                        </div>`
+	                        : html`<div className="settings-subtle">No arbitrary topic grants.</div>`}
+                    </div>
+                  </div>
+                </div>
+              `
+            })}
+
+      ${loginGrants.length > 0 && html`
+        <div className="settings-row settings-row-actions">
+          <button className="btn subtle danger" onClick=${revokeAllLogin} disabled=${busy === 'login-all'}>
+            ${busy === 'login-all' ? 'Revoking…' : 'Revoke all sign-ins'}
+          </button>
+        </div>
+      `}
     </div>
   `
+}
+
+function relaySupportedTransports (doc) {
+  if (Array.isArray(doc?.supported_transports)) return doc.supported_transports
+  if (Array.isArray(doc?.transports)) return doc.transports
+  return []
 }
 
 function RelaysSection ({ rpc, C }) {
@@ -2272,64 +3558,538 @@ function RelaysSection ({ rpc, C }) {
   }
 
   return html`
-    <div class="settings-card">
-      ${err && html`<div class="apps-error">${err}</div>`}
-      <div class="settings-row">
+    <div className="settings-card">
+      ${err && html`<div className="apps-error">${err}</div>`}
+      <div className="settings-row">
         <div>
-          <div class="settings-label">${config.enabled ? 'Hybrid fetch' : 'Pure P2P mode'}</div>
-          <div class="settings-subtle">${config.enabled
+          <div className="settings-label">${config.enabled ? 'Hybrid fetch' : 'Pure P2P mode'}</div>
+          <div className="settings-subtle">${config.enabled
             ? 'Try a relay first (1-2s first paint), fall back to P2P. Recommended for most users.'
             : 'P2P only — slower first paint, no relay dependency. Toggle this on to use relays.'
           }</div>
         </div>
-        <button class="btn subtle" onClick=${() => toggleEnabled(!config.enabled)} disabled=${busy === 'toggle'}>
+        <button className="btn subtle" onClick=${() => toggleEnabled(!config.enabled)} disabled=${busy === 'toggle'}>
           ${config.enabled ? 'Disable' : 'Enable'}
         </button>
       </div>
       ${loaded && config.relays.length === 0 && html`
-        <div class="settings-subtle">No relays configured.</div>
+        <div className="settings-subtle">No relays configured.</div>
       `}
       ${config.relays.map((url, idx) => {
         const cap = capabilities[url]
         return html`
-        <div class="settings-row relay-row" key=${url}>
-          <div class="relay-info">
-            <div class="relay-url-line">
-              <code class="settings-code">${url}</code>
-              ${idx === 0 ? html`<span class="settings-pill">primary</span>` : ''}
+        <div className="settings-row relay-row" key=${url}>
+          <div className="relay-info">
+            <div className="relay-url-line">
+              <code className="settings-code">${url}</code>
+              ${idx === 0 ? html`<span className="settings-pill">primary</span>` : ''}
             </div>
             ${cap === undefined || cap === null
-              ? html`<div class="relay-caps relay-caps-loading">probing capability advertisement…</div>`
+              ? html`<div className="relay-caps relay-caps-loading">probing capability advertisement…</div>`
               : !cap.ok
-                ? html`<div class="relay-caps relay-caps-err">capability check failed: ${cap.error}</div>`
-                : html`<div class="relay-caps">
-                    <span class="relay-cap-label">v${cap.doc?.version || '?'}</span>
-                    ${cap.doc?.region ? html`<span class="relay-cap-label">${cap.doc.region}</span>` : ''}
-                    ${(cap.doc?.supported_transports || []).map((t) => html`
-                      <span class=${'relay-cap-pill' + (t === 'dht-relay-ws' ? ' relay-cap-pill-new' : '')} key=${t}>${t}</span>
+                ? html`<div className="relay-caps relay-caps-err">capability check failed: ${cap.error}</div>`
+                : html`<div className="relay-caps">
+                    <span className="relay-cap-label">v${cap.doc?.version || '?'}</span>
+                    ${cap.doc?.region ? html`<span className="relay-cap-label">${cap.doc.region}</span>` : ''}
+                    ${relaySupportedTransports(cap.doc).map((t) => html`
+                      <span className=${'relay-cap-pill' + (t === 'dht-relay-ws' ? ' relay-cap-pill-new' : '')} key=${t}>${t}</span>
                     `)}
                   </div>`}
           </div>
           ${config.relays.length > 1 ? html`
-            <button class="btn subtle" onClick=${() => removeRelay(url)} disabled=${busy === 'save'}>
+            <button className="btn subtle" onClick=${() => removeRelay(url)} disabled=${busy === 'save'}>
               Remove
             </button>
           ` : ''}
         </div>
       `})}
-      <div class="settings-row">
+      <div className="settings-row">
         <input
           type="text"
-          class="profile-input"
+          className="profile-input"
           placeholder="https://relay.example.com"
           value=${input}
           onInput=${(e) => setInput(e.target.value)}
           onKeyDown=${(e) => e.key === 'Enter' && addRelay()}
-          spellcheck="false"
+          spellCheck="false"
         />
-        <button class="btn primary" onClick=${addRelay} disabled=${!input.trim() || busy === 'save'}>
+        <button className="btn primary" onClick=${addRelay} disabled=${!input.trim() || busy === 'save'}>
           Add
         </button>
+      </div>
+    </div>
+  `
+}
+
+// --- Nostr identity (Phase 1) — npub + cross-curve binding (NOSTR0-2) -------
+// Mirrors the ProfileSection/TrustedPeers load-copy-mutate idiom. All three
+// CMD_NOSTR_* are request/response (no page payload reaches a signer). The
+// wording is "linked (attested)", never "verified" — it's a trust assertion.
+function NostrIdentitySection ({ rpc, C }) {
+  const [state, setState] = useState(null)
+  const [busy, setBusy] = useState(null)
+  const [err, setErr] = useState('')
+  const [copied, setCopied] = useState(false)
+
+  const load = async () => {
+    try { setState(await rpc.request(C.CMD_NOSTR_GET_IDENTITY)); setErr('') }
+    catch (e) { setErr(e.message) }
+  }
+  useEffect(() => { load() }, [])
+
+  const copy = async () => {
+    if (!state?.npub) return
+    try { await navigator.clipboard.writeText(state.npub); setCopied(true); setTimeout(() => setCopied(false), 1500) } catch {}
+  }
+  const run = async (cmd, flag) => {
+    setBusy(flag); setErr('')
+    try { setState(await rpc.request(cmd)) }
+    catch (e) { setErr(e.message) }
+    finally { setBusy(null) }
+  }
+
+  const npub = state?.npub || ''
+  const short = npub ? npub.slice(0, 14) + '…' + npub.slice(-6) : '—'
+  const status = state?.status || (state?.linked ? 'linked' : 'unverified')
+  const linked = status === 'linked'
+  const epoch = state?.epoch || 0
+  const statusBadge = status === 'linked' ? 'self' : status === 'revoked' ? 'other danger' : 'other'
+  const statusText = status === 'linked'
+    ? `linked (attested) · epoch ${epoch}`
+    : status === 'revoked'
+      ? `revoked · epoch ${epoch}`
+      : status === 'stale'
+        ? `stale · epoch ${epoch}`
+        : 'not linked'
+  const statusHelp = status === 'linked'
+    ? 'Your pear root and this Nostr key are mutually signed.'
+    : status === 'revoked'
+      ? 'The last attestation was revoked and is no longer trusted.'
+      : status === 'stale'
+        ? 'The stored attestation points at an older Nostr key.'
+        : 'Mint a mutual attestation binding your pear root ↔ Nostr key.'
+
+  return html`
+    <div className="settings-card">
+      <div className="settings-row">
+        <div>
+          <div className="settings-label">Your Nostr key</div>
+          <div className="settings-subtle">${state ? short : 'Loading…'}</div>
+        </div>
+        <button className="btn small" onClick=${copy} disabled=${!npub}>${copied ? 'Copied' : 'Copy npub'}</button>
+      </div>
+      <div className="settings-row">
+        <div>
+          <div className="settings-label">Link status</div>
+          <div className="settings-subtle">
+            <span className=${`src-badge ${statusBadge}`}>${statusText}</span> ${statusHelp}
+          </div>
+        </div>
+        ${linked
+          ? html`<button className="btn subtle danger" onClick=${() => run(C.CMD_NOSTR_REVOKE, 'revoke')} disabled=${busy != null}>${busy === 'revoke' ? 'Revoking…' : 'Revoke'}</button>`
+          : html`<button className="btn primary" onClick=${() => run(C.CMD_NOSTR_BIND, 'bind')} disabled=${busy != null}>${busy === 'bind' ? 'Linking…' : 'Link (attest)'}</button>`}
+      </div>
+      ${err && html`<div className="tp-msg">${err}</div>`}
+    </div>
+  `
+}
+
+// --- Nostr feed (Phase 2) — author + read your own NIP-01 notes -------------
+// Compose kind:1 notes signed with your Nostr key and stored in your local event
+// log (CMD_NOSTR_PUBLISH); the list is your own store queried via CMD_NOSTR_QUERY.
+function NostrFeedSection ({ rpc, C }) {
+  const [events, setEvents] = useState([])
+  const [draft, setDraft] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const [federated, setFederated] = useState(false) // include trusted contacts' notes
+  const [hidden, setHidden] = useState(null)
+  const maxContent = 64 * 1024
+
+  const load = async () => {
+    try {
+      const res = await rpc.request(C.CMD_NOSTR_QUERY, { filter: { kinds: [1], limit: 50 }, federated })
+      setEvents(Array.isArray(res?.events) ? res.events : [])
+      setHidden(res?.hidden || null)
+      setErr('')
+    } catch (e) { setErr(e.message) }
+  }
+  useEffect(() => { load() }, [federated])
+
+  const post = async () => {
+    const content = draft.trim()
+    if (!content) return
+    setBusy(true); setErr('')
+    try {
+      await rpc.request(C.CMD_NOSTR_PUBLISH, { kind: 1, content })
+      setDraft(''); await load()
+    } catch (e) { setErr(e.message) } finally { setBusy(false) }
+  }
+  const when = (ts) => {
+    const d = Date.now() / 1000 - ts
+    if (d < 60) return 'just now'
+    if (d < 3600) return Math.floor(d / 60) + 'm'
+    if (d < 86400) return Math.floor(d / 3600) + 'h'
+    return Math.floor(d / 86400) + 'd'
+  }
+  const hiddenTotal = hidden
+    ? (hidden.quarantined || 0) + (hidden.dropped || 0) + (hidden.futureDated || 0) + (hidden.bindingMissing || 0) + (hidden.bindingUntrusted || 0) + (hidden.contactFailures || 0)
+    : 0
+  const hiddenReasons = hidden?.byReason
+    ? Object.entries(hidden.byReason).filter(([, count]) => count > 0).map(([reason, count]) => `${reason}: ${count}`).join(' · ')
+    : ''
+
+  return html`
+    <div className="settings-card">
+      <div className="tp-field">
+        <label>Post a note</label>
+        <textarea className="profile-input" rows="2" maxLength=${maxContent} placeholder="What's happening?" value=${draft}
+                  onInput=${(e) => setDraft(e.target.value)}></textarea>
+        <button className="btn small primary" onClick=${post} disabled=${busy || !draft.trim()}>${busy ? 'Posting…' : 'Post'}</button>
+      </div>
+      ${err && html`<div className="tp-msg">${err}</div>`}
+      <div className="settings-row">
+        <label className="login-scope${federated ? ' on' : ''}">
+          <input type="checkbox" checked=${federated} onChange=${() => setFederated((v) => !v)} />
+          Include trusted contacts' notes
+        </label>
+      </div>
+      ${federated && hiddenTotal > 0 && html`
+        <div className="settings-subtle">
+          Hidden contact activity: ${hiddenTotal}${hiddenReasons ? ` · ${hiddenReasons}` : ''}
+        </div>
+      `}
+      <div className="nostr-feed">
+        ${events.length === 0
+          ? html`<div className="settings-subtle">No notes yet — post one above. Each is signed with your Nostr key and stored in your local event log.</div>`
+          : events.map((ev) => html`
+            <div className="nostr-note" key=${ev.id}>
+              <div className="nostr-note-content">${ev.content}</div>
+              <div className="settings-subtle">
+                ${ev._via
+                  ? html`<span className="src-badge followed">from ${ev._via}</span>`
+                  : html`<span className="src-badge self">you</span>`}
+                kind ${ev.kind} · ${when(ev.created_at)}
+              </div>
+            </div>`)}
+      </div>
+    </div>
+  `
+}
+
+// --- Name registry (Phase N5) — claim memorable names → drives/app links ----
+// Owner-signed, multi-writer, first-claim-wins with a confusable/homograph guard.
+// One form claims a new name or updates (rotates) one you already own; each name
+// is shareable as pearname://<name> and resolves in the URL bar.
+function NameRegistrySection ({ rpc, C }) {
+  const [list, setList] = useState([])
+  const [status, setStatus] = useState(null)
+  const [name, setName] = useState('')
+  const [target, setTarget] = useState('')
+  const [busy, setBusy] = useState(null)
+  const [err, setErr] = useState('')
+  const [copied, setCopied] = useState('')
+
+  const load = async () => {
+    try {
+      const st = await rpc.request(C.CMD_NAMEREG_STATUS)
+      setStatus(st)
+      if (st.created) { const r = await rpc.request(C.CMD_NAMEREG_LIST); setList(Array.isArray(r?.names) ? r.names : []) }
+      else setList([])
+    } catch (e) { setErr(e.message) }
+  }
+  useEffect(() => { load() }, [])
+
+  const submit = async () => {
+    const n = name.trim()
+    const t = normalizeNameTarget(target)
+    if (!t) { setErr('Enter a 64-hex drive key or pear://, hyper://, file:// link.'); return }
+    const owned = list.find((e) => e.normalized === n.toLowerCase() || (e.name || '').toLowerCase() === n.toLowerCase())
+    setBusy('submit'); setErr('')
+    try {
+      await rpc.request(owned ? C.CMD_NAMEREG_ROTATE : C.CMD_NAMEREG_CLAIM, { name: n, target: t })
+      setName(''); setTarget(''); await load()
+    } catch (e) { setErr(e.message) } finally { setBusy(null) }
+  }
+  const act = async (cmd, n) => {
+    setBusy(n + cmd); setErr('')
+    try { await rpc.request(cmd, { name: n }); await load() }
+    catch (e) { setErr(e.message) } finally { setBusy(null) }
+  }
+  const copyPearname = async (n) => {
+    try { await navigator.clipboard.writeText('pearname://' + n); setCopied(n); setTimeout(() => setCopied(''), 1500) } catch {}
+  }
+
+  const targetValid = normalizeNameTarget(target) != null
+  return html`
+    <div className="settings-card">
+	      ${status && !status.enabled
+	        ? html`<div className="settings-subtle">Turn on “Names” in Experimental (below) to claim registry names.</div>`
+	        : html`<div className="namereg-body">
+	        <div className="settings-row">
+	          <div>
+	            <div className="settings-label">Claim or update a name</div>
+	            <div className="settings-subtle">A memorable name → a drive key or app link. First claim wins; confusable look-alikes are rejected. Re-submitting a name you own updates its target.</div>
+          </div>
+        </div>
+        <div className="tp-row">
+          <input className="profile-input" placeholder="name (e.g. alice)" value=${name} onInput=${(e) => setName(e.target.value)} />
+          <input className="profile-input" placeholder="64-hex key, pear://, hyper://, file://" value=${target} onInput=${(e) => setTarget(e.target.value)} />
+          <button className="btn small primary" onClick=${submit} disabled=${busy != null || !name.trim() || !targetValid}>${busy === 'submit' ? 'Saving…' : 'Save'}</button>
+        </div>
+        ${list.length > 0 && html`<div className="namereg-list">
+          ${list.map((e) => html`
+            <div className="settings-row" key=${e.normalized}>
+              <div>
+                <div className="settings-label">${e.name} <span className="src-badge self">pearname://${e.normalized}</span></div>
+                <div className="settings-subtle" title=${e.link || e.key || e.target}>→ ${shortKey(e.link || e.key || e.target)} · v${e.version}</div>
+              </div>
+              <div>
+                <button className="btn small" onClick=${() => copyPearname(e.normalized)}>${copied === e.normalized ? 'Copied' : 'Copy'}</button>
+                <button className="btn small" onClick=${() => act(C.CMD_NAMEREG_RELEASE, e.normalized)} disabled=${busy != null}>Release</button>
+                <button className="btn subtle danger" onClick=${() => act(C.CMD_NAMEREG_REVOKE, e.normalized)} disabled=${busy != null}>Revoke</button>
+              </div>
+            </div>`)}
+	        </div>`}
+	        ${status && status.created && list.length === 0 && html`<div className="settings-subtle">No names yet — claim one above.</div>`}
+	      </div>`}
+      ${err && html`<div className="tp-msg">${err}</div>`}
+    </div>
+  `
+}
+
+// --- Multi-device bookmark sync (encrypted) — Settings panel ---------------
+//
+// Surfaces the CMD_SYNC_* backend (Rollout Phase 4). Rendered only when the
+// experimentalDeviceSync flag is on. Mirrors the collaborative-catalog pairing
+// flow, but the base is ENCRYPTED and private to the user's own devices: the
+// invite `sync://<key>:<encKey>` carries the encryption key, so only paired
+// devices can read the bookmarks.
+//
+// Pairing (two of your own devices):
+//   Device A — "Set up sync" (becomes the first writer) → copy the invite.
+//   Device B — paste the invite → "Pair" (read-only) → copy B's writer key.
+//   Device A — paste B's writer key → "Add device". B becomes a writer on sync.
+function DeviceSync ({ rpc, C }) {
+  const [status, setStatus] = useState(null) // null = still loading
+  const [busy, setBusy] = useState(null)
+  const [err, setErr] = useState('')
+  const [notice, setNotice] = useState('')
+  const [joinInput, setJoinInput] = useState('')
+  const [writerInput, setWriterInput] = useState('')
+  const [copied, setCopied] = useState('')
+
+  const flash = (msg) => { setNotice(msg); setTimeout(() => setNotice(''), 2200) }
+  const copy = (text, what) => { if (!text) return; try { navigator.clipboard.writeText(text); setCopied(what); setTimeout(() => setCopied(''), 1500) } catch {} }
+
+  const loadStatus = async () => {
+    setErr('')
+    try { setStatus(await rpc.request(C.CMD_SYNC_STATUS)) }
+    catch (e) { setErr(e.message); setStatus({ enabled: true, paired: false }) }
+  }
+  useEffect(() => { loadStatus() }, [])
+
+  // Manual re-check — there is no push event when another device promotes this
+  // one from read-only to writer, so the user refreshes to pick it up.
+  const refresh = async () => { setBusy('refresh'); try { await loadStatus() } finally { setBusy(null) } }
+
+  const create = async () => {
+    setErr(''); setBusy('create')
+    try { await rpc.request(C.CMD_SYNC_CREATE, {}, 60000); await loadStatus(); flash('Sync is on — this device is the first writer.') }
+    catch (e) { setErr(e.message) } finally { setBusy(null) }
+  }
+
+  const join = async () => {
+    const parsed = parseSyncInvite(joinInput)
+    if (!parsed) { setErr('That is not a valid sync invite — expected sync://<64-hex>:<64-hex>.'); return }
+    setErr(''); setBusy('join')
+    try {
+      await rpc.request(C.CMD_SYNC_JOIN, parsed, 60000)
+      setJoinInput(''); await loadStatus()
+      flash('Paired. Copy this device’s writer key below, then add it from a writer device.')
+    } catch (e) { setErr(e.message) } finally { setBusy(null) }
+  }
+
+  const addWriter = async () => {
+    // Accept a bare writer key or a paste that happens to be a sync invite.
+    const writerKey = (parseSyncInvite(writerInput)?.key || writerInput).trim().toLowerCase()
+    setErr(''); setBusy('writer')
+    try {
+      await rpc.request(C.CMD_SYNC_ADD_WRITER, { writerKey }, 60000)
+      setWriterInput(''); flash('Device added — it becomes a writer once it syncs.')
+    } catch (e) { setErr(e.message) } finally { setBusy(null) }
+  }
+
+  const pushLocal = async () => {
+    setErr(''); setBusy('push')
+    try {
+      const res = await rpc.request(C.CMD_SYNC_PUSH_LOCAL, {}, 60000)
+      await loadStatus(); flash(`Imported ${res?.pushed ?? 0} local bookmark(s) into the synced set.`)
+    } catch (e) { setErr(e.message) } finally { setBusy(null) }
+  }
+
+  const removeBookmark = async (url) => {
+    setErr(''); setBusy('rm:' + url)
+    try { await rpc.request(C.CMD_SYNC_REMOVE_BOOKMARK, { url }, 60000); await loadStatus() }
+    catch (e) { setErr(e.message) } finally { setBusy(null) }
+  }
+
+  if (status === null) return html`<div className="settings-card"><div className="settings-subtle">Loading…</div></div>`
+
+  const paired = !!status.paired
+  const writable = !!status.writable
+  const invite = formatSyncInvite(status.key, status.encKey)
+  const bookmarks = Array.isArray(status.bookmarks) ? status.bookmarks : []
+  const count = (status.count && Number.isFinite(status.count.bookmarks)) ? status.count.bookmarks : bookmarks.length
+
+  return html`
+    <div className="settings-card">
+      ${err && html`<div className="apps-error">${err}</div>`}
+      ${notice && html`<div className="apps-ok">${notice}</div>`}
+
+	      ${!paired && html`<div className="sync-setup">
+	        <div className="settings-row">
+	          <div>
+	            <div className="settings-label">Set up sync on this device</div>
+	            <div className="settings-subtle">Creates a private, encrypted bookmark store. This device becomes the first writer; pair your other devices to it.</div>
+          </div>
+          <button className="btn primary" onClick=${create} disabled=${busy === 'create'}>${busy === 'create' ? 'Setting up…' : 'Set up sync'}</button>
+        </div>
+        <div className="settings-row">
+          <div className="profile-field">
+            <div className="settings-label">…or pair this device with another</div>
+            <input className="profile-input" placeholder="sync://<key>:<encryption-key>" value=${joinInput}
+                   onInput=${(e) => setJoinInput(e.target.value)} onKeyDown=${(e) => e.key === 'Enter' && join()} />
+	          </div>
+	          <button className="btn" onClick=${join} disabled=${busy === 'join' || !joinInput.trim()}>${busy === 'join' ? 'Pairing…' : 'Pair'}</button>
+	        </div>
+	      </div>`}
+
+	      ${paired && html`<div className="sync-paired">
+	        <div className="settings-row">
+	          <div>
+	            <div className="settings-label">Syncing ${writable ? '' : html`<span className="settings-subtle">· read-only on this device</span>`}</div>
+	            <div className="settings-subtle">${count} bookmark(s) in the synced set</div>
+          </div>
+          <div className="settings-row-actions">
+            <button className="btn subtle small" onClick=${refresh} disabled=${busy === 'refresh'} title="Re-check sync status (e.g. after another device added this one as a writer)">${busy === 'refresh' ? 'Refreshing…' : 'Refresh'}</button>
+            ${writable && html`<button className="btn subtle" onClick=${pushLocal} disabled=${busy === 'push'}>${busy === 'push' ? 'Importing…' : 'Import local bookmarks'}</button>`}
+          </div>
+        </div>
+
+        <div className="settings-row">
+          <div className="profile-field">
+            <div className="settings-label">Pairing invite — open this on another device to sync it</div>
+            <code className="settings-code">${invite || '(unavailable)'}</code>
+            <div className="settings-subtle">Carries your encryption key. Anyone with it can read your synced bookmarks — treat it like a password.</div>
+          </div>
+          <button className="btn small" onClick=${() => copy(invite, 'invite')} disabled=${!invite}>${copied === 'invite' ? 'Copied' : 'Copy'}</button>
+        </div>
+
+        <div className="settings-row">
+          <div className="profile-field">
+            <div className="settings-label">This device’s writer key${writable ? '' : ' — give it to a writer device to be added'}</div>
+            <code className="settings-code">${status.writerKey || '(unavailable)'}</code>
+          </div>
+          <button className="btn small" onClick=${() => copy(status.writerKey, 'writer')} disabled=${!status.writerKey}>${copied === 'writer' ? 'Copied' : 'Copy'}</button>
+        </div>
+
+        ${writable && html`
+          <div className="settings-row">
+            <div className="profile-field">
+              <div className="settings-label">Add another device (paste its writer key)</div>
+              <input className="profile-input" placeholder="64-hex writer key" value=${writerInput}
+                     onInput=${(e) => setWriterInput(e.target.value)} onKeyDown=${(e) => e.key === 'Enter' && addWriter()} />
+            </div>
+            <button className="btn" onClick=${addWriter} disabled=${busy === 'writer' || !writerInput.trim()}>${busy === 'writer' ? 'Adding…' : 'Add device'}</button>
+          </div>
+        `}
+
+        ${!writable && html`<div className="settings-subtle">This device is read-only until a writer device adds the key above. Synced bookmarks still replicate here in the meantime.</div>`}
+
+	        ${bookmarks.length > 0 && html`<div className="sync-bookmarks">
+	          <div className="settings-row"><div className="settings-label">Synced bookmarks</div></div>
+	          ${bookmarks.map((b) => html`
+	            <div className="settings-row" key=${b.url}>
+	              <div>
+                <div className="settings-label">${b.title || b.url}</div>
+                <div className="settings-subtle">${b.url}</div>
+              </div>
+	              ${writable && html`<button className="btn small subtle" onClick=${() => removeBookmark(b.url)} disabled=${busy === 'rm:' + b.url}>Remove</button>`}
+	            </div>
+	          `)}
+	        </div>`}
+	      </div>`}
+    </div>
+  `
+}
+
+// Experimental-features toggles. The backend enforces each flag server-side;
+// these are the user-facing switches (persisted in user-data settings):
+//   - experimentalAutobeeCatalogs  unlocks the create/load `autobee://` paths
+//                                  in the Apps tab.
+//   - experimentalDeviceSync       unlocks the Device sync panel below (and the
+//                                  CMD_SYNC_* handlers, gated by requireSync).
+function ExperimentalSection ({ rpc, C, onAutobeeChange, onDeviceSyncChange }) {
+  const [naming, setNaming] = useState(false)
+  const [autobee, setAutobee] = useState(false)
+  const [deviceSync, setDeviceSync] = useState(false)
+  const [busy, setBusy] = useState(null) // the flag currently being written, or null
+  const [err, setErr] = useState('')
+
+  useEffect(() => {
+    rpc.request(C.CMD_USERDATA_GET_SETTINGS)
+      .then((res) => {
+        const s = unwrapSettings(res)
+        setNaming(!!s?.experimentalNaming)
+        setAutobee(!!s?.experimentalAutobeeCatalogs)
+        setDeviceSync(!!s?.experimentalDeviceSync)
+      })
+      .catch(() => {})
+  }, [])
+
+  const toggle = async (flag, next, setLocal, onChange) => {
+    setBusy(flag); setErr('')
+    try {
+      await rpc.request(C.CMD_USERDATA_SET_SETTINGS, { updates: { [flag]: next } })
+      setLocal(next)
+      onChange?.(next)
+    } catch (e) { setErr(`save: ${e.message}`) }
+    finally { setBusy(null) }
+  }
+
+  return html`
+    <div className="settings-card">
+      ${err && html`<div className="apps-error">${err}</div>`}
+      <div className="settings-row">
+        <div>
+          <div className="settings-label">Names (petnames)</div>
+          <div className="settings-subtle">Type friendly names like <code>keet</code> in the address bar instead of 52-character keys. Resolves your own saved petnames plus a curated set of well-known names, fully local — a provenance chip shows how each name resolved. Experimental.</div>
+        </div>
+        <label className="login-scope${naming ? ' on' : ''}">
+          <input type="checkbox" checked=${naming} disabled=${busy === 'experimentalNaming'}
+                 onChange=${() => toggle('experimentalNaming', !naming, setNaming)} />
+        </label>
+      </div>
+      <div className="settings-row">
+        <div>
+          <div className="settings-label">Collaborative catalogs (Autobee)</div>
+          <div className="settings-subtle">Create app catalogs several people can co-edit, synced peer-to-peer with no server. Experimental — load or create them with <code>autobee://</code> keys in the Apps tab. Not yet pinned on relays, so a catalog is reachable only while a writer is online.</div>
+        </div>
+        <label className="login-scope${autobee ? ' on' : ''}">
+          <input type="checkbox" checked=${autobee} disabled=${busy === 'experimentalAutobeeCatalogs'}
+                 onChange=${() => toggle('experimentalAutobeeCatalogs', !autobee, setAutobee, onAutobeeChange)} />
+        </label>
+      </div>
+      <div className="settings-row">
+        <div>
+          <div className="settings-label">Device sync (encrypted bookmarks)</div>
+          <div className="settings-subtle">Sync your bookmarks across your own devices, encrypted end-to-end with no server or account. Once enabled, pair devices in the <strong>Device sync</strong> section below. Experimental — your synced data is readable only on devices that hold the pairing invite.</div>
+        </div>
+        <label className="login-scope${deviceSync ? ' on' : ''}">
+          <input type="checkbox" checked=${deviceSync} disabled=${busy === 'experimentalDeviceSync'}
+                 onChange=${() => toggle('experimentalDeviceSync', !deviceSync, setDeviceSync, onDeviceSyncChange)} />
+        </label>
       </div>
     </div>
   `
@@ -2344,6 +4104,9 @@ function Settings ({ rpc, C, status, storagePath, log }) {
   const [showRestore, setShowRestore] = useState(false)
   const [restoreInput, setRestoreInput] = useState('')
   const [restoreNotice, setRestoreNotice] = useState('')
+  // Whether the Device-sync section is shown — driven by the experimental flag,
+  // toggled live from the Experimental card below.
+  const [deviceSync, setDeviceSync] = useState(false)
   const CMD_GET_IDENTITY = C?.CMD_GET_IDENTITY ?? 31
   const CMD_IDENTITY_EXPORT_PHRASE = C?.CMD_IDENTITY_EXPORT_PHRASE ?? 70
   const CMD_IDENTITY_IMPORT_PHRASE = C?.CMD_IDENTITY_IMPORT_PHRASE ?? 71
@@ -2355,6 +4118,14 @@ function Settings ({ rpc, C, status, storagePath, log }) {
     rpc.request(CMD_GET_IDENTITY).then(setIdentity).catch((e) => setErr(e.message))
 
   useEffect(() => { refreshIdentity() }, [])
+
+  // Load the device-sync flag once so the section renders on first paint if the
+  // user already enabled it; the Experimental toggle keeps it in sync after.
+  useEffect(() => {
+    rpc.request(C.CMD_USERDATA_GET_SETTINGS)
+      .then((res) => setDeviceSync(!!unwrapSettings(res)?.experimentalDeviceSync))
+      .catch(() => {})
+  }, [])
 
   const revealPhrase = async () => {
     if (seedPhrase) { setSeedPhrase(null); return }
@@ -2425,131 +4196,153 @@ function Settings ({ rpc, C, status, storagePath, log }) {
   }
 
   return html`
-    <div class="settings">
+    <div className="settings">
       <h1>Settings</h1>
-      <p class="subtitle">Identity, infrastructure, and diagnostics for your peer-to-peer browser.</p>
-      ${err && html`<div class="apps-error">${err}</div>`}
+      <p className="subtitle">Identity, infrastructure, and diagnostics for your peer-to-peer browser.</p>
+      ${err && html`<div className="apps-error">${err}</div>`}
 
       <h2>Identity</h2>
-      <div class="settings-card">
-        <div class="settings-row">
+      <div className="settings-card">
+        <div className="settings-row">
           <div>
-            <div class="settings-label">Your peer public key</div>
-            <code class="settings-code">${identity?.publicKey || '(loading…)'}</code>
+            <div className="settings-label">Your peer public key</div>
+            <code className="settings-code">${identity?.publicKey || '(loading…)'}</code>
           </div>
         </div>
       </div>
 
       <h2>Moving to a new device?</h2>
-      <p class="subtitle">Your identity lives on this machine. To use the same identity on another computer or after a wipe, write down your 12-word backup phrase. Anyone with the phrase can sign in as you — store it like a password.</p>
-      <div class="settings-card">
-        <div class="settings-row">
+      <p className="subtitle">Your identity lives on this machine. To use the same identity on another computer or after a wipe, write down your 12-word backup phrase. Anyone with the phrase can sign in as you — store it like a password.</p>
+      <div className="settings-card">
+        <div className="settings-row">
           <div>
-            <div class="settings-label">Backup phrase</div>
-            <div class="settings-subtle">${identity?.hasBackupPhrase ? `${identity.mnemonicWordCount}-word BIP-39 mnemonic. Reveal once to write down — never display on a shared screen.` : 'not available'}</div>
+            <div className="settings-label">Backup phrase</div>
+            <div className="settings-subtle">${identity?.hasBackupPhrase ? `${identity.mnemonicWordCount}-word BIP-39 mnemonic. Reveal once to write down — never display on a shared screen.` : 'not available'}</div>
           </div>
-          <button class="btn" onClick=${revealPhrase} disabled=${busy === 'reveal' || !identity?.hasBackupPhrase}>
+          <button className="btn" onClick=${revealPhrase} disabled=${busy === 'reveal' || !identity?.hasBackupPhrase}>
             ${seedPhrase ? 'Hide' : 'Reveal phrase'}
           </button>
         </div>
         ${seedPhrase && html`
-          <pre class="seed-phrase">${seedPhrase}</pre>
-          <div class="settings-warning">Write this down somewhere offline. Anyone with these words controls your identity — and we can't reset it for you.</div>
+          <pre className="seed-phrase">${seedPhrase}</pre>
+          <div className="settings-warning">Write this down somewhere offline. Anyone with these words controls your identity — and we can't reset it for you.</div>
         `}
-        <div class="settings-row">
+        <div className="settings-row">
           <div>
-            <div class="settings-label">Restore from phrase</div>
-            <div class="settings-subtle">Replace this device's identity with one recovered from a saved 12 or 24-word phrase. Use this on a fresh PearBrowser install to bring your existing identity over.</div>
+            <div className="settings-label">Restore from phrase</div>
+            <div className="settings-subtle">Replace this device's identity with one recovered from a saved 12 or 24-word phrase. Use this on a fresh PearBrowser install to bring your existing identity over.</div>
           </div>
-          <button class="btn subtle" onClick=${() => { setShowRestore((v) => !v); setRestoreNotice(''); setErr('') }}
+          <button className="btn subtle" onClick=${() => { setShowRestore((v) => !v); setRestoreNotice(''); setErr('') }}
                   disabled=${busy?.startsWith?.('restore')}>
             ${showRestore ? 'Cancel' : 'Restore…'}
           </button>
         </div>
         ${showRestore && html`
-          <div class="restore-form">
+          <div className="restore-form">
             <textarea
-              class="restore-textarea"
+              className="restore-textarea"
               placeholder="Paste your 12 or 24-word backup phrase here, separated by spaces"
               value=${restoreInput}
               rows="3"
-              spellcheck="false"
-              autocapitalize="none"
+              spellCheck="false"
+              autoCapitalize="none"
               onInput=${(e) => setRestoreInput(e.target.value)}
             ></textarea>
-            <div class="restore-actions">
-              <button class="btn primary" onClick=${validateAndRestore}
+            <div className="restore-actions">
+              <button className="btn primary" onClick=${validateAndRestore}
                       disabled=${!restoreInput.trim() || busy?.startsWith?.('restore')}>
                 ${busy === 'restore-validate' ? 'Checking…' : busy === 'restore-apply' ? 'Restoring…' : 'Restore identity'}
               </button>
             </div>
-            <div class="settings-warning">This destroys the current identity on disk. Make sure you've saved its phrase first.</div>
+            <div className="settings-warning">This destroys the current identity on disk. Make sure you've saved its phrase first.</div>
           </div>
         `}
-        ${restoreNotice && html`<div class="apps-ok">${restoreNotice}</div>`}
+        ${restoreNotice && html`<div className="apps-ok">${restoreNotice}</div>`}
       </div>
 
       <h2>Profile</h2>
-      <p class="subtitle">What apps see when you grant a sign-in. Each field is opt-in — leave blank to share nothing.</p>
+      <p className="subtitle">What apps see when you grant a sign-in. Each field is opt-in — leave blank to share nothing.</p>
       <${ProfileSection} rpc=${rpc} C=${C} />
 
-      <h2>Connected Apps</h2>
-      <p class="subtitle">Pear apps that have been granted access to your identity. Revoke any time.</p>
-      <${ConnectedAppsSection} rpc=${rpc} C=${C} />
+      <h2>Permission Center</h2>
+      <p className="subtitle">Persistent app grants grouped by drive: sign-in, profile fields, contacts, and arbitrary swarm topics.</p>
+      <${PermissionCenterSection} rpc=${rpc} C=${C} />
 
       <h2>Relays</h2>
-      <p class="subtitle">HiveRelay endpoints used for fast first-paint and persistence. Hybrid mode falls back to pure P2P if a relay is down.</p>
+      <p className="subtitle">HiveRelay endpoints used for fast first-paint and persistence. Hybrid mode falls back to pure P2P if a relay is down.</p>
       <${RelaysSection} rpc=${rpc} C=${C} />
 
+      <h2>Nostr identity</h2>
+      <p className="subtitle">A portable Nostr key (npub), linked to your pear identity by a mutual, revocable attestation. "Linked (attested)" is a trust assertion the two keys mutually signed — never proof of the same person.</p>
+      <${NostrIdentitySection} rpc=${rpc} C=${C} />
+
+      <h2>Nostr feed</h2>
+      <p className="subtitle">Post NIP-01 notes signed with your Nostr key. Toggle "Include trusted contacts" to also see notes a verified contact authored with their attested Nostr key, replicated peer-to-peer.</p>
+      <${NostrFeedSection} rpc=${rpc} C=${C} />
+
+      <h2>Name registry</h2>
+      <p className="subtitle">Claim memorable names that resolve to your drives or app links — type the name (or pearname://name) in the URL bar. Owner-signed, durable across devices, first-claim-wins with a homograph guard.</p>
+      <${NameRegistrySection} rpc=${rpc} C=${C} />
+
       <h2>HiveRelay Network</h2>
-      <div class="settings-card">
-        <div class="settings-row">
+      <div className="settings-card">
+        <div className="settings-row">
           <div>
-            <div class="settings-label">Connected relays</div>
-            <div class="settings-subtle">${status.hiveRelays || 0} HiveRelay(s) reachable via the DHT right now</div>
+            <div className="settings-label">Connected relays</div>
+            <div className="settings-subtle">${status.hiveRelays || 0} HiveRelay(s) reachable via the DHT right now</div>
           </div>
         </div>
-        <div class="settings-row">
+        <div className="settings-row">
           <div>
-            <div class="settings-label">Default replication factor</div>
-            <div class="settings-subtle">3 relays per published site (configurable per-publish in a future release)</div>
+            <div className="settings-label">Default replication factor</div>
+            <div className="settings-subtle">3 relays per published site (configurable per-publish in a future release)</div>
           </div>
         </div>
       </div>
 
       <h2>Live status</h2>
-      <pre class="boot-log">${JSON.stringify(status, null, 2)}</pre>
+      <pre className="boot-log">${JSON.stringify(status, null, 2)}</pre>
 
       <h2>Storage</h2>
-      <div class="settings-card">
-        <div class="settings-row">
+      <div className="settings-card">
+        <div className="settings-row">
           <div>
-            <div class="settings-label">Path</div>
-            <code class="settings-code">${storagePath}</code>
+            <div className="settings-label">Path</div>
+            <code className="settings-code">${storagePath}</code>
           </div>
         </div>
-        <div class="settings-row">
+        <div className="settings-row">
           <div>
-            <div class="settings-label">Usage</div>
-            <div class="settings-subtle">${status.storageUsed ? (status.storageUsed / 1048576).toFixed(1) + ' MB' : '—'} / ${status.storageLimit ? (status.storageLimit / 1048576).toFixed(0) + ' MB' : '—'}</div>
+            <div className="settings-label">Usage</div>
+            <div className="settings-subtle">${status.storageUsed ? (status.storageUsed / 1048576).toFixed(1) + ' MB' : '—'} / ${status.storageLimit ? (status.storageLimit / 1048576).toFixed(0) + ' MB' : '—'}</div>
           </div>
-          <button class="btn subtle" onClick=${clearCache} disabled=${busy === 'cache'}>Clear cache</button>
+          <button className="btn subtle" onClick=${clearCache} disabled=${busy === 'cache'}>Clear cache</button>
         </div>
       </div>
 
+      <h2>Experimental</h2>
+      <p className="subtitle">Early features behind a flag. They may change, break, or be removed.</p>
+      <${ExperimentalSection} rpc=${rpc} C=${C} onDeviceSyncChange=${setDeviceSync} />
+
+	      ${deviceSync && html`<div className="settings-section-device-sync">
+	        <h2>Device sync <span className="settings-subtle">(experimental)</span></h2>
+	        <p className="subtitle">Your bookmarks, encrypted and synced across your own devices — no server, no account. Set up sync here, then pair your other devices with the invite.</p>
+	        <${DeviceSync} rpc=${rpc} C=${C} />
+	      </div>`}
+
       <h2>Danger zone</h2>
-      <div class="settings-card danger">
-        <div class="settings-row">
+      <div className="settings-card danger">
+        <div className="settings-row">
           <div>
-            <div class="settings-label">Reset app data</div>
-            <div class="settings-subtle">Unseeds every published site from HiveRelay first (only possible while your publisher keypair is intact), then wipes local storage and quits. You'll start fresh on next launch. <strong>Copy your drive keys before doing this.</strong></div>
+            <div className="settings-label">Reset app data</div>
+            <div className="settings-subtle">Unseeds every published site from HiveRelay first (only possible while your publisher keypair is intact), then wipes local storage and quits. You'll start fresh on next launch. <strong>Copy your drive keys before doing this.</strong></div>
           </div>
-          <button class="btn subtle danger" onClick=${resetApp} disabled=${busy === 'reset'}>${busy === 'reset' ? 'Resetting…' : 'Reset data'}</button>
+          <button className="btn subtle danger" onClick=${resetApp} disabled=${busy === 'reset'}>${busy === 'reset' ? 'Resetting…' : 'Reset data'}</button>
         </div>
       </div>
 
       <h2>Boot log</h2>
-      <pre class="boot-log">${log.join('\n') || '(events arrived pre-mount — check status above)'}</pre>
+      <pre className="boot-log">${log.join('\n') || '(events arrived pre-mount — check status above)'}</pre>
     </div>
   `
 }
@@ -2571,9 +4364,9 @@ function BlockEditor ({ block, onChange }) {
   switch (block.type) {
     case 'heading':
       return html`
-        <div class="block-fields">
+        <div className="block-fields">
           <select value=${block.level} onChange=${(e) => update({ level: +e.target.value })}>
-            ${[1, 2, 3].map((n) => html`<option value=${n}>H${n}</option>`)}
+            ${[1, 2, 3].map((n) => html`<option key=${n} value=${n}>H${n}</option>`)}
           </select>
           <input type="text" value=${block.text} onInput=${(e) => update({ text: e.target.value })} />
         </div>
@@ -2585,14 +4378,14 @@ function BlockEditor ({ block, onChange }) {
       return html`<textarea rows=${block.type === 'html' ? 8 : (block.type === 'code' ? 4 : 2)} value=${block.text} placeholder=${block.type === 'html' ? 'Paste raw HTML, CSS, or <script> — rendered as part of the page' : ''} onInput=${(e) => update({ text: e.target.value })}></textarea>`
     case 'image':
       return html`
-        <div class="block-fields">
+        <div className="block-fields">
           <input type="text" placeholder="src (https://…)" value=${block.src} onInput=${(e) => update({ src: e.target.value })} />
           <input type="text" placeholder="alt text" value=${block.alt} onInput=${(e) => update({ alt: e.target.value })} />
         </div>
       `
     case 'link':
       return html`
-        <div class="block-fields">
+        <div className="block-fields">
           <input type="text" placeholder="href" value=${block.href} onInput=${(e) => update({ href: e.target.value })} />
           <input type="text" placeholder="text" value=${block.text} onInput=${(e) => update({ text: e.target.value })} />
         </div>
@@ -2600,9 +4393,9 @@ function BlockEditor ({ block, onChange }) {
     case 'list':
       return html`<textarea rows=${Math.max(2, block.items.length)} placeholder="One item per line" value=${block.items.join('\n')} onInput=${(e) => update({ items: e.target.value.split('\n') })}></textarea>`
     case 'divider':
-      return html`<div class="placeholder">— divider —</div>`
+      return html`<div className="placeholder">— divider —</div>`
     default:
-      return html`<div class="placeholder">unknown block: ${block.type}</div>`
+      return html`<div className="placeholder">unknown block: ${block.type}</div>`
   }
 }
 
@@ -2672,68 +4465,176 @@ function SiteEditor ({ site, rpc, C, onBack, onBrowse }) {
     }
   }
 
+  // Upload a site icon — read as a data URL and write /icon.<ext> into the drive
+  // (peers replicate it; already-published sites need no re-publish). Shows in
+  // the browser's app/site listings via CMD_GET_APP_ICON.
+  const [iconOk, setIconOk] = useState(false)
+  const uploadIcon = (e) => {
+    const file = e.target.files && e.target.files[0]
+    if (!file) return
+    if (file.size > 512 * 1024) { setErr('icon: too large (max 512KB)'); e.target.value = ''; return }
+    const reader = new FileReader()
+    reader.onload = async () => {
+      setErr(''); setIconOk(false); setBusy('icon')
+      try {
+        await rpc.request(C.CMD_SET_SITE_ICON, { siteId: site.siteId, dataUrl: reader.result })
+        setIconOk(true); setTimeout(() => setIconOk(false), 2500)
+      } catch (err) { setErr(`icon: ${err.message}`) }
+      finally { setBusy(null); if (e.target) e.target.value = '' }
+    }
+    reader.readAsDataURL(file)
+  }
+
   return html`
-    <div class="site-editor">
-      <div class="site-editor-bar">
-        <button class="btn subtle" onClick=${onBack}>← Sites</button>
-        <input class="site-name-input" type="text" placeholder="Site name" value=${name} onInput=${(e) => setName(e.target.value)} />
-        <div class="spacer"></div>
-        <button class="btn" onClick=${save} disabled=${busy === 'save'} title="Write block changes to the drive — peers see updates live">${busy === 'save' ? 'Saving…' : 'Save'}</button>
+    <div className="site-editor">
+      <div className="site-editor-bar">
+        <button className="btn subtle" onClick=${onBack}>← Sites</button>
+        <input className="site-name-input" type="text" placeholder="Site name" value=${name} onInput=${(e) => setName(e.target.value)} />
+        <div className="spacer"></div>
+        <label className="btn subtle" title="Upload a site icon (SVG/PNG/JPEG/WebP, ≤512KB) — shows in the browser's site list">
+          ${busy === 'icon' ? 'Uploading…' : (iconOk ? '✓ Icon set' : '🖼 Icon')}
+          <input type="file" accept="image/svg+xml,image/png,image/jpeg,image/webp" style=${{ display: 'none' }} onChange=${uploadIcon} />
+        </label>
+        <button className="btn" onClick=${save} disabled=${busy === 'save'} title="Write block changes to the drive — peers see updates live">${busy === 'save' ? 'Saving…' : 'Save'}</button>
         ${meta.published
-          ? html`<button class="btn subtle" onClick=${unpublish} disabled=${busy === 'unpublish'}>${busy === 'unpublish' ? 'Unpublishing…' : 'Unpublish'}</button>`
-          : html`<button class="btn primary" onClick=${publish} disabled=${busy === 'publish'} title="Seeds via Hyperswarm and pins to HiveRelay for 24/7 availability">${busy === 'publish' ? 'Publishing…' : 'Publish & Pin'}</button>`}
+          ? html`<button key="unpublish" className="btn subtle" onClick=${unpublish} disabled=${busy === 'unpublish'}>${busy === 'unpublish' ? 'Unpublishing…' : 'Unpublish'}</button>`
+          : html`<button key="publish" className="btn primary" onClick=${publish} disabled=${busy === 'publish'} title="Seeds via Hyperswarm and pins to HiveRelay for 24/7 availability">${busy === 'publish' ? 'Publishing…' : 'Publish & Pin'}</button>`}
       </div>
 
-      ${err && html`<div class="apps-error">${err}</div>`}
+      ${err && html`<div className="apps-error">${err}</div>`}
 
       ${meta.published && meta.keyHex && html`
-        <div class="site-published">
-          <div class="site-published-row">
+        <div className="site-published">
+          <div className="site-published-row">
             <span>Published at</span>
             <code>hyper://${meta.keyHex}/</code>
-            <button class="btn small" onClick=${() => copyText(`hyper://${meta.keyHex}/`)} title="Copy hyper:// URL">📋 Copy</button>
-            <button class="btn" onClick=${() => onBrowse(`hyper://${meta.keyHex}/`)}>Open in Browse</button>
+            <button className="btn small" onClick=${() => copyText(`hyper://${meta.keyHex}/`)} title="Copy hyper:// URL">📋 Copy</button>
+            <button className="btn" onClick=${() => onBrowse(`hyper://${meta.keyHex}/`)}>Open in Browse</button>
           </div>
-          <div class="site-published-row subtle">
+          <div className="site-published-row subtle">
             <span>Drive key</span>
-            <code class="key-mono">${meta.keyHex}</code>
-            <button class="btn small subtle" onClick=${() => copyText(meta.keyHex)} title="Copy raw key">📋 Key</button>
+            <code className="key-mono">${meta.keyHex}</code>
+            <button className="btn small subtle" onClick=${() => copyText(meta.keyHex)} title="Copy raw key">📋 Key</button>
           </div>
-          <div class="site-pin-row ${meta.pin?.replicatedPeers > 0 ? 'ok' : 'warn'}">
+          <div className="site-pin-row ${meta.pin?.replicatedPeers > 0 ? 'ok' : 'warn'}">
             ${meta.pin?.replicatedPeers > 0
               ? html`<span>📌 Replicated to ${meta.pin.replicatedPeers} HiveRelay peer${meta.pin.replicatedPeers === 1 ? '' : 's'} (of ${meta.pin.acceptances} accepted). Safe to close the app — stays online 24/7.</span>`
               : meta.pin?.ok
                 ? html`<span>📡 <strong>${meta.pin.acceptances} relay${meta.pin.acceptances === 1 ? '' : 's'} accepted</strong> your pin request, but none have pulled the content yet. The public HiveRelay network may take minutes or may not replicate at all. Your site is reachable via Hyperswarm as long as this app is running. Share your drive key now; keep the app open until you're sure someone's replicated it.</span>`
                 : html`<span>⚠️ Seeded P2P locally only. ${meta.pin?.connectedRelays > 0 ? `Connected to ${meta.pin.connectedRelays} relay(s) but none accepted the seed request.` : 'No HiveRelays connected yet; retry in a moment.'} Site is reachable while this app is running.</span>`}
           </div>
-          <div class="site-save-warning">
+          <div className="site-save-warning">
             💾 <strong>Save this key now.</strong> It's the only way to recover this site if you reset app data. Anyone with the key can reach your site; only this machine's publisher keypair can unseed it.
           </div>
         </div>
       `}
 
-      <div class="blocks">
-        ${blocks.length === 0 && html`<p class="placeholder">No blocks yet. Add one below.</p>`}
+      <div className="blocks">
+        ${blocks.length === 0 && html`<p className="placeholder">No blocks yet. Add one below.</p>`}
         ${blocks.map((block, i) => html`
-          <div class="block" key=${i}>
-            <div class="block-header">
-              <span class="block-type">${block.type}</span>
-              <div class="spacer"></div>
-              <button class="btn subtle small" onClick=${() => moveBlock(i, -1)} disabled=${i === 0}>↑</button>
-              <button class="btn subtle small" onClick=${() => moveBlock(i, 1)} disabled=${i === blocks.length - 1}>↓</button>
-              <button class="btn subtle small" onClick=${() => removeBlock(i)}>✕</button>
+          <div className="block" key=${i}>
+            <div className="block-header">
+              <span className="block-type">${block.type}</span>
+              <div className="spacer"></div>
+              <button className="btn subtle small" onClick=${() => moveBlock(i, -1)} disabled=${i === 0}>↑</button>
+              <button className="btn subtle small" onClick=${() => moveBlock(i, 1)} disabled=${i === blocks.length - 1}>↓</button>
+              <button className="btn subtle small" onClick=${() => removeBlock(i)}>✕</button>
             </div>
             <${BlockEditor} block=${block} onChange=${(next) => updateBlock(i, next)} />
           </div>
         `)}
       </div>
 
-      <div class="add-block-row">
-        <span class="placeholder">Add:</span>
+      <div className="add-block-row">
+        <span className="placeholder">Add:</span>
         ${Object.keys(BLOCK_TEMPLATES).map((t) => html`
-          <button class="btn subtle small" onClick=${() => addBlock(t)}>${t}</button>
+          <button key=${t} className="btn subtle small" onClick=${() => addBlock(t)}>${t}</button>
         `)}
       </div>
+    </div>
+  `
+}
+
+// Lighthouse federated search, as a reusable widget (Library + P2P Sites tabs).
+// Local results paint instantly via CMD_SEARCH; the opt-in trusted-peer set
+// arrives over EVT_SEARCH_FEDERATED, correlated by queryId so a stale reply
+// can't clobber a newer search.
+function FederatedSearch ({ rpc, C, onBrowse, placeholder }) {
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState(null) // null = not searched yet
+  const [indexed, setIndexed] = useState(0)
+  const [searching, setSearching] = useState(false)
+  const [federated, setFederated] = useState(false)
+  const [federating, setFederating] = useState(false)
+  const [searchMeta, setSearchMeta] = useState(null)
+  const [err, setErr] = useState('')
+  const searchIdRef = useRef(0)
+
+  const runSearch = async () => {
+    const q = query.trim()
+    if (!q) { setResults(null); setFederating(false); setSearchMeta(null); return }
+    setSearching(true); setFederating(false); setSearchMeta(null)
+    try {
+      const res = await rpc.request(C.CMD_SEARCH, { query: q, limit: 50, federated })
+      searchIdRef.current = res?.queryId || 0
+      setResults(Array.isArray(res?.results) ? res.results : [])
+      setIndexed(res?.stats?.docs || 0)
+      if (res?.federating) setFederating(true)
+    } catch (e) { setErr(`search: ${e.message}`) }
+    finally { setSearching(false) }
+  }
+  const resultUrl = (r) => {
+    if (r && r.link) return r.link
+    if (r && /^(?:pear|file|hyper):\/\//i.test(r.driveKey || '')) return r.driveKey
+    return `hyper://${r.driveKey}${r.path && r.path !== '/' ? r.path : '/'}`
+  }
+  const srcBadge = (r) => {
+    if (!r.tier || r.tier === 'self') return html`<span className="src-badge self">you</span>`
+    if (r.tier === 'followed') return html`<span className="src-badge followed">trusted · hop ${r.trustHop ?? 1}</span>`
+    return html`<span className="src-badge other">${r.tier}</span>`
+  }
+  useEffect(() => {
+    const onFederated = (e) => {
+      const d = (e && e.detail) || {}
+      if (d.queryId !== searchIdRef.current) return
+      if (Array.isArray(d.results)) setResults(d.results)
+      setSearchMeta(d)
+      setFederating(false)
+    }
+    rpc.addEventListener(`event:${C.EVT_SEARCH_FEDERATED}`, onFederated)
+    return () => rpc.removeEventListener(`event:${C.EVT_SEARCH_FEDERATED}`, onFederated)
+  }, [])
+
+  return html`
+    <div className="fed-search">
+      ${err && html`<div className="apps-error">${err}</div>`}
+      <div className="urlbar" style=${{ marginBottom: '10px' }}>
+        <input type="text" className="url-input"
+          placeholder=${placeholder || "Search the peer-to-peer web…"}
+          value=${query}
+          onInput=${(e) => setQuery(e.target.value)}
+          onKeyDown=${(e) => e.key === 'Enter' && runSearch()} />
+        <button className="btn primary" onClick=${runSearch} disabled=${searching || !query.trim()}>${searching ? 'Searching…' : 'Search'}</button>
+      </div>
+      <label className="search-fed-toggle">
+        <input type="checkbox" checked=${federated} onChange=${(e) => setFederated(e.target.checked)} />
+        Include trusted peers${federating ? html` <span className="fed-status">· searching peers…</span>` : ''}
+        <${SearchProvenanceBadges} meta=${searchMeta} />
+      </label>
+      ${indexed ? html`<span className="search-indexed" style=${{ marginLeft: '10px', opacity: 0.6, fontSize: '12px' }}>${indexed} page(s) indexed</span>` : ''}
+      ${results !== null && (results.length === 0
+        ? html`<p className="placeholder">No matches${indexed === 0 ? ' yet — browse some hyper:// pages first to build your index.' : '.'}</p>`
+        : html`<div className="library-list">
+            ${results.map((r) => html`
+              <div className="library-row" key=${r.docId || (r.driveKey + r.path)}>
+                <div className="library-row-main">
+                  <div className="library-title">${r.title || resultUrl(r)}${federated ? srcBadge(r) : ''}</div>
+                  <div className="library-url">${resultUrl(r)}</div>
+                </div>
+                <button className="btn small" onClick=${() => onBrowse(resultUrl(r))}>Open</button>
+              </div>
+            `)}
+          </div>`)}
     </div>
   `
 }
@@ -2757,7 +4658,31 @@ function Sites ({ rpc, C, onBrowse }) {
     }
   }
 
-  useEffect(() => { refresh() }, [])
+  // Published P2P sites from the catalogue (hyperdrive sites pinned on the
+  // relay network) — anything with a real 64-hex driveKey is a browsable site.
+  const [discovered, setDiscovered] = useState([])
+  const loadDiscovered = async () => {
+    try {
+      const res = await rpc.request(C.CMD_GET_CATALOG_APPS)
+      const apps = Array.isArray(res) ? res : (res?.apps ?? [])
+      // Dedupe by driveKey — the aggregated list carries the same site once per
+      // loaded catalogue (dev seed + live bee), and the backend only collapses
+      // entries that share a stable `id` (the dev seed has none), so without this
+      // every published site renders twice on the Sites page.
+      const sites = apps.filter((a) => a && typeof a.driveKey === 'string' && /^[0-9a-f]{64}$/i.test(a.driveKey))
+      // Order: peerit (the front page of the P2P internet) is pinned first,
+      // then any 'featured' sites, then the rest — stable within each band.
+      const rank = (a) => (a.driveKey === PEERIT_DRIVE_KEY ? 0
+        : (Array.isArray(a.categories) && a.categories.includes('featured') ? 1 : 2))
+      const ordered = dedupeApps(sites)
+        .map((a, i) => ({ a, i }))
+        .sort((x, y) => rank(x.a) - rank(y.a) || x.i - y.i)
+        .map((e) => e.a)
+      setDiscovered(ordered)
+    } catch (e) { /* discovery is best-effort */ }
+  }
+
+  useEffect(() => { refresh(); loadDiscovered() }, [])
 
   const createSite = async () => {
     if (busy === 'create') return
@@ -2795,37 +4720,63 @@ function Sites ({ rpc, C, onBrowse }) {
   }
 
   return html`
-    <div class="sites">
-      <h1>Sites</h1>
-      <p class="subtitle">Browse P2P sites or create your own — published to the HiveRelay network for 24/7 availability.</p>
-      <div class="catalog-loader">
+    <div className="sites">
+      <h1>P2P Sites</h1>
+      <p className="subtitle">Search the peer-to-peer web, browse published sites, or create your own — all served 24/7 on the HiveRelay network.</p>
+
+      <h2>Search the P2P web</h2>
+      <${FederatedSearch} rpc=${rpc} C=${C} onBrowse=${onBrowse} placeholder="Search the peer-to-peer web…" />
+
+      <h2>Published sites${discovered.length ? ` (${discovered.length})` : ''}</h2>
+      <p className="subtitle">Live hyper:// sites pinned on the relay network — open any one in a tab.</p>
+      ${discovered.length === 0
+        ? html`<p className="placeholder">Loading published sites…</p>`
+        : html`<div className="app-grid">
+            ${discovered.map((s) => html`
+              <div className="app-card" key=${s.driveKey}>
+                <${AppIcon} rpc=${rpc} C=${C} driveKey=${s.driveKey} iconRef=${s.icon} iconData=${s.iconData} name=${s.name} />
+                <div className="app-info">
+                  <div className="app-name">${s.name}</div>
+                  <div className="app-meta">${s.description || ('hyper://' + s.driveKey.slice(0, 10) + '…')}</div>
+                </div>
+                <div className="app-actions">
+                  <button className="btn primary" onClick=${() => onBrowse('hyper://' + s.driveKey + '/')}>Open</button>
+                  <button className="btn subtle" onClick=${() => copyText('hyper://' + s.driveKey + '/')}>📋 Copy</button>
+                </div>
+              </div>
+            `)}
+          </div>`}
+
+      <h2>Your sites</h2>
+      <p className="subtitle">Create and publish your own P2P site — auto-pinned to HiveRelay for 24/7 availability.</p>
+      <div className="catalog-loader">
         <input
-          class="site-name-field"
+          className="site-name-field"
           type="text"
           placeholder="New site name…"
           onKeyDown=${(e) => e.key === 'Enter' && createSite()}
         />
-        <button class="btn primary" onClick=${createSite} disabled=${busy === 'create'}>
+        <button className="btn primary" onClick=${createSite} disabled=${busy === 'create'}>
           ${busy === 'create' ? 'Creating…' : 'Create site'}
         </button>
       </div>
-      ${err && html`<div class="apps-error">${err}</div>`}
+      ${err && html`<div className="apps-error">${err}</div>`}
 
       ${sites.length === 0
-        ? html`<p class="placeholder">No sites yet. Create one above.</p>`
-        : html`<div class="app-grid">
+        ? html`<p className="placeholder">No sites yet. Create one above.</p>`
+        : html`<div className="app-grid">
             ${sites.map((site) => html`
-              <div class="app-card" key=${site.siteId}>
-                <div class="app-icon app-icon-fallback">${(site.name || '?').charAt(0)}</div>
-                <div class="app-info">
-                  <div class="app-name">${site.name}</div>
-                  <div class="app-meta">${site.published ? 'published · ' + (site.keyHex?.slice(0, 8) ?? '') + '…' : 'draft'}</div>
+              <div className="app-card" key=${site.siteId}>
+                <${AppIcon} rpc=${rpc} C=${C} driveKey=${site.keyHex} name=${site.name} />
+                <div className="app-info">
+                  <div className="app-name">${site.name}</div>
+                  <div className="app-meta">${site.published ? 'published · ' + (site.keyHex?.slice(0, 8) ?? '') + '…' : 'draft'}</div>
                 </div>
-                <div class="app-actions">
-                  <button class="btn" onClick=${() => setEditing(site)}>Edit</button>
-                  ${site.published && site.keyHex && html`<button class="btn subtle" onClick=${() => onBrowse(`hyper://${site.keyHex}/`)}>Open</button>`}
-                  ${site.published && site.keyHex && html`<button class="btn subtle" onClick=${() => copyText(`hyper://${site.keyHex}/`)}>📋 Copy</button>`}
-                  <button class="btn subtle" onClick=${() => deleteSite(site)} disabled=${busy === `del:${site.siteId}`}>Delete</button>
+                <div className="app-actions">
+                  <button className="btn" onClick=${() => setEditing(site)}>Edit</button>
+                  ${site.published && site.keyHex && html`<button className="btn subtle" onClick=${() => onBrowse(`hyper://${site.keyHex}/`)}>Open</button>`}
+                  ${site.published && site.keyHex && html`<button className="btn subtle" onClick=${() => copyText(`hyper://${site.keyHex}/`)}>📋 Copy</button>`}
+                  <button className="btn subtle" onClick=${() => deleteSite(site)} disabled=${busy === `del:${site.siteId}`}>Delete</button>
                 </div>
               </div>
             `)}
@@ -2856,10 +4807,13 @@ export function App ({ rpc, C, storagePath }) {
   //   1. Switching to Apps/Settings/etc and back doesn't destroy them
   //      (Browse used to remount with a fresh tabs[] every time)
   //   2. We can persist them to user-data and restore across launches
-  // Default initial state is one welcome tab; the restore-from-settings
-  // step below replaces it once user-data is ready.
-  const [tabs, setTabs] = useState(() => [makeTab(DEFAULT_URL)])
+  // Default initial state on launch is the PearBrowser landing page first,
+  // then p2pbuilders, then peerit. Restored session tabs stay behind those
+  // defaults so an app homepage such as Dealroom cannot hijack the release
+  // landing slot.
+  const [tabs, setTabs] = useState(() => [makeTab(DEFAULT_URL), makeTab(P2PBUILDERS_URL), makeTab(PEERIT_URL)])
   const [browseActiveId, setBrowseActiveId] = useState(() => 'placeholder')
+  const [closedTabs, setClosedTabs] = useState(() => [])
   // Tracks whether we've completed the one-time tabs-restore from
   // user-data so the persistence effect doesn't overwrite saved state
   // with the placeholder during boot.
@@ -2880,31 +4834,30 @@ export function App ({ rpc, C, storagePath }) {
       // either show the onboarding (first launch) or skip it.
       rpc.request(C.CMD_USERDATA_GET_SETTINGS).then((res) => {
         const s = unwrapSettings(res)
+        // Show the first-launch onboarding modal. The landing-page hyperdrive
+        // (DEFAULT_URL) auto-loads in the default browse tab BEHIND the modal —
+        // the auto-load effect runs once settings are ready, independent of
+        // onboarding — so skipping or clicking through reveals the already-loaded
+        // landing, and reopening later (onboardingDone) lands straight on it.
         setOnboardingState(s?.onboardingDone ? 'done' : 'show')
         // Session restore: rehydrate browse tabs from previous session.
-        // We only restore the URL list — history/scroll/iframe-src are
-        // recreated on first navigation. Skip if no saved tabs (first
-        // run) or if the saved list is empty.
+        // Iframes are recreated on first activation, but tab order,
+        // active tab, pinned state, and per-tab back/forward history
+        // are preserved.
         const savedTabs = Array.isArray(s?.browseTabs) ? s.browseTabs : null
         if (savedTabs && savedTabs.length > 0) {
-          const restored = savedTabs
-            .filter((t) => t && typeof t.url === 'string')
-            .map((t) => {
-              const fresh = makeTab(t.url || '')
-              fresh.displayUrl = t.displayUrl || t.url || ''
-              fresh.title = t.title || fresh.title
-              return fresh
-            })
-          if (restored.length > 0) {
-            setTabs(restored)
-            // Resume on whichever tab was active last time, fall back to first.
-            const targetIdx = Math.max(0, Math.min(
-              savedTabs.findIndex((t) => t && t.active === true),
-              restored.length - 1
-            ))
-            setBrowseActiveId(restored[targetIdx].id)
+          const restored = restoreStartupTabs(savedTabs, [DEFAULT_URL, P2PBUILDERS_URL, PEERIT_URL])
+          if (restored.tabs.length > 0) {
+            setTabs(restored.tabs)
+            setBrowseActiveId(restored.activeId)
           }
         }
+        const savedClosedTabs = Array.isArray(s?.browseClosedTabs) ? s.browseClosedTabs : []
+        const restoredClosed = savedClosedTabs
+          .map((tab) => normalizeTabSnapshot(tab))
+          .filter(Boolean)
+          .slice(0, MAX_CLOSED_TABS)
+        setClosedTabs(restoredClosed)
       }).catch(() => {
         // Couldn't read settings — be conservative and skip onboarding
         // rather than show it on every launch when the bee is broken.
@@ -2960,18 +4913,17 @@ export function App ({ rpc, C, storagePath }) {
   useEffect(() => {
     if (!tabsRestored) return
     const t = setTimeout(() => {
-      const serialized = tabs.map((tab) => ({
-        url: tab.url || '',
-        displayUrl: tab.displayUrl || '',
-        title: tab.title || 'New tab',
-        active: tab.id === browseActiveId
-      }))
+      const serialized = tabs.map((tab) => serializeTab(tab, browseActiveId))
+      const serializedClosed = closedTabs
+        .map((tab) => normalizeTabSnapshot(tab))
+        .filter(Boolean)
+        .slice(0, MAX_CLOSED_TABS)
       rpc.request(C.CMD_USERDATA_SET_SETTINGS, {
-        updates: { browseTabs: serialized }
+        updates: { browseTabs: serialized, browseClosedTabs: serializedClosed }
       }).catch(() => {})
     }, 800)
     return () => clearTimeout(t)
-  }, [tabs, browseActiveId, tabsRestored, rpc, C])
+  }, [tabs, closedTabs, browseActiveId, tabsRestored, rpc, C])
 
   const launchInBrowse = (url) => {
     setNavUrl(url)
@@ -2985,33 +4937,33 @@ export function App ({ rpc, C, storagePath }) {
     : `DHT · ${status.peerCount} peer${status.peerCount === 1 ? '' : 's'} · ${status.hiveRelays || 0} relay${status.hiveRelays === 1 ? '' : 's'} · proxy :${status.proxyPort}`
 
   return html`
-    <div class="app">
-      <div class="topbar">
-        <div class="brand">
+    <div className="app">
+      <div className="topbar">
+        <div className="brand">
           <${Logo} size=${22} />
           <${Wordmark} />
         </div>
-        <div class="tabs">
+        <div className="tabs">
           ${Object.entries(TAB_META).map(([id, m]) => html`
-            <button class=${'tab' + (tab === id ? ' active' : '')} onClick=${() => setTab(id)} key=${id}>
-              <span class="tab-icon">${m.icon}</span>
-              <span class="tab-label">${m.label}</span>
+            <button className=${'tab' + (tab === id ? ' active' : '')} onClick=${() => setTab(id)} key=${id}>
+              <span className="tab-icon">${m.icon}</span>
+              <span className="tab-label">${m.label}</span>
             </button>
           `)}
         </div>
-        <div class="topbar-spacer"></div>
+        <div className="topbar-spacer"></div>
       </div>
 
-      <div class=${'panel' + (tab === 'browse' ? ' panel-browse' : '')}>
-        ${tab === 'browse' && html`<${Browse} rpc=${rpc} C=${C} navUrl=${navUrl} onNavigated=${() => setNavUrl(null)} tabs=${tabs} setTabs=${setTabs} activeId=${browseActiveId} setActiveId=${setBrowseActiveId} />`}
+      <div className=${'panel' + (tab === 'browse' ? ' panel-browse' : '')}>
+        ${tab === 'browse' && html`<${Browse} rpc=${rpc} C=${C} navUrl=${navUrl} onNavigated=${() => setNavUrl(null)} tabs=${tabs} setTabs=${setTabs} activeId=${browseActiveId} setActiveId=${setBrowseActiveId} closedTabs=${closedTabs} setClosedTabs=${setClosedTabs} sessionReady=${tabsRestored} />`}
         ${tab === 'apps' && html`<${Apps} rpc=${rpc} C=${C} onLaunch=${launchInBrowse} />`}
         ${tab === 'sites' && html`<${Sites} rpc=${rpc} C=${C} onBrowse=${launchInBrowse} />`}
         ${tab === 'library' && html`<${Library} rpc=${rpc} C=${C} onBrowse=${launchInBrowse} />`}
         ${tab === 'settings' && html`<${Settings} rpc=${rpc} C=${C} status=${status} storagePath=${storagePath} log=${log} />`}
       </div>
 
-      <div class=${'status ' + statusClass}>
-        <span class="dot"></span>${statusText}
+      <div className=${'status ' + statusClass}>
+        <span className="dot"></span>${statusText}
       </div>
 
       ${pendingLogin && html`<${LoginConsent}

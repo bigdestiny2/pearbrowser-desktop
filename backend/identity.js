@@ -121,6 +121,12 @@ class Identity {
     this.file = path.join(storagePath, 'identity.json')
     this._entropy = null
     this._seed = null
+    // SEC0 — seed-at-rest encryption. When the on-disk seed is an encrypted vault
+    // the identity boots LOCKED (entropy unavailable until unlock(passphrase));
+    // _passphrase is held in memory so persist/rotate can re-encrypt.
+    this._passphrase = null
+    this._locked = false
+    this._encryptedVault = null
   }
 
   /**
@@ -132,6 +138,13 @@ class Identity {
     try {
       const raw = fs.readFileSync(this.file, 'utf-8')
       const data = JSON.parse(raw)
+      // SEC0: an encrypted-at-rest vault — boot LOCKED, never regenerate (that
+      // would destroy the user's seed). unlock(passphrase) loads it.
+      if (data && data.v === 2 && data.enc === 'argon2id-secretbox') {
+        this._encryptedVault = data
+        this._locked = true
+        return
+      }
       if (data && typeof data.entropy === 'string') {
         this._entropy = b4a.from(data.entropy, 'hex')
         if (this._entropy.length !== 16 && this._entropy.length !== 32) {
@@ -155,12 +168,50 @@ class Identity {
     try {
       if (!fs.existsSync(this.storagePath)) fs.mkdirSync(this.storagePath, { recursive: true })
     } catch (_) {}
-    const payload = {
-      version: 1,
-      entropy: b4a.toString(this._entropy, 'hex'),
-      createdAt: Date.now(),
+    let payload
+    if (this._passphrase) {
+      // SEC0: encrypt the seed at rest (argon2id + secretbox).
+      const sv = require('./seed-vault.cjs')
+      payload = { ...sv.encryptEntropy(this._entropy, this._passphrase), createdAt: Date.now() }
+    } else {
+      payload = { version: 1, entropy: b4a.toString(this._entropy, 'hex'), createdAt: Date.now() }
     }
     fs.writeFileSync(this.file, JSON.stringify(payload))
+  }
+
+  /** Is the on-disk seed encrypted (SEC0)? */
+  isEncryptedAtRest () { return !!this._passphrase || !!this._encryptedVault }
+
+  /** Is the identity locked (encrypted on disk, not yet unlocked this session)? */
+  isLocked () { return !!this._locked }
+
+  /**
+   * SEC0 — encrypt the seed at rest under `passphrase`. The seed must already be
+   * unlocked/loaded. Rewrites identity.json as an argon2id+secretbox vault and
+   * holds the passphrase in memory so rotate/save re-encrypt.
+   */
+  encryptSeedAtRest (passphrase) {
+    if (this._locked || !this._entropy) throw new Error('Identity must be unlocked to encrypt')
+    if (typeof passphrase !== 'string' || passphrase.length === 0) throw new Error('passphrase required')
+    this._passphrase = passphrase
+    this._persist()
+  }
+
+  /**
+   * Unlock an encrypted-at-rest identity with `passphrase`. Fails CLOSED (throws)
+   * on the wrong passphrase. No-op if already unlocked.
+   */
+  unlock (passphrase) {
+    if (!this._locked) return true
+    const sv = require('./seed-vault.cjs')
+    const entropy = sv.decryptEntropy(this._encryptedVault, passphrase)
+    if (entropy.length !== 16 && entropy.length !== 32) throw new Error('decrypted entropy has invalid length')
+    this._entropy = entropy
+    this._seed = entropyToSeed(entropy)
+    this._passphrase = passphrase
+    this._locked = false
+    this._encryptedVault = null
+    return true
   }
 
   /** Raw seed bytes (32 bytes). Pass into Corestore.namespace(seed). */
@@ -252,6 +303,114 @@ class Identity {
   }
 
   /**
+   * Derive a deterministic ed25519 sub-keypair under the root seed for a domain
+   * `tag` + `input`:  subSeed = SHA-256(rootSeed || tag || input). Domain-
+   * separated so the SAME input under DIFFERENT tags (app / invoice / session)
+   * yields UNLINKABLE keys. Pure: same seed + tag + input ⇒ same keypair on every
+   * device, forever; the root secret never leaves the worklet.
+   */
+  _deriveSubkey (tag, input) {
+    if (!sodium) throw new Error('sodium-universal not available')
+    if (!this._seed) throw new Error('Identity not ready')
+    if (typeof input !== 'string' || input.length === 0) throw new Error('input must be a non-empty string')
+    const hash = crypto.createHash('sha256')
+    hash.update(this._seed)
+    hash.update(tag)
+    hash.update(input)
+    const subSeed = hash.digest()
+    const publicKey = b4a.alloc(sodium.crypto_sign_PUBLICKEYBYTES)
+    const secretKey = b4a.alloc(sodium.crypto_sign_SECRETKEYBYTES)
+    sodium.crypto_sign_seed_keypair(publicKey, secretKey, subSeed)
+    return { publicKey, secretKey }
+  }
+
+  /**
+   * Per-invoice keypair (Payments / Privacy-routing PRIV0). Deterministic from
+   * the sale nonce so buyer + seller can both re-derive it for the same sale, yet
+   * UNLINKABLE across invoices and from the root/app keys. Zero network cost.
+   */
+  getInvoiceKeypair (saleNonce) {
+    return { ...this._deriveSubkey('pear-invoice-v1:', String(saleNonce == null ? '' : saleNonce)), saleNonce }
+  }
+
+  /**
+   * Per-session keypair (Nostr / PRIV0). Deterministic from a session salt the
+   * caller picks at random — session isolation + unlinkability across sessions,
+   * recoverable within one.
+   */
+  getSessionKeypair (sessionSalt) {
+    return { ...this._deriveSubkey('pear-session-v1:', String(sessionSalt == null ? '' : sessionSalt)), sessionSalt }
+  }
+
+  // --- Nostr (secp256k1 / BIP-340) — NOSTR0 -----------------------------------
+  // Derived deterministically from the root seed via the Bare-loadable
+  // secp256k1-bundle.cjs (SPIKE-SCHNORR-BARE). The nsec (secret) stays SEALED in
+  // here — callers only get the public key + sign/verify, never the secret.
+
+  _nostrSecretHex () {
+    if (!this._seed) throw new Error('Identity not ready')
+    const hash = crypto.createHash('sha256')
+    hash.update(this._seed)
+    hash.update('pear-nostr-v1:')
+    return b4a.toString(hash.digest(), 'hex')
+  }
+
+  /** The user's Nostr x-only public key (hex). Stable across devices/restores. */
+  getNostrPublicKey () {
+    return require('./secp256k1-bundle.cjs').schnorrGetPublicKey(this._nostrSecretHex())
+  }
+
+  /** Schnorr-sign a 32-byte message hash with the Nostr key. We supply aux
+   *  randomness from bare-crypto (the bundle's default uses a WebCrypto global
+   *  that isn't guaranteed under Bare). */
+  nostrSign (msg32Hex, auxRandHex) {
+    const aux = auxRandHex || b4a.toString(crypto.randomBytes(32), 'hex')
+    return require('./secp256k1-bundle.cjs').schnorrSign(msg32Hex, this._nostrSecretHex(), aux)
+  }
+
+  /** Verify ANY party's Nostr (BIP-340) signature — pure, needs only the pubkey. */
+  nostrVerify (sigHex, msg32Hex, pubkeyHex) {
+    return require('./secp256k1-bundle.cjs').schnorrVerify(sigHex, msg32Hex, pubkeyHex)
+  }
+
+  /** Sign a NIP-01 event { kind, created_at, tags, content } with our Nostr key —
+   *  fills pubkey, computes the event id, attaches the signature. */
+  nostrSignEvent (ev, auxRandHex) {
+    const secp = require('./secp256k1-bundle.cjs')
+    const aux = auxRandHex || b4a.toString(crypto.randomBytes(32), 'hex')
+    return secp.nip01Sign({ ...ev, pubkey: this.getNostrPublicKey() }, this._nostrSecretHex(), aux)
+  }
+
+  /** NOSTR2 — mint a cross-curve binding linking our pear root ↔ our Nostr key,
+   *  signed by BOTH (ed25519 root + secp256k1 nostr). `epoch` is monotonic. */
+  makeNostrBinding (epoch, auxRandHex) {
+    const nb = require('./nostr-bind.cjs')
+    const rootPubkey = b4a.toString(this.getSigningKeypair().publicKey, 'hex')
+    return nb.makeNostrBind(
+      { rootPubkey, nostrPubkey: this.getNostrPublicKey(), epoch },
+      (msg) => this.sign(msg).signature, // ed25519 root attestation
+      (msg32Hex) => this.nostrSign(msg32Hex, auxRandHex) // secp256k1 nostr attestation
+    )
+  }
+
+  /** Verify a peer's cross-curve binding against their (Contacts-held) root. */
+  verifyNostrBinding (bind, expectedRootPubkey) {
+    return require('./nostr-bind.cjs').verifyNostrBind(bind, expectedRootPubkey)
+  }
+
+  /** NOSTR2 — mint a ROOT-signed revocation of the binding at `epoch` (you can
+   *  unilaterally unlink from your pear side; revoke-wins by epoch). Root-signed
+   *  only — no nostr counter-signature needed to unlink. */
+  makeNostrRevocation (epoch) {
+    const nb = require('./nostr-bind.cjs')
+    const rootPubkey = b4a.toString(this.getSigningKeypair().publicKey, 'hex')
+    return nb.makeNostrRevoke(
+      { rootPubkey, nostrPubkey: this.getNostrPublicKey(), epoch },
+      (msg) => this.sign(msg).signature
+    )
+  }
+
+  /**
    * Sign with the per-app sub-key (not the root). Safe to expose to
    * pages — the root remains sealed inside the worklet.
    *
@@ -304,6 +463,53 @@ class Identity {
       publicKey: b4a.toString(publicKey, 'hex'),
       algorithm: 'ed25519'
     }
+  }
+
+  /**
+   * Verify an Ed25519 detached signature over a payload — the counterpart to
+   * sign(). PURE: needs only the public key, never the root seed, so it can
+   * verify ANY party's signature, not just our own. This is the anti-forgery
+   * gate every signed-record consumer (naming, payments, nostr, routing) in
+   * docs/research/ depends on (Phase P0 of IMPLEMENTATION-PLAN.md).
+   *
+   * Returns a boolean. Never throws on malformed / attacker-controlled input
+   * (fail-closed → false); throws only if the crypto backend is missing, the
+   * same hard-environment failure sign() raises.
+   */
+  verify (payload, signatureHex, publicKeyHex) {
+    if (!sodium) throw new Error('sodium-universal not available — ed25519 verify disabled')
+    try {
+      const signature = b4a.from(String(signatureHex), 'hex')
+      const publicKey = b4a.from(String(publicKeyHex), 'hex')
+      if (signature.length !== sodium.crypto_sign_BYTES) return false
+      if (publicKey.length !== sodium.crypto_sign_PUBLICKEYBYTES) return false
+      const message = typeof payload === 'string' ? b4a.from(payload, 'utf-8') : b4a.from(payload || [])
+      if (message.length === 0) return false
+      return sodium.crypto_sign_verify_detached(signature, message, publicKey)
+    } catch {
+      return false
+    }
+  }
+
+  /**
+   * Verify a per-app signature produced by signForApp(). Reconstructs the
+   * `pear.app.<driveKey>:<namespace>:` domain-separator tag (signForApp():264)
+   * before verifying, so a signature minted for one (app, namespace) can't be
+   * replayed in another. `signed` is the { signature, publicKey } shape
+   * signForApp() returns.
+   *
+   * NOTE: this confirms the signature is valid for the PROVIDED publicKey; the
+   * caller must still bind that pubkey to an expected identity (see the
+   * IdentityBinding record in the naming/payments designs) to prevent a
+   * forger from simply presenting their own key.
+   */
+  verifyForApp (driveKeyHex, payload, namespace = '', signed = {}) {
+    const tag = `pear.app.${driveKeyHex}:${namespace}:`
+    const message = b4a.concat([
+      b4a.from(tag, 'utf-8'),
+      typeof payload === 'string' ? b4a.from(payload, 'utf-8') : b4a.from(payload || []),
+    ])
+    return this.verify(message, signed.signature, signed.publicKey)
   }
 
   /**
