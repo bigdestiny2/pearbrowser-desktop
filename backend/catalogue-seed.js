@@ -151,6 +151,7 @@ module.exports = {
     {
       "name": "HiveWorm",
       "type": "standalone",
+      "driveKey": "e3f910d11e70044afe361b1cecfb5cfb3c4f61f600cc81c2365ba0e6f58c8d4d",
       "link": "hyper://e3f910d11e70044afe361b1cecfb5cfb3c4f61f600cc81c2365ba0e6f58c8d4d/",
       "iconData": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMwYTBkMTIiLz48ZyBmaWxsPSIjYTM3MWY3Ij48Y2lyY2xlIGN4PSIxOSIgY3k9IjQ0IiByPSI3Ii8+PGNpcmNsZSBjeD0iMjkiIGN5PSI0MCIgcj0iNyIvPjxjaXJjbGUgY3g9IjM5IiBjeT0iMzMiIHI9IjcuNSIvPjxjaXJjbGUgY3g9IjQ2IiBjeT0iMjQiIHI9IjgiLz48L2c+PGcgZmlsbD0iIzBhMGQxMiI+PGNpcmNsZSBjeD0iNDgiIGN5PSIyMiIgcj0iMS43Ii8+PGNpcmNsZSBjeD0iNDQiIGN5PSIyMC41IiByPSIxLjciLz48L2c+PC9zdmc+",
       "author": "HiveWorm",
