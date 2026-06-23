@@ -38,10 +38,10 @@ test('shell.js opens PearBrowser landing first with peerit beside it', () => {
   // The drive key constant exists and is used to build the front-tab URL.
   assert.match(shell, new RegExp(`PEERIT_DRIVE_KEY = '${PEERIT_KEY}'`))
   assert.match(shell, /const PEERIT_URL = 'hyper:\/\/' \+ PEERIT_DRIVE_KEY \+ '\/'/)
-  // Fresh launch opens PearBrowser first (tabs[0] == the active tab), then peerit.
-  assert.match(shell, /\[makeTab\(DEFAULT_URL\), makeTab\(PEERIT_URL\)\]/)
+  // Fresh launch opens PearBrowser first (tabs[0] == the active tab), then p2pbuilders + peerit.
+  assert.match(shell, /\[makeTab\(DEFAULT_URL\), makeTab\(P2PBUILDERS_URL\), makeTab\(PEERIT_URL\)\]/)
   // Session restore must keep those defaults in front of restored app pages.
-  assert.match(shell, /restoreStartupTabs\(savedTabs, \[DEFAULT_URL, PEERIT_URL\]\)/)
+  assert.match(shell, /restoreStartupTabs\(savedTabs, \[DEFAULT_URL, P2PBUILDERS_URL, PEERIT_URL\]\)/)
 })
 
 test('shell.js pins peerit to the top of the Sites discovery grid', () => {

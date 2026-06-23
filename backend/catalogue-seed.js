@@ -70,16 +70,20 @@ module.exports = {
     {
       "name": "P2P Builders",
       "type": "hypersite",
-      "driveKey": "8545ce29bedf22d3c6ff682684b626947e4b71e98d874931df7a1d00b70db5b7",
-      "author": "bigdestiny2",
+      "driveKey": "ac1977a75cc84b46af0af8bb559cd4ebbe10507eb0f51d863e289d09635f6d74",
+      "link": "hyper://ac1977a75cc84b46af0af8bb559cd4ebbe10507eb0f51d863e289d09635f6d74/",
+      "author": "defidon",
       "categories": [
         "community",
-        "site"
+        "social",
+        "site",
+        "featured"
       ],
-      "description": "Permissionless peer-to-peer hacker news for anons who build P2P. Runs in your terminal — no servers, no accounts.",
+      "description": "Permissionless peer-to-peer Hacker News for anons who build P2P — in the browser. Proof-of-work-gated posts, reputation-weighted votes, boards, threaded comments, follows and subscribable blocklists replicate directly between peers over the same Holepunch engine as peerit. Runs as a P2P site inside PearBrowser, seeded 24/7 on HiveRelay.",
       "version": "1.0.0",
-      "sourceUrl": "https://github.com/bigdestiny2/p2pbuilders",
-      "license": "Apache-2.0",
+      "homepage": "hyper://ac1977a75cc84b46af0af8bb559cd4ebbe10507eb0f51d863e289d09635f6d74/",
+      "sourceUrl": "pear-ecosystem/02-apps/p2pbuilders",
+      "license": "MIT",
       "verification": "relay-listed"
     },
     {
