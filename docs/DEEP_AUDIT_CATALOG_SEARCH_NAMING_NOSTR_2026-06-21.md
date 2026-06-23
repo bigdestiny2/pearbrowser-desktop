@@ -632,18 +632,19 @@ catalogue.
 ### Verification Added
 
 - Full desktop suite: `npm test` in `pearbrowser-desktop`: 404 passed, 0 failed.
-- GitHub Actions Desktop CI run `28028914438` passed on head
-  `639f956f99868f2e19739ab8154a12b693df15b4`, including install, tests, and
-  high-severity dependency audit.
+- GitHub Actions Desktop CI passes on the release branch, including source
+  checkouts, HiveRelay layout guard, install, tests, and high-severity
+  dependency audit.
 - Full mobile suite: `npm test` in `PearBrowser`: 124 passed, 0 failed.
-- Live relay check with real DHT access: 1 unique HiveRelay reachable and 8 live
+- Live relay check with real DHT access: 1 unique HiveRelay reachable and 10 live
   relay connections.
 - Live catalogue check: signed `PearBrowser Network` Hyperbee at length 222,
   13 apps, Peercord and HiveWorm rows present, and Peercord marked `standalone`.
 - Production drive check: fresh peer reached length 16898 and fetched 14284
   bytes from `/CHANGELOG.md`.
 - Deep bundle checks: PearBrowser homepage, Peercord, and Keet all returned
-  peers and had zero missing sampled blobs.
+  peers and had zero missing sampled blobs. Latest samples: PearBrowser
+  homepage `2/2`, Peercord `12/12`, Keet `12/12`.
 
 Restricted/sandboxed network runs can false-negative DHT discovery. The release
 gate should use real DHT access, as the verifier scripts do when run from the

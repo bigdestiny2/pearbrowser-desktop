@@ -153,9 +153,9 @@ flows, and native shell source-contract parity.
 
 The current 2026-06-23 release audit verified:
 
-- Desktop automated tests: `npm test` passing, 404 tests; GitHub Actions
-  Desktop CI run `28028914438` also passed install, tests, and high-severity
-  audit on head `639f956f99868f2e19739ab8154a12b693df15b4`.
+- Desktop automated tests: `npm test` passing, 404 tests. The PR Desktop CI
+  workflow also passes source checkouts, HiveRelay layout guard, install, tests,
+  and high-severity audit on the release branch.
 - Mobile automated tests: `npm test` passing, 124 tests.
 - Live PearBrowser Network catalogue: `hyperbee://f5fb7500bccd60a976d2b1d24246108f4444a210b9ca591533114dffc089934d` reachable from a fresh peer, signed, and carrying 13 apps including Peercord and HiveWorm.
 - Production PearBrowser drive: reachable from a fresh peer at length 16898, with blob sampling proving content blocks replicate.
