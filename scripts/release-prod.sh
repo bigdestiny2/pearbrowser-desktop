@@ -59,13 +59,17 @@ echo "============================================================"
 STAGE_OUT=$(pear stage "$PROD_LINK" . 2>&1)
 STAGE_CLEAN=$(printf '%s\n' "$STAGE_OUT" | strip_ansi)
 printf '%s\n' "$STAGE_CLEAN" | tail -8
-NEW_LEN=$(printf '%s\n' "$STAGE_CLEAN" | awk '/Latest:/ {print $2; exit}')
+# Parse the staged length. Newer Pear prints "Latest length: N" (not the older
+# "Latest: N"), so accept both. A miss here is NOT fatal — the release step
+# below re-reads the authoritative released length — so fall back to pear info
+# and continue rather than aborting the whole release on a cosmetic parse change.
+NEW_LEN=$(printf '%s\n' "$STAGE_CLEAN" | awk '/Latest length:/ {print $3; exit} /Latest:/ {print $2; exit}')
 if [[ -z "$NEW_LEN" ]]; then
-  echo "✗ Could not parse staged length from pear stage output" >&2
-  exit 1
+  NEW_LEN=$(pear info "$PROD_LINK" 2>/dev/null | awk '/^[[:space:]]*length[[:space:]]/ {print $2; exit}')
+  echo "▸ (staged length not in stage output — read from pear info: ${NEW_LEN:-unknown})"
 fi
 echo
-echo "▸ new staged length: $NEW_LEN"
+echo "▸ new staged length: ${NEW_LEN:-unknown}"
 echo
 
 # ── 2. release ────────────────────────────────────────────
