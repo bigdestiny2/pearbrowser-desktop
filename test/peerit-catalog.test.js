@@ -14,7 +14,7 @@ test('peerit is seeded as a browsable hypersite, not a standalone app', () => {
   assert.ok(app, 'peerit seed row missing')
   assert.equal(app.type, 'hypersite')
   assert.equal(app.driveKey, PEERIT_KEY)
-  assert.equal(app.link, undefined, 'a site is opened by driveKey, not a pear:// link')
+  assert.equal(app.link, PEERIT_URL)
   assert.equal(app.author, 'defidon')
   assert.equal(app.version, '1.0.0')
   assert.ok(app.categories.includes('featured'), 'peerit must be featured')
@@ -29,6 +29,7 @@ test('peerit catalogue source declares the site + drive key', () => {
   assert.ok(app, 'peerit source row missing')
   assert.equal(app.type, 'hypersite')
   assert.equal(app.driveKey, PEERIT_KEY)
+  assert.equal(app.link, PEERIT_URL)
   assert.equal(app.url, PEERIT_URL)
 })
 
