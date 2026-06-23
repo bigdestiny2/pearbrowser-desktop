@@ -3,6 +3,7 @@
 Scope: desktop PearBrowser, mobile/native PearBrowser, the live PearBrowser Network catalogue, and the high-risk systems called out for review: catalogue, app launch, search, naming, Nostr bridge, site publishing, sync, and release operations.
 
 Manual smoke checklist: `docs/MANUAL_RELEASE_SMOKE_2026-06-23.md`.
+Operator evidence log: `docs/RELEASE_SMOKE_EVIDENCE_LOG_2026-06-23.md`.
 
 ## Current Verdict
 

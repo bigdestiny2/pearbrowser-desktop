@@ -118,6 +118,7 @@ Three independent keypairs — BIP-39 identity, HiveRelay publisher key, Coresto
 | [Architecture and capabilities](./docs/ARCHITECTURE_AND_CAPABILITIES.md) | Current system map for browser surfaces, runtime layers, catalogue, search, naming, Nostr, APIs, and validation. |
 | [Deep audit](./docs/DEEP_AUDIT_CATALOG_SEARCH_NAMING_NOSTR_2026-06-21.md) | Detailed catalogue/search/naming/Nostr audit, issue list, fixes, and test evidence. |
 | [Manual release smoke](./docs/MANUAL_RELEASE_SMOKE_2026-06-23.md) | Final human-run release checklist for UI flows, Peercord trust approval, mobile device smoke, and signing/store gates. |
+| [Release evidence log](./docs/RELEASE_SMOKE_EVIDENCE_LOG_2026-06-23.md) | Operator-fillable proof table for final PASS/FAIL/DEFER release evidence and announcement decision. |
 | [Test command matrix](./docs/TEST-COMMAND-MATRIX-2026-06-23.md) | Separates deterministic local checks from GUI, real-DHT, third-party trust, release-drive, and mobile/native gates. |
 | [App compatibility standard](./docs/PEARBROWSER-APP-COMPAT-STANDARD.md) | Author-facing release contract for apps targeting desktop and mobile. |
 | [Feature roadmap](./docs/P2P-BROWSER-FEATURE-ROADMAP.md) | Current shipped/next/parking-lot roadmap after the 2026 audit. |

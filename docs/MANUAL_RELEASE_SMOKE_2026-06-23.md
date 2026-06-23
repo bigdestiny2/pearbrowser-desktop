@@ -6,7 +6,8 @@ behavior, but these checks cover UI flows, third-party trust decisions, and
 mobile distribution gates that should not be faked by automation.
 
 Record the operator, date, machine/device, commit SHA, and any screenshots or
-logs next to each checked item before public announcement.
+logs in `docs/RELEASE_SMOKE_EVIDENCE_LOG_2026-06-23.md` before public
+announcement.
 
 ## Desktop Release Candidate
 
