@@ -16,7 +16,7 @@ The release is in strong shape for a community launch. The core protocol tests a
 - Production browser drive fresh-peer verification passed at length `16898`, with `/CHANGELOG.md` blob fetch proving content blocks are reachable.
 - Live catalogue fresh-peer verification passed at Hyperbee core length `206`, with signed meta present and Peercord/HiveWorm rows matching expected release metadata.
 - Desktop GUI runtime is up in dev mode with Pear Runtime renderer connected to the backend RPC socket on `127.0.0.1:9876`.
-- Real-DHT relay health passed with 1 unique HiveRelay reachable and 8 live relay connections. A restricted/sandboxed network run can false-negative DHT discovery, so release checks should run with real network access.
+- Real-DHT relay health passed again after the latest doc/native fix push, with 1 unique HiveRelay reachable and 7 live relay connections. A restricted/sandboxed network run can false-negative DHT discovery, so release checks should run with real network access.
 - PearBrowser homepage, Peercord, and Keet bundle drives were fresh-peer sampled without executing third-party code; all returned peers, file listings, and zero missing sampled blobs.
 - Native simulator/device smoke was attempted but is not cleared: iOS launched far enough to expose a real missing native module (`ExpoLinking`), the tracked dependency is now added and autolinked, but the follow-up simulator build is blocked by local generated CocoaPods/BareKit/Xcode shell-script hangs; Android Gradle inspection is blocked by a missing Java Runtime in this environment.
 
@@ -143,10 +143,10 @@ npm run validate # publisher catalogue
 node scripts/gen-catalogue-seed.mjs
 node scripts/publish-catalog-bee.js catalog-source/pearbrowser-network.catalog.json --storage /Users/localllm/Projects/pear-ecosystem/03-sites/pearbrowser-publishers/catalog
 node scripts/check-relays.js
-node scripts/verify-pin.js --expect 16898
-node scripts/verify-live-catalog.js --expect-app peercord --expect-app hiveworm
+node scripts/verify-pin.js --expect 16898 # latest rerun: length 16898, peers 2, /CHANGELOG.md sampled
+node scripts/verify-live-catalog.js --expect-app peercord --expect-app hiveworm # latest rerun: length 206, peers 1, 13 apps
 node scripts/verify-app-full.js --key 1868916a7a282ff0f211b11b536e9642828c32d3a817a254e1ef7e602709e25d --name pearbrowser-homepage --samples 12 --timeout 90
-node scripts/verify-app-full.js --key a2ea4d769d5e2b90caca4fbcb7f4b7b43caf43f2555b81201d3463ef89b55c26 --name peercord --samples 12 --timeout 90
+node scripts/verify-app-full.js --key a2ea4d769d5e2b90caca4fbcb7f4b7b43caf43f2555b81201d3463ef89b55c26 --name peercord --samples 12 --timeout 90 # latest rerun: peers 1, entries 14730, sampled 12, missing 0
 node scripts/verify-app-full.js --key 82110be69e2a531e840bc886dc7b9cab16729c587815295f55035109b45e4ddb --name keet --samples 12 --timeout 90
 xcodebuild -workspace ios/PearBrowser.xcworkspace -list # mobile/native, succeeded
 xcrun simctl list devices available # mobile/native, selected booted iPhone 17, OS 26.4.1
