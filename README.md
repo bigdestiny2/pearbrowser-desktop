@@ -139,6 +139,14 @@ Solo publisher, two steps:
 node scripts/pin-self-on-hiverelay.js   # re-pin the new length on relays
 ```
 
+Catalogue updates are versioned from [`catalog-source/pearbrowser-network.catalog.json`](./catalog-source/pearbrowser-network.catalog.json):
+
+```sh
+node scripts/gen-catalogue-seed.mjs
+node scripts/publish-catalog-bee.js catalog-source/pearbrowser-network.catalog.json --storage /Users/localllm/Projects/pear-ecosystem/03-sites/pearbrowser-publishers/catalog
+node scripts/verify-live-catalog.js --expect-app peercord
+```
+
 `pear release` is deprecated in Pear runtime `v2.4.0` but still works and we use it deliberately — the replacement (`pear provision` + `pear multisig` quorum-cosigning) is designed for multi-publisher releases. A solo 1-of-1 multisig is pure ceremony with no security gain.
 
 **When to migrate to multisig:** when we add a co-signer (genuine quorum security), or when Pear actually removes `pear release` (not just deprecates it). The link config + provision target are pre-staged in `pear.json` so the migration is just plumbing — see the `_comment` field there.
@@ -153,6 +161,9 @@ node scripts/pin-self-on-hiverelay.js   # re-pin the new length on relays
 | `scripts/extract-drive.js <key>` | Pull a drive's full content out to a local directory. |
 | `scripts/list-drive.js <key>` | Diagnose what's inside a drive's manifest. |
 | `scripts/check-relays.js` | Discovery probe — print all HiveRelays reachable via DHT. |
+| `scripts/verify-pin.js --expect <length>` | Fresh-peer production-drive check: proves the released browser drive is reachable and serving at least the expected length. |
+| `scripts/verify-live-catalog.js --expect-app peercord` | Fresh-peer Hyperbee catalogue check: proves the live app catalogue key is reachable and contains expected release rows. |
+| `scripts/verify-app-full.js --key <driveKey>` | Deeper fresh-peer blob sampling across a drive's file tree. |
 | `scripts/release-prod.sh` | The two-step release pipeline above. |
 
 ## Distribution

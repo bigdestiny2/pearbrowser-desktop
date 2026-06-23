@@ -1,6 +1,6 @@
-// Generate backend/catalogue-seed.js (the desktop offline seed) FROM the single
-// source of truth: the curated network manifest at
-//   03-sites/pearbrowser-publishers/catalog-source/catalog.json
+// Generate backend/catalogue-seed.js (the desktop offline seed) FROM the
+// versioned PearBrowser Network catalogue manifest at
+//   catalog-source/pearbrowser-network.catalog.json
 //
 // This is the unification primitive: the SAME source feeds (1) this offline seed
 // (ensureDevCatalogue), (2) the published Hyperbee catalog (publish-catalog-bee.js),
@@ -9,6 +9,7 @@
 // driveKey/link, so an app present in both shows once.
 //
 //   node scripts/gen-catalogue-seed.mjs
+//   node scripts/gen-catalogue-seed.mjs --source /path/to/catalog.json
 //
 // The manifest is rich (id, pearLink, homepage, license, platforms, …); the seed
 // rows are validated against the strict APPS_SCHEMA (additionalProperties:false),
@@ -16,10 +17,21 @@
 
 import { readFileSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const SRC = join(here, '..', '..', '..', '03-sites', 'pearbrowser-publishers', 'catalog-source', 'catalog.json')
+let sourceArg = null
+for (let i = 2; i < process.argv.length; i++) {
+  if (process.argv[i] === '--source') sourceArg = process.argv[++i]
+  else if (process.argv[i] === '--help' || process.argv[i] === '-h') {
+    console.log('usage: node scripts/gen-catalogue-seed.mjs [--source catalog.json]')
+    process.exit(0)
+  }
+}
+
+const SRC = sourceArg
+  ? resolve(sourceArg)
+  : join(here, '..', 'catalog-source', 'pearbrowser-network.catalog.json')
 const OUT = join(here, '..', 'backend', 'catalogue-seed.js')
 
 const cat = JSON.parse(readFileSync(SRC, 'utf8'))
@@ -53,7 +65,7 @@ for (const [i, r] of rows.entries()) {
 const header = `/**
  * Dev catalogue seed data — GENERATED FILE, do not edit by hand.
  *
- * Source of truth: 03-sites/pearbrowser-publishers/catalog-source/catalog.json
+ * Source of truth: catalog-source/pearbrowser-network.catalog.json
  * Regenerate:      node scripts/gen-catalogue-seed.mjs
  *
  * Until the HiveRelay publishes a canonical schema-sheets catalogue room, the

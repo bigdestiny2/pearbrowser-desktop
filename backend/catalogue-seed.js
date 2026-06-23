@@ -1,7 +1,7 @@
 /**
  * Dev catalogue seed data — GENERATED FILE, do not edit by hand.
  *
- * Source of truth: 03-sites/pearbrowser-publishers/catalog-source/catalog.json
+ * Source of truth: catalog-source/pearbrowser-network.catalog.json
  * Regenerate:      node scripts/gen-catalogue-seed.mjs
  *
  * Until the HiveRelay publishes a canonical schema-sheets catalogue room, the
