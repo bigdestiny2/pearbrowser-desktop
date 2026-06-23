@@ -6,7 +6,7 @@ import {
   MAX_TAB_HISTORY, MAX_CLOSED_TABS,
   makeTab, cleanTabUrl, cleanTabTitle,
   normalizeTabHistory, clampHistoryIndex, pushTabHistory,
-  normalizeTabSnapshot, serializeTab, restoreSavedTab, sortTabsPinnedFirst
+  normalizeTabSnapshot, serializeTab, restoreSavedTab, restoreStartupTabs, sortTabsPinnedFirst
 } from './lib/tabs.js'
 
 function copyText (text) {
@@ -107,8 +107,8 @@ const TAB_META = {
 const DEFAULT_URL = 'hyper://1868916a7a282ff0f211b11b536e9642828c32d3a817a254e1ef7e602709e25d/'
 
 // peerit — "the front page of the P2P internet" (a peer-to-peer Reddit). Opens
-// as the active front tab on every fresh launch (alongside the landing page),
-// and is pinned to the top of the Sites discovery grid. Published 2026-06-23,
+// beside the PearBrowser landing page on launch and is pinned to the top of
+// the Sites discovery grid. Published 2026-06-23,
 // seeded 24/7 on HiveRelay. Source: 02-apps/peerit.
 const PEERIT_DRIVE_KEY = 'ec6e2d6d9d22b9d6b40e11a9ca3042be3197e4bdca9e9a7f079be6ee830761b4'
 const PEERIT_URL = 'hyper://' + PEERIT_DRIVE_KEY + '/'
@@ -4800,10 +4800,10 @@ export function App ({ rpc, C, storagePath }) {
   //   1. Switching to Apps/Settings/etc and back doesn't destroy them
   //      (Browse used to remount with a fresh tabs[] every time)
   //   2. We can persist them to user-data and restore across launches
-  // Default initial state on a fresh launch is two tabs: peerit (the front
-  // page of the P2P internet) as the active tab, plus the landing page. The
-  // restore-from-settings step below replaces these if a saved session exists.
-  const [tabs, setTabs] = useState(() => [makeTab(PEERIT_URL), makeTab(DEFAULT_URL)])
+  // Default initial state on launch is the PearBrowser landing page first,
+  // then peerit. Restored session tabs stay behind those defaults so an app
+  // homepage such as Dealroom cannot hijack the release landing slot.
+  const [tabs, setTabs] = useState(() => [makeTab(DEFAULT_URL), makeTab(PEERIT_URL)])
   const [browseActiveId, setBrowseActiveId] = useState(() => 'placeholder')
   const [closedTabs, setClosedTabs] = useState(() => [])
   // Tracks whether we've completed the one-time tabs-restore from
@@ -4838,19 +4838,10 @@ export function App ({ rpc, C, storagePath }) {
         // are preserved.
         const savedTabs = Array.isArray(s?.browseTabs) ? s.browseTabs : null
         if (savedTabs && savedTabs.length > 0) {
-          const restoredPairs = savedTabs
-            .map((t) => ({ saved: t, tab: restoreSavedTab(t) }))
-            .filter((entry) => entry.tab)
-          const restored = sortTabsPinnedFirst(restoredPairs.map((entry) => entry.tab))
-          // Only resume the saved session if it carries real content. If every
-          // restored tab is blank (url-less), fall through to the default landing
-          // tab instead of reopening onto a blank page — so a returning user still
-          // lands on the loaded landing.
-          if (restored.some((t) => t.url)) {
-            setTabs(restored)
-            // Resume on whichever tab was active last time, fall back to first.
-            const activePair = restoredPairs.find((entry) => entry.saved && entry.saved.active === true)
-            setBrowseActiveId((activePair?.tab || restored[0]).id)
+          const restored = restoreStartupTabs(savedTabs, [DEFAULT_URL, PEERIT_URL])
+          if (restored.tabs.length > 0) {
+            setTabs(restored.tabs)
+            setBrowseActiveId(restored.activeId)
           }
         }
         const savedClosedTabs = Array.isArray(s?.browseClosedTabs) ? s.browseClosedTabs : []

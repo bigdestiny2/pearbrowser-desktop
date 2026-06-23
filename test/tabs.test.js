@@ -8,12 +8,13 @@ import {
   MAX_TAB_HISTORY,
   normalizeTabHistory, clampHistoryIndex, pushTabHistory,
   normalizeTabSnapshot, serializeTab, restoreSavedTab, sortTabsPinnedFirst,
-  makeTab
+  restoreStartupTabs, makeTab
 } from '../ui/lib/tabs.js'
 
 const A = 'hyper://aaa/'
 const B = 'hyper://bbb/'
 const C = 'hyper://ccc/'
+const DEALROOM = 'hyper://0724aabf2ad6394983f91c6b24ebd417cb3d25addcf29c98eb246c512dc77f90/'
 
 test('normalizeTabHistory drops empties and collapses consecutive repeats', () => {
   assert.deepEqual(normalizeTabHistory([A, A, B, B, B, C]), [A, B, C])
@@ -83,4 +84,24 @@ test('sortTabsPinnedFirst keeps pinned tabs first, preserving relative order', (
   const t3 = { id: '3', pinned: false }
   const t4 = { id: '4', pinned: true }
   assert.deepEqual(sortTabsPinnedFirst([t1, t2, t3, t4]).map((t) => t.id), ['2', '4', '1', '3'])
+})
+
+test('restoreStartupTabs keeps PearBrowser landing first even when Dealroom was active', () => {
+  const restored = restoreStartupTabs([
+    { url: DEALROOM, title: 'Pear Dealroom', active: true }
+  ], [A, B])
+  assert.equal(restored.tabs.length, 3)
+  assert.equal(restored.tabs[0].url, A)
+  assert.equal(restored.tabs[1].url, B)
+  assert.equal(restored.tabs[2].url, DEALROOM)
+  assert.equal(restored.activeId, restored.tabs[0].id)
+})
+
+test('restoreStartupTabs dedupes default tabs from saved sessions', () => {
+  const restored = restoreStartupTabs([
+    { url: B, title: 'peerit', active: true },
+    { url: C, title: 'other' }
+  ], [A, B])
+  assert.deepEqual(restored.tabs.map((tab) => tab.url), [A, B, C])
+  assert.equal(restored.activeId, restored.tabs[0].id)
 })

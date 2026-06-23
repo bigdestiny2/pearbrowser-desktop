@@ -102,6 +102,39 @@ export function restoreSavedTab (source) {
   return makeTab(snap.url, snap)
 }
 
+export function restoreStartupTabs (savedTabs, defaultUrls = []) {
+  const tabs = []
+  const seenUrls = new Set()
+  const add = (tab) => {
+    if (!tab) return
+    const key = cleanTabUrl(tab.url || tab.displayUrl)
+    if (key && seenUrls.has(key)) return
+    if (key) seenUrls.add(key)
+    tabs.push(tab)
+  }
+
+  for (const url of defaultUrls) {
+    const clean = cleanTabUrl(url)
+    if (clean) add(makeTab(clean))
+  }
+
+  const restoredPairs = Array.isArray(savedTabs)
+    ? savedTabs
+      .map((saved) => ({ saved, tab: restoreSavedTab(saved) }))
+      .filter((entry) => entry.tab && (entry.tab.url || entry.tab.displayUrl))
+    : []
+  for (const entry of restoredPairs) add(entry.tab)
+
+  if (tabs.length === 0 && restoredPairs.length > 0) {
+    for (const entry of restoredPairs) add(entry.tab)
+  }
+
+  return {
+    tabs,
+    activeId: tabs[0]?.id || ''
+  }
+}
+
 export function sortTabsPinnedFirst (list) {
   return [
     ...list.filter((tab) => tab.pinned),

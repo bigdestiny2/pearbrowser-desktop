@@ -42,10 +42,11 @@ announcement.
 - [ ] Browse user story:
   - Open `hyper://1868916a7a282ff0f211b536e9642828c32d3a817a254e1ef7e602709e25d/`.
   - Expected: page renders, About-this-site shows the drive key, reload works.
-- [ ] Fresh-launch peerit story:
+- [ ] Fresh-launch landing story:
   - Start with no saved tab/session state or a clean browser profile.
-  - Expected: `peerit` opens as the active front Browse tab, the landing page is
-    still available as the second tab, and Sites discovery pins `peerit` first.
+  - Expected: the PearBrowser landing page opens as the active front Browse tab,
+    `peerit` is still available as the second tab, and Sites discovery pins
+    `peerit` first.
 - [ ] Catalogue user story:
   - Open Apps.
   - Expected: PearBrowser Network catalogue auto-loads.

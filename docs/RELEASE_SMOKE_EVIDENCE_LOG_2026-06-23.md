@@ -27,7 +27,7 @@ manual gate.
 
 | Gate | Expected | Result | Evidence |
 | --- | --- | --- | --- |
-| `npm test` | 425/425 pass | PASS | 2026-06-23 local run: `node --test 'test/*.test.js'`, pass `425/425` |
+| `npm test` | 427/427 pass | PASS | 2026-06-23 local run: `node --test 'test/*.test.js'`, pass `427/427` |
 | `git diff --check` | clean | PASS | 2026-06-23 local run exited 0 before evidence-log edits |
 | `npm audit --audit-level=high` | 0 high vulnerabilities | PASS | 2026-06-23 local run: `found 0 vulnerabilities` |
 | Desktop CI | install/test/audit success |  |  |
@@ -48,7 +48,7 @@ manual gate.
 | Production browser launch | stable `pear://tco5k7...` opens and backend connects |  |  |
 | Runtime RPC smoke | `/status-smoke` reports DHT/proxy/relay readiness |  |  |
 | Browse story | homepage `hyper://186891...` renders, reloads, site info correct |  |  |
-| Fresh-launch peerit story | `peerit` front tab, landing page second tab |  |  |
+| Fresh-launch landing story | PearBrowser landing front tab, `peerit` second tab |  |  |
 | Catalogue story | Apps auto-loads, featured cards visible, search works |  |  |
 | Latest-app-without-download story | app launches from catalogue row without project page/download/manual update |  |  |
 | Existing featured app regression | Keet or equivalent standalone app still opens |  |  |
