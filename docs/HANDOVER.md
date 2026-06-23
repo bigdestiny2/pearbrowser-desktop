@@ -69,7 +69,7 @@ shared substrate, so the tracks **reuse it, not rebuild it**:
 |---|---|---|
 | `pearbrowser-desktop` | branch `feat/p2p-infra-naming`, PR head is the current branch tip | Release-audit branch carrying catalogue, Peercord, search, naming, Nostr, docs, and readiness updates. GitHub PR #4 is `CLEAN` / `MERGEABLE` against `main` and remains draft for review. |
 | `origin/main` | `1577ad5` at the time of the merge-back | Base branch. Its catalogue-discovery work is merged into the release branch. |
-| `PearBrowser` mobile repo | `main`, clean after `5b80bcb` | Mobile/native README and audit-gate docs are pushed; tests passed `124/124` in the release pass. Native simulator/device smoke is still gated: iOS reached final framework embedding before a signal-9 script kill, and Android Gradle needs a Java Runtime. |
+| `PearBrowser` mobile repo | `main` | Mobile/native README and audit-gate docs are current; tests passed `124/124`, and the missing `ExpoLinking` native dependency found by simulator launch is fixed in the tracked dependency set. Native simulator/device smoke is still gated by local CocoaPods/BareKit/Xcode generated shell-phase hangs on iOS and a missing Java Runtime for Android Gradle. |
 | Legacy `feat/p2p-infra-naming-n1ui` / `feat/p2p-infra-impl` references below | historical only | Kept as reconciliation provenance. Do not treat old tip SHAs in §4-§6 as the current release head. |
 
 ---

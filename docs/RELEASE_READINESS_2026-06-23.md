@@ -18,7 +18,7 @@ The release is in strong shape for a community launch. The core protocol tests a
 - Desktop GUI runtime is up in dev mode with Pear Runtime renderer connected to the backend RPC socket on `127.0.0.1:9876`.
 - Real-DHT relay health passed with 1 unique HiveRelay reachable and 8 live relay connections. A restricted/sandboxed network run can false-negative DHT discovery, so release checks should run with real network access.
 - PearBrowser homepage, Peercord, and Keet bundle drives were fresh-peer sampled without executing third-party code; all returned peers, file listings, and zero missing sampled blobs.
-- Native simulator/device smoke was attempted but is not cleared: iOS reaches the final CocoaPods framework embed phase after local generated-state fixes, then `Pods-PearBrowser-frameworks.sh` is killed with signal 9; Android Gradle inspection is blocked by a missing Java Runtime in this environment.
+- Native simulator/device smoke was attempted but is not cleared: iOS launched far enough to expose a real missing native module (`ExpoLinking`), the tracked dependency is now added and autolinked, but the follow-up simulator build is blocked by local generated CocoaPods/BareKit/Xcode shell-script hangs; Android Gradle inspection is blocked by a missing Java Runtime in this environment.
 
 One transient desktop `npm test` run reported `401/402`; the immediately repeated compact full run passed `402/402`, and the catalogue-focused subset passed `30/30`. No code change was needed for that blip.
 
@@ -30,6 +30,7 @@ One transient desktop `npm test` run reported `401/402`; the immediately repeate
 - Added `catalog-source/pearbrowser-network.catalog.json` so the canonical catalogue source is versioned in the desktop GitHub repo.
 - Regenerated `backend/catalogue-seed.js` from the versioned catalogue source so the offline seed and live catalogue agree.
 - Added `.landing-seed.mjs` to `.gitignore` so the local operational landing-page seeder does not appear as release source.
+- Added mobile `expo-linking@~55.0.15` after the iOS simulator launch exposed `[runtime not ready]: Error: Cannot find native module 'ExpoLinking'`.
 
 ## Catalogue And Launch
 
@@ -100,11 +101,12 @@ The mobile app logic is tested, while native simulator/device release smoke stil
 - Mobile catalogue normalization preserves safe link-only rows and rejects targetless rows.
 - iOS and Android bridge constants are mirrored for login, profile, connected apps, trusted origins, and `swarm.v1`.
 - Mobile flows cover Home, Browse, Explore, Settings, My Sites, editor, QR scanner, identity backup/restore, and bridge runtime smoke tests.
-- iOS generated CocoaPods metadata in the ignored `ios/` tree had stale nested Expo paths (`node_modules/expo/node_modules/...`) while the current Expo autolinker resolves hoisted packages. Local generated metadata was corrected for EXConstants, ExpoAsset, ExpoDomWebView, ExpoFont, ExpoKeepAwake, and ExpoLogBox, moving the build past missing `PrivacyInfo.xcprivacy`, missing ExpoLogBox sources, and EXConstants header export failures.
-- The simulator build then reached the app target's generated `Pods-PearBrowser-frameworks.sh` step and failed when that framework embed script was killed with signal 9.
+- An installed iOS simulator build launched and exposed `[runtime not ready]: Error: Cannot find native module 'ExpoLinking'`.
+- `expo-linking@~55.0.15` is now tracked in `package.json`/`package-lock.json`; `npm ls expo-linking` resolves `expo-linking@55.0.15`, and Expo autolinking resolves the `ExpoLinking` pod/module.
+- A follow-up iOS build is still not release-cleared because local generated native tooling hangs: `react-native-bare-kit`'s CocoaPods `prepare_command` hung while relinking add-on frameworks, and Xcode later hung inside generated shell-script phases even when the phase body was reduced locally to `true`.
 - Android native Gradle inspection is blocked in this environment by a missing Java Runtime.
 
-Required before native/mobile distribution: regenerate dependencies cleanly, rerun the iOS simulator build and launch, and install a JDK before the Android Gradle smoke. Local Node tests do not prove platform WebView behavior under real OS permissions.
+Required before native/mobile distribution: regenerate CocoaPods/BareKit state cleanly, rerun the iOS simulator build and launch with the new `expo-linking` dependency, and install a JDK before the Android Gradle smoke. Local Node tests do not prove platform WebView behavior under real OS permissions.
 
 ## Release Operations
 
@@ -133,6 +135,7 @@ node --test --test-reporter=spec test/*.test.js
 node --test test/catalog-manager-safety.test.js test/catalog-bee.test.js test/peercord-catalog.test.js test/resolve-name.test.js test/index-room-client.test.js
 git diff --check
 npm test # mobile/native
+npm ls expo-linking # mobile/native, resolved expo-linking@55.0.15
 npm audit --audit-level=high
 npm audit fix # mobile/native, non-force only
 npm audit --audit-level=high # mobile/native after fix
@@ -149,6 +152,9 @@ xcodebuild -workspace ios/PearBrowser.xcworkspace -list # mobile/native, succeed
 xcrun simctl list devices available # mobile/native, selected booted iPhone 17, OS 26.4.1
 ./gradlew :app:tasks --all # mobile/native, failed: no Java Runtime
 xcodebuild -workspace ios/PearBrowser.xcworkspace -scheme PearBrowser -configuration Debug -destination 'id=13BEE7B5-1283-4DE4-BE38-8B70356E4A5B' -derivedDataPath ios/build/DerivedData CODE_SIGNING_ALLOWED=NO build # mobile/native, failed at final framework embed script after generated Expo path fixes
+xcrun simctl install 13BEE7B5-1283-4DE4-BE38-8B70356E4A5B ios/build/DerivedData/Build/Products/Debug-iphonesimulator/PearBrowser.app # mobile/native, succeeded with prior build
+xcrun simctl launch 13BEE7B5-1283-4DE4-BE38-8B70356E4A5B com.pearbrowser.app # mobile/native, exposed missing ExpoLinking runtime module
+xcodebuild -workspace ios/PearBrowser.xcworkspace -scheme PearBrowser -configuration Debug -destination 'id=13BEE7B5-1283-4DE4-BE38-8B70356E4A5B' -derivedDataPath ios/build/DerivedData CODE_SIGNING_ALLOWED=NO COCOAPODS_PARALLEL_CODE_SIGN=false COMPILER_INDEX_STORE_ENABLE=NO build # mobile/native after expo-linking, blocked by generated shell-script phase hang in this environment
 ```
 
 Key live values:
@@ -164,5 +170,5 @@ Key live values:
 - Network replication can vary by relay health and NAT conditions. This pass saw reachable relays, a reachable production drive, and a reachable live catalogue, but a second-network spot check remains useful before a high-visibility announcement.
 - Peercord cannot honestly be marketed as headless-in-tab until upstream ships a compatible pear-request worker. PearBrowser does launch it from the featured catalogue without manual download/update.
 - Public Nostr relay behavior is not part of this release; the shipped feature is the trusted-contact bridge.
-- Native mobile is not app-store-release-cleared yet. The JS/test surface is green, but iOS still needs a clean generated dependency pass plus simulator launch, and Android needs a local JDK before Gradle can be inspected.
+- Native mobile is not app-store-release-cleared yet. The JS/test surface is green and the missing `ExpoLinking` dependency is fixed, but iOS still needs a clean CocoaPods/BareKit/Xcode-generated build plus simulator launch, and Android needs a local JDK before Gradle can be inspected.
 - Mobile still reports 15 moderate `npm audit` advisories in Expo/React Native test/tooling transitive dependencies. npm's available fix requires breaking major-version changes, so these should move to the next mobile platform-upgrade lane rather than this release-day hardening pass.
