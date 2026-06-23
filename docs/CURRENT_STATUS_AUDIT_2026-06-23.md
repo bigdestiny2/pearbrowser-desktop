@@ -17,9 +17,9 @@ federated search, safe target normalization, identity-backed login, swarm.v1,
 and operational scripts for pin, catalogue, relay, and bundle verification.
 
 The strongest current evidence is local and protocol-level. The release notes
-record `npm test` passing with 415/415 desktop tests, Desktop CI passing on the
+record `npm test` passing with 423/423 desktop tests, Desktop CI passing on the
 release branch, high-severity dependency audit passing, the live catalogue
-fresh-peer check passing at Hyperbee length 256 with 14 apps, and the production
+fresh-peer check passing at Hyperbee length 273 with 14 apps, and the production
 browser drive fresh-peer check passing at length 18552. The search handover
 also records that local self-search is live and opt-in trusted-peer federation
 is wired through `QueryPlanner`.
@@ -87,7 +87,7 @@ validation, and broader real-device smoke.
 - Promoted copy matched the draft with `cmp -s`.
 - `git diff --check` passed on the current dirty worktree.
 - `npm test` passed on the current dirty worktree.
-  - Node test runner: 415 tests passed, 0 failed.
+  - Node test runner: 423 tests passed, 0 failed.
   - This supersedes the older 404/404 and 408-test counts recorded in the release notes
     for purposes of this local loop.
 

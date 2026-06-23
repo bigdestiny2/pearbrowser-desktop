@@ -638,9 +638,10 @@ catalogue.
 - Full mobile suite: `npm test` in `PearBrowser`: 136 passed, 0 failed.
 - Live relay check with real DHT access: 1 unique HiveRelay reachable and 7 live
   relay connections.
-- Live catalogue check: signed `PearBrowser Network` Hyperbee at length 256,
+- Live catalogue check: signed `PearBrowser Network` Hyperbee at length 273,
   14 apps, Peercord, peerit, and HiveWorm rows present, Peercord marked
-  `standalone`, and peerit marked `hypersite`.
+  `standalone` with upstream source/licence metadata, and peerit marked
+  `hypersite`.
 - Production drive check: fresh peer reached length 18552 and fetched 11652
   bytes from `/backend/anongpt-buyer.js`; a fresh-peer metadata scan also
   confirmed `/.landing-seed.mjs`, `/pearbrowser-storage`, `/docs`, `/scripts`,

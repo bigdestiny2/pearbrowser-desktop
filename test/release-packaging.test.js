@@ -9,6 +9,7 @@ const mainEntry = readFileSync(new URL('../index.js', import.meta.url), 'utf8')
 const bootEntry = readFileSync(new URL('../ui/boot.js', import.meta.url), 'utf8')
 const tabRuntime = readFileSync(new URL('../backend/tab-runtime.js', import.meta.url), 'utf8')
 const runtimeSmoke = readFileSync(new URL('../scripts/runtime-rpc-smoke.mjs', import.meta.url), 'utf8')
+const liveCatalogVerifier = readFileSync(new URL('../scripts/verify-live-catalog.js', import.meta.url), 'utf8')
 
 test('Pear stage ignore excludes local release/operator scratch files', () => {
   const ignored = pkg.pear?.stage?.ignore || []
@@ -54,4 +55,11 @@ test('runtime smoke asserts backend readiness fields', () => {
   assert.match(runtimeSmoke, /status\.dhtConnected !== true/)
   assert.match(runtimeSmoke, /status\.proxyPort/)
   assert.match(runtimeSmoke, /status\.hiveRelays/)
+})
+
+test('live catalogue verifier asserts Peercord provenance metadata', () => {
+  assert.match(liveCatalogVerifier, /Peercord sourceUrl mismatch/)
+  assert.match(liveCatalogVerifier, /https:\/\/git\.churchofmalware\.org\/mastercodeon\/Peercord/)
+  assert.match(liveCatalogVerifier, /Peercord license mismatch/)
+  assert.match(liveCatalogVerifier, /GPL-3\.0/)
 })

@@ -116,6 +116,8 @@ async function main () {
     if (peercord.link !== 'pear://wmir47w7mai3b1skj66mx7fzso6k6o91kipaney7gtt69npimouy') fail('Peercord link mismatch')
     if (peercord.driveKey) fail('Peercord should be pear:// standalone without a Hyperdrive driveKey')
     if (peercord.type !== 'standalone') fail(`Peercord type mismatch: expected standalone, got ${peercord.type || '(missing)'}`)
+    if (peercord.sourceUrl !== 'https://git.churchofmalware.org/mastercodeon/Peercord') fail('Peercord sourceUrl mismatch')
+    if (peercord.license !== 'GPL-3.0') fail('Peercord license mismatch')
   }
 
   const hiveworm = byId.get('hiveworm')
@@ -133,6 +135,7 @@ async function main () {
 
   console.log('   → signed meta signature:', signedMeta.value.signature.slice(0, 16) + '…')
   console.log('   → catalogue:', data.name, '· apps:', data.apps.length)
+  if (peercord) console.log('   → Peercord:', peercord.type, '·', peercord.sourceUrl, '·', peercord.license)
   console.log('   → expected apps:', args.expectApps.length ? args.expectApps.join(', ') : '(none)')
   console.log()
   console.log('✅ Live catalogue is reachable and matches expected release rows')
