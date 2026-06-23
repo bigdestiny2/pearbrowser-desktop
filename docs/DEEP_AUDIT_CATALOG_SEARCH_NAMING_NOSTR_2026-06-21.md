@@ -226,8 +226,8 @@ Focused verification after the fixes:
 
 Full suite verification was also run during this review pass and later expanded as more tests landed:
 
-- Desktop `npm test` in `pearbrowser-desktop`: latest recorded pass is 384 passed, 0 failed.
-- Mobile/outer `npm test` in `PearBrowser`: latest recorded pass is 102 passed, 0 failed.
+- Desktop `npm test` in `pearbrowser-desktop`: then-current pass was 384 passed, 0 failed; later addenda supersede this count.
+- Mobile/outer `npm test` in `PearBrowser`: then-current pass was 102 passed, 0 failed; later addenda supersede this count.
 
 ## Addendum: Deeper Pass On 2026-06-22
 
@@ -283,7 +283,7 @@ Nostr bridge is sound as a Pear-native trusted-contact feed, not a public relay 
 ### Verification Added
 
 - `node --test test/catalog-bee.test.js test/keys.test.js test/constants-mirror.test.js`: 22 passed, 0 failed.
-- Desktop `npm test` in `pearbrowser-desktop`: latest recorded pass is 384 passed, 0 failed.
+- Desktop `npm test` in `pearbrowser-desktop`: then-current pass was 384 passed, 0 failed; later addenda supersede this count.
 - Renderer harness retest: About footer no longer contained `Invalid Date`; Apps catalog input advertised `sheets://` and `hiveindex://`.
 
 ## Addendum: Discovery-Surface Retest On 2026-06-22
@@ -631,7 +631,10 @@ catalogue.
 
 ### Verification Added
 
-- Full desktop suite: `npm test` in `pearbrowser-desktop`: 402 passed, 0 failed.
+- Full desktop suite: `npm test` in `pearbrowser-desktop`: 404 passed, 0 failed.
+- GitHub Actions Desktop CI run `28028914438` passed on head
+  `639f956f99868f2e19739ab8154a12b693df15b4`, including install, tests, and
+  high-severity dependency audit.
 - Full mobile suite: `npm test` in `PearBrowser`: 124 passed, 0 failed.
 - Live relay check with real DHT access: 1 unique HiveRelay reachable and 8 live
   relay connections.

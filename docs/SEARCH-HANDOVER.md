@@ -6,7 +6,7 @@
 
 > **Verification baseline (re-run before trusting this doc):**
 > `npm test`
-> → **402 tests, 402 pass** as of the 2026-06-23 release pass. Focused search coverage lives in `test/search-core.test.js`, `test/personal-index.test.js`, `test/search-shard.test.js`, `test/search-federation.test.js`, `test/search-frontier.test.js`, `test/search-completeness.test.js`, `test/query-planner.test.js`, `test/row-verifier.test.js`, `test/cmd-search-contract.test.js`, `test/index-room-client.test.js`, and `test/identity-binding.test.js`. Engine modules stay pure/`.cjs` where they need to load under both Node and Bare.
+> → **404 tests, 404 pass** as of the 2026-06-23 release pass. Focused search coverage lives in `test/search-core.test.js`, `test/personal-index.test.js`, `test/search-shard.test.js`, `test/search-federation.test.js`, `test/search-frontier.test.js`, `test/search-completeness.test.js`, `test/query-planner.test.js`, `test/row-verifier.test.js`, `test/cmd-search-contract.test.js`, `test/index-room-client.test.js`, and `test/identity-binding.test.js`. Engine modules stay pure/`.cjs` where they need to load under both Node and Bare.
 
 ---
 
