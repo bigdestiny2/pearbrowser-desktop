@@ -15,6 +15,7 @@ const NAME_ALIASES = [
   { name: 'pearpass', label: 'PearPass', link: 'pear://tywsat7gz8m65ejx4zjn3773pbdc4j8m66tukis8dgzekraymtzo' },
   { name: 'pass', label: 'PearPass', link: 'pear://tywsat7gz8m65ejx4zjn3773pbdc4j8m66tukis8dgzekraymtzo' },
   { name: 'peercord', label: 'Peercord', link: 'pear://wmir47w7mai3b1skj66mx7fzso6k6o91kipaney7gtt69npimouy' },
+  { name: 'peerit', label: 'peerit', link: 'hyper://ec6e2d6d9d22b9d6b40e11a9ca3042be3197e4bdca9e9a7f079be6ee830761b4/' },
   { name: 'hiveworm', label: 'HiveWorm', link: 'pear://d1xbkcpcbi1xa8dexp49rsendra5r67w3qh5a9k8t44oemm4k16y' },
   { name: 'anongpt', label: 'anonGPT', link: 'pear://rpzh3fsgg38kfir9nmae7x3o8ubofddzzixr5js4mxd6a6drb6wo' }
 ]

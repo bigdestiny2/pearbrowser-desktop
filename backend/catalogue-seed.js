@@ -31,6 +31,22 @@ module.exports = {
       "verification": "relay-listed"
     },
     {
+      "name": "peerit",
+      "type": "hypersite",
+      "driveKey": "ec6e2d6d9d22b9d6b40e11a9ca3042be3197e4bdca9e9a7f079be6ee830761b4",
+      "iconData": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCIgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0Ij4KICA8ZGVmcz4KICAgIDxsaW5lYXJHcmFkaWVudCBpZD0iZyIgeDE9IjAiIHkxPSIwIiB4Mj0iMSIgeTI9IjEiPgogICAgICA8c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmZjZiM2QiLz4KICAgICAgPHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjOWI2Y2ZmIi8+CiAgICA8L2xpbmVhckdyYWRpZW50PgogIDwvZGVmcz4KICA8cmVjdCB3aWR0aD0iNjQiIGhlaWdodD0iNjQiIHJ4PSIxNiIgZmlsbD0idXJsKCNnKSIvPgogIDwhLS0gdGhyZWUgcGVlcnMgY29ubmVjdGVkIGluIGEgbWVzaCwgd2l0aCBhbiB1cHZvdGUgYXJyb3cgLS0+CiAgPGcgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMGEwZTE3IiBzdHJva2Utd2lkdGg9IjMiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+CiAgICA8cGF0aCBkPSJNMjAgNDAgTDQ0IDQwIE0yMCA0MCBMMzIgMjAgTTQ0IDQwIEwzMiAyMCIgb3BhY2l0eT0iMC41Ii8+CiAgPC9nPgogIDxjaXJjbGUgY3g9IjMyIiBjeT0iMjAiIHI9IjYiIGZpbGw9IiMwYTBlMTciLz4KICA8Y2lyY2xlIGN4PSIyMCIgY3k9IjQwIiByPSI2IiBmaWxsPSIjMGEwZTE3Ii8+CiAgPGNpcmNsZSBjeD0iNDQiIGN5PSI0MCIgcj0iNiIgZmlsbD0iIzBhMGUxNyIvPgogIDxwYXRoIGQ9Ik0zMiA1MCBMMzIgMzMgTTMyIDMzIEwyNiAzOSBNMzIgMzMgTDM4IDM5IiBzdHJva2U9IiNmZmYiIHN0cm9rZS13aWR0aD0iMy40IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiIGZpbGw9Im5vbmUiLz4KPC9zdmc+Cg==",
+      "author": "defidon",
+      "categories": [
+        "community",
+        "social",
+        "site",
+        "featured"
+      ],
+      "description": "The front page of the P2P internet — a peer-to-peer Reddit. Communities, posts, threaded comments and votes live in a shared Holepunch log (Autobase + Hyperbee) and replicate directly between peers. No servers, no data center. Runs as a P2P site inside PearBrowser, seeded 24/7 on HiveRelay.",
+      "version": "1.0.0",
+      "verification": "relay-listed"
+    },
+    {
       "name": "HiveRelay",
       "type": "hypersite",
       "driveKey": "9f2b34aad8cd1a681d5f07d8a76768f0dc92a5008251d02a8600eb0751ad6b5f",

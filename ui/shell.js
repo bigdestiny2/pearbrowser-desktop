@@ -106,6 +106,13 @@ const TAB_META = {
 // republish — block-source lives at /.blocks.json inside the drive.
 const DEFAULT_URL = 'hyper://1868916a7a282ff0f211b11b536e9642828c32d3a817a254e1ef7e602709e25d/'
 
+// peerit — "the front page of the P2P internet" (a peer-to-peer Reddit). Opens
+// as the active front tab on every fresh launch (alongside the landing page),
+// and is pinned to the top of the Sites discovery grid. Published 2026-06-23,
+// seeded 24/7 on HiveRelay. Source: 02-apps/peerit.
+const PEERIT_DRIVE_KEY = 'ec6e2d6d9d22b9d6b40e11a9ca3042be3197e4bdca9e9a7f079be6ee830761b4'
+const PEERIT_URL = 'hyper://' + PEERIT_DRIVE_KEY + '/'
+
 // Default catalog — auto-loads on first Apps-tab visit when the user has not yet
 // pinned a catalog of their own. The "PearBrowser Network" curated entry point,
 // published as a Hyperbee (the Pear-native, updatable catalog format) from the
@@ -4631,7 +4638,15 @@ function Sites ({ rpc, C, onBrowse }) {
       // entries that share a stable `id` (the dev seed has none), so without this
       // every published site renders twice on the Sites page.
       const sites = apps.filter((a) => a && typeof a.driveKey === 'string' && /^[0-9a-f]{64}$/i.test(a.driveKey))
-      setDiscovered(dedupeApps(sites))
+      // Order: peerit (the front page of the P2P internet) is pinned first,
+      // then any 'featured' sites, then the rest — stable within each band.
+      const rank = (a) => (a.driveKey === PEERIT_DRIVE_KEY ? 0
+        : (Array.isArray(a.categories) && a.categories.includes('featured') ? 1 : 2))
+      const ordered = dedupeApps(sites)
+        .map((a, i) => ({ a, i }))
+        .sort((x, y) => rank(x.a) - rank(y.a) || x.i - y.i)
+        .map((e) => e.a)
+      setDiscovered(ordered)
     } catch (e) { /* discovery is best-effort */ }
   }
 
@@ -4760,9 +4775,10 @@ export function App ({ rpc, C, storagePath }) {
   //   1. Switching to Apps/Settings/etc and back doesn't destroy them
   //      (Browse used to remount with a fresh tabs[] every time)
   //   2. We can persist them to user-data and restore across launches
-  // Default initial state is one welcome tab; the restore-from-settings
-  // step below replaces it once user-data is ready.
-  const [tabs, setTabs] = useState(() => [makeTab(DEFAULT_URL)])
+  // Default initial state on a fresh launch is two tabs: peerit (the front
+  // page of the P2P internet) as the active tab, plus the landing page. The
+  // restore-from-settings step below replaces these if a saved session exists.
+  const [tabs, setTabs] = useState(() => [makeTab(PEERIT_URL), makeTab(DEFAULT_URL)])
   const [browseActiveId, setBrowseActiveId] = useState(() => 'placeholder')
   const [closedTabs, setClosedTabs] = useState(() => [])
   // Tracks whether we've completed the one-time tabs-restore from

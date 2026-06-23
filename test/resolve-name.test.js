@@ -19,6 +19,8 @@ test('curated lookup is normalized + supports alias names', () => {
   assert.equal(resolveName('KEET', { petnames: {} }).provenance, 'curated')  // case-folded
   assert.equal(lookupAlias('pass').label, 'PearPass')                        // alias → PearPass
   assert.equal(lookupAlias('peercord').link, 'pear://wmir47w7mai3b1skj66mx7fzso6k6o91kipaney7gtt69npimouy')
+  // peerit is a hyper:// site (not a pear:// app) — the alias layer carries it too
+  assert.equal(lookupAlias('peerit').link, 'hyper://ec6e2d6d9d22b9d6b40e11a9ca3042be3197e4bdca9e9a7f079be6ee830761b4/')
 })
 
 test('petname HIT works offline and beats the curated floor', () => {
