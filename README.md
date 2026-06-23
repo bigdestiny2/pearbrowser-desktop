@@ -168,6 +168,7 @@ node scripts/verify-live-catalog.js --expect-app peercord
 | `scripts/verify-pin.js --expect <length>` | Fresh-peer production-drive check: proves the released browser drive is reachable and serving at least the expected length. |
 | `scripts/verify-live-catalog.js --expect-app peercord` | Fresh-peer Hyperbee catalogue check: proves the live app catalogue key is reachable and contains expected release rows and Peercord launch metadata. |
 | `scripts/verify-app-full.js --key <driveKey>` | Deeper fresh-peer blob sampling across a drive's file tree. |
+| `scripts/verify-pear-bundle-contract.js --key <driveKey>` | Metadata-only Pear bundle contract check: reads `pear.json` and selected files from a fresh peer without executing third-party code. |
 | `scripts/release-prod.sh` | The two-step release pipeline above. |
 
 ## Distribution
