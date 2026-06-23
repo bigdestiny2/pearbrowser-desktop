@@ -18,7 +18,7 @@ The release is in strong shape for a community launch. The core protocol tests a
 - Desktop GUI runtime is up in dev mode with Pear Runtime renderer connected to the backend RPC socket on `127.0.0.1:9876`.
 - Real-DHT relay health passed again after the latest doc/native fix push, with 1 unique HiveRelay reachable and 7 live relay connections. A restricted/sandboxed network run can false-negative DHT discovery, so release checks should run with real network access.
 - PearBrowser homepage, Peercord, and Keet bundle drives were fresh-peer sampled without executing third-party code; all returned peers, file listings, and zero missing sampled blobs.
-- Native simulator/device smoke is partly cleared: the generated Expo iOS project exposed a real missing native module (`ExpoLinking`), the tracked dependency is now added and autolinked, and the tracked SwiftUI `ios-native` shell now builds, installs, launches, recovers from stale Corestore layout, and reaches a green `Connected` worklet state on the iPhone 17 simulator. Android Gradle task discovery and `:app:compileDebugKotlin` pass with Homebrew OpenJDK 17; full Android APK assembly still needs follow-up because the Java/package phase hung before refreshing the APK.
+- Native simulator/device smoke is mostly cleared: the generated Expo iOS project exposed a real missing native module (`ExpoLinking`), the tracked dependency is now added and autolinked, and the tracked SwiftUI `ios-native` shell now builds, installs, launches, recovers from stale Corestore layout, and reaches a green `Connected` worklet state on the iPhone 17 simulator. Android native now builds a fresh debug APK with a verified JDK 17, installs it on a headless `pp_avd` emulator, launches `com.pearbrowser.app/.MainActivity`, loads `libbare-kit.so`, extracts `backend.android.bundle`, starts the local proxy, and reaches a green `Connected` Home screen.
 
 One transient desktop `npm test` run reported `401/402`; the immediately repeated compact full run passed `402/402`, and the catalogue-focused subset passed `30/30`. No code change was needed for that blip.
 
@@ -32,6 +32,7 @@ One transient desktop `npm test` run reported `401/402`; the immediately repeate
 - Added `.landing-seed.mjs` to `.gitignore` so the local operational landing-page seeder does not appear as release source.
 - Added mobile `expo-linking@~55.0.15` after the iOS simulator launch exposed `[runtime not ready]: Error: Cannot find native module 'ExpoLinking'`.
 - Added a non-destructive mobile Corestore recovery path in `bigdestiny2/PearBrowser@41a7fb6`: if root app storage belongs to another Corestore, the backend falls back to an identity-scoped `corestore-*` subdirectory instead of failing worklet boot.
+- Fixed Android native first-launch Home behavior in the mobile repo: Home now retries bookmark RPCs across the Binder/worklet boot race, so a clean install no longer shows "Bookmarks are unavailable right now" before the backend reports ready.
 
 ## Catalogue And Launch
 
@@ -106,9 +107,9 @@ The mobile app logic is tested, and native simulator/device release smoke is par
 - `expo-linking@~55.0.15` is now tracked in `package.json`/`package-lock.json`; `npm ls expo-linking` resolves `expo-linking@55.0.15`, and Expo autolinking resolves the `ExpoLinking` pod/module.
 - A follow-up iOS build is still not release-cleared because local generated native tooling hangs: `react-native-bare-kit`'s CocoaPods `prepare_command` hung while relinking add-on frameworks, and Xcode later hung inside generated shell-script phases even when the phase body was reduced locally to `true`.
 - The tracked SwiftUI `ios-native` shell builds, installs, launches, and reaches green `Connected` on the iPhone 17 simulator. The smoke also verified stale-Corestore recovery: the first launch failed with `Another corestore is stored here`, then the fallback build recovered into an identity-scoped subdirectory and booted the worklet.
-- Android native Gradle inspection now passes by pointing `JAVA_HOME` at the installed Homebrew OpenJDK 17. `:app:tasks --all` and `:app:compileDebugKotlin` pass; `:app:assembleDebug` reached Java/package work and then went idle before producing a fresh APK.
+- Android native Gradle inspection, Kotlin/Java compile, and `:app:assembleDebug` pass with Eclipse Temurin 17; Homebrew OpenJDK 17.0.19 hung in AGP's JDK image transform on this machine. The fresh debug APK (`android-native/app/build/outputs/apk/debug/app-debug.apk`, 169 MB diagnostic build with bare-kit/addons and two ARM ABIs) installed and launched on a headless `pp_avd` emulator. The app reached a green `Connected` Home screen after extracting the bundled worklet and starting the local proxy.
 
-Required before native/mobile distribution: clean up the generated Expo iOS CocoaPods/BareKit/Xcode script-phase path if that shell remains a target, complete Android APK assembly and device/emulator launch, and run app-store-style signing/distribution checks. Local Node tests do not prove platform WebView behavior under real OS permissions.
+Required before native/mobile distribution: clean up the generated Expo iOS CocoaPods/BareKit/Xcode script-phase path if that shell remains a target, produce signed release APK/AAB artifacts, run app-store-style distribution checks, and broaden simulator/emulator smoke to real devices. Local Node tests do not prove platform WebView behavior under real OS permissions.
 
 ## Release Operations
 
@@ -164,7 +165,9 @@ xcrun simctl install 13BEE7B5-1283-4DE4-BE38-8B70356E4A5B ios-native/build/Deriv
 xcrun simctl launch 13BEE7B5-1283-4DE4-BE38-8B70356E4A5B com.pearbrowser.app # tracked SwiftUI iOS shell, reached green Connected after Corestore fallback
 JAVA_HOME=/opt/homebrew/Cellar/openjdk@17/17.0.19/libexec/openjdk.jdk/Contents/Home PATH=/opt/homebrew/Cellar/openjdk@17/17.0.19/bin:$PATH android/gradlew -p android-native :app:tasks --all # Android native, succeeded
 JAVA_HOME=/opt/homebrew/Cellar/openjdk@17/17.0.19/libexec/openjdk.jdk/Contents/Home PATH=/opt/homebrew/Cellar/openjdk@17/17.0.19/bin:$PATH android/gradlew -p android-native --no-daemon -Dkotlin.compiler.execution.strategy=in-process :app:compileDebugKotlin # Android native, succeeded
-JAVA_HOME=/opt/homebrew/Cellar/openjdk@17/17.0.19/libexec/openjdk.jdk/Contents/Home PATH=/opt/homebrew/Cellar/openjdk@17/17.0.19/bin:$PATH android/gradlew -p android-native --no-daemon -Dkotlin.compiler.execution.strategy=in-process :app:assembleDebug # Android native, reached Java/package phase then hung before fresh APK
+JAVA_HOME=/opt/homebrew/Cellar/openjdk@17/17.0.19/libexec/openjdk.jdk/Contents/Home PATH=/opt/homebrew/Cellar/openjdk@17/17.0.19/bin:$PATH android/gradlew -p android-native --no-daemon -Dkotlin.compiler.execution.strategy=in-process :app:assembleDebug # Android native, Homebrew OpenJDK hung in jmod/JDK image transform
+JAVA_HOME=/path/to/temurin-17/Contents/Home PATH=/path/to/temurin-17/Contents/Home/bin:$PATH android/gradlew -p android-native --no-daemon -Dorg.gradle.workers.max=1 -Dkotlin.compiler.execution.strategy=in-process :app:compileDebugJavaWithJavac # Android native with Temurin 17, succeeded
+JAVA_HOME=/path/to/temurin-17/Contents/Home PATH=/path/to/temurin-17/Contents/Home/bin:$PATH android/gradlew -p android-native --no-daemon -Dorg.gradle.workers.max=1 -Dkotlin.compiler.execution.strategy=in-process :app:assembleDebug # Android native with Temurin 17, succeeded; fresh debug APK installed/launched on pp_avd and reached green Connected
 ```
 
 Key live values:
@@ -180,5 +183,5 @@ Key live values:
 - Network replication can vary by relay health and NAT conditions. This pass saw reachable relays, a reachable production drive, and a reachable live catalogue, but a second-network spot check remains useful before a high-visibility announcement.
 - Peercord cannot honestly be marketed as headless-in-tab until upstream ships a compatible pear-request worker. PearBrowser does launch it from the featured catalogue without manual download/update.
 - Public Nostr relay behavior is not part of this release; the shipped feature is the trusted-contact bridge.
-- Native mobile is not app-store-release-cleared yet. The JS/test surface is green, the missing `ExpoLinking` dependency is fixed, the tracked SwiftUI iOS shell reaches `Connected`, and Android native Kotlin compile passes. Remaining gates are generated Expo iOS cleanup if that shell remains release-targeted, Android APK assembly/device launch, and signing/distribution checks.
+- Native mobile is not app-store-release-cleared yet. The JS/test surface is green, the missing `ExpoLinking` dependency is fixed, the tracked SwiftUI iOS shell reaches `Connected`, and Android native debug APK assembly plus emulator launch now pass. Remaining gates are generated Expo iOS cleanup if that shell remains release-targeted, signed release APK/AAB distribution checks, broader real-device validation, and app-store-style signing.
 - Mobile still reports 15 moderate `npm audit` advisories in Expo/React Native test/tooling transitive dependencies. npm's available fix requires breaking major-version changes, so these should move to the next mobile platform-upgrade lane rather than this release-day hardening pass.
