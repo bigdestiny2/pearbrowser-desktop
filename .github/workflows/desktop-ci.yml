@@ -18,6 +18,13 @@ jobs:
         with:
           path: pear-ecosystem/01-browser/pearbrowser-desktop
 
+      - name: Checkout PearBrowser mobile source contracts
+        uses: actions/checkout@v4
+        with:
+          repository: bigdestiny2/PearBrowser
+          ref: defdaaf52a5a328195525b313b9d8f72a0cff6f6
+          path: pear-ecosystem/01-browser/PearBrowser
+
       - name: Checkout HiveRelay workspace packages
         uses: actions/checkout@v4
         with:
