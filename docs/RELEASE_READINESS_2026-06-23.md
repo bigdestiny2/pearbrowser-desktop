@@ -10,6 +10,7 @@ The release is in strong shape for a community launch. The core protocol tests a
 
 - Desktop: `npm test` passed `417/417`.
 - Mobile/native: `npm test` passed `136/136`.
+- Mobile evidence was refreshed in `bigdestiny2/PearBrowser@01eb8c7`: release preflight still reports `14 pass / 0 warn / 4 fail` at `2026-06-23T15:51:08.065Z`, with only production signing and store/distribution markers failing.
 - Publisher catalogue: `npm run validate` passes with no warnings.
 - Desktop and mobile `git diff --check` are clean.
 - Desktop dependency audit: `npm audit --audit-level=high` found 0 vulnerabilities.
