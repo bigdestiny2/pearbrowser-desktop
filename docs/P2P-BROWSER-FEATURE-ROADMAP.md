@@ -1,6 +1,6 @@
 # P2P Browser Feature Roadmap
 
-Last updated: 2026-06-22
+Last updated: 2026-06-23
 
 This roadmap tracks the current browser direction after the catalogue, search,
 naming, Nostr, and mobile-parity audit. For a system map, see
@@ -28,8 +28,9 @@ only a `hyper://` viewer:
   contacts, `/api/*`, and gated anonGPT inference.
 - Settings: identity, profile, connected apps, relays, trusted peers, device
   sync, Nostr, names, experimental capabilities, storage cleanup, and reset.
-- Tests: desktop `npm test` passing with 400 tests; mobile sibling `npm test`
-  passing with 124 tests.
+- Tests: desktop `npm test` passing with 402 tests; mobile sibling `npm test`
+  passing with 124 tests; high-severity dependency audits pass after the safe
+  mobile lockfile refresh.
 
 ## Shipped Since The Original Roadmap
 

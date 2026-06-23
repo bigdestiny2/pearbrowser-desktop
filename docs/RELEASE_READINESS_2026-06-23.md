@@ -135,7 +135,7 @@ npm run validate # publisher catalogue
 node scripts/gen-catalogue-seed.mjs
 node scripts/publish-catalog-bee.js catalog-source/pearbrowser-network.catalog.json --storage /Users/localllm/Projects/pear-ecosystem/03-sites/pearbrowser-publishers/catalog
 node scripts/check-relays.js
-node scripts/verify-pin.js --expect 5440
+node scripts/verify-pin.js --expect 16898
 node scripts/verify-live-catalog.js --expect-app peercord --expect-app hiveworm
 node scripts/verify-app-full.js --key 1868916a7a282ff0f211b11b536e9642828c32d3a817a254e1ef7e602709e25d --name pearbrowser-homepage --samples 12 --timeout 90
 node scripts/verify-app-full.js --key a2ea4d769d5e2b90caca4fbcb7f4b7b43caf43f2555b81201d3463ef89b55c26 --name peercord --samples 12 --timeout 90
