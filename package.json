@@ -7,6 +7,7 @@
     "preinstall": "node scripts/check-hiverelay-layout.mjs",
     "start": "pear run --dev .",
     "run": "pear run .",
+    "check:release-evidence": "node scripts/check-release-evidence.mjs",
     "smoke:runtime": "node scripts/runtime-rpc-smoke.mjs",
     "test": "node --test 'test/*.test.js'"
   },

@@ -27,6 +27,11 @@ announcement.
   - `node scripts/verify-pin.js --expect 18552`
   - `node scripts/verify-release-contents.js --expect 18552 --missing /.landing-seed.mjs --missing /pearbrowser-storage --missing /docs --missing /scripts --missing /examples --missing /test`
   - `node scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --expect-app hiveworm`
+- [ ] After filling `docs/RELEASE_SMOKE_EVIDENCE_LOG_2026-06-23.md`, run
+  `npm run check:release-evidence`.
+  - Expected before manual gates are filled: non-zero with blank/incomplete
+    rows listed.
+  - Expected before announcement: exit `0`.
 - [ ] Launch the production browser link:
   - `pear://tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty`
   - Expected: browser opens, backend RPC connects, default page loads.
@@ -155,3 +160,5 @@ Do not announce the release if any of these remain unchecked:
   deferred mobile-store distribution.
 - A real-device/mobile smoke test exposes WebView bridge, permission, or worklet
   boot failures that are not documented as mobile-only follow-up.
+- `npm run check:release-evidence` exits non-zero after the operator evidence
+  log is supposed to be complete.

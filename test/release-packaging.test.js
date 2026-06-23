@@ -23,6 +23,10 @@ test('release script purges ignored files from previous Pear stages', () => {
   assert.match(releaseScript, /pear stage --purge/)
 })
 
+test('release evidence checker is exposed as an operator script', () => {
+  assert.equal(pkg.scripts?.['check:release-evidence'], 'node scripts/check-release-evidence.mjs')
+})
+
 test('schema-sheets bundle keeps native addons in package context', () => {
   assert.match(sheetsBundleScript, /--external:quickbit-native/)
   assert.match(sheetsBundleScript, /--external:simdle-native/)

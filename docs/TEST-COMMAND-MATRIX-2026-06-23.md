@@ -17,10 +17,10 @@ Current local status from this loop:
 
 - `git diff --check` passed.
 - `npm audit --audit-level=high` passed with `found 0 vulnerabilities`.
-- `npm test` passed: 417 tests, 0 failed.
+- `npm test` passed: 422 tests, 0 failed.
 
 This supersedes older local counts in nearby docs for this checkout. The
-current release-readiness docs and latest rerun agree on 417/417.
+current release-readiness docs and latest rerun agree on 422/422.
 
 ## Fast Local Gates
 
@@ -28,7 +28,8 @@ current release-readiness docs and latest rerun agree on 417/417.
 | --- | --- | --- |
 | `git diff --check` | Whitespace/conflict-marker sanity | Passed |
 | `npm audit --audit-level=high` | High-severity dependency audit for desktop package | Passed, 0 vulnerabilities |
-| `npm test` | Full desktop Node test suite: `node --test 'test/*.test.js'` | Passed, 417/417 |
+| `npm test` | Full desktop Node test suite: `node --test 'test/*.test.js'` | Passed, 422/422 |
+| `npm run check:release-evidence` | Operator evidence-log completeness; fails until required rows are `PASS` or documented `DEFER` | Expected fail until manual gates are filled |
 
 The root package is the only package with test scripts relevant to this desktop
 matrix. `backend/package.json` has no scripts. `examples/headless-tab` has a
@@ -140,7 +141,10 @@ Run the PearBrowser Desktop release-evidence cleanup pass:
 2. Capture runtime RPC smoke only after launching the desktop app.
 3. Capture Peercord trust-prompt and standalone-window evidence manually,
    without automating approval.
-4. Keep mobile/native production signing and store validation in the mobile
+4. Run `npm run check:release-evidence`; it should exit `0` only after the
+   operator evidence log is filled and the final decision is `GO` or
+   `GO desktop only`.
+5. Keep mobile/native production signing and store validation in the mobile
    release lane.
 
 ## Source Evidence
@@ -152,6 +156,7 @@ Run the PearBrowser Desktop release-evidence cleanup pass:
 - `/Users/localllm/Projects/pear-ecosystem/01-browser/pearbrowser-desktop/docs/RELEASE_READINESS_2026-06-23.md`
 - `/Users/localllm/Projects/pear-ecosystem/01-browser/pearbrowser-desktop/docs/MANUAL_RELEASE_SMOKE_2026-06-23.md`
 - `/Users/localllm/Projects/pear-ecosystem/01-browser/pearbrowser-desktop/scripts/runtime-rpc-smoke.mjs`
+- `/Users/localllm/Projects/pear-ecosystem/01-browser/pearbrowser-desktop/scripts/check-release-evidence.mjs`
 - `/Users/localllm/Projects/pear-ecosystem/01-browser/pearbrowser-desktop/scripts/check-relays.js`
 - `/Users/localllm/Projects/pear-ecosystem/01-browser/pearbrowser-desktop/scripts/verify-pin.js`
 - `/Users/localllm/Projects/pear-ecosystem/01-browser/pearbrowser-desktop/scripts/verify-live-catalog.js`

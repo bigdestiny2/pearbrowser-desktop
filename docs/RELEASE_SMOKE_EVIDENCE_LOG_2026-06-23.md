@@ -27,7 +27,7 @@ manual gate.
 
 | Gate | Expected | Result | Evidence |
 | --- | --- | --- | --- |
-| `npm test` | 417/417 pass |  |  |
+| `npm test` | 422/422 pass |  |  |
 | `git diff --check` | clean |  |  |
 | `npm audit --audit-level=high` | 0 high vulnerabilities |  |  |
 | Desktop CI | install/test/audit success |  |  |
