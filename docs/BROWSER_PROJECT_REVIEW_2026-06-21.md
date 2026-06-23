@@ -13,7 +13,7 @@ The deep audit focused on the systems explicitly requested for review: search en
 
 Overall state: strong for local and protocol-level correctness. The desktop project has a broad test suite around the hard parts: Hyperbee/Autobee catalogues, encrypted Autobase durability, signed search records, name registry convergence, Nostr bindings/events, relay directory verification, browser-state sync, tabs, and query planning. The mobile project is smaller but its TypeScript, backend syntax, native bridge constants, app catalogue verification, swarm bridge, trusted origins, and stream bridge tests are green.
 
-Not exercised in this pass: live Pear GUI launch, live DHT/HiveRelay replication, real default Hyperbee availability from the public network, or mobile simulator/device runtime. Network access is restricted in this environment, so the review relies on local tests and static/code-level inspection for those paths.
+Original 2026-06-21 limitation: live Pear GUI launch, live DHT/HiveRelay replication, real default Hyperbee availability from the public network, and mobile simulator/device runtime were not exercised in that first pass. The 2026-06-23 release pass closed the network/catalogue gaps: the live PearBrowser Network Hyperbee, production browser drive, Peercord bundle drive, and Keet bundle drive were fresh-peer verified with real network access. The remaining manual/runtime gaps are Pear's trust prompt for actually executing Peercord and a simulator/device smoke for mobile WebView behavior.
 
 ## Feature Inventory
 
@@ -129,7 +129,9 @@ Desktop:
 npm test
 ```
 
-Result: 346 tests passed, 0 failed.
+Original result: 346 tests passed, 0 failed.
+
+2026-06-23 release result: `npm test` passed `402/402`, including the catalogue, Peercord, search, naming, Nostr, sync, and command-mirror additions that landed after this review.
 
 Focused desktop checks:
 
@@ -149,12 +151,16 @@ Mobile:
 npm test
 ```
 
-Result: 95 tests passed, 0 failed.
+Original result: 95 tests passed, 0 failed.
+
+2026-06-23 release result: `npm test` passed `124/124` after the mobile audit cleanup.
 
 ## Review Notes
 
 - The desktop test suite initially showed one transient failure on the first run, but two later full runs were green. If this recurs, inspect the longer-running Autobase/durability tests first.
-- Live default-catalog availability still needs a network smoke because this environment cannot verify the public Hyperbee key against the real HiveRelay/DHT path.
+- Live default-catalog availability is now proven by `node scripts/verify-live-catalog.js --expect-app peercord --expect-app hiveworm`: signed Hyperbee metadata present, catalogue length `206`, 13 apps, peers found, Peercord/HiveWorm rows present.
+- Production browser release availability is now proven by `node scripts/verify-pin.js --expect 16898`: drive length `16898`, `/CHANGELOG.md` blob sampled, peers found.
+- Peercord bundle availability is now proven by `node scripts/verify-app-full.js --key a2ea4d769d5e2b90caca4fbcb7f4b7b43caf43f2555b81201d3463ef89b55c26 --name peercord --samples 12 --timeout 90`: 14,730 entries, 12 sampled blobs present, 0 missing.
 - The mobile Android Browse changes pass tests but still deserve a simulator/device smoke because WebView bridge timing is lifecycle-sensitive.
 - The search system is technically strong; the next meaningful optimization is completing digest-first peer gating so trusted-peer search does less direct frontier fetching.
 - The catalogue system is feature-complete but has many source formats. Keep the key-shape helpers centralized so future UI code does not reintroduce `hyperbee://` vs `bee:` mismatches.

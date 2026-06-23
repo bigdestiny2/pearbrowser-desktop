@@ -1,15 +1,18 @@
 # PearBrowser Desktop — P2P-Infra Handover (master)
 
-**Generated:** 2026-06-19 · **HEAD:** `89ca728` · **Branch:** `feat/p2p-infra-naming` · **Version:** `0.4.5`
+**Generated:** 2026-06-19 · **Release-status refreshed:** 2026-06-23 · **Release PR HEAD:** `71d6490` · **Branch:** `feat/p2p-infra-naming` · **Version:** `0.4.5`
 **Scope:** the **P2P-infra build** (the four-track program in [`research/IMPLEMENTATION-PLAN.md`](./research/IMPLEMENTATION-PLAN.md)) **+ the live branch/worktree/stash map.**
 **Audience:** whoever picks up the infra program next — a fresh session, a teammate, or an AI agent.
 **Canonical handover set:** this file (master) + [`SEARCH-HANDOVER.md`](./SEARCH-HANDOVER.md) (search companion).
 The earlier `HANDOVER-v0.4.5.md` snapshot has been folded in here and removed. Since it: **Phase N1 is COMPLETE
 on one branch** (n1ui UI half merged — §4) and **device sync is fully committed** (UI `b26e4c3` — §2/§6).
 
-> **Historical note (2026-06-22):** this handover preserves the branch status as
-> of 2026-06-19. Naming, search hardening, and a trusted-contact Nostr bridge
-> subset have advanced since then. Use
+> **Historical note (refreshed 2026-06-23):** this handover still preserves some
+> branch-map detail from 2026-06-19, but the product/release state has advanced.
+> Search now has a live `QueryPlanner` path behind opt-in federation, naming has
+> registry and trusted-contact federation, the trusted-contact Nostr bridge is
+> implemented, and the live catalogue/release drives have fresh-peer verification.
+> Use
 > [`ARCHITECTURE_AND_CAPABILITIES.md`](./ARCHITECTURE_AND_CAPABILITIES.md) and
 > [`DEEP_AUDIT_CATALOG_SEARCH_NAMING_NOSTR_2026-06-21.md`](./DEEP_AUDIT_CATALOG_SEARCH_NAMING_NOSTR_2026-06-21.md)
 > as the current product/audit baseline.
@@ -45,43 +48,29 @@ shared substrate, so the tracks **reuse it, not rebuild it**:
 
 | Track | Status | Evidence | Notes |
 |---|---|---|---|
-| **Shared substrate** | ✅ **Shipped** (via the search track) | `backend/identity-binding.cjs`, `search-frontier.cjs`, `search-completeness.cjs` | Reuse verbatim. Open coordination: add a `purpose` domain field to the binding (name/merchant/nostr/routing) to stop cross-purpose replay — a small, *coordinated* change to the shared module. |
+| **Shared substrate** | ✅ **Shipped** (via the search track) | `backend/identity-binding.cjs`, `search-frontier.cjs`, `search-completeness.cjs` | Reuse verbatim. The binding format now carries a signed `purpose` field so search/name/merchant/nostr/routing consumers cannot accidentally accept a binding minted for another purpose. |
 | **L0 — Identity `verify()`** | ✅ **Committed** (P0) | `06614f2`; `backend/identity.js`, `CMD_IDENTITY_VERIFY=75`, `test/identity-verify.test.js` | Ed25519 `verify`/`verifyForApp`; un-stubbed `anongpt-buyer`. The root gate for all trust-bearing work. |
-| **Naming** | ✅ **N0 + N1 COMPLETE** (behind `experimentalNaming`) | N0 `e6c649e`, N1-core `103211c`, N1-wiring `637ef61`+`76af6ef`, merge `fc7b620` | Tiers 0 (local petname, wins) + 3 (curated floor) ship. URL-bar bare-word resolution + provenance chip live. **Next: N2 is superseded by `identity-binding.cjs`; the real next step is N3/N4** (pointer publish, then endorsement rooms + the shared `endorsement-rank.cjs`). `CMD_NAME_LOAD_DIRECTORY=254` reserved for N3/N4. |
+| **Naming** | ✅ **Experimental but end-to-end usable** | `backend/name-registry-*`, `federated-name-resolver.cjs`, `resolve-name.cjs`, `ui/lib/keys.js`, name tests | URL-bar bare-word + `pearname://` resolution, petnames, owner registry, trusted-contact federation, curated aliases, homograph guardrails, and provenance all ship. Remaining improvement: clearer provenance/ambiguity UX. |
 | **Payments** | ⛔ **Not started** | no `backend/payment*`/`*receipt*` files | First real phase PAY1 (signed receipt op-log) is **gated on `SPIKE-AUTOBEE-DURABILITY`**. PAY2/3 span **pear-pos / pear-exchange** (vendor escrow/onchain `.cjs`). |
-| **Nostr** | Historical snapshot: not started on 2026-06-19 | no `backend/nostr*`/`secp256k1*` files at that snapshot | A trusted-contact bridge subset has since landed; broader public-relay work remains gated on **`SPIKE-SCHNORR-BARE`**. |
+| **Nostr** | ✅ **Trusted-contact bridge shipped** | `backend/nostr-*`, `secp256k1-bundle.cjs`, `NostrBindingStore`, `FederatedNostrFeed`, Nostr tests | Deterministic Nostr key, mutual Pear↔Nostr attestation, revoke/rebind, local NIP-01 event store, and trusted-contact feed diagnostics ship. Public `wss://` relay client behavior remains future work. |
 | **Privacy-routing** | ⛔ **Not started** | no `backend/routing*` files | PRIV0 (metadata-min defaults) is cheap + default-on and can land early; PRIV1+ build the routing directory + single-hop. |
-| **Search** (substrate's origin) | ✅ Committed — phases 0–5 + 4 hardening rounds + UI search box/indexer | `b7addc7`, `826b04b`, `be9a7e9`…`b58c49d`, `0c53ed4`…`b2cc5bd` | See [`SEARCH-HANDOVER.md`](./SEARCH-HANDOVER.md) (concurrent) + [`P2P-SEARCH-RESEARCH.md`](./P2P-SEARCH-RESEARCH.md). |
+| **Search** (substrate's origin) | ✅ **Local-first + opt-in federated path shipped** | `PersonalIndex`, `QueryPlanner`, `search-handler.js`, `EVT_SEARCH_FEDERATED`, search tests | Local results paint immediately; trusted-peer federation runs in the background when requested and emits a correlated enriched event. See [`SEARCH-HANDOVER.md`](./SEARCH-HANDOVER.md). |
 | **Device sync** (adjacent, not a plan track) | ✅ **Fully committed** (backend + UI) | `3051373` (engine), `366f78e` (invite helpers), `b26e4c3` (UI) | Behind `experimentalDeviceSync`. `DeviceSync` panel + toggle in `ui/shell.js`. |
 | **HiveRelay / schema-sheets index** | ✅ Committed through phase5 | `37ad282` + relay-* / `index-room-client.js` | Upstream contract: [`HIVERELAY-BACKBONE-HANDOVER.md`](./HIVERELAY-BACKBONE-HANDOVER.md). |
 | **Autobee collaborative catalogs** | ✅ Committed | `CMD_AUTOBEE_*` 160–165 | Behind `experimentalAutobeeCatalogs`. |
 
-**Gating spikes (must be green before their dependents exit):** `SPIKE-AUTOBEE-DURABILITY` (gates N5/PAY1/PAY6/NOSTR1),
-`SPIKE-SCHNORR-BARE` (gates all NOSTR), `SEC0` seed-at-rest (gates **real-user** PAY2/NOSTR2/N2), `SPIKE-LN`
-(gates Lightning). **None are started.** See IMPLEMENTATION-PLAN §5.
+**Gating spikes:** `SPIKE-AUTOBEE-DURABILITY` and the Bare-loadable Schnorr bundle are now resolved for the shipped catalogue/name/Nostr/search subset. `SEC0` seed-at-rest, payments, privacy-routing, public Nostr relay interop, and Lightning remain future tracks. See IMPLEMENTATION-PLAN §5 for the older program map, then cross-check against `ARCHITECTURE_AND_CAPABILITIES.md` before starting work.
 
 ---
 
-## 3. Branch / worktree map (the live topology)
+## 3. Branch / PR / worktree map (current release state)
 
-```
-103211c (N1 core)
-├─ 637ef61 (N1 backend wiring + test/constants-mirror.test.js)
-│    └─ 366f78e ("test: add sync functions" — keys.js invite helpers)
-│         └─ fc7b620  ← N1 MERGE ──┐
-└─ 76af6ef (N1 UI half: shell.js resolver + chip, styles, keys.looksLikeName) ──┘
-                                    └─ b26e4c3 (device-sync UI, recovered from stash@{0})
-                                         └─ f92f8f7 (master handover)
-                                              └─ 89ca728 (search handover)  ← HEAD
-   n1ui half also checked out in worktree  pearbrowser-desktop--n1ui  [feat/p2p-infra-naming-n1ui]
-```
-
-| Branch / location | Tip | Role now |
+| Location | State | Role now |
 |---|---|---|
-| `feat/p2p-infra-naming` (this worktree) | `89ca728` | **Canonical infra branch** (plan-designated). Carries full N1 + mirror guard + device sync (UI `b26e4c3`) + handover docs. |
-| `feat/p2p-infra-naming-n1ui` (worktree `../pearbrowser-desktop--n1ui`) | `76af6ef` | **Now redundant** — its work is merged into the canonical branch. Safe to delete *once that worktree is idle* (`git worktree remove` then `git branch -d`). Can't be deleted while checked out. |
-| `feat/p2p-infra-impl` | search tip + stashes `{0,1,2}` | Older infra branch; superseded by what's committed here. (Stashes renumbered after the device-sync `stash@{0}` was recovered + dropped.) |
-| `tag backup/pre-reconcile-366f78e` | `366f78e` | Safety net — the pre-merge tip, if the reconciliation needs unwinding. |
+| `pearbrowser-desktop` | branch `feat/p2p-infra-naming`, PR head `71d6490` | Release-audit branch carrying catalogue, Peercord, search, naming, Nostr, docs, and readiness updates. GitHub PR #4 is `CLEAN` / `MERGEABLE` against `main` and remains draft for review. |
+| `origin/main` | `1577ad5` at the time of the merge-back | Base branch. Its catalogue-discovery work is merged into the release branch. |
+| `PearBrowser` mobile repo | `main`, clean after `5b80bcb` | Mobile/native README and audit-gate docs are pushed; tests passed `124/124` in the release pass. |
+| Legacy `feat/p2p-infra-naming-n1ui` / `feat/p2p-infra-impl` references below | historical only | Kept as reconciliation provenance. Do not treat old tip SHAs in §4-§6 as the current release head. |
 
 ---
 
@@ -119,7 +108,7 @@ friendly name) is what gets bookmarked / copied / put in history.
 1. ~~**Land the device-sync UI**~~ ✅ **Done** — recovered from `stash@{0}`, re-merged onto N1, committed `b26e4c3` (159 tests + encrypted smoke pass); stash dropped.
 2. **Retire the n1ui worktree/branch** once it's idle: `git worktree remove ../pearbrowser-desktop--n1ui && git branch -d feat/p2p-infra-naming-n1ui`.
 3. **Branch hygiene** — `feat/p2p-infra-naming` now carries naming + sync + search + relay work. Consider splitting
-   device sync into its own PR rather than bundling it under the naming branch.
+   device sync into its own PR rather than bundling it under the naming branch. The current release PR intentionally keeps the broad release audit branch together for review.
 4. **Triage untracked docs** (§ below) and the stale `impl`-branch stashes (§6).
 
 ---
@@ -165,12 +154,12 @@ flag itself; the UI switch is only the user-facing control.
 1–3      core: navigate/status/drive-info       80–86    profile + login grants
 10–19    catalogs (incl. autobee)               90–94    contacts
 20–30    sites + reset/cache                     120–123  swarm grants
-31,70–75 identity (verify=75)                    150–155  my-catalog
-40–42    relays                                  160–165  autobee collaborative catalogs
-50–60    user-data                               177–178  search
-                                                  180–187  device sync
-                                                  200–201  pear bridge / run-app-in-tab
-                                                  250–253  naming  (254 reserved → N3/N4 directory)
+31,70–75 identity (verify=75)                    132      federated search
+40–42    relays                                  133–137  Nostr
+50–60    user-data                               150–155  my-catalog
+160–165  autobee collaborative catalogs          177–178  search
+180–187  device sync                             200–201  pear bridge / run-app-in-tab
+250–253  naming (254 reserved → directory)       264–270  name registry
 ```
 **Rule (enforced by `test/constants-mirror.test.js`):** every `CMD_/EVT_` in `constants.js` must be mirrored
 in `ui/boot.js`'s `C` object, or the renderer call resolves to `undefined` and silently never matches —
@@ -182,14 +171,12 @@ breaking the feature with no error. The drift guard fails CI if they disagree.
 
 ```bash
 npm start          # pear run --dev .   (dev shell)
-npm test           # node --test 'test/*.test.js'   → 157 passing on HEAD (fc7b620)
+npm test           # node --test 'test/*.test.js'   → 402 passing on release PR HEAD (71d6490)
 node scripts/browser-state-sync-smoke.js   # encrypted two-device bookmark sync (no GUI)
 node scripts/autobee-catalog-smoke.js      # collaborative catalog convergence
 node scripts/check-relays.js               # relay reachability over the DHT
 ```
-**GUI note:** the Bare in-app runtime + Electron GUI are **not** exercised headlessly here. UI is verified
-structurally + via pure-logic unit tests (the house pattern — test pure helpers/engines, not htm render trees).
-The naming URL-bar flow + provenance chip therefore need a real `pear run` to exercise end-to-end.
+**GUI note:** the Bare in-app runtime + Electron GUI were smoke-tested for PearBrowser during the release pass, but third-party app execution still needs human trust approval. Peercord's bundle is reachable and catalogued; actually launching it requires approving Pear's persistent trust prompt for its `pear://` key.
 
 **Concurrent-session hazard:** multiple Claude sessions edit this one worktree simultaneously; work has been
 committed/stashed/reset under active editing. Mitigations: `git status` + `git stash list` + `git reflog`

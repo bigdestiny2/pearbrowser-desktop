@@ -1,12 +1,12 @@
 # Lighthouse — P2P Search Engine (Handover)
 
 **Audience:** whoever continues the Lighthouse search engine (search/federation engineer).
-**Status:** Phase 0 (local self-search) **built, wired, and live in the UI.** Phases 1–5 (federation, trust, completeness) **built as pure modules + tested**, not yet stitched into the live query path.
+**Status:** Local self-search is built, wired, and live in the UI. The trusted-peer federation harness is now stitched into the live query path through `QueryPlanner`: `CMD_SEARCH` returns local first-paint results immediately, then emits one correlated `EVT_SEARCH_FEDERATED` update when federation is requested and a planner is available. The lower-level trust, digest, frontier, shard, and completeness modules remain pure/tested and are consumed by that planner where the current v1 network shape has enough data.
 **Full design:** [`P2P-SEARCH-RESEARCH.md`](./P2P-SEARCH-RESEARCH.md) (the synthesis of TermShard / Trustweave / HiveSearch / Constellation into a federation-of-signed-indexes model). Phase roadmap also in [`research/IMPLEMENTATION-PLAN.md`](./research/IMPLEMENTATION-PLAN.md).
 
 > **Verification baseline (re-run before trusting this doc):**
-> `node --test test/search-core.test.js test/personal-index.test.js test/search-shard.test.js test/search-federation.test.js test/search-frontier.test.js test/search-completeness.test.js test/index-room-client.test.js test/identity-binding.test.js`
-> → **58 tests, 58 pass** as of this handover. Every engine module is pure/`.cjs` and runs under plain Node *and* Bare.
+> `npm test`
+> → **402 tests, 402 pass** as of the 2026-06-23 release pass. Focused search coverage lives in `test/search-core.test.js`, `test/personal-index.test.js`, `test/search-shard.test.js`, `test/search-federation.test.js`, `test/search-frontier.test.js`, `test/search-completeness.test.js`, `test/query-planner.test.js`, `test/row-verifier.test.js`, `test/cmd-search-contract.test.js`, `test/index-room-client.test.js`, and `test/identity-binding.test.js`. Engine modules stay pure/`.cjs` where they need to load under both Node and Bare.
 
 ---
 
@@ -34,11 +34,13 @@ Lighthouse is PearBrowser's **decentralized full-text search**: a local-first pe
 
 ---
 
-## 3. End-to-end data flow (the live Phase-0 spine)
+## 3. End-to-end data flow
 
 **Index path** (committed, live): browse `hyper://<key>/path` → iframe `onLoad` fires [`indexPage()`](../ui/shell.js) → extracts `{title, text}` (same-origin via the proxy, 200 KB cap; degrades to title-only if cross-origin) → `CMD_SEARCH_INDEX` ([index.js:332](../backend/index.js#L332)) → `personalIndex.indexDoc()` → `buildDocRecords` tokenizes (title weighted ×2), signs the `d!` record via `identity.signForApp('search', canonDoc, 'lighthouse-doc-v2')`, writes `d!`+`t!` keys → LRU-evicts if over cap. Best-effort, never throws into the render path.
 
-**Query path** (committed, live): Library-tab search box → `CMD_SEARCH` ([index.js:324](../backend/index.js#L324)) → `personalIndex.search(query, {now0: Date.now(), limit})` → `searchIndex` tokenizes, range-scans `t!term!<invScore>!<docId>` (best-first via inverted score, `perTerm` cap), AND-intersects (smallest list first), fetches `d!` records, `rankCandidates` → results render as clickable `hyper://` links. `now0` is injected at the RPC boundary — the engine itself never reads the clock.
+**Query path** (committed, live): Library-tab or Sites-tab search box → `CMD_SEARCH` → `search-handler.js` normalizes/clamps the request → `personalIndex.search(query, {now0: Date.now(), limit})` → `searchIndex` tokenizes, range-scans `t!term!<invScore>!<docId>` (best-first via inverted score, `perTerm` cap), AND-intersects (smallest list first), fetches `d!` records, `rankCandidates` → local results render as clickable `hyper://` links. `now0` is injected at the RPC boundary — the engine itself never reads the clock.
+
+**Federated query path** (committed, live): if the request has `{ federated: true }` and `QueryPlanner` initialized, the same handler returns the local results immediately with `federating: true`, then runs `queryPlanner.search()` in the background. The planner verifies peer sources, merges deterministic federated candidates, and emits `EVT_SEARCH_FEDERATED` with the original `queryId`; the renderer ignores stale events whose `queryId` no longer matches the active search. `CMD_SEARCH_FEDERATED` is an explicit alias that forces this mode.
 
 **Signing identity:** the `sign` fn is wired at boot ([index.js:1633](../backend/index.js#L1633)) as `identity.signForApp('search', …, 'lighthouse-doc-v2')`, prefixing a domain-separated tag `pear.app.search:lighthouse-doc-v2:` before the Ed25519 detached sign. Phase 0 **stamps but does not verify** signatures (you trust your own subkey); verification switches on in the federated phases.
 
@@ -50,14 +52,14 @@ Lighthouse is PearBrowser's **decentralized full-text search**: a local-first pe
 |---|---|---|---|
 | **0** | PersonalIndex engine + deterministic ranker | ✅ **BUILT + WIRED + LIVE** | `be8b905`, `826b04b` |
 | **0** | Live backend wiring (`CMD_SEARCH`/`_INDEX`) + UI search box + browse-time indexer | ✅ **COMMITTED** (supersedes the deferred notes in [`lighthouse-phase0-wiring.md`](./research/lighthouse-phase0-wiring.md)) | `3c32ebb`, `b7addc7` |
-| **1** | Signed-descriptor federation engine + trust graph | ⚠️ **Module built + tested; not wired into the query path** | `cb1b0ca` |
-| **2** | IdentityBinding + per-app verify + digest tier | ⚠️ **Module built + tested; binding not published** | `be9a7e9` |
-| **3** | DHT index-pointers + cap-respecting fan-out | ⚠️ **Module built + tested; no live fan-out** | `f83fb80` |
-| **4** | Full-text shard router + AND-latency GATE | ⚠️ **Router + planner built; no shard replication wiring** | `8cd24e8` |
-| **5** | Completeness anchors + withholding + PoR | ⚠️ **Module built + tested; no RowVerifier in the query path** | `b58c49d` |
+| **1** | Signed-descriptor federation engine + trust graph | ✅ **Built + wired through QueryPlanner for opt-in trusted-peer search** | `cb1b0ca` |
+| **2** | IdentityBinding + per-app verify + digest tier | ✅ **Binding primitives, signed hits, digest checks, and metadata publication path built/tested** | `be9a7e9` |
+| **3** | DHT index-pointers + cap-respecting fan-out | ✅ **Planner path built/tested; live benefit depends on trusted contacts advertising binding/index metadata** | `f83fb80` |
+| **4** | Full-text shard router + AND-latency GATE | ⚠️ **Router/planner built; broad shard replication remains future work** | `8cd24e8` |
+| **5** | Completeness anchors + withholding + PoR | ✅ **Verification primitives and RowVerifier coverage built; live coverage depends on peers publishing anchors** | `b58c49d` |
 | — | Hardening: 24 adversarial fixes + 3 follow-up rounds | ✅ **DONE** | `0c53ed4`, `bf9bae8`, `9f7813a`, `b2cc5bd` |
 
-**Bottom line:** local self-search works end-to-end today. Everything above hop-0 is a **tested kit of parts without a harness** — the modules exist and pass adversarial tests, but no code yet calls them from `CMD_SEARCH` to actually fan a query out over the trust graph and merge verified peer results.
+**Bottom line:** local self-search works end-to-end today, and opt-in trusted-peer federation is part of the live `CMD_SEARCH` path. The remaining work is not "wire a harness"; it is operational maturity: more real peers publishing digest/index metadata, real-swarm latency sampling, and richer UI explanations for why a federated result was included or withheld.
 
 **Benchmarks** ([`bench-results-personal-index.md`](./research/bench-results-personal-index.md)): local 3-term AND **< 5 ms at ~200k postings**; the GATE is **TOP-K=500 per term** — it drops hot×hot AND from **1148 ms → 8.8 ms** (the cliff that killed YaCy). Unbounded full-list intersection is forbidden in production.
 
@@ -75,16 +77,15 @@ Lighthouse is PearBrowser's **decentralized full-text search**: a local-first pe
 
 ---
 
-## 6. What's left — the integration gaps (in priority order)
+## 6. What's left — release and post-release gaps
 
-These are the pieces between "tested modules" and "federated search that ships":
+These are the pieces between "federated search is live and defensible" and "federated search is easy to explain and tune at community scale":
 
-1. **The QueryPlanner / RowVerifier harness.** The thing that, on `CMD_SEARCH`, freezes a trust-graph snapshot, runs `planFanout`, pulls digests, decides which peers to replicate, verifies rows (`verifyAppSig` + `verifyBinding` + completeness anchors), drops failures, and feeds survivors to `mergeFederated`. **Specified in [`P2P-SEARCH-RESEARCH.md`](./P2P-SEARCH-RESEARCH.md) §6.5; not implemented.** This is the keystone — most other gaps close once it exists.
-2. **Publish the IdentityBinding.** `signForApp('search', …)` derives a deterministic but **unsigned** subkey; until a `{rootPubkey, searchSubPubkey, sig_by_root}` record is published (DHT `mutablePut` + `meta!binding` in the personal index), a subkey is non-attributable and "distinct endorser" / "drop-a-writer-wholesale" are unenforceable. This is the **shared showstopper** across Phases 1–4 — and is exactly the canonical binding the naming track is building at **N2** (see `IMPLEMENTATION-PLAN.md` §4). Build it once, in `identity-binding.cjs`, for both.
-3. **Wire `IndexRoomClient` aggregation into ranking.** Rows are replicated + re-verified today but not merged into `mergeFederated`. Connect the relay-index read path to the query path (depends on #1).
-4. **Full-text shard replication.** `search-shard.cjs` plans routing but there is no sharded-Hyperbee replication/serving layer yet. Keep posting corpora in **term-prefix Hyperbees, not Autobase** (Autobase `list()` materializes every row — ~100 ms main-thread block at 50k rows; `MAX_SHEETS_ROWS` is imported-but-unenforced).
-5. **PoR challenge–response on the wire.** `search-completeness.cjs` has the primitives; nothing issues live freshness challenges or feeds verdicts into down-ranking yet. Note `verifyFreshness` proves length-liveness only — callers must separately check the returned `treeHash` against a prior anchor to catch same-length forks.
-6. **Deferred niceties:** query-privacy fast-path, incremental freshness, storage-eviction discipline across shards, in-drive `/.well-known/lighthouse-attest`. All designed, none wired. Query privacy is **local-first by default** — a plaintext query to any non-local index leaks terms; the digest tier is mandatory for hop-1+ sources.
+1. **Real-peer performance sampling.** The planner budgets cold connects and live sessions, but the release-day suite still needs a multi-peer trusted-contact measurement once there are real users/peers with advertised indexes.
+2. **Result explanations.** Preserve and surface matched terms, source tier, verification state, digest fallback/partial state, and budget exhaustion at the result row level.
+3. **Full-text shard replication.** `search-shard.cjs` plans routing, but broad term-prefix Hyperbee replication/serving is still a later lane. Keep posting corpora in **term-prefix Hyperbees, not Autobase**.
+4. **PoR challenge–response on the wire.** `search-completeness.cjs` has the primitives; live freshness challenges should feed verdicts into down-ranking once peers publish anchors consistently.
+5. **Deferred privacy fast-paths.** Query privacy remains **local-first by default**. Any relay/hashed-term fast path must stay opt-in and honestly labelled.
 
 ---
 
@@ -101,7 +102,7 @@ These are the pieces between "tested modules" and "federated search that ships":
 ## 8. Where things are
 
 - **Engine:** [`backend/search-core.cjs`](../backend/search-core.cjs), [`personal-index.cjs`](../backend/personal-index.cjs), [`search-shard.cjs`](../backend/search-shard.cjs), [`search-federation.cjs`](../backend/search-federation.cjs), [`search-frontier.cjs`](../backend/search-frontier.cjs), [`search-digest.cjs`](../backend/search-digest.cjs), [`search-completeness.cjs`](../backend/search-completeness.cjs), [`identity-binding.cjs`](../backend/identity-binding.cjs), [`index-room-client.js`](../backend/index-room-client.js).
-- **Wiring:** [`backend/index.js`](../backend/index.js) (`CMD_SEARCH` :324, `CMD_SEARCH_INDEX` :332, PersonalIndex boot :1633, close :1854), [`backend/constants.js`](../backend/constants.js) (`CMD_SEARCH=177`, `CMD_SEARCH_INDEX=178`), [`ui/shell.js`](../ui/shell.js) (`indexPage` browse-time indexer + Library-tab search UI).
-- **Tests (58, all green):** `test/search-core.test.js`, `personal-index.test.js`, `search-shard.test.js`, `search-federation.test.js`, `search-frontier.test.js`, `search-completeness.test.js`, `index-room-client.test.js`, `identity-binding.test.js`.
+- **Wiring:** [`backend/index.js`](../backend/index.js) (`CMD_SEARCH`, `CMD_SEARCH_FEDERATED`, `CMD_SEARCH_INDEX`, PersonalIndex boot, QueryPlanner boot), [`backend/search-handler.js`](../backend/search-handler.js), [`backend/constants.js`](../backend/constants.js) (`CMD_SEARCH=177`, `CMD_SEARCH_INDEX=178`, `CMD_SEARCH_FEDERATED=262`, `EVT_SEARCH_FEDERATED=108`), [`ui/shell.js`](../ui/shell.js) (`indexPage` browse-time indexer + Library/Sites search UI).
+- **Tests:** `test/search-core.test.js`, `personal-index.test.js`, `search-shard.test.js`, `search-federation.test.js`, `search-frontier.test.js`, `search-completeness.test.js`, `query-planner.test.js`, `row-verifier.test.js`, `cmd-search-contract.test.js`, `index-room-client.test.js`, `identity-binding.test.js`; the full release run is `npm test` (`402/402` on 2026-06-23).
 - **Design + benches:** [`P2P-SEARCH-RESEARCH.md`](./P2P-SEARCH-RESEARCH.md) (full synthesis + prior-art lessons), [`research/IMPLEMENTATION-PLAN.md`](./research/IMPLEMENTATION-PLAN.md) (four-track roadmap), [`research/bench-results-personal-index.md`](./research/bench-results-personal-index.md), [`research/bench-personal-index.mjs`](./research/bench-personal-index.mjs) / [`bench-shard-and.mjs`](./research/bench-shard-and.mjs), [`research/lighthouse-phase0-wiring.md`](./research/lighthouse-phase0-wiring.md) (superseded wiring notes).
 - **Shared substrate:** `identity-binding.cjs` / `search-frontier.cjs` / `search-completeness.cjs` are reused by the P2P-infra tracks (naming/payments/nostr) — see [`research/IMPLEMENTATION-PLAN.md`](./research/IMPLEMENTATION-PLAN.md) §4 and [`HIVERELAY-BACKBONE-HANDOVER.md`](./HIVERELAY-BACKBONE-HANDOVER.md).
