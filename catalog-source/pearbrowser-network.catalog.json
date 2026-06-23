@@ -73,18 +73,20 @@
     {
       "id": "p2pbuilders",
       "name": "P2P Builders",
-      "description": "Permissionless peer-to-peer hacker news for anons who build P2P. Runs in your terminal — no servers, no accounts.",
-      "author": "bigdestiny2",
+      "description": "Permissionless peer-to-peer Hacker News for anons who build P2P — in the browser. Proof-of-work-gated posts, reputation-weighted votes, boards, threaded comments, follows and subscribable blocklists replicate directly between peers over the same Holepunch engine as peerit. Runs as a P2P site inside PearBrowser, seeded 24/7 on HiveRelay.",
+      "author": "defidon",
       "version": "1.0.0",
       "categories": [
         "community",
-        "site"
+        "social",
+        "site",
+        "featured"
       ],
-      "publishedAt": "2026-04-28T00:00:00Z",
-      "url": "hyper://8545ce29bedf22d3c6ff682684b626947e4b71e98d874931df7a1d00b70db5b7/",
-      "driveKey": "8545ce29bedf22d3c6ff682684b626947e4b71e98d874931df7a1d00b70db5b7",
-      "source": "https://github.com/bigdestiny2/p2pbuilders",
-      "license": "Apache-2.0",
+      "publishedAt": "2026-06-23T00:00:00Z",
+      "url": "hyper://ac1977a75cc84b46af0af8bb559cd4ebbe10507eb0f51d863e289d09635f6d74/",
+      "driveKey": "ac1977a75cc84b46af0af8bb559cd4ebbe10507eb0f51d863e289d09635f6d74",
+      "source": "pear-ecosystem/02-apps/p2pbuilders",
+      "license": "MIT",
       "verification": "relay-listed"
     },
     {
