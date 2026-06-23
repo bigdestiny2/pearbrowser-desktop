@@ -812,6 +812,10 @@ p { color: #8b949e; margin-bottom: 12px; }
 }
 .settings-row + .settings-row { border-top: 1px solid #21262d; }
 .settings-row > div:first-child { flex: 1; min-width: 0; }
+/* When a row holds more than one field (e.g. Author + Categories on the Submit
+   form), every .profile-field must flex equally — the :first-child rule above
+   only grows the first, leaving later fields to collapse and overlap. */
+.settings-row > .profile-field { flex: 1; min-width: 0; }
 .settings-label { color: #e6edf3; font-weight: 500; font-size: 13px; margin-bottom: 2px; }
 .settings-subtle { color: #8b949e; font-size: 12px; }
 .settings-code {
