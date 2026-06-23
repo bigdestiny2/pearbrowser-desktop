@@ -671,6 +671,88 @@ const PEAR_SWARM_V1_SHIM = `<script>(function () {
 })();</script>`
 
 /**
+ * Page-side window.pear.sync + window.pear.identity shim. Thin, token-
+ * authenticated fetch wrappers over the /api/sync/* and /api/identity/*
+ * endpoints the HttpBridge already serves on the same loopback port.
+ *
+ * Without this, any page that builds on window.pear.sync (peerit,
+ * p2pbuilders, pear-exchange, …) never detects a data bridge and silently
+ * falls back to its localStorage "dev" mode — single-user, not actually
+ * peer-to-peer. We inject only swarm.v1 before this; this completes the
+ * surface so multi-writer P2P apps work in the browser.
+ *
+ * Security: the HttpBridge scopes EVERY appId by the page's own drive key
+ * (derived from the per-page api-token via _scopeAppId), so a page can only
+ * read/write its own app's data — it cannot reach another app's records even
+ * though the endpoint paths are generic. The shim therefore only needs to
+ * forward the token (X-Pear-Token), exactly like the swarm shim.
+ */
+const PEAR_SYNC_SHIM = `<script>(function () {
+  if (window.pear && window.pear.sync && window.pear.identity) return
+  function readToken () {
+    var m = document.querySelector('meta[name="pear-api-token"]')
+    return m ? m.content : ''
+  }
+  async function apiGet (path) {
+    var res = await fetch(path, { headers: { 'X-Pear-Token': readToken() } })
+    if (!res.ok) {
+      var err = ''
+      try { var j = await res.json(); err = (j && j.error) || res.statusText } catch (_) { err = res.statusText }
+      throw new Error('pear.sync: ' + err)
+    }
+    return res.json()
+  }
+  async function apiPost (path, body) {
+    var res = await fetch(path, {
+      method: 'POST',
+      headers: { 'X-Pear-Token': readToken(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {})
+    })
+    if (!res.ok) {
+      var err = ''
+      try { var j = await res.json(); err = (j && j.error) || res.statusText } catch (_) { err = res.statusText }
+      throw new Error('pear.sync: ' + err)
+    }
+    return res.json()
+  }
+  var sync = {
+    create: function (appId) { return apiPost('/api/sync/create', { appId: appId }) },
+    join: function (appId, inviteKey) { return apiPost('/api/sync/join', { appId: appId, inviteKey: inviteKey }) },
+    append: function (appId, op) { return apiPost('/api/sync/append', { appId: appId, op: op }) },
+    get: function (appId, key) { return apiGet('/api/sync/get?appId=' + encodeURIComponent(appId) + '&key=' + encodeURIComponent(key)) },
+    list: function (appId, prefix, opts) {
+      var url = '/api/sync/list?appId=' + encodeURIComponent(appId)
+      if (prefix) url += '&prefix=' + encodeURIComponent(prefix)
+      if (opts && opts.limit) url += '&limit=' + opts.limit
+      return apiGet(url)
+    },
+    range: function (appId, opts) {
+      var url = '/api/sync/range?appId=' + encodeURIComponent(appId)
+      if (opts && opts.gte) url += '&gte=' + encodeURIComponent(opts.gte)
+      if (opts && opts.gt) url += '&gt=' + encodeURIComponent(opts.gt)
+      if (opts && opts.lte) url += '&lte=' + encodeURIComponent(opts.lte)
+      if (opts && opts.lt) url += '&lt=' + encodeURIComponent(opts.lt)
+      if (opts && opts.reverse) url += '&reverse=1'
+      if (opts && opts.limit) url += '&limit=' + opts.limit
+      return apiGet(url)
+    },
+    count: function (appId, prefix) {
+      var url = '/api/sync/count?appId=' + encodeURIComponent(appId)
+      if (prefix) url += '&prefix=' + encodeURIComponent(prefix)
+      return apiGet(url)
+    },
+    status: function (appId) { return apiGet('/api/sync/status?appId=' + encodeURIComponent(appId)) }
+  }
+  var identity = {
+    getPublicKey: function () { return apiGet('/api/identity') },
+    sign: function (payload, namespace) { return apiPost('/api/identity/sign', { payload: String(payload), namespace: namespace || '' }) }
+  }
+  if (!window.pear) window.pear = {}
+  if (!window.pear.sync) window.pear.sync = sync
+  if (!window.pear.identity) window.pear.identity = identity
+})();</script>`
+
+/**
  * Page-side shim injected into HTML responses ONLY when the loaded
  * Hyperdrive is the anonGPT drive AND its manifest.json declares the
  * required privacy claims. See:
@@ -749,4 +831,4 @@ const PEAR_ANONGPT_SHIM = `<script>(function () {
   window.pear.anongpt.infer = infer
 })();</script>`
 
-module.exports = { PearBridge, PEAR_SWARM_V1_SHIM, PEAR_ANONGPT_SHIM }
+module.exports = { PearBridge, PEAR_SWARM_V1_SHIM, PEAR_SYNC_SHIM, PEAR_ANONGPT_SHIM }

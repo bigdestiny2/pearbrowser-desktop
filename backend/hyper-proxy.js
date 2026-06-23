@@ -181,6 +181,14 @@ class HyperProxy {
      */
     this._pearSwarmShim = ''
     /**
+     * String injected into the <head> of every served text/html response,
+     * exposing window.pear.sync + window.pear.identity to pages. Set by
+     * setPearSyncShim(); empty by default. Without it, multi-writer apps
+     * (peerit, p2pbuilders, …) fall back to single-user localStorage mode.
+     */
+    this._pearSyncShim = ''
+    this._pearSyncShimHash = ''
+    /**
      * Page-side anonGPT shim, plus the gate key it's allowed to be
      * injected for. The shim is only emitted into HTML responses when
      * the loaded drive's hex key equals this._anongptDriveKey AND the
@@ -213,6 +221,16 @@ class HyperProxy {
   setPearSwarmShim (shimHtml) {
     this._pearSwarmShim = String(shimHtml || '')
     this._pearSwarmShimHash = this._pearSwarmShim ? sha256ScriptBody(this._pearSwarmShim) : ''
+  }
+
+  /**
+   * Provide the page-side window.pear.sync + window.pear.identity shim.
+   * Called once at boot from index.js with PEAR_SYNC_SHIM. Empty string
+   * disables the surface (pages see no data bridge → dev-mode fallback).
+   */
+  setPearSyncShim (shimHtml) {
+    this._pearSyncShim = String(shimHtml || '')
+    this._pearSyncShimHash = this._pearSyncShim ? sha256ScriptBody(this._pearSyncShim) : ''
   }
 
   /**
@@ -362,6 +380,7 @@ class HyperProxy {
       `<base href="${baseHref}">` +
       `<meta name="pear-api-token" content="${apiToken}">` +
       (this._pearSwarmShim || '') +
+      (this._pearSyncShim || '') +
       (includeAnongpt ? this._anongptShim : '')
     let injected = html.includes('<head>')
       ? html.replace('<head>', `<head>${headInjection}`)
@@ -380,6 +399,7 @@ class HyperProxy {
     // exact scripts we (the authorized runtime) inject.
     const hashesToAuthorize = []
     if (this._pearSwarmShim && this._pearSwarmShimHash) hashesToAuthorize.push(this._pearSwarmShimHash)
+    if (this._pearSyncShim && this._pearSyncShimHash) hashesToAuthorize.push(this._pearSyncShimHash)
     if (includeAnongpt && this._anongptShimHash) hashesToAuthorize.push(this._anongptShimHash)
     if (hashesToAuthorize.length > 0) {
       injected = injectCspShimHashes(injected, hashesToAuthorize)
