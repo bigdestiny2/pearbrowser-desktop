@@ -30,6 +30,21 @@ function copyText (text) {
 //                    so it renders HEADLESS in a tab.
 // The UI gates the action on this: standalone → "Open" (window); hypersite →
 // "Run in tab". This removes the confusing "Run in tab" on apps that can't.
+const PEERCORD_LINK = 'pear://wmir47w7mai3b1skj66mx7fzso6k6o91kipaney7gtt69npimouy'
+
+// First rollout: Peercord. Add other standalone pear:// apps here only when
+// they need the same first-run window/trust warning.
+const STANDALONE_PRELAUNCH_WARNINGS = {
+  peercord: {
+    key: 'peercord',
+    link: PEERCORD_LINK,
+    appName: 'Peercord',
+    title: 'Before opening Peercord',
+    body: 'Peercord opens in its own Pear window. On first launch, Pear may ask you to review and approve a persistent third-party trust prompt.',
+    trust: 'Approving it executes third-party code and creates a persistent trust decision.'
+  }
+}
+
 const FEATURED_APPS = [
   {
     id: 'keet',
@@ -85,7 +100,7 @@ const FEATURED_APPS = [
     name: 'Peercord',
     type: 'standalone',
     tagline: 'Decentralized Discord-style chat with text, voice, video, screen sharing, and P2P file transfer.',
-    link: 'pear://wmir47w7mai3b1skj66mx7fzso6k6o91kipaney7gtt69npimouy',
+    link: PEERCORD_LINK,
     initial: 'P',
     gradient: 'linear-gradient(135deg, #5865f2, #22d3ee)'
   }
@@ -708,6 +723,37 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [activeId, tabs, closedTabs])
+
+  // Hyperdrive pages run in a sandboxed iframe. Literal hyper:// anchors inside
+  // those pages must come back through Browse navigation; otherwise Chromium
+  // asks the host OS to open an external protocol handler.
+  useEffect(() => {
+    const onFrameMessage = (event) => {
+      const data = event.data
+      if (!data || data.type !== 'pearbrowser:navigate') return
+      const url = typeof data.url === 'string' ? data.url.trim() : ''
+      if (!/^hyper:\/\//i.test(url)) return
+
+      const sourceTab = tabs.find((t) => iframeRefs.current[t.id]?.contentWindow === event.source)
+      if (!sourceTab) return
+
+      if (data.openInNewTab) {
+        const t = makeTab(url)
+        setTabs((prev) => [...prev, t])
+        setActiveId(t.id)
+        setEditingUrl(url)
+        go(url, t.id)
+        return
+      }
+
+      setActiveId(sourceTab.id)
+      setEditingUrl(url)
+      go(url, sourceTab.id)
+    }
+    window.addEventListener('message', onFrameMessage)
+    return () => window.removeEventListener('message', onFrameMessage)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabs])
 
   // Auto-load restored tabs on first activation without adding duplicate
   // entries to the per-tab back/forward list.
@@ -1884,6 +1930,44 @@ function LaunchBar ({ prog, onRetry }) {
   `
 }
 
+function standalonePrelaunchWarningFor (app) {
+  if (!app || app.type === 'hypersite') return null
+  const link = normalizeAppLinkForKey(app.link)
+  if (!/^pear:\/\//i.test(link)) return null
+  const id = String(app.id || '').trim().toLowerCase()
+  const warning = STANDALONE_PRELAUNCH_WARNINGS.peercord
+  if (id === warning.key || link === warning.link) return warning
+  return null
+}
+
+function normalizeStandaloneWarningsSeen (value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+}
+
+function StandalonePrelaunchWarning ({ pending, onCancel, onConfirm, busy }) {
+  const warning = pending?.warning
+  const appName = warning?.appName || pending?.app?.name || 'This app'
+  if (!warning) return null
+  return html`
+    <div className="modal-overlay standalone-prelaunch-overlay" role="dialog" aria-modal="true"
+         onClick=${(e) => e.target.classList.contains('modal-overlay') && onCancel()}>
+      <div className="modal-card standalone-prelaunch-card">
+        <div className="standalone-prelaunch-kicker">Standalone Pear app</div>
+        <h2>${warning.title || `Before opening ${appName}`}</h2>
+        <p>${warning.body}</p>
+        <p className="standalone-prelaunch-trust">${warning.trust}</p>
+        ${pending.link && html`<code className="standalone-prelaunch-link">${pending.link}</code>`}
+        <div className="standalone-prelaunch-actions">
+          <button className="btn subtle" onClick=${onCancel} disabled=${busy === 'pear-link'}>Cancel</button>
+          <button className="btn primary" onClick=${onConfirm} disabled=${busy === 'pear-link'}>
+            ${busy === 'pear-link' ? 'Opening...' : `Open ${appName}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  `
+}
+
 function Apps ({ rpc, C, onLaunch }) {
   const [catalogKey, setCatalogKey] = useState('')
   // Cross-catalog store: PearBrowser keeps every catalog the user has
@@ -1919,6 +2003,8 @@ function Apps ({ rpc, C, onLaunch }) {
   const [launched, setLaunched] = useState('')
   // Live download/launch progress per bundle key, fed by EVT_LAUNCH_PROGRESS.
   const [launchProg, setLaunchProg] = useState({})
+  const [standaloneWarningsSeen, setStandaloneWarningsSeen] = useState(null)
+  const [pendingStandaloneLaunch, setPendingStandaloneLaunch] = useState(null)
   useEffect(() => {
     if (!(rpc && C && C.EVT_LAUNCH_PROGRESS)) return
     const onProg = (e) => {
@@ -1955,6 +2041,55 @@ function Apps ({ rpc, C, onLaunch }) {
     }
   }
 
+  const readStandaloneWarningsSeen = async () => {
+    if (standaloneWarningsSeen !== null) return standaloneWarningsSeen
+    try {
+      const settings = unwrapSettings(await rpc.request(C.CMD_USERDATA_GET_SETTINGS))
+      const seen = normalizeStandaloneWarningsSeen(settings?.standaloneLaunchWarningsSeen)
+      setStandaloneWarningsSeen(seen)
+      return seen
+    } catch {
+      setStandaloneWarningsSeen({})
+      return {}
+    }
+  }
+
+  const requestPearLinkLaunch = async (overrideLink, app = null) => {
+    const link = (typeof overrideLink === 'string' ? overrideLink : pearLink).trim()
+    if (!link) return
+    const launchApp = { ...(app || {}), link, name: app?.name || '' }
+    const warning = standalonePrelaunchWarningFor(launchApp)
+    if (warning) {
+      const seen = await readStandaloneWarningsSeen()
+      if (!seen[warning.key]) {
+        setErr('')
+        setLaunched('')
+        setPendingStandaloneLaunch({
+          app: { ...launchApp, id: launchApp.id || warning.key, name: launchApp.name || warning.appName },
+          link,
+          warning
+        })
+        return
+      }
+    }
+    await launchPearLink(link)
+  }
+
+  const confirmStandaloneLaunch = async () => {
+    const pending = pendingStandaloneLaunch
+    if (!pending) return
+    const warningKey = pending.warning?.key
+    if (warningKey) {
+      const next = { ...normalizeStandaloneWarningsSeen(standaloneWarningsSeen), [warningKey]: true }
+      setStandaloneWarningsSeen(next)
+      rpc.request(C.CMD_USERDATA_SET_SETTINGS, {
+        updates: { standaloneLaunchWarningsSeen: next }
+      }).catch(() => {})
+    }
+    setPendingStandaloneLaunch(null)
+    await launchPearLink(pending.link)
+  }
+
   // Featured apps in this list are a mix of `pear://` apps (spawn
   // their own runtime via CMD_LAUNCH_PEAR_LINK — Keet, PearPass,
   // HiveWorm) and `hyper://` sites that are hosted INSIDE PearBrowser
@@ -1976,7 +2111,7 @@ function Apps ({ rpc, C, onLaunch }) {
     const link = (app.link || '').trim()
     if (!link) return
     if (link.startsWith('pear://') || link.startsWith('file://')) {
-      launchPearLink(link)
+      requestPearLinkLaunch(link, app)
       return
     }
     if (link.startsWith('hyper://') || link.startsWith('http://') || link.startsWith('https://')) {
@@ -2298,6 +2433,7 @@ function Apps ({ rpc, C, onLaunch }) {
     ;(async () => {
       try {
         const settings = unwrapSettings(await rpc.request(C.CMD_USERDATA_GET_SETTINGS))
+        setStandaloneWarningsSeen(normalizeStandaloneWarningsSeen(settings?.standaloneLaunchWarningsSeen))
         const recentRaw = Array.isArray(settings?.recentCatalogs) ? settings.recentCatalogs : []
         // Back-compat: older builds persisted only a single lastCatalogKey.
         const last = settings?.lastCatalogKey
@@ -2366,6 +2502,7 @@ function Apps ({ rpc, C, onLaunch }) {
       } catch {
         // user-data not ready yet — first-launch / boot races. The user
         // can still paste a key by hand below.
+        setStandaloneWarningsSeen({})
       } finally {
         setAutoLoadAttempted(true)
       }
@@ -2550,10 +2687,10 @@ function Apps ({ rpc, C, onLaunch }) {
           placeholder=${'pear://<key> — opens in a new window'}
           value=${pearLink}
           onInput=${(e) => setPearLink(e.target.value)}
-          onKeyDown=${(e) => e.key === 'Enter' && launchPearLink()}
+          onKeyDown=${(e) => e.key === 'Enter' && requestPearLinkLaunch()}
           spellCheck="false"
         />
-        <button className="btn primary" onClick=${launchPearLink} disabled=${!pearLink || busy === 'pear-link'}>
+        <button className="btn primary" onClick=${() => requestPearLinkLaunch()} disabled=${!pearLink || busy === 'pear-link'}>
           ${busy === 'pear-link' ? 'Launching…' : 'Launch'}
         </button>
       </div>
@@ -2780,6 +2917,13 @@ function Apps ({ rpc, C, onLaunch }) {
       <${CollaborativeCatalog} rpc=${rpc} C=${C} />
 
       <${ModeratorPanel} rpc=${rpc} C=${C} />
+
+      ${pendingStandaloneLaunch && html`<${StandalonePrelaunchWarning}
+        pending=${pendingStandaloneLaunch}
+        onCancel=${() => setPendingStandaloneLaunch(null)}
+        onConfirm=${confirmStandaloneLaunch}
+        busy=${busy}
+      />`}
 
       ${detailApp && html`
         <div onClick=${() => setDetailApp(null)} style=${{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '24px' }}>

@@ -110,6 +110,25 @@ test('anonGPT shim is injected only for the configured drive with manifest priva
   assert.doesNotMatch(otherHtml, /window\.__anongptShim = true/)
 })
 
+test('hyper:// page links are intercepted before the OS protocol handler sees them', async () => {
+  const proxy = makeProxy()
+
+  const html = (await proxy._injectHtmlHead(
+    '<html><head><meta http-equiv="Content-Security-Policy" content="default-src \'self\'"></head><body><a href="hyper://f0cd01e3565a9e/bundle">P2P Builder</a></body></html>',
+    otherDrive,
+    `/hyper/${otherDrive}/`
+  )).toString('utf8')
+
+  assert.match(html, /window\.__pearBrowserHyperLinkBridge = true/)
+  assert.match(html, /type: 'pearbrowser:navigate'/)
+  assert.match(html, /document\.addEventListener\('click', handleHyperLink, true\)/)
+  assert.match(html, /document\.addEventListener\('auxclick', handleHyperLink, true\)/)
+
+  const policy = html.match(/script-src[^"]+/)?.[0] || ''
+  const hashes = policy.match(/'sha256-[^']+'/g) || []
+  assert.ok(hashes.length >= 2, 'CSP authorizes both the link bridge and runtime shim')
+})
+
 test('anonGPT shim gate fails closed for missing or unsafe manifest declarations', async () => {
   const warn = console.warn
   console.warn = () => {}

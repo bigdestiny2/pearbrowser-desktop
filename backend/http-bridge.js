@@ -292,10 +292,9 @@ class HttpBridge {
         const auth = this._requireToken(req, res)
         if (!auth) return true
         if (!this._identity) return this._jsonError(res, 'identity not available', 503)
-        let body
-        try { body = await this._readBody(req) } catch (err) {
-          return this._jsonError(res, 'Invalid JSON body', 400)
-        }
+        // NOTE: the POST body was already read once at the top of _handle (for
+        // every POST). Reading it again here hangs forever — the request stream
+        // is already consumed, so 'data'/'end' never fire. Use the parsed body.
         if (!body || typeof body.payload !== 'string') {
           return this._jsonError(res, '`payload` (string) required', 400)
         }
