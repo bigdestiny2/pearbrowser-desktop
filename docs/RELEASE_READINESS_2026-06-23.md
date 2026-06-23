@@ -13,6 +13,8 @@ The release is in strong shape for a community launch. The core protocol tests a
 - Live catalogue Hyperbee republished at `hyperbee://f5fb7500bccd60a976d2b1d24246108f4444a210b9ca591533114dffc089934d`; 5 relay seed requests were accepted.
 - Production browser drive fresh-peer verification passed at length `16898`, with `/CHANGELOG.md` blob fetch proving content blocks are reachable.
 - Live catalogue fresh-peer verification passed at Hyperbee core length `206`, with signed meta present and Peercord/HiveWorm rows matching expected release metadata.
+- Desktop GUI runtime is up in dev mode with Pear Runtime renderer connected to the backend RPC socket on `127.0.0.1:9876`.
+- Peercord and Keet bundle drives were fresh-peer sampled without executing third-party code; both returned peers, file listings, and `12/12` sampled blobs.
 
 One transient desktop `npm test` run reported `401/402`; the immediately repeated compact full run passed `402/402`, and the catalogue-focused subset passed `30/30`. No code change was needed for that blip.
 
@@ -110,7 +112,7 @@ The release script is in better shape after the recent verify-step fix:
 Required external smoke before a public announcement:
 
 - If time allows, run `node scripts/verify-app-full.js --key 1868916a7a282ff0f211b11b536e9642828c32d3a817a254e1ef7e602709e25d --name pearbrowser --samples 12`.
-- Launch Peercord and one existing featured Pear app from the catalogue to verify real Pear runtime behavior.
+- Launch Peercord and one existing featured Pear app from the catalogue after explicitly approving Pear's trust prompt for Peercord.
 
 ## Evidence
 
@@ -128,6 +130,8 @@ node scripts/publish-catalog-bee.js catalog-source/pearbrowser-network.catalog.j
 node scripts/check-relays.js
 node scripts/verify-pin.js --expect 5440
 node scripts/verify-live-catalog.js --expect-app peercord --expect-app hiveworm
+node scripts/verify-app-full.js --key a2ea4d769d5e2b90caca4fbcb7f4b7b43caf43f2555b81201d3463ef89b55c26 --name peercord --samples 12 --timeout 90
+node scripts/verify-app-full.js --key 82110be69e2a531e840bc886dc7b9cab16729c587815295f55035109b45e4ddb --name keet --samples 12 --timeout 90
 ```
 
 Key live values:
@@ -139,7 +143,7 @@ Key live values:
 
 ## Residual Risks
 
-- Live GUI launch was not proven inside this local test pass. Automated tests prove the routing contracts and fresh-peer checks prove bytes are reachable; a real Pear window smoke still matters.
+- Live GUI process health was proven for PearBrowser itself, and Peercord/Keet bundle availability was proven without executing them. A real Peercord window launch still requires explicit human approval of Pear's trust prompt for that third-party key.
 - Network replication can vary by relay health and NAT conditions. This pass saw reachable relays, a reachable production drive, and a reachable live catalogue, but a second-network spot check remains useful before a high-visibility announcement.
 - Peercord cannot honestly be marketed as headless-in-tab until upstream ships a compatible pear-request worker. PearBrowser does launch it from the featured catalogue without manual download/update.
 - Public Nostr relay behavior is not part of this release; the shipped feature is the trusted-contact bridge.
