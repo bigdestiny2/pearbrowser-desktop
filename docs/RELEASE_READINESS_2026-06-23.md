@@ -2,34 +2,37 @@
 
 Scope: desktop PearBrowser, mobile/native PearBrowser, the live PearBrowser Network catalogue, and the high-risk systems called out for review: catalogue, app launch, search, naming, Nostr bridge, site publishing, sync, and release operations.
 
+Manual smoke checklist: `docs/MANUAL_RELEASE_SMOKE_2026-06-23.md`.
+
 ## Current Verdict
 
 The release is in strong shape for a community launch. The core protocol tests are broad and green after the final catalogue cleanup:
 
-- Desktop: `node --test 'test/*.test.js'` passed `404/404`.
-- Mobile/native: `npm test` passed `127/127`.
+- Desktop: `npm test` passed `412/412`.
+- Mobile/native: `npm test` passed `136/136`.
 - Publisher catalogue: `npm run validate` passes with no warnings.
 - Desktop and mobile `git diff --check` are clean.
 - Desktop dependency audit: `npm audit --audit-level=high` found 0 vulnerabilities.
 - Mobile dependency audit: safe `npm audit fix` removed high/critical advisories, `npm audit --audit-level=high` now passes, and the full mobile suite still passes. Full `npm audit` still reports 15 moderate inherited Expo/React Native toolchain advisories with only breaking framework fixes offered.
 - Mobile release preflight is now machine-checkable with `npm run release:preflight`: local structural prerequisites pass (version/package IDs, native worklet bundles, iOS BareKit/addons, Android BareKit AAR, EAS identity), and the remaining failures are the expected external production gates: real Android signing env/keystore, Apple development team signing, TestFlight/App Store Connect validation, and Play/Firebase validation.
 - Desktop source-install reproducibility is now explicit: `npm install` runs `scripts/check-hiverelay-layout.mjs`, which verifies the required sibling HiveRelay workspace packages at `../../00-core/hiverelay/packages/{core,client,verifier}`. Those `0.16.3` packages are not published to npm, so a standalone `pearbrowser-desktop` clone is documented as insufficient until the relay packages are published.
-- Desktop GitHub Actions CI is now present: `.github/workflows/desktop-ci.yml` checks out PearBrowser desktop, `bigdestiny2/PearBrowser@defdaaf`, and `bigdestiny2/P2P-Hiverelay@v0.16.3`, verifies the local workspace layout, runs `npm ci`, runs the desktop test suite, and runs the high-severity dependency audit.
-- Live catalogue Hyperbee republished at `hyperbee://f5fb7500bccd60a976d2b1d24246108f4444a210b9ca591533114dffc089934d`; 5 relay seed requests were accepted.
+- Desktop GitHub Actions CI is now present: `.github/workflows/desktop-ci.yml` checks out PearBrowser desktop, `bigdestiny2/PearBrowser@de85d420c942d433905324c3e098acc34458a23a`, and `bigdestiny2/P2P-Hiverelay@v0.16.3`, verifies the local workspace layout, runs `npm ci`, runs the desktop test suite, and runs the high-severity dependency audit.
+- Live catalogue Hyperbee republished at `hyperbee://f5fb7500bccd60a976d2b1d24246108f4444a210b9ca591533114dffc089934d`; the corrected version 7 catalogue has 14 apps and 5 relay seed requests were accepted.
 - Production browser drive fresh-peer verification passed at length `16898`, with `/CHANGELOG.md` blob fetch proving content blocks are reachable.
-- Live catalogue fresh-peer verification passed at Hyperbee core length `222`, with signed meta present and Peercord/HiveWorm rows matching expected release metadata, including Peercord `type: "standalone"`.
+- Live catalogue fresh-peer verification passed at Hyperbee core length `256`, with signed meta present and Peercord/peerit/HiveWorm rows matching expected release metadata, including Peercord `type: "standalone"` and peerit `type: "hypersite"`.
 - Desktop GUI runtime is up in dev mode with Pear Runtime renderer connected to the backend RPC socket on `127.0.0.1:9876`.
 - Real-DHT relay health passed again after the latest doc/native fix push, with 1 unique HiveRelay reachable and 10 live relay connections. A restricted/sandboxed network run can false-negative DHT discovery, so release checks should run with real network access.
 - PearBrowser homepage, Peercord, and Keet bundle drives were fresh-peer sampled without executing third-party code; all returned peers, file listings, and zero missing sampled blobs. Latest samples: PearBrowser homepage peers `1`, entries `2`, sampled `2/2`; Peercord peers `1`, entries `14730`, sampled `12/12`; Keet peers `9`, entries `7449`, sampled `12/12`.
 - Peercord's live bundle contract was verified without executing third-party code for `by-arch/linux-x64/app/peercord/resources/app` and `by-arch/win32-x64/app/peercord/resources/app`: both packaged roots expose `pear.json` with `type: "desktop"`, `main: "index.js"`, GUI `dist/index.html`, `pre: "pear-electron/pre"`, and `index.js` contains `BrowserWindow` while not containing `Pear.worker.pipe`.
-- Native simulator/device smoke is mostly cleared: the generated Expo iOS project exposed a real missing native module (`ExpoLinking`), the tracked dependency is now added and autolinked, and the tracked SwiftUI `ios-native` shell now builds, installs, launches, recovers from stale Corestore layout, and reaches a green `Connected` worklet state on the iPhone 17 simulator. Generated Expo iOS Debug and Release simulator builds now pass; the Release helper pins `HERMES_CLI_PATH` to the Pods `hermesc` as an Xcode build setting so the bundle phase does not hang on the node_modules compiler path. Android native now builds a fresh debug APK with a verified JDK 17, installs it on a headless `pp_avd` emulator, launches `com.pearbrowser.app/.MainActivity`, loads `libbare-kit.so`, extracts `backend.android.bundle`, starts the local proxy, and reaches a green `Connected` Home screen. Android native release APK/AAB builds also pass with R8/resource shrink, and the env-driven signing path verifies with a disposable test key (`apksigner` for APK, `jarsigner` for AAB).
+- Native simulator/device smoke is mostly cleared: the generated Expo iOS project exposed a real missing native module (`ExpoLinking`), the tracked dependency is now added and autolinked, and the tracked SwiftUI `ios-native` shell now builds, installs, launches, recovers from stale Corestore layout, and reaches a green `Connected` worklet state on the iPhone 17 simulator. Generated Expo iOS Debug and Release simulator builds now pass; the Release helper pins `HERMES_CLI_PATH` to the Pods `hermesc` as an Xcode build setting so the bundle phase does not hang on the node_modules compiler path. Android native now builds a fresh debug APK with a verified JDK 17, installs it on a headless `pp_avd` emulator, launches `com.pearbrowser.app/.MainActivity`, loads `libbare-kit.so`, extracts `backend.android.bundle`, starts the local proxy, and reaches a green `Connected` Home screen. Android native release APK/AAB builds also pass with R8/resource shrink, and the env-driven signing path verifies with a disposable test key (`apksigner` for APK, `jarsigner` for AAB). The latest mobile test pass also covers the extracted navigation parser, verified signed-catalog update forwarding, Android native proxy/token bridge guards, and Android Browse share-sheet wiring.
 
-One earlier desktop `npm test` run reported `401/402`; the immediately repeated compact full run passed `402/402`, and the current release branch now passes `404/404` after the Peercord launch-mode coverage landed. No code change was needed for that earlier blip.
+One earlier desktop `npm test` run reported `401/402`; the immediately repeated compact full run passed `402/402`, and the current release branch now passes `412/412` after the Peercord launch-mode, peerit, catalogue-dedupe, naming-target, and release-doc coverage landed. No code change was needed for that earlier blip.
 
 ## Fixes In This Pass
 
 - Added Peercord to the featured apps and default catalogue, with tests.
 - Kept Peercord on the standalone Pear launch path. Upstream Peercord currently ships as a full Pear desktop app, not a pear-request worker, so surfacing "Run in tab" would create a bad launch experience. It can move to headless tab launch once Peercord publishes a worker/headless entry point.
+- Added peerit to the default catalogue, offline seed, Sites discovery ranking, URL-bar curated aliases, and fresh-launch tab set as the front page of the P2P internet.
 - Cleaned the HiveWorm catalogue row: explicit `driveKey`, `url` for the Hyperdrive page, and no misleading `pearLink` for a `hyper://` target.
 - Added `catalog-source/pearbrowser-network.catalog.json` so the canonical catalogue source is versioned in the desktop GitHub repo.
 - Regenerated `backend/catalogue-seed.js` from the versioned catalogue source so the offline seed and live catalogue agree.
@@ -40,13 +43,14 @@ One earlier desktop `npm test` run reported `401/402`; the immediately repeated 
 - Fixed Android native first-launch Home behavior in the mobile repo: Home now retries bookmark RPCs across the Binder/worklet boot race, so a clean install no longer shows "Bookmarks are unavailable right now" before the backend reports ready.
 - Added optional env-driven Android release signing to the native shell and R8 rules for unused React Native adapter classes inside `bare-kit.aar`; release APK/AAB builds and disposable-key signing verification now pass.
 - Added mobile `scripts/release-preflight.js`, `npm run release:preflight`, and fixture tests so production mobile signing, bundle IDs, native bundles, BareKit artifacts, and store-distribution validation are a hard gate rather than prose-only release notes.
+- Added mobile navigation-parser tests and Android native Browse source-contract coverage for proxy URL/port/token validation, bridge injection lifecycle, verified signed-catalog updates, and system share-sheet wiring.
 
 ## Catalogue And Launch
 
 The Apps surface is coherent now:
 
 - Featured apps include Keet, PearPass, anonGPT, Paste, and Peercord.
-- The default live catalogue and the offline seed both contain 13 entries.
+- The default live catalogue and the offline seed both contain 14 entries.
 - The catalogue loader accepts Hyperdrive JSON, signed Hyperbee, Autobee, schema-sheets rooms, HiveRelay index rooms, community submissions, and writable personal catalogues.
 - App rows distinguish launch behavior:
   - `standalone`: full Pear/file apps open in their own isolated window through `CMD_LAUNCH_PEAR_LINK`.
@@ -110,6 +114,7 @@ The mobile app logic is tested, and native simulator/device release smoke is par
 - Mobile catalogue normalization preserves safe link-only rows and rejects targetless rows.
 - iOS and Android bridge constants are mirrored for login, profile, connected apps, trusted origins, and `swarm.v1`.
 - Mobile flows cover Home, Browse, Explore, Settings, My Sites, editor, QR scanner, identity backup/restore, and bridge runtime smoke tests.
+- The mobile backend now isolates `CMD_NAVIGATE` parsing in `backend/navigation.js`; tests cover hex/z32 drive keys, path/query/hash preservation, proxy-port validation, and fail-closed API-token issuance.
 - An installed iOS simulator build launched and exposed `[runtime not ready]: Error: Cannot find native module 'ExpoLinking'`.
 - `expo-linking@~55.0.15` is now tracked in `package.json`/`package-lock.json`; `npm ls expo-linking` resolves `expo-linking@55.0.15`, and Expo autolinking resolves the `ExpoLinking` pod/module.
 - A follow-up generated Expo iOS Debug simulator build now succeeds with signing disabled and DerivedData under `/private/tmp`; it includes the `ExpoLinking` pod, runs `[Expo] Configure project`, and copies/strips the BareKit xcframework stack. The generated Expo Release simulator path is also release-build-cleared when the build pins `HERMES_CLI_PATH` to `ios/Pods/hermes-engine/destroot/bin/hermesc` as an Xcode build setting. The earlier stalled path invoked `/Users/localllm/Desktop/PearBrowser/node_modules/hermes-compiler/hermesc/osx-bin/hermesc`; the Pods compiler successfully bytecodes the same 7.5 MB JS bundle, and the full generated Expo Release simulator build now succeeds.
@@ -117,6 +122,7 @@ The mobile app logic is tested, and native simulator/device release smoke is par
 - Android native Gradle inspection, Kotlin/Java compile, and `:app:assembleDebug` pass with Eclipse Temurin 17; Homebrew OpenJDK 17.0.19 hung in AGP's JDK image transform on this machine. The fresh debug APK (`android-native/app/build/outputs/apk/debug/app-debug.apk`, 169 MB diagnostic build with bare-kit/addons and two ARM ABIs) installed and launched on a headless `pp_avd` emulator. The app reached a green `Connected` Home screen after extracting the bundled worklet and starting the local proxy.
 - Android native `:app:assembleRelease` and `:app:bundleRelease` pass with R8/resource shrink after suppressing unused React Native adapter warnings from the local Bare Kit AAR. Env-driven release signing was verified with a disposable test keystore: `app-release.apk` is 142 MB and verifies with certificate `CN=PearBrowserTest, O=PearBrowser, C=US`; `app-release.aab` is 49 MB and passes `jarsigner -verify` with expected self-signed test-certificate warnings.
 - `npm run release:preflight -- --soft` now reports 14 passing structural checks and 4 expected blockers: missing production Android signing env/keystore, blank Apple development team, missing TestFlight/App Store Connect validation marker, and missing Play/Firebase validation marker. The command exits non-zero without `--soft`, making it suitable as the final mobile release gate.
+- A local Kotlin compile was attempted with Homebrew OpenJDK 17 and `android/gradlew -p android-native --no-daemon -Dorg.gradle.workers.max=1 -Dkotlin.compiler.execution.strategy=in-process :app:compileDebugKotlin`; it produced no output for more than three minutes and was stopped. Treat Android native compile as still requiring the known-good Temurin/JDK setup before signing/distribution.
 
 Required before native/mobile distribution: clear `npm run release:preflight` with real Apple/Android signing and store validation evidence, then broaden simulator/emulator smoke to real devices. Local Node tests do not prove platform WebView behavior under real OS permissions.
 
@@ -135,6 +141,7 @@ Required external smoke before a public announcement:
 
 - Launch Peercord and one existing featured Pear app from the catalogue after explicitly approving Pear's trust prompt for Peercord. Automated launch is intentionally not treated as a safe substitute for this gate because it executes third-party code and creates a persistent trust decision for `pear://wmir47w7mai3b1skj66mx7fzso6k6o91kipaney7gtt69npimouy`.
 - Clear remaining native mobile smoke before any app-store-style mobile announcement: production Apple/Android signing and store validation plus broader real-device testing.
+- Use `docs/MANUAL_RELEASE_SMOKE_2026-06-23.md` as the final operator checklist; record device/machine, commit SHA, screenshots/logs, and pass/fail notes beside each checked item.
 
 ## Evidence
 
@@ -146,6 +153,7 @@ node --test --test-reporter=spec test/*.test.js
 node --test test/catalog-manager-safety.test.js test/catalog-bee.test.js test/peercord-catalog.test.js test/resolve-name.test.js test/index-room-client.test.js
 git diff --check
 npm test # mobile/native
+npm test # mobile/native latest rerun: 136/136
 npm run release:preflight -- --soft # mobile/native, 14 pass / 4 expected production blockers
 npm ls expo-linking # mobile/native, resolved expo-linking@55.0.15
 npm run bundle-backend-native-ios # mobile/native tracked SwiftUI shell
@@ -158,7 +166,7 @@ node scripts/gen-catalogue-seed.mjs
 node scripts/publish-catalog-bee.js catalog-source/pearbrowser-network.catalog.json --storage /Users/localllm/Projects/pear-ecosystem/03-sites/pearbrowser-publishers/catalog
 node scripts/check-relays.js # latest rerun: 1 unique relay reachable, 10 live connections
 node scripts/verify-pin.js --expect 16898 # latest rerun: length 16898, peers 1, /CHANGELOG.md sampled
-node scripts/verify-live-catalog.js --expect-app peercord --expect-app hiveworm # latest rerun: length 222, peers 1, 13 apps, Peercord type standalone
+node scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --expect-app hiveworm # latest rerun: length 256, peers 1, 14 apps, Peercord type standalone, peerit type hypersite
 node scripts/verify-app-full.js --key 1868916a7a282ff0f211b11b536e9642828c32d3a817a254e1ef7e602709e25d --name pearbrowser-homepage --samples 12 --timeout 90 # latest rerun: peers 1, entries 2, sampled 2, missing 0
 node scripts/verify-app-full.js --key a2ea4d769d5e2b90caca4fbcb7f4b7b43caf43f2555b81201d3463ef89b55c26 --name peercord --samples 12 --timeout 90 # latest rerun: peers 1, entries 14730, sampled 12, missing 0
 node scripts/verify-app-full.js --key 82110be69e2a531e840bc886dc7b9cab16729c587815295f55035109b45e4ddb --name keet --samples 12 --timeout 90 # latest rerun: peers 9, entries 7449, sampled 12, missing 0
@@ -203,5 +211,5 @@ Key live values:
 - Network replication can vary by relay health and NAT conditions. This pass saw reachable relays, a reachable production drive, and a reachable live catalogue, but a second-network spot check remains useful before a high-visibility announcement.
 - Peercord cannot honestly be marketed as headless-in-tab until upstream ships a compatible pear-request worker. The live bundle contract confirms the current packaged app is desktop/window-class, and PearBrowser launches it from the featured catalogue without manual download/update.
 - Public Nostr relay behavior is not part of this release; the shipped feature is the trusted-contact bridge.
-- Native mobile is not app-store-release-cleared yet. The JS/test surface is green, the missing `ExpoLinking` dependency is fixed, generated Expo iOS Debug and Release simulator builds pass, the tracked SwiftUI iOS shell reaches `Connected`, Android native debug APK assembly plus emulator launch pass, Android release APK/AAB plus disposable-key signing verification pass, and `npm run release:preflight -- --soft` now makes the remaining production gates explicit. Remaining gates are production Apple/Android signing, TestFlight/App Store Connect or Play/Firebase validation, and broader real-device validation.
+- Native mobile is not app-store-release-cleared yet. The JS/test surface is green, the missing `ExpoLinking` dependency is fixed, generated Expo iOS Debug and Release simulator builds pass, the tracked SwiftUI iOS shell reaches `Connected`, Android native debug APK assembly plus emulator launch previously passed, Android release APK/AAB plus disposable-key signing verification previously passed, and `npm run release:preflight -- --soft` now makes the remaining production gates explicit. The latest Android Kotlin compile attempt hung in the local Homebrew JDK environment, so rerun native compile/build with the known-good Temurin setup before distribution. Remaining gates are production Apple/Android signing, TestFlight/App Store Connect or Play/Firebase validation, and broader real-device validation.
 - Mobile still reports 15 moderate `npm audit` advisories in Expo/React Native test/tooling transitive dependencies. npm's available fix requires breaking major-version changes, so these should move to the next mobile platform-upgrade lane rather than this release-day hardening pass.

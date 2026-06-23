@@ -39,10 +39,12 @@ test('setPetname + lookupPetname round-trips; names are normalized', async () =>
 
 test('petname accepts a link; requires key or link', async () => {
   await withStore(async (names) => {
-    const r = await names.setPetname({ name: 'home', link: 'hyper://abc/' })
+    const r = await names.setPetname({ name: 'home', link: ' HYPER://abc/ ' })
     assert.equal(r.link, 'hyper://abc/')
     assert.equal(r.key, null)
     await assert.rejects(() => names.setPetname({ name: 'badlink', link: 'javascript:alert(1)' }), /needs a key or link/)
+    await assert.rejects(() => names.setPetname({ name: 'web', link: 'https://example.com' }), /needs a key or link/)
+    await assert.rejects(() => names.setPetname({ name: 'toolong', link: 'pear://' + 'x'.repeat(301) }), /needs a key or link/)
     await assert.rejects(() => names.setPetname({ name: 'bad' }), /needs a key or link/)
     await assert.rejects(() => names.setPetname({ name: '', key: KEY }), /name required/)
   })

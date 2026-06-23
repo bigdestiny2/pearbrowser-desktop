@@ -134,11 +134,17 @@ function normalizeCatalogData (catalog, opts = {}) {
 }
 
 function catalogAppStableKey (app) {
-  const normalized = normalizeCatalogApp(app)
-  if (!normalized) return ''
-  if (normalized.driveKey) return `drive:${normalized.driveKey}`
-  if (normalized.link) return `link:${normalized.link}`
-  if (normalized.id) return `id:${normalized.id}`
+  if (!app || typeof app !== 'object' || Array.isArray(app)) return ''
+  const key = trimString(app.driveKey) ||
+    trimString(app.appKey) ||
+    trimString(app.key) ||
+    ''
+  const link = normalizeCatalogLink(app.link)
+  const driveKey = normalizeDriveKey(key) || driveKeyFromHyperLink(link)
+  if (driveKey) return `drive:${driveKey}`
+  if (link) return `link:${link}`
+  const id = trimString(app.id)
+  if (id) return `id:${id}`
   return ''
 }
 
@@ -279,6 +285,8 @@ module.exports = {
   mergeCatalogAppEntries,
   normalizeCatalogApp,
   normalizeCatalogLink,
+  normalizeDriveKey,
+  driveKeyFromHyperLink,
   normalizeCatalogData,
   normalizeAppType,
   scrubPrototypeKeys,

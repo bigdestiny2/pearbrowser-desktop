@@ -8,7 +8,7 @@
  * Usage:
  *   node scripts/verify-live-catalog.js \
  *     --key f5fb7500bccd60a976d2b1d24246108f4444a210b9ca591533114dffc089934d \
- *     --expect-app peercord --expect-app hiveworm
+ *     --expect-app peercord --expect-app peerit --expect-app hiveworm
  */
 
 import Corestore from 'corestore'
@@ -29,7 +29,7 @@ function parseArgs (argv) {
   const args = {
     key: DEFAULT_KEY,
     expectApps: [],
-    expectCount: 13,
+    expectCount: 14,
     expectName: 'PearBrowser Network'
   }
   for (let i = 0; i < argv.length; i++) {
@@ -122,6 +122,13 @@ async function main () {
   if (hiveworm) {
     if (hiveworm.driveKey !== 'e3f910d11e70044afe361b1cecfb5cfb3c4f61f600cc81c2365ba0e6f58c8d4d') fail('HiveWorm driveKey mismatch')
     if (hiveworm.link !== 'hyper://e3f910d11e70044afe361b1cecfb5cfb3c4f61f600cc81c2365ba0e6f58c8d4d/') fail('HiveWorm link mismatch')
+  }
+
+  const peerit = byId.get('peerit')
+  if (peerit) {
+    if (peerit.driveKey !== 'ec6e2d6d9d22b9d6b40e11a9ca3042be3197e4bdca9e9a7f079be6ee830761b4') fail('peerit driveKey mismatch')
+    if (peerit.link !== 'hyper://ec6e2d6d9d22b9d6b40e11a9ca3042be3197e4bdca9e9a7f079be6ee830761b4/') fail('peerit link mismatch')
+    if (peerit.type !== 'hypersite') fail(`peerit type mismatch: expected hypersite, got ${peerit.type || '(missing)'}`)
   }
 
   console.log('   → signed meta signature:', signedMeta.value.signature.slice(0, 16) + '…')

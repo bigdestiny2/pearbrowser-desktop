@@ -28,9 +28,9 @@ only a `hyper://` viewer:
   contacts, `/api/*`, and gated anonGPT inference.
 - Settings: identity, profile, connected apps, relays, trusted peers, device
   sync, Nostr, names, experimental capabilities, storage cleanup, and reset.
-- Tests: desktop `npm test` passing with 404 tests; GitHub Actions Desktop CI
+- Tests: desktop `npm test` passing with 412 tests; GitHub Actions Desktop CI
   also passes install, tests, and high-severity audit on the release PR branch;
-  mobile sibling `npm test` passing with 124 tests; high-severity dependency
+  mobile sibling `npm test` passing with 136 tests; high-severity dependency
   audits pass after the safe mobile lockfile refresh.
 
 ## Shipped Since The Original Roadmap

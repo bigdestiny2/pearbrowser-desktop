@@ -1763,10 +1763,32 @@ function betterApp (a, b) {
   if (appVersionGreater(b.version, a.version)) return b
   return b
 }
+function normalizeAppLinkForKey (raw) {
+  const s = String(raw || '').trim()
+  if (!s) return ''
+  return s.replace(/^([a-z][a-z0-9+.-]*):\/\//i, (_, scheme) => scheme.toLowerCase() + '://')
+}
+function appStableDedupeKey (app) {
+  if (!app || typeof app !== 'object') return ''
+  const driveKey = /^[0-9a-f]{64}$/i.test(String(app.driveKey || '').trim())
+    ? String(app.driveKey).trim().toLowerCase()
+    : ''
+  const link = normalizeAppLinkForKey(app.link)
+  const hyperKey = /^hyper:\/\//i.test(link) ? driveKeyFromHyperRef(link) : ''
+  if (driveKey || hyperKey) return 'drive:' + (driveKey || hyperKey)
+  if (/^(?:hyper|pear|file):\/\/.+/i.test(link)) return 'link:' + link
+  const id = String(app.id || '').trim()
+  return id ? 'id:' + id : ''
+}
 function dedupeApps (list) {
   const byKey = new Map()
+  const anon = []
   for (const app of list) {
-    const key = app.driveKey || app.link || ('id:' + (app.id || ''))
+    const key = appStableDedupeKey(app)
+    if (!key) {
+      anon.push(app)
+      continue
+    }
     const existing = byKey.get(key)
     if (!existing) {
       byKey.set(key, { ...app, _sources: app.catalogName ? [app.catalogName] : [] })
@@ -1784,7 +1806,7 @@ function dedupeApps (list) {
     if (!merged.icon && other.icon) merged.icon = other.icon
     byKey.set(key, { ...merged, _sources: sources })
   }
-  return [...byKey.values()]
+  return [...byKey.values(), ...anon]
 }
 
 // Decode an app's bundle drive key from its pear:// link (z-base-32 host,

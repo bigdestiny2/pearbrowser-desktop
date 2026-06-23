@@ -125,7 +125,8 @@ test('shared catalog app normalizer builds stable target keys', () => {
   assert.equal(catalogAppStableKey(app), `drive:${driveKey}`)
 
   assert.equal(catalogAppStableKey({ link: ' PEAR://Demo ' }), 'link:pear://Demo')
-  assert.equal(catalogAppStableKey({ id: 'only-id' }), '')
+  assert.equal(catalogAppStableKey({ id: 'only-id' }), 'id:only-id')
+  assert.equal(catalogAppStableKey({ id: 'site', link: `hyper://${driveKey}/app` }), `drive:${driveKey}`)
 })
 
 test('catalog app normalizer keeps only supported launch types', () => {
@@ -230,4 +231,36 @@ test('backend aggregation dedupes by stable target across all catalog sources', 
 
   assert.equal(byName['First Same Id'].driveKey, sameIdFirstDriveKey)
   assert.equal(byName['Second Same Id Different Drive'].driveKey, otherDriveKey)
+})
+
+test('backend aggregation collapses link-only duplicates with different catalog ids', () => {
+  const catalogs = new Map()
+
+  catalogs.set('bee:signed', {
+    type: 'hyperbee',
+    data: {
+      name: 'Signed Catalog',
+      apps: [
+        { id: 'signed-row', name: 'Signed Link App', link: 'PEAR://shared-app', type: 'standalone', version: '1.0.0', verification: 'author-signed' }
+      ]
+    }
+  })
+  catalogs.set('sheets:community', {
+    type: 'sheets',
+    data: {
+      name: 'Community Catalog',
+      apps: [
+        { id: 'sheet-row-uuid', name: 'Community Link App', link: 'pear://shared-app', type: 'standalone', version: '9.0.0', verification: 'unverified' }
+      ]
+    }
+  })
+
+  const apps = aggregateCatalogApps(catalogs)
+  assert.equal(apps.length, 1)
+  assert.equal(apps[0].id, 'signed-row')
+  assert.equal(apps[0].name, 'Signed Link App')
+  assert.equal(apps[0].link, 'pear://shared-app')
+  assert.equal(apps[0].type, 'standalone')
+  assert.equal(apps[0].verification, 'author-signed')
+  assert.deepEqual(apps[0]._sources.sort(), ['Community Catalog', 'Signed Catalog'])
 })

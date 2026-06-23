@@ -131,7 +131,7 @@ npm test
 
 Original result: 346 tests passed, 0 failed.
 
-2026-06-23 release result: `npm test` passed `404/404`, including the catalogue, Peercord, search, naming, Nostr, sync, and command-mirror additions that landed after this review.
+2026-06-23 release result: `npm test` passed `412/412`, including the catalogue, Peercord, peerit, search, naming, Nostr, sync, and command-mirror additions that landed after this review.
 
 Focused desktop checks:
 
@@ -153,14 +153,14 @@ npm test
 
 Original result: 95 tests passed, 0 failed.
 
-2026-06-23 release result: `npm test` passed `124/124` after the mobile audit cleanup.
+2026-06-23 release result: `npm test` passed `136/136` after the mobile audit cleanup and latest Android Browse/navigation hardening.
 
 ## Review Notes
 
 - The desktop test suite initially showed one transient failure on the first run, but two later full runs were green. If this recurs, inspect the longer-running Autobase/durability tests first.
-- Live default-catalog availability is now proven by `node scripts/verify-live-catalog.js --expect-app peercord --expect-app hiveworm`: signed Hyperbee metadata present, catalogue length `222`, 13 apps, peers found, Peercord/HiveWorm rows present, and Peercord carries `type: "standalone"`.
+- Live default-catalog availability is now proven by `node scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --expect-app hiveworm`: signed Hyperbee metadata present, catalogue length `256`, 14 apps, peers found, Peercord/peerit/HiveWorm rows present, Peercord carries `type: "standalone"`, and peerit carries `type: "hypersite"`.
 - Production browser release availability is now proven by `node scripts/verify-pin.js --expect 16898`: drive length `16898`, `/CHANGELOG.md` blob sampled, peers found.
 - Peercord bundle availability is now proven by `node scripts/verify-app-full.js --key a2ea4d769d5e2b90caca4fbcb7f4b7b43caf43f2555b81201d3463ef89b55c26 --name peercord --samples 12 --timeout 90`: 14,730 entries, 12 sampled blobs present, 0 missing.
-- The mobile Browse and catalogue changes pass tests, `ExpoLinking` is now present, generated Expo iOS Debug and Release simulator builds pass, the tracked SwiftUI iOS shell launches to `Connected`, Android native debug APK assembly plus emulator launch pass with Eclipse Temurin 17, and Android release APK/AAB plus disposable-key signing verification pass. Production Apple/Android signing, broader real-device validation, and distribution checks are still required before app-store-style release.
+- The mobile Browse and catalogue changes pass tests, `ExpoLinking` is now present, generated Expo iOS Debug and Release simulator builds pass, the tracked SwiftUI iOS shell launches to `Connected`, Android native debug APK assembly plus emulator launch previously passed with Eclipse Temurin 17, and Android release APK/AAB plus disposable-key signing verification pass. Latest source-contract coverage also checks Android Browse proxy/token hardening and share-sheet wiring. Production Apple/Android signing, broader real-device validation, and distribution checks are still required before app-store-style release.
 - The search system is technically strong; the next meaningful optimization is completing digest-first peer gating so trusted-peer search does less direct frontier fetching.
 - The catalogue system is feature-complete but has many source formats. Keep the key-shape helpers centralized so future UI code does not reintroduce `hyperbee://` vs `bee:` mismatches.

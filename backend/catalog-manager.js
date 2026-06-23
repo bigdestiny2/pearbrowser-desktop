@@ -62,7 +62,7 @@ class CatalogManager {
     if (!catalogBuf) throw new Error(getUserFriendlyError('No catalog.json found'))
 
     // SECURITY: Parse JSON with prototype pollution protection
-    const data = normalizeCatalogData(this._safeJSONParse(catalogBuf.toString()))
+    const data = normalizeCatalogData(this._safeJSONParse(catalogBuf.toString()), { source: 'hyperdrive' })
 
     // Load icons for each app
     if (data.apps) {
@@ -451,7 +451,7 @@ class CatalogManager {
     if (driveEntry && driveEntry.drive) {
       const catalogBuf = await driveEntry.drive.get('/catalog.json')
       if (catalogBuf) {
-        driveEntry.data = normalizeCatalogData(this._safeJSONParse(catalogBuf.toString()))
+        driveEntry.data = normalizeCatalogData(this._safeJSONParse(catalogBuf.toString()), { source: 'hyperdrive' })
         driveEntry.lastRefresh = Date.now()
       }
       return driveEntry.data

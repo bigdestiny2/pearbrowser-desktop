@@ -9,6 +9,11 @@
 // op — not redefined here.
 
 const { normalize, skeleton } = require('./name-normalize.cjs')
+const {
+  driveKeyFromHyperLink,
+  normalizeCatalogLink,
+  normalizeDriveKey
+} = require('./catalog-safety.cjs')
 
 const CLAIM = 'name.claim'
 const ROTATE = 'name.rotate'
@@ -26,7 +31,8 @@ const HEX64 = /^[0-9a-f]{64}$/i
 const HEX128 = /^[0-9a-f]{128}$/i
 const MAX_NAME = 253
 const MAX_TARGET = 300
-const ALLOWED_LINK_RE = /^(?:hyper|pear|file):\/\/.+/i
+const TARGET_ERROR = 'target must be a Hyperdrive key or pear://, hyper://, file:// link'
+const SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i
 // Total serialized op cap (defense-in-depth vs a writer bloating the log — a real
 // op is ~700 bytes: name≤253 + normalized/skeleton + a few 64-hex fields). Mirrors
 // MAX_OP_BYTES in browser-state-ops / autobee-catalog-ops. Oversized → dropped on apply.
@@ -35,12 +41,20 @@ const MAX_OP_BYTES = 4096
 function normalizeTarget (target) {
   const s = String(target || '').trim()
   if (!s) return null
-  if (HEX64.test(s)) {
-    const key = s.toLowerCase()
-    return { target: key, key, link: null, kind: 'drive' }
+
+  // Links remain link-shaped so hyper:// paths, pear:// launch targets, and
+  // file:// targets survive intact. For hyper:// links, also surface the drive
+  // key when the shared catalogue normalizer can safely derive it.
+  if (SCHEME_RE.test(s)) {
+    const link = normalizeCatalogLink(s)
+    if (!link || link.length > MAX_TARGET) return null
+    const key = driveKeyFromHyperLink(link) || null
+    return { target: link, key, link, kind: 'link' }
   }
-  if (s.length <= MAX_TARGET && ALLOWED_LINK_RE.test(s)) {
-    return { target: s, key: null, link: s, kind: 'link' }
+
+  const key = normalizeDriveKey(s)
+  if (key) {
+    return { target: key, key, link: null, kind: 'drive' }
   }
   return null
 }
@@ -80,13 +94,13 @@ function isWellFormedOp (op) {
 function claimOp ({ name, target, owner }, ownerSign) {
   const normalized = normalize(name)
   const nt = normalizeTarget(target)
-  if (!nt) throw new Error('target must be a 64-hex drive key or pear://, hyper://, file:// link')
+  if (!nt) throw new Error(TARGET_ERROR)
   return { type: CLAIM, name, normalized, skeleton: skeleton(name), target: nt.target, owner, version: 1, sig: ownerSign(canon(CLAIM, { name, normalized, target: nt.target, owner, version: 1 })) }
 }
 function rotateOp ({ name, target, owner, version }, ownerSign) {
   const normalized = normalize(name)
   const nt = normalizeTarget(target)
-  if (!nt) throw new Error('target must be a 64-hex drive key or pear://, hyper://, file:// link')
+  if (!nt) throw new Error(TARGET_ERROR)
   return { type: ROTATE, name, normalized, skeleton: skeleton(name), target: nt.target, owner, version, sig: ownerSign(canon(ROTATE, { name, normalized, target: nt.target, owner, version })) }
 }
 function releaseOp ({ name, owner }, ownerSign) {
@@ -99,7 +113,7 @@ function revokeOp ({ name, owner }, ownerSign) {
 }
 
 module.exports = {
-  CLAIM, ROTATE, RELEASE, REVOKE, OP_TYPES, MAX_NAME, MAX_TARGET, MAX_OP_BYTES,
+  CLAIM, ROTATE, RELEASE, REVOKE, OP_TYPES, MAX_NAME, MAX_TARGET, MAX_OP_BYTES, TARGET_ERROR,
   normalizeTarget, targetToResolution,
   canon, isWellFormedOp, claimOp, rotateOp, releaseOp, revokeOp,
 }

@@ -117,6 +117,7 @@ Three independent keypairs — BIP-39 identity, HiveRelay publisher key, Coresto
 |---|---|
 | [Architecture and capabilities](./docs/ARCHITECTURE_AND_CAPABILITIES.md) | Current system map for browser surfaces, runtime layers, catalogue, search, naming, Nostr, APIs, and validation. |
 | [Deep audit](./docs/DEEP_AUDIT_CATALOG_SEARCH_NAMING_NOSTR_2026-06-21.md) | Detailed catalogue/search/naming/Nostr audit, issue list, fixes, and test evidence. |
+| [Manual release smoke](./docs/MANUAL_RELEASE_SMOKE_2026-06-23.md) | Final human-run release checklist for UI flows, Peercord trust approval, mobile device smoke, and signing/store gates. |
 | [App compatibility standard](./docs/PEARBROWSER-APP-COMPAT-STANDARD.md) | Author-facing release contract for apps targeting desktop and mobile. |
 | [Feature roadmap](./docs/P2P-BROWSER-FEATURE-ROADMAP.md) | Current shipped/next/parking-lot roadmap after the 2026 audit. |
 
@@ -149,7 +150,7 @@ Catalogue updates are versioned from [`catalog-source/pearbrowser-network.catalo
 ```sh
 node scripts/gen-catalogue-seed.mjs
 node scripts/publish-catalog-bee.js catalog-source/pearbrowser-network.catalog.json --storage /Users/localllm/Projects/pear-ecosystem/03-sites/pearbrowser-publishers/catalog
-node scripts/verify-live-catalog.js --expect-app peercord
+node scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --expect-app hiveworm
 ```
 
 `pear release` is deprecated in Pear runtime `v2.4.0` but still works and we use it deliberately — the replacement (`pear provision` + `pear multisig` quorum-cosigning) is designed for multi-publisher releases. A solo 1-of-1 multisig is pure ceremony with no security gain.
@@ -167,7 +168,7 @@ node scripts/verify-live-catalog.js --expect-app peercord
 | `scripts/list-drive.js <key>` | Diagnose what's inside a drive's manifest. |
 | `scripts/check-relays.js` | Discovery probe — print all HiveRelays reachable via DHT. |
 | `scripts/verify-pin.js --expect <length>` | Fresh-peer production-drive check: proves the released browser drive is reachable and serving at least the expected length. |
-| `scripts/verify-live-catalog.js --expect-app peercord` | Fresh-peer Hyperbee catalogue check: proves the live app catalogue key is reachable and contains expected release rows and Peercord launch metadata. |
+| `scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --expect-app hiveworm` | Fresh-peer Hyperbee catalogue check: proves the live app catalogue key is reachable and contains expected release rows and Peercord launch metadata. |
 | `scripts/verify-app-full.js --key <driveKey>` | Deeper fresh-peer blob sampling across a drive's file tree. |
 | `scripts/verify-pear-bundle-contract.js --key <driveKey>` | Metadata-only Pear bundle contract check: reads `pear.json` and selected files from a fresh peer without executing third-party code. |
 | `scripts/release-prod.sh` | The two-step release pipeline above. |

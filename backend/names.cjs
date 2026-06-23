@@ -11,10 +11,11 @@
 //   seen!<keyHex>         { lastNickname, seenAt }   ← self-asserted, never resolved
 const Hyperbee = require('hyperbee')
 const { normalize } = require('./name-normalize.cjs')
+const { normalizeCatalogLink } = require('./catalog-safety.cjs')
 
 const MAX_PETNAMES = 10_000
 const HEX64_RE = /^[0-9a-f]{64}$/i
-const ALLOWED_LINK_RE = /^(?:hyper|pear|file):\/\/.+/i
+const MAX_LINK = 300
 
 class Names {
   constructor (store, { now = Date.now } = {}) {
@@ -40,7 +41,8 @@ class Names {
     const n = normalize(name)
     if (!n) throw new Error('name required')
     const keyHex = (typeof key === 'string' && HEX64_RE.test(key)) ? key.toLowerCase() : null
-    const lk = typeof link === 'string' && ALLOWED_LINK_RE.test(link.trim()) ? link.trim().slice(0, 300) : null
+    const normalizedLink = normalizeCatalogLink(link)
+    const lk = normalizedLink && normalizedLink.length <= MAX_LINK ? normalizedLink : null
     if (!keyHex && !lk) throw new Error('petname needs a key or link')
     const existing = await this._bee.get('pet!' + n)
     if (!existing) {

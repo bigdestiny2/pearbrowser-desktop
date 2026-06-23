@@ -40,7 +40,9 @@ test('first-claim-wins: the earlier claim in linear order owns the name', () => 
 
 test('claims can target allowed app links, while unsafe schemes are rejected', () => {
   const a = crypto.keyPair()
-  assert.equal(ops.normalizeTarget(HYPER_LINK).link, HYPER_LINK)
+  assert.deepEqual(ops.normalizeTarget(HYPER_LINK), { target: HYPER_LINK, key: TARGET_A, link: HYPER_LINK, kind: 'link' })
+  assert.deepEqual(ops.targetToResolution(HYPER_LINK), { key: TARGET_A, link: HYPER_LINK })
+  assert.equal(ops.normalizeTarget(' PEAR://keet ').target, PEAR_LINK)
   assert.equal(ops.normalizeTarget(FILE_LINK).link, FILE_LINK)
 
   const view = applyView([
@@ -52,6 +54,10 @@ test('claims can target allowed app links, while unsafe schemes are rejected', (
 
   assert.throws(
     () => ops.claimOp({ name: 'bad', target: 'javascript:alert(1)', owner: owner(a) }, signer(a)),
+    /target must be/
+  )
+  assert.throws(
+    () => ops.claimOp({ name: 'web', target: 'https://example.com', owner: owner(a) }, signer(a)),
     /target must be/
   )
   const badRemote = {

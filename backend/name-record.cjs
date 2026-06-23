@@ -1,6 +1,6 @@
 // Self-certifying DHT name pointer + name-binding row schema (naming Phase N0).
 //
-// Mirrors backend/relay-record.js: a name's owner publishes `name → driveKey`
+// Mirrors backend/relay-record.js: a name's owner publishes `name → target`
 // as a hyperdht MUTABLE record keyed by the name's (rotatable, NOT seed-derived)
 // sub-pubkey. dht.mutableGet VERIFIES the Ed25519 signature against that key, so
 // a resolved pointer is self-certifying — a malicious DHT node can serve stale
@@ -10,31 +10,57 @@
 // Node-safe (b4a only, no Bare modules) → unit-testable outside Bare, like
 // relay-record.js. See docs/research/naming.md.
 const b4a = require('b4a')
+const {
+  driveKeyFromHyperLink,
+  normalizeCatalogLink,
+  normalizeDriveKey
+} = require('./catalog-safety.cjs')
 
 const NAME_RECORD_VERSION = 1
-const HEX64_RE = /^[0-9a-f]{64}$/i
-const PEAR_LINK_RE = /^(pear|hyper|hyperbee|autobee):\/\//i
+const MAX_LINK = 300
 
-// Wire shape: { v, n, k, s, l? } — version, name, drive key (64-hex), a
-// monotonic seq, and an optional launch link. Unknown shapes decode to null.
+function normalizeRecordLink (raw) {
+  const link = normalizeCatalogLink(raw)
+  return link && link.length <= MAX_LINK ? link : null
+}
+
+function normalizeRecordTarget ({ driveKey, link, target } = {}) {
+  const normalizedLink = normalizeRecordLink(target) || normalizeRecordLink(link)
+  const key = normalizeDriveKey(driveKey) ||
+    (!normalizedLink ? normalizeDriveKey(target) : '') ||
+    (normalizedLink ? driveKeyFromHyperLink(normalizedLink) : '')
+  if (!key && !normalizedLink) return null
+  return {
+    driveKey: key || null,
+    link: normalizedLink || null,
+    target: normalizedLink || key
+  }
+}
+
+// Wire shape: { v, n, k?, s, l? } — version, name, optional drive key
+// (64-hex), monotonic seq, and optional target/launch link. Old key-only records
+// still decode; newer link-only records are accepted when the link scheme is one
+// of the shared app-link schemes. Unknown shapes decode to null.
 function decodeNameRecord (buf) {
   if (buf == null) return null
   let rec
   try { rec = JSON.parse(b4a.isBuffer(buf) ? b4a.toString(buf, 'utf8') : String(buf)) } catch { return null }
   if (!rec || typeof rec !== 'object' || rec.v !== NAME_RECORD_VERSION) return null
   if (typeof rec.n !== 'string' || rec.n.length === 0 || rec.n.length > 253) return null
-  if (typeof rec.k !== 'string' || !HEX64_RE.test(rec.k)) return null
   if (!Number.isInteger(rec.s) || rec.s < 0) return null
-  const link = (typeof rec.l === 'string' && PEAR_LINK_RE.test(rec.l)) ? rec.l : null
-  return { name: rec.n, driveKey: rec.k.toLowerCase(), seq: rec.s, link }
+  const target = normalizeRecordTarget({ driveKey: rec.k, link: rec.l })
+  if (!target) return null
+  return { name: rec.n, driveKey: target.driveKey, seq: rec.s, link: target.link, target: target.target }
 }
 
-function encodeNameRecord ({ name, driveKey, seq, link } = {}) {
+function encodeNameRecord ({ name, driveKey, seq, link, target } = {}) {
   if (typeof name !== 'string' || !name) throw new Error('name required')
-  if (typeof driveKey !== 'string' || !HEX64_RE.test(driveKey)) throw new Error('driveKey must be 64-hex')
   if (!Number.isInteger(seq) || seq < 0) throw new Error('seq must be a non-negative integer')
-  const rec = { v: NAME_RECORD_VERSION, n: name, k: driveKey.toLowerCase(), s: seq }
-  if (link) rec.l = String(link)
+  const resolved = normalizeRecordTarget({ driveKey, link, target })
+  if (!resolved) throw new Error('target must be a Hyperdrive key or pear://, hyper://, file:// link')
+  const rec = { v: NAME_RECORD_VERSION, n: name, s: seq }
+  if (resolved.driveKey) rec.k = resolved.driveKey
+  if (resolved.link) rec.l = resolved.link
   return b4a.from(JSON.stringify(rec), 'utf8')
 }
 
@@ -66,7 +92,7 @@ const NAME_BINDING_SCHEMA = {
   properties: {
     name: { type: 'string', maxLength: 253 },
     driveKey: { type: 'string', pattern: '^[0-9a-f]{64}$' },
-    link: { type: 'string', maxLength: 300 },
+    link: { type: 'string', maxLength: 300, pattern: '^(?:hyper|pear|file)://.+' },
     binderPubkey: { type: 'string', pattern: '^[0-9a-f]{64}$' },
     bindingSig: { type: 'string', pattern: '^[0-9a-f]{128}$' },
     seq: { type: 'integer' },

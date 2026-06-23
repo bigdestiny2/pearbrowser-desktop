@@ -1705,7 +1705,7 @@ rpc.handle(C.CMD_NAME_RESOLVE, async ({ name } = {}) => {
     // Tier 2b — trusted contacts' registries (cross-user federation).
     let fed = null
     try { fed = await federatedNameResolver.resolve(name) } catch {}
-    if (fed) resolved = { name: fed.name, key: fed.key || null, link: fed.link || null, label: fed.name, provenance: 'contact', source: fed.source, candidates: fed.candidates }
+    if (fed) resolved = { name: fed.name, key: fed.key || null, link: fed.link || null, target: fed.target || fed.link || fed.key || null, label: fed.name, provenance: 'contact', source: fed.source, candidates: fed.candidates }
   }
   // Tier 3 — curated bootstrap floor (lowest authority).
   if (!resolved) resolved = resolveName(name, { aliases: true })
@@ -1768,11 +1768,11 @@ rpc.handle(C.CMD_NAMEREG_CLAIM, async ({ name, target } = {}) => {
   // appends a dead op. A name that normalizes to empty (all-invisible) or exceeds
   // MAX_NAME would be silently dropped by the reducer → a confusing {ok, null}.
   const { normalize } = require('./name-normalize.cjs')
-  const { MAX_NAME, normalizeTarget } = require('./name-registry-ops.cjs')
+  const { MAX_NAME, TARGET_ERROR, normalizeTarget } = require('./name-registry-ops.cjs')
   if (typeof name !== 'string' || !name.trim()) throw new Error('name required')
   if (name.length > MAX_NAME || !normalize(name)) throw new Error('invalid name (too long, or empty after normalization)')
   const cleanTarget = normalizeTarget(target)
-  if (!cleanTarget) throw new Error('target must be a 64-hex drive key or pear://, hyper://, file:// link')
+  if (!cleanTarget) throw new Error(TARGET_ERROR)
   const reg = await ensureNameRegistry({ create: true })
   const { owner, ownerSign } = nameRegSigner()
   await reg.claim({ name, target: cleanTarget.target, owner }, ownerSign)
@@ -1785,9 +1785,9 @@ rpc.handle(C.CMD_NAMEREG_CLAIM, async ({ name, target } = {}) => {
 
 rpc.handle(C.CMD_NAMEREG_ROTATE, async ({ name, target } = {}) => {
   await whenReady(); await requireNaming()
-  const { normalizeTarget } = require('./name-registry-ops.cjs')
+  const { TARGET_ERROR, normalizeTarget } = require('./name-registry-ops.cjs')
   const cleanTarget = normalizeTarget(target)
-  if (!cleanTarget) throw new Error('target must be a 64-hex drive key or pear://, hyper://, file:// link')
+  if (!cleanTarget) throw new Error(TARGET_ERROR)
   const reg = requireNameRegistryCreated()
   const cur = await reg.resolve(name)
   if (!cur) throw new Error('You don\'t hold that name (claim it first).')

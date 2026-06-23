@@ -69,7 +69,7 @@ shared substrate, so the tracks **reuse it, not rebuild it**:
 |---|---|---|
 | `pearbrowser-desktop` | branch `feat/p2p-infra-naming`, PR head is the current branch tip | Release-audit branch carrying catalogue, Peercord, search, naming, Nostr, docs, and readiness updates. GitHub PR #4 is `CLEAN` / `MERGEABLE` against `main` and remains draft for review. |
 | `origin/main` | `1577ad5` at the time of the merge-back | Base branch. Its catalogue-discovery work is merged into the release branch. |
-| `PearBrowser` mobile repo | `main` with native release-smoke fixes/docs | Mobile/native README and audit-gate docs are current; tests passed `124/124`, the missing `ExpoLinking` native dependency is fixed, the tracked SwiftUI iOS shell builds/installs/launches to a green `Connected` worklet state after stale-Corestore recovery, and generated Expo iOS now clears Debug and Release simulator Xcode builds with `ExpoLinking` autolinked. Android native debug APK assembly plus headless emulator launch now pass with Eclipse Temurin 17. The Android Home screen also retries bookmark RPCs across first-launch Binder/worklet boot so a clean install reaches green `Connected` without an early bookmark-error banner. Android release APK/AAB builds now pass with R8/resource shrink, and env-driven signing verifies with a disposable test key. Remaining native gates: production Apple/Android signing and store validation plus broader real-device validation. |
+| `PearBrowser` mobile repo | `main` at `de85d420c942d433905324c3e098acc34458a23a` with native release-smoke fixes/docs | Mobile/native README and audit-gate docs are current; tests passed `136/136`, the missing `ExpoLinking` native dependency is fixed, the tracked SwiftUI iOS shell builds/installs/launches to a green `Connected` worklet state after stale-Corestore recovery, and generated Expo iOS clears Debug and Release simulator Xcode builds with `ExpoLinking` autolinked. Android native debug APK assembly plus headless emulator launch previously passed with Eclipse Temurin 17; the latest local Homebrew-JDK Kotlin compile attempt hung and was stopped, so rerun native compile/build with the known-good JDK before distribution. Android Browse now has source-contract coverage for proxy/token bridge hardening and share-sheet wiring. Android release APK/AAB builds pass with R8/resource shrink, and env-driven signing verifies with a disposable test key. Remaining native gates: production Apple/Android signing and store validation plus broader real-device validation. |
 | Legacy `feat/p2p-infra-naming-n1ui` / `feat/p2p-infra-impl` references below | historical only | Kept as reconciliation provenance. Do not treat old tip SHAs in §4-§6 as the current release head. |
 
 ---
@@ -171,7 +171,7 @@ breaking the feature with no error. The drift guard fails CI if they disagree.
 
 ```bash
 npm start          # pear run --dev .   (dev shell)
-npm test           # node --test 'test/*.test.js'   → 404 passing on the release PR branch
+npm test           # node --test 'test/*.test.js'   → 412 passing on the release PR branch
 node scripts/check-hiverelay-layout.mjs  # verifies sibling HiveRelay workspace packages before source install
 gh pr checks 4 --repo bigdestiny2/pearbrowser-desktop  # GitHub Actions desktop CI, if enabled for the PR branch
 node scripts/browser-state-sync-smoke.js   # encrypted two-device bookmark sync (no GUI)

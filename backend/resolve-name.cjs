@@ -27,7 +27,9 @@ function resolveName (rawName, { petnames = {}, registry = {}, aliases = true } 
   // Tier 0 — local petname. Highest authority: the user explicitly saved it.
   const pet = petnames[n]
   if (pet && (pet.key || pet.link)) {
-    return { name: n, key: pet.key || null, link: pet.link || null, label: pet.label || rawName, provenance: 'petname' }
+    const key = pet.key || null
+    const link = pet.link || null
+    return { name: n, key, link, target: link || key, label: pet.label || rawName, provenance: 'petname' }
   }
 
   // Tier 2 — multi-writer name registry (N5). An owner-signed first-claim, durable
@@ -36,14 +38,18 @@ function resolveName (rawName, { petnames = {}, registry = {}, aliases = true } 
   if (reg) {
     const target = targetToResolution(reg.link || reg.key || reg.target)
     if (target && (target.key || target.link)) {
-      return { name: n, key: target.key || null, link: target.link || null, label: reg.label || rawName, provenance: 'registry' }
+      return { name: n, key: target.key || null, link: target.link || null, target: target.link || target.key, label: reg.label || rawName, provenance: 'registry' }
     }
   }
 
   // Tier 3 — curated bootstrap floor. Lowest authority; overridden by anything above.
   if (aliases) {
     const a = lookupAlias(n)
-    if (a) return { name: n, key: a.key || null, link: a.link || null, label: a.label, provenance: 'curated' }
+    if (a) {
+      const key = a.key || null
+      const link = a.link || null
+      return { name: n, key, link, target: link || key, label: a.label, provenance: 'curated' }
+    }
   }
 
   return null
