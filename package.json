@@ -19,6 +19,7 @@
         "/.github",
         "/.gitignore",
         "/.DS_Store",
+        "/.landing-seed.mjs",
         "**/.DS_Store",
         "/.claude",
         "/CHANGELOG.md",
