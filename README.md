@@ -4,7 +4,7 @@ A local-first peer-to-peer browser, app store, search engine, naming layer, Nost
 
 **No accounts. No DNS. No manual app updates.** Sites and apps are addressed by stable Pear/Hyperdrive keys and pinned 24/7 on the [HiveRelay](https://github.com/bigdestiny2/P2P-Hiverelay) backbone. The publisher's laptop being offline doesn't matter — the relays carry the bytes, and users launch the current release from the catalogue without hunting for a download or applying an updater.
 
-**Current release:** `v0.4.5` · production length `16898` · pinned on the HiveRelay backbone · fresh-peer verified · desktop packages pinned to local [`00-core/hiverelay`](/Users/localllm/Projects/pear-ecosystem/00-core/hiverelay) with runtime docs targeting the live `0.19.x` relay contract.
+**Current release:** `v0.4.5` · production length `16898` · pinned on the HiveRelay backbone · fresh-peer verified · desktop packages pinned to local [`00-core/hiverelay`](/Users/localllm/Projects/pear-ecosystem/00-core/hiverelay) packages at `0.16.3`, with runtime compatibility checked through relay capability documents rather than npm package publication.
 
 **Current architecture:** start with [docs/ARCHITECTURE_AND_CAPABILITIES.md](./docs/ARCHITECTURE_AND_CAPABILITIES.md). The deeper catalogue/search/naming/Nostr audit is in [docs/DEEP_AUDIT_CATALOG_SEARCH_NAMING_NOSTR_2026-06-21.md](./docs/DEEP_AUDIT_CATALOG_SEARCH_NAMING_NOSTR_2026-06-21.md).
 
@@ -122,11 +122,15 @@ Three independent keypairs — BIP-39 identity, HiveRelay publisher key, Coresto
 ## Develop
 
 ```sh
-git clone https://github.com/bigdestiny2/pearbrowser-desktop
-cd pearbrowser-desktop
+mkdir -p pear-ecosystem/00-core pear-ecosystem/01-browser
+git clone https://github.com/bigdestiny2/p2p-hiverelay pear-ecosystem/00-core/hiverelay
+git clone https://github.com/bigdestiny2/pearbrowser-desktop pear-ecosystem/01-browser/pearbrowser-desktop
+cd pear-ecosystem/01-browser/pearbrowser-desktop
 npm install
 pear run --dev .
 ```
+
+The desktop currently consumes HiveRelay as local workspace packages at `../../00-core/hiverelay/packages/{core,client,verifier}`. Those `0.16.3` packages are not published to npm yet, so the sibling checkout is required for community source installs until the relay packages are published.
 
 UI files use htm + React (no build step). Backend in `backend/` is CommonJS. See `package.json` `pear` field for runtime config, and `pear.json` for multisig signing config.
 
@@ -189,7 +193,7 @@ Code signing is per-platform:
 | [`bigdestiny2/hyper-fetch`](https://github.com/bigdestiny2/hyper-fetch) | ~5 KB JS library — read `hyper://` drives from any browser via the HiveRelay HTTP gateway. Pair with PearBrowser to embed hyper:// content in regular web pages. |
 | [`bigdestiny2/hiveworm`](https://github.com/bigdestiny2/hiveworm) | Featured multiplayer life-sim. Uses `window.pear.swarm.v1` for direct peer gossip. Live at `pear://d1xbkcpc…`. |
 | [`mastercodeon/Peercord`](https://git.churchofmalware.org/mastercodeon/Peercord) | Featured decentralized Discord-style chat. Current Pear release: `pear://wmir47w7…`, window-class desktop app. |
-| [`bigdestiny2/P2P-Hiverelay`](https://github.com/bigdestiny2/P2P-Hiverelay) | The always-on relay backbone keeping the whole network alive (targeting the live `0.19.x` contract surface). |
+| [`bigdestiny2/P2P-Hiverelay`](https://github.com/bigdestiny2/P2P-Hiverelay) | The always-on relay backbone keeping the whole network alive; this desktop checkout currently consumes the local `0.16.3` workspace packages and verifies live relay compatibility through capability docs. |
 | [`bigdestiny2/PearBrowser`](https://github.com/bigdestiny2/PearBrowser) | Mobile-focused sibling — iOS / Android port. Bare-kit-based. |
 
 ## Credits

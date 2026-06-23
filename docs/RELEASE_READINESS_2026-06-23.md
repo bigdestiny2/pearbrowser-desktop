@@ -12,6 +12,7 @@ The release is in strong shape for a community launch. The core protocol tests a
 - Desktop and mobile `git diff --check` are clean.
 - Desktop dependency audit: `npm audit --audit-level=high` found 0 vulnerabilities.
 - Mobile dependency audit: safe `npm audit fix` removed high/critical advisories, `npm audit --audit-level=high` now passes, and the full mobile suite still passes. Full `npm audit` still reports 15 moderate inherited Expo/React Native toolchain advisories with only breaking framework fixes offered.
+- Desktop source-install reproducibility is now explicit: `npm install` runs `scripts/check-hiverelay-layout.mjs`, which verifies the required sibling HiveRelay workspace packages at `../../00-core/hiverelay/packages/{core,client,verifier}`. Those `0.16.3` packages are not published to npm, so a standalone `pearbrowser-desktop` clone is documented as insufficient until the relay packages are published.
 - Live catalogue Hyperbee republished at `hyperbee://f5fb7500bccd60a976d2b1d24246108f4444a210b9ca591533114dffc089934d`; 5 relay seed requests were accepted.
 - Production browser drive fresh-peer verification passed at length `16898`, with `/CHANGELOG.md` blob fetch proving content blocks are reachable.
 - Live catalogue fresh-peer verification passed at Hyperbee core length `222`, with signed meta present and Peercord/HiveWorm rows matching expected release metadata, including Peercord `type: "standalone"`.
