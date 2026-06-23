@@ -56,7 +56,10 @@ echo
 echo "============================================================"
 echo "  1/2  pear stage"
 echo "============================================================"
-STAGE_OUT=$(pear stage "$PROD_LINK" . 2>&1)
+# --purge is important: Pear drives are append-only, so adding a file to the
+# stage ignore list only prevents future adds. It does not remove a file that
+# was staged in an older release unless we explicitly purge ignored paths.
+STAGE_OUT=$(pear stage --purge "$PROD_LINK" . 2>&1)
 STAGE_CLEAN=$(printf '%s\n' "$STAGE_OUT" | strip_ansi)
 printf '%s\n' "$STAGE_CLEAN" | tail -8
 # Parse the staged length. Newer Pear prints "Latest length: N" (not the older
