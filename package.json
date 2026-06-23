@@ -28,6 +28,7 @@
         "/docs",
         "/examples",
         "/scripts",
+        "/test",
         "/pearbrowser-storage"
       ]
     },

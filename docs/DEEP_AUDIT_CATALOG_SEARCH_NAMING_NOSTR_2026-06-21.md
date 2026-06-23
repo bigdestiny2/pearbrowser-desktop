@@ -631,18 +631,20 @@ catalogue.
 
 ### Verification Added
 
-- Full desktop suite: `npm test` in `pearbrowser-desktop`: 412 passed, 0 failed.
+- Full desktop suite: `npm test` in `pearbrowser-desktop`: 415 passed, 0 failed.
 - GitHub Actions Desktop CI passes on the release branch, including source
   checkouts, HiveRelay layout guard, install, tests, and high-severity
   dependency audit.
 - Full mobile suite: `npm test` in `PearBrowser`: 136 passed, 0 failed.
-- Live relay check with real DHT access: 1 unique HiveRelay reachable and 10 live
+- Live relay check with real DHT access: 1 unique HiveRelay reachable and 7 live
   relay connections.
 - Live catalogue check: signed `PearBrowser Network` Hyperbee at length 256,
   14 apps, Peercord, peerit, and HiveWorm rows present, Peercord marked
   `standalone`, and peerit marked `hypersite`.
-- Production drive check: fresh peer reached length 16898 and fetched 14284
-  bytes from `/CHANGELOG.md`.
+- Production drive check: fresh peer reached length 18552 and fetched 11652
+  bytes from `/backend/anongpt-buyer.js`; a fresh-peer metadata scan also
+  confirmed `/.landing-seed.mjs`, `/pearbrowser-storage`, `/docs`, `/scripts`,
+  `/examples`, and `/test` are absent from the production drive.
 - Deep bundle checks: PearBrowser homepage, Peercord, and Keet all returned
   peers and had zero missing sampled blobs. Latest samples: PearBrowser
   homepage `2/2`, Peercord `12/12`, Keet `12/12`.

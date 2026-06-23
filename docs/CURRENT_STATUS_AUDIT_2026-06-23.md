@@ -17,10 +17,10 @@ federated search, safe target normalization, identity-backed login, swarm.v1,
 and operational scripts for pin, catalogue, relay, and bundle verification.
 
 The strongest current evidence is local and protocol-level. The release notes
-record `npm test` passing with 412/412 desktop tests, Desktop CI passing on the
+record `npm test` passing with 415/415 desktop tests, Desktop CI passing on the
 release branch, high-severity dependency audit passing, the live catalogue
 fresh-peer check passing at Hyperbee length 256 with 14 apps, and the production
-browser drive fresh-peer check passing at length 16898. The search handover
+browser drive fresh-peer check passing at length 18552. The search handover
 also records that local self-search is live and opt-in trusted-peer federation
 is wired through `QueryPlanner`.
 
@@ -87,7 +87,7 @@ validation, and broader real-device smoke.
 - Promoted copy matched the draft with `cmp -s`.
 - `git diff --check` passed on the current dirty worktree.
 - `npm test` passed on the current dirty worktree.
-  - Node test runner: 412 tests passed, 0 failed.
+  - Node test runner: 415 tests passed, 0 failed.
   - This supersedes the older 404/404 and 408-test counts recorded in the release notes
     for purposes of this local loop.
 
@@ -135,7 +135,8 @@ Real-network release checks:
 
 ```bash
 node scripts/check-relays.js
-node scripts/verify-pin.js --expect 16898
+node scripts/verify-pin.js --expect 18552
+node scripts/verify-release-contents.js --expect 18552 --missing /.landing-seed.mjs --missing /pearbrowser-storage --missing /docs --missing /scripts --missing /examples --missing /test
 node scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --expect-app hiveworm
 node scripts/verify-app-full.js --key 1868916a7a282ff0f211b11b536e9642828c32d3a817a254e1ef7e602709e25d --name pearbrowser-homepage --samples 12 --timeout 90
 node scripts/verify-app-full.js --key a2ea4d769d5e2b90caca4fbcb7f4b7b43caf43f2555b81201d3463ef89b55c26 --name peercord --samples 12 --timeout 90

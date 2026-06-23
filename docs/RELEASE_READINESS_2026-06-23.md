@@ -8,7 +8,7 @@ Manual smoke checklist: `docs/MANUAL_RELEASE_SMOKE_2026-06-23.md`.
 
 The release is in strong shape for a community launch. The core protocol tests are broad and green after the final catalogue cleanup:
 
-- Desktop: `npm test` passed `412/412`.
+- Desktop: `npm test` passed `415/415`.
 - Mobile/native: `npm test` passed `136/136`.
 - Publisher catalogue: `npm run validate` passes with no warnings.
 - Desktop and mobile `git diff --check` are clean.
@@ -18,15 +18,16 @@ The release is in strong shape for a community launch. The core protocol tests a
 - Desktop source-install reproducibility is now explicit: `npm install` runs `scripts/check-hiverelay-layout.mjs`, which verifies the required sibling HiveRelay workspace packages at `../../00-core/hiverelay/packages/{core,client,verifier}`. Those `0.16.3` packages are not published to npm, so a standalone `pearbrowser-desktop` clone is documented as insufficient until the relay packages are published.
 - Desktop GitHub Actions CI is now present: `.github/workflows/desktop-ci.yml` checks out PearBrowser desktop, `bigdestiny2/PearBrowser@de85d420c942d433905324c3e098acc34458a23a`, and `bigdestiny2/P2P-Hiverelay@v0.16.3`, verifies the local workspace layout, runs `npm ci`, runs the desktop test suite, and runs the high-severity dependency audit.
 - Live catalogue Hyperbee republished at `hyperbee://f5fb7500bccd60a976d2b1d24246108f4444a210b9ca591533114dffc089934d`; the corrected version 7 catalogue has 14 apps and 5 relay seed requests were accepted.
-- Production browser drive fresh-peer verification passed at length `16898`, with `/CHANGELOG.md` blob fetch proving content blocks are reachable.
+- Production browser drive fresh-peer verification passed at length `18552`, with `/backend/anongpt-buyer.js` blob fetch proving content blocks are reachable.
+- Production release contents were scanned from a fresh peer at length `18552`: 10,199 metadata entries, and forbidden local/operator paths `/.landing-seed.mjs`, `/pearbrowser-storage`, `/docs`, `/scripts`, `/examples`, and `/test` were absent.
 - Live catalogue fresh-peer verification passed at Hyperbee core length `256`, with signed meta present and Peercord/peerit/HiveWorm rows matching expected release metadata, including Peercord `type: "standalone"` and peerit `type: "hypersite"`.
 - Desktop GUI runtime is up in dev mode with Pear Runtime renderer connected to the backend RPC socket on `127.0.0.1:9876`.
-- Real-DHT relay health passed again after the latest doc/native fix push, with 1 unique HiveRelay reachable and 10 live relay connections. A restricted/sandboxed network run can false-negative DHT discovery, so release checks should run with real network access.
+- Real-DHT relay health passed again after the latest doc/native fix push, with 1 unique HiveRelay reachable and 7 live relay connections. A restricted/sandboxed network run can false-negative DHT discovery, so release checks should run with real network access.
 - PearBrowser homepage, Peercord, and Keet bundle drives were fresh-peer sampled without executing third-party code; all returned peers, file listings, and zero missing sampled blobs. Latest samples: PearBrowser homepage peers `1`, entries `2`, sampled `2/2`; Peercord peers `1`, entries `14730`, sampled `12/12`; Keet peers `9`, entries `7449`, sampled `12/12`.
 - Peercord's live bundle contract was verified without executing third-party code for `by-arch/linux-x64/app/peercord/resources/app` and `by-arch/win32-x64/app/peercord/resources/app`: both packaged roots expose `pear.json` with `type: "desktop"`, `main: "index.js"`, GUI `dist/index.html`, `pre: "pear-electron/pre"`, and `index.js` contains `BrowserWindow` while not containing `Pear.worker.pipe`.
 - Native simulator/device smoke is mostly cleared: the generated Expo iOS project exposed a real missing native module (`ExpoLinking`), the tracked dependency is now added and autolinked, and the tracked SwiftUI `ios-native` shell now builds, installs, launches, recovers from stale Corestore layout, and reaches a green `Connected` worklet state on the iPhone 17 simulator. Generated Expo iOS Debug and Release simulator builds now pass; the Release helper pins `HERMES_CLI_PATH` to the Pods `hermesc` as an Xcode build setting so the bundle phase does not hang on the node_modules compiler path. Android native now builds a fresh debug APK with a verified JDK 17, installs it on a headless `pp_avd` emulator, launches `com.pearbrowser.app/.MainActivity`, loads `libbare-kit.so`, extracts `backend.android.bundle`, starts the local proxy, and reaches a green `Connected` Home screen. Android native release APK/AAB builds also pass with R8/resource shrink, and the env-driven signing path verifies with a disposable test key (`apksigner` for APK, `jarsigner` for AAB). The latest mobile test pass also covers the extracted navigation parser, verified signed-catalog update forwarding, Android native proxy/token bridge guards, and Android Browse share-sheet wiring.
 
-One earlier desktop `npm test` run reported `401/402`; the immediately repeated compact full run passed `402/402`, and the current release branch now passes `412/412` after the Peercord launch-mode, peerit, catalogue-dedupe, naming-target, and release-doc coverage landed. No code change was needed for that earlier blip.
+One earlier desktop `npm test` run reported `401/402`; the immediately repeated compact full run passed `402/402`, and the current release branch now passes `415/415` after the Peercord launch-mode, peerit, catalogue-dedupe, naming-target, and release-doc coverage landed. No code change was needed for that earlier blip.
 
 ## Fixes In This Pass
 
@@ -36,7 +37,8 @@ One earlier desktop `npm test` run reported `401/402`; the immediately repeated 
 - Cleaned the HiveWorm catalogue row: explicit `driveKey`, `url` for the Hyperdrive page, and no misleading `pearLink` for a `hyper://` target.
 - Added `catalog-source/pearbrowser-network.catalog.json` so the canonical catalogue source is versioned in the desktop GitHub repo.
 - Regenerated `backend/catalogue-seed.js` from the versioned catalogue source so the offline seed and live catalogue agree.
-- Added `.landing-seed.mjs` to `.gitignore` so the local operational landing-page seeder does not appear as release source.
+- Added `/.landing-seed.mjs` to Pear's stage ignore list, changed production staging to use `pear stage --purge`, and added `scripts/verify-release-contents.js` so local/operator scratch files are removed from already-published append-only release drives and verified absent from a fresh peer.
+- Rebuilt the generated schema-sheets bundle with `quickbit-native` and `simdle-native` kept external, preserving native-addon package context during Pear stage validation and reducing the bundle by about 1.6 MB.
 - Added mobile `expo-linking@~55.0.15` after the iOS simulator launch exposed `[runtime not ready]: Error: Cannot find native module 'ExpoLinking'`.
 - Added `npm run ios:generated:release` in the mobile repo to make the generated Expo iOS Release simulator build use the working Pods Hermes compiler path through an Xcode build setting.
 - Added a non-destructive mobile Corestore recovery path in `bigdestiny2/PearBrowser@41a7fb6`: if root app storage belongs to another Corestore, the backend falls back to an identity-scoped `corestore-*` subdirectory instead of failing worklet boot.
@@ -135,6 +137,7 @@ The release script is in better shape after the recent verify-step fix:
 - Off the publisher box, `scripts/verify-pin.js --expect <length>` remains the stronger external round trip.
 - `scripts/verify-live-catalog.js` fresh-loads the published Hyperbee catalogue and asserts expected app rows plus Peercord launch metadata from the network.
 - `scripts/verify-app-full.js` is available for deeper fresh-peer blob sampling across a drive.
+- `scripts/verify-release-contents.js` fresh-loads the production drive metadata and asserts ignored/operator paths are absent after purge staging.
 - The live DHT verifiers must run with real network access. In a restricted sandbox, peer discovery can time out even when the same checks pass outside the sandbox.
 
 Required external smoke before a public announcement:
@@ -164,8 +167,9 @@ npm audit --audit-level=high # mobile/native after fix
 npm run validate # publisher catalogue
 node scripts/gen-catalogue-seed.mjs
 node scripts/publish-catalog-bee.js catalog-source/pearbrowser-network.catalog.json --storage /Users/localllm/Projects/pear-ecosystem/03-sites/pearbrowser-publishers/catalog
-node scripts/check-relays.js # latest rerun: 1 unique relay reachable, 10 live connections
-node scripts/verify-pin.js --expect 16898 # latest rerun: length 16898, peers 1, /CHANGELOG.md sampled
+node scripts/check-relays.js # latest rerun: 1 unique relay reachable, 7 live connections
+node scripts/verify-pin.js --expect 18552 # latest rerun: length 18552, peers 1, /backend/anongpt-buyer.js sampled
+node scripts/verify-release-contents.js --expect 18552 --missing /.landing-seed.mjs --missing /pearbrowser-storage --missing /docs --missing /scripts --missing /examples --missing /test # latest rerun: length 18552, entries 10199, forbidden paths absent
 node scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --expect-app hiveworm # latest rerun: length 256, peers 1, 14 apps, Peercord type standalone, peerit type hypersite
 node scripts/verify-app-full.js --key 1868916a7a282ff0f211b11b536e9642828c32d3a817a254e1ef7e602709e25d --name pearbrowser-homepage --samples 12 --timeout 90 # latest rerun: peers 1, entries 2, sampled 2, missing 0
 node scripts/verify-app-full.js --key a2ea4d769d5e2b90caca4fbcb7f4b7b43caf43f2555b81201d3463ef89b55c26 --name peercord --samples 12 --timeout 90 # latest rerun: peers 1, entries 14730, sampled 12, missing 0
