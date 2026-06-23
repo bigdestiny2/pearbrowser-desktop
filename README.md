@@ -4,7 +4,7 @@ A local-first peer-to-peer browser, app store, search engine, naming layer, Nost
 
 **No accounts. No DNS. No manual app updates.** Sites and apps are addressed by stable Pear/Hyperdrive keys and pinned 24/7 on the [HiveRelay](https://github.com/bigdestiny2/P2P-Hiverelay) backbone. The publisher's laptop being offline doesn't matter — the relays carry the bytes, and users launch the current release from the catalogue without hunting for a download or applying an updater.
 
-**Current release:** `v0.4.5` · production length `18552` · pinned on the HiveRelay backbone · fresh-peer verified · desktop packages pinned to local [`00-core/hiverelay`](/Users/localllm/Projects/pear-ecosystem/00-core/hiverelay) packages at `0.16.3`, with runtime compatibility checked through relay capability documents rather than npm package publication.
+**Current release:** `v0.5.0` · production length `18552` · pinned on the HiveRelay backbone · fresh-peer verified · desktop packages pinned to local [`00-core/hiverelay`](/Users/localllm/Projects/pear-ecosystem/00-core/hiverelay) packages at `0.16.3`, with runtime compatibility checked through relay capability documents rather than npm package publication.
 
 **Current architecture:** start with [docs/ARCHITECTURE_AND_CAPABILITIES.md](./docs/ARCHITECTURE_AND_CAPABILITIES.md). The deeper catalogue/search/naming/Nostr audit is in [docs/DEEP_AUDIT_CATALOG_SEARCH_NAMING_NOSTR_2026-06-21.md](./docs/DEEP_AUDIT_CATALOG_SEARCH_NAMING_NOSTR_2026-06-21.md).
 
