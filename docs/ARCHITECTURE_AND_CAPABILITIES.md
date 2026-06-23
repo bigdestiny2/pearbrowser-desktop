@@ -1,6 +1,6 @@
 # PearBrowser Desktop Architecture and Capabilities
 
-Last updated: 2026-06-22
+Last updated: 2026-06-23
 
 PearBrowser Desktop is a local-first peer-to-peer browser built on Pear, Bare,
 Hypercore, Hyperdrive, Hyperbee, Hyperswarm, and HiveRelay. It combines a
@@ -151,10 +151,13 @@ flows, and native shell source-contract parity.
 
 ## Validation Snapshot
 
-The 2026-06-21/22 audit verified:
+The current 2026-06-23 release audit verified:
 
-- Desktop automated tests: `npm test` passing, 400 tests.
+- Desktop automated tests: `npm test` passing, 402 tests.
 - Mobile automated tests: `npm test` passing, 124 tests.
+- Live PearBrowser Network catalogue: `hyperbee://f5fb7500bccd60a976d2b1d24246108f4444a210b9ca591533114dffc089934d` reachable from a fresh peer, signed, and carrying 13 apps including Peercord and HiveWorm.
+- Production PearBrowser drive: reachable from a fresh peer at length 16898, with blob sampling proving content blocks replicate.
+- Featured app bundles: Peercord and Keet fresh-peer sampled with zero missing sampled blobs.
 - Feature tracker: 100 user stories, 31 issues, 68 recorded test runs.
 - Focus areas covered: catalogue, search, naming, Nostr bridge, mobile parity,
   hidden diagnostics, app catalogue safety, bridge gating, and storage cleanup.

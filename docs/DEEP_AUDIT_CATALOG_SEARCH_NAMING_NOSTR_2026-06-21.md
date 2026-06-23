@@ -607,3 +607,41 @@ Why it matters: the bridge remains fail-closed, but users now get operational vi
 - Command-surface audit script: renderer commands without backend handlers returned `[]`.
 - Full desktop suite: `npm test` in `pearbrowser-desktop`: 400 passed, 0 failed.
 - Full mobile suite: `npm test` in `PearBrowser`: 124 passed, 0 failed.
+
+## Addendum: Release Recheck On 2026-06-23
+
+This pass rechecked the discovery surfaces against the actual release branch after
+Peercord was added to the featured apps and default PearBrowser Network
+catalogue.
+
+### Current State
+
+- Catalogue: Peercord is present in the versioned catalogue source, generated
+  offline seed, featured Apps UI, resolver alias, and live Hyperbee catalogue.
+  It is intentionally marked as a standalone Pear app because the upstream
+  Peercord release is a desktop Pear app, not a pear-request worker.
+- Search: the local-first and federated search contracts remain green,
+  including bounded query handling, digest-first fanout, stale-query
+  suppression, signed-result verification, and provenance fields.
+- Naming: petnames, registry rows, curated aliases, and trusted-contact claims
+  still resolve through the shared safe-target universe, including `pear://`
+  link-only apps such as Peercord.
+- Nostr bridge: the shipped surface remains the Pear-native trusted-contact
+  bridge with binding/revocation diagnostics, not a public relay client.
+
+### Verification Added
+
+- Full desktop suite: `npm test` in `pearbrowser-desktop`: 402 passed, 0 failed.
+- Full mobile suite: `npm test` in `PearBrowser`: 124 passed, 0 failed.
+- Live relay check with real DHT access: 1 unique HiveRelay reachable and 8 live
+  relay connections.
+- Live catalogue check: signed `PearBrowser Network` Hyperbee at length 206,
+  13 apps, Peercord and HiveWorm rows present.
+- Production drive check: fresh peer reached length 16898 and fetched 14284
+  bytes from `/CHANGELOG.md`.
+- Deep bundle checks: PearBrowser homepage, Peercord, and Keet all returned
+  peers and had zero missing sampled blobs.
+
+Restricted/sandboxed network runs can false-negative DHT discovery. The release
+gate should use real DHT access, as the verifier scripts do when run from the
+publisher box or a normal remote host.

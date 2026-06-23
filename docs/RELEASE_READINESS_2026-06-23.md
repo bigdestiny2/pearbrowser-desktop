@@ -10,11 +10,14 @@ The release is in strong shape for a community launch. The core protocol tests a
 - Mobile/native: `npm test` passed `124/124`.
 - Publisher catalogue: `npm run validate` passes with no warnings.
 - Desktop and mobile `git diff --check` are clean.
+- Desktop dependency audit: `npm audit --audit-level=high` found 0 vulnerabilities.
+- Mobile dependency audit: safe `npm audit fix` removed high/critical advisories, `npm audit --audit-level=high` now passes, and the full mobile suite still passes.
 - Live catalogue Hyperbee republished at `hyperbee://f5fb7500bccd60a976d2b1d24246108f4444a210b9ca591533114dffc089934d`; 5 relay seed requests were accepted.
 - Production browser drive fresh-peer verification passed at length `16898`, with `/CHANGELOG.md` blob fetch proving content blocks are reachable.
 - Live catalogue fresh-peer verification passed at Hyperbee core length `206`, with signed meta present and Peercord/HiveWorm rows matching expected release metadata.
 - Desktop GUI runtime is up in dev mode with Pear Runtime renderer connected to the backend RPC socket on `127.0.0.1:9876`.
-- Peercord and Keet bundle drives were fresh-peer sampled without executing third-party code; both returned peers, file listings, and `12/12` sampled blobs.
+- Real-DHT relay health passed with 1 unique HiveRelay reachable and 8 live relay connections. A restricted/sandboxed network run can false-negative DHT discovery, so release checks should run with real network access.
+- PearBrowser homepage, Peercord, and Keet bundle drives were fresh-peer sampled without executing third-party code; all returned peers, file listings, and zero missing sampled blobs.
 
 One transient desktop `npm test` run reported `401/402`; the immediately repeated compact full run passed `402/402`, and the catalogue-focused subset passed `30/30`. No code change was needed for that blip.
 
@@ -108,6 +111,7 @@ The release script is in better shape after the recent verify-step fix:
 - Off the publisher box, `scripts/verify-pin.js --expect <length>` remains the stronger external round trip.
 - `scripts/verify-live-catalog.js` fresh-loads the published Hyperbee catalogue and asserts expected app rows from the network.
 - `scripts/verify-app-full.js` is available for deeper fresh-peer blob sampling across a drive.
+- The live DHT verifiers must run with real network access. In a restricted sandbox, peer discovery can time out even when the same checks pass outside the sandbox.
 
 Required external smoke before a public announcement:
 
@@ -124,12 +128,16 @@ node --test --test-reporter=spec test/*.test.js
 node --test test/catalog-manager-safety.test.js test/catalog-bee.test.js test/peercord-catalog.test.js test/resolve-name.test.js test/index-room-client.test.js
 git diff --check
 npm test # mobile/native
+npm audit --audit-level=high
+npm audit fix # mobile/native, non-force only
+npm audit --audit-level=high # mobile/native after fix
 npm run validate # publisher catalogue
 node scripts/gen-catalogue-seed.mjs
 node scripts/publish-catalog-bee.js catalog-source/pearbrowser-network.catalog.json --storage /Users/localllm/Projects/pear-ecosystem/03-sites/pearbrowser-publishers/catalog
 node scripts/check-relays.js
 node scripts/verify-pin.js --expect 5440
 node scripts/verify-live-catalog.js --expect-app peercord --expect-app hiveworm
+node scripts/verify-app-full.js --key 1868916a7a282ff0f211b11b536e9642828c32d3a817a254e1ef7e602709e25d --name pearbrowser-homepage --samples 12 --timeout 90
 node scripts/verify-app-full.js --key a2ea4d769d5e2b90caca4fbcb7f4b7b43caf43f2555b81201d3463ef89b55c26 --name peercord --samples 12 --timeout 90
 node scripts/verify-app-full.js --key 82110be69e2a531e840bc886dc7b9cab16729c587815295f55035109b45e4ddb --name keet --samples 12 --timeout 90
 ```
@@ -147,3 +155,4 @@ Key live values:
 - Network replication can vary by relay health and NAT conditions. This pass saw reachable relays, a reachable production drive, and a reachable live catalogue, but a second-network spot check remains useful before a high-visibility announcement.
 - Peercord cannot honestly be marketed as headless-in-tab until upstream ships a compatible pear-request worker. PearBrowser does launch it from the featured catalogue without manual download/update.
 - Public Nostr relay behavior is not part of this release; the shipped feature is the trusted-contact bridge.
+- Mobile still reports 15 moderate `npm audit` advisories in Expo/React Native test/tooling transitive dependencies. npm's available fix requires breaking major-version changes, so these should move to the next mobile platform-upgrade lane rather than this release-day hardening pass.
