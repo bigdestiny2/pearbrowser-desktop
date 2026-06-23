@@ -17,8 +17,8 @@ The release is in strong shape for a community launch. The core protocol tests a
 - Desktop dependency audit: `npm audit --audit-level=high` found 0 vulnerabilities.
 - Mobile dependency audit: safe `npm audit fix` removed high/critical advisories, `npm audit --audit-level=high` now passes, and the full mobile suite still passes. Full `npm audit` still reports 15 moderate inherited Expo/React Native toolchain advisories with only breaking framework fixes offered.
 - Mobile release preflight is now machine-checkable with `npm run release:preflight`: local structural prerequisites pass (version/package IDs, native worklet bundles, iOS BareKit/addons, Android BareKit AAR, EAS identity), and the remaining failures are the expected external production gates: real Android signing env/keystore, Apple development team signing, TestFlight/App Store Connect validation, and Play/Firebase validation.
-- Desktop source-install reproducibility is now explicit: `npm install` runs `scripts/check-hiverelay-layout.mjs`, which verifies the required sibling HiveRelay workspace packages at `../../00-core/hiverelay/packages/{core,client,verifier}`. Those `0.16.3` packages are not published to npm, so a standalone `pearbrowser-desktop` clone is documented as insufficient until the relay packages are published.
-- Desktop GitHub Actions CI is now present: `.github/workflows/desktop-ci.yml` checks out PearBrowser desktop, `bigdestiny2/PearBrowser@de85d420c942d433905324c3e098acc34458a23a`, and `bigdestiny2/P2P-Hiverelay@v0.16.3`, verifies the local workspace layout, runs `npm ci`, runs the desktop test suite, and runs the high-severity dependency audit.
+- Desktop source-install reproducibility is now explicit: `npm install` runs `scripts/check-hiverelay-layout.mjs`, which verifies the required sibling HiveRelay workspace packages at `../../00-core/hiverelay/packages/{core,client,verifier}`. Those `0.20.0` packages are not published to npm, so a standalone `pearbrowser-desktop` clone is documented as insufficient until the relay packages are published.
+- Desktop GitHub Actions CI is now present: `.github/workflows/desktop-ci.yml` checks out PearBrowser desktop, `bigdestiny2/PearBrowser@de85d420c942d433905324c3e098acc34458a23a`, and `bigdestiny2/P2P-Hiverelay@v0.20.0`, verifies the local workspace layout, runs `npm ci`, runs the desktop test suite, and runs the high-severity dependency audit.
 - Live catalogue Hyperbee republished at `hyperbee://f5fb7500bccd60a976d2b1d24246108f4444a210b9ca591533114dffc089934d`; the corrected version 7 catalogue has 14 apps and 5 relay seed requests were accepted.
 - Production browser drive fresh-peer verification passed at length `18552`, with `/backend/anongpt-buyer.js` blob fetch proving content blocks are reachable.
 - Production release contents were scanned from a fresh peer at length `18552`: 10,199 metadata entries, and forbidden local/operator paths `/.landing-seed.mjs`, `/pearbrowser-storage`, `/docs`, `/scripts`, `/examples`, and `/test` were absent.
@@ -137,7 +137,7 @@ The release script is in better shape after the recent verify-step fix:
 
 - `scripts/release-prod.sh` stages, releases, pins, and verifies.
 - On the publisher box, it avoids false failure from same-NAT/fresh-peer verification by confirming the durable seeder announced the new length and has live remote peers.
-- Off the publisher box, `scripts/verify-pin.js --expect <length>` remains the stronger external round trip.
+- Off the publisher box, `scripts/verify-pin.js --expect <length> --hiverelay` remains the stronger external round trip and captures relay proof evidence when upgraded relays expose storage-proof.
 - `scripts/verify-live-catalog.js` fresh-loads the published Hyperbee catalogue and asserts expected app rows plus Peercord launch metadata from the network.
 - `scripts/verify-app-full.js` is available for deeper fresh-peer blob sampling across a drive.
 - `scripts/verify-release-contents.js` fresh-loads the production drive metadata and asserts ignored/operator paths are absent after purge staging.
@@ -173,7 +173,7 @@ npm run validate # publisher catalogue
 node scripts/gen-catalogue-seed.mjs
 node scripts/publish-catalog-bee.js catalog-source/pearbrowser-network.catalog.json --storage /Users/localllm/Projects/pear-ecosystem/03-sites/pearbrowser-publishers/catalog
 node scripts/check-relays.js # latest rerun: 1 unique relay reachable, 8 live connections
-node scripts/verify-pin.js --expect 18552 # latest rerun: length 18552, peers 1, /backend/anongpt-buyer.js sampled
+node scripts/verify-pin.js --expect 18552 --hiverelay # latest rerun: length 18552, peers 1, /backend/anongpt-buyer.js sampled; storage-proof evidence is captured when upgraded relays expose it
 node scripts/verify-release-contents.js --expect 18552 --missing /.landing-seed.mjs --missing /pearbrowser-storage --missing /docs --missing /scripts --missing /examples --missing /test # latest rerun: length 18552, entries 10199, forbidden paths absent
 node scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --expect-app hiveworm # latest rerun: length 273, peers 1, 14 apps, Peercord type standalone/source GPL-3.0, peerit type hypersite
 node scripts/runtime-rpc-smoke.mjs --timeout 20000 --json # after launching PearBrowser; latest rerun: ok, rpcPort 9877, proxyPort 60887, peerCount 7, hiveRelays 7, storagePercent 7

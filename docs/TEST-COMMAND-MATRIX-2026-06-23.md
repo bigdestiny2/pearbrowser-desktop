@@ -79,7 +79,7 @@ sandboxed environments.
 | Command | Scope |
 | --- | --- |
 | `node scripts/check-relays.js` | HiveRelay discovery/connection health |
-| `node scripts/verify-pin.js --expect 18552` | Fresh-peer production browser drive reachability and length |
+| `node scripts/verify-pin.js --expect 18552 --hiverelay` | Fresh-peer production browser drive reachability and length, plus HiveRelay proof evidence when available |
 | `node scripts/verify-release-contents.js --expect 18552 --missing /.landing-seed.mjs --missing /pearbrowser-storage --missing /docs --missing /scripts --missing /examples --missing /test` | Fresh-peer release contents and forbidden-path absence |
 | `node scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --expect-app hiveworm` | Live PearBrowser Network catalogue contents |
 | `node scripts/verify-app-full.js --key 1868916a7a282ff0f211b11b536e9642828c32d3a817a254e1ef7e602709e25d --name pearbrowser-homepage --samples 12 --timeout 90` | Fresh-peer homepage drive sampling |

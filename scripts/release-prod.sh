@@ -95,7 +95,7 @@ echo
 if [[ "$SKIP_PIN" == "1" ]]; then
   echo "▸ --no-pin given, skipping pin + verification"
   echo "  manually: node scripts/pin-self-on-hiverelay.js"
-  echo "           node scripts/verify-pin.js --expect $NEW_LEN"
+  echo "           node scripts/verify-pin.js --expect $NEW_LEN --hiverelay"
   exit 0
 fi
 
@@ -143,8 +143,8 @@ confirm_via_seed_log() {
 # (a) Try the real fresh-peer round-trip once. Passes from a remote host /
 #     CI (and short-circuits the whole step). On the publisher box it sees
 #     "no peers" — expected, not a real outage — so we fall through to (b).
-echo "  ▸ fresh-peer verify (verify-pin.js --expect $NEW_LEN)..."
-if node scripts/verify-pin.js --expect "$NEW_LEN"; then
+echo "  ▸ fresh-peer verify (verify-pin.js --expect $NEW_LEN --hiverelay)..."
+if node scripts/verify-pin.js --expect "$NEW_LEN" --hiverelay; then
   echo
   echo "🎉 Release complete and verified end-to-end (fresh remote peer)."
   echo "   Anyone running 'pear run $PROD_LINK' will get length $NEW_LEN."
@@ -159,7 +159,7 @@ if confirm_via_seed_log; then
   echo
   echo "🎉 Release complete — served live by the durable seeder."
   echo "   verify-pin can only PASS from a different machine/network; run"
-  echo "   'node scripts/verify-pin.js --expect $NEW_LEN' elsewhere to"
+  echo "   'node scripts/verify-pin.js --expect $NEW_LEN --hiverelay' elsewhere to"
   echo "   double-check externally."
   echo "   Anyone running 'pear run $PROD_LINK' will get length $NEW_LEN."
   exit 0
@@ -171,12 +171,12 @@ echo "  ▸ no local seeder to confirm against — retrying fresh-peer verify"
 echo "    (up to 10 min, every 90s)"
 ATTEMPT=0
 MAX_ATTEMPTS=7   # 7 * 90s ≈ 10 min
-until node scripts/verify-pin.js --expect "$NEW_LEN"; do
+until node scripts/verify-pin.js --expect "$NEW_LEN" --hiverelay; do
   ATTEMPT=$((ATTEMPT + 1))
   if [[ $ATTEMPT -ge $MAX_ATTEMPTS ]]; then
     echo
     echo "✗ Release succeeded but blobs not yet reachable from a fresh peer."
-    echo "  The drive IS published — re-run \`node scripts/verify-pin.js --expect $NEW_LEN\`"
+    echo "  The drive IS published — re-run \`node scripts/verify-pin.js --expect $NEW_LEN --hiverelay\`"
     echo "  in 10–20 min. If it keeps failing, relays may need a higher maxStorage"
     echo "  cap (see scripts/pin-self-on-hiverelay.js SEED_OPTS)."
     exit 2

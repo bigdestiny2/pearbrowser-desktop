@@ -135,7 +135,7 @@ Real-network release checks:
 
 ```bash
 node scripts/check-relays.js
-node scripts/verify-pin.js --expect 18552
+node scripts/verify-pin.js --expect 18552 --hiverelay
 node scripts/verify-release-contents.js --expect 18552 --missing /.landing-seed.mjs --missing /pearbrowser-storage --missing /docs --missing /scripts --missing /examples --missing /test
 node scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --expect-app hiveworm
 node scripts/verify-app-full.js --key 1868916a7a282ff0f211b11b536e9642828c32d3a817a254e1ef7e602709e25d --name pearbrowser-homepage --samples 12 --timeout 90

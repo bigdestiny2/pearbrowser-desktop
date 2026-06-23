@@ -32,7 +32,7 @@ manual gate.
 | `npm audit --audit-level=high` | 0 high vulnerabilities | PASS | 2026-06-23 local run: `found 0 vulnerabilities` |
 | Desktop CI | install/test/audit success |  |  |
 | `node scripts/check-relays.js` | real-DHT relay reachable |  |  |
-| `node scripts/verify-pin.js --expect 18552` | length >= 18552, sampled blob present |  |  |
+| `node scripts/verify-pin.js --expect 18552 --hiverelay` | length >= 18552, sampled blob present, HiveRelay proof captured when available |  |  |
 | `node scripts/verify-release-contents.js ...` | forbidden paths absent |  |  |
 | `node scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --expect-app hiveworm` | signed catalogue, 14 apps, expected rows | PASS | 2026-06-23 real-network run: length `273`, peers `1`, 14 apps, Peercord `standalone`, source URL, `GPL-3.0` |
 | `node scripts/verify-app-full.js` homepage | sampled blobs present |  |  |

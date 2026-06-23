@@ -113,6 +113,13 @@ const DEFAULT_URL = 'hyper://1868916a7a282ff0f211b11b536e9642828c32d3a817a254e1e
 const PEERIT_DRIVE_KEY = 'ec6e2d6d9d22b9d6b40e11a9ca3042be3197e4bdca9e9a7f079be6ee830761b4'
 const PEERIT_URL = 'hyper://' + PEERIT_DRIVE_KEY + '/'
 
+// p2pbuilders — "permissionless P2P Hacker News" (the same Hyperdrive-webapp
+// pattern as peerit: signed records + PoW + reputation, runs in the browser via
+// the window.pear bridge). Opens beside the landing page + peerit on launch.
+// Published 2026-06-23, seeded on HiveRelay. Source: 02-apps/p2pbuilders.
+const P2PBUILDERS_DRIVE_KEY = 'ac1977a75cc84b46af0af8bb559cd4ebbe10507eb0f51d863e289d09635f6d74'
+const P2PBUILDERS_URL = 'hyper://' + P2PBUILDERS_DRIVE_KEY + '/'
+
 // Default catalog — auto-loads on first Apps-tab visit when the user has not yet
 // pinned a catalog of their own. The "PearBrowser Network" curated entry point,
 // published as a Hyperbee (the Pear-native, updatable catalog format) from the
@@ -1221,7 +1228,7 @@ const ONBOARDING_FIRST_SITES = [
     id: 'p2pbuilders',
     title: 'P2P Builders',
     subtitle: 'Permissionless P2P hacker news',
-    url: 'hyper://f0cd01e3565a9eb5d811f3f46f0595ad6b2e87652304789bef3fe4501b3db42a/',
+    url: P2PBUILDERS_URL,
     initial: '🔧',
     gradient: 'linear-gradient(135deg, #ff6600, #fbbf24)'
   }
@@ -4801,9 +4808,10 @@ export function App ({ rpc, C, storagePath }) {
   //      (Browse used to remount with a fresh tabs[] every time)
   //   2. We can persist them to user-data and restore across launches
   // Default initial state on launch is the PearBrowser landing page first,
-  // then peerit. Restored session tabs stay behind those defaults so an app
-  // homepage such as Dealroom cannot hijack the release landing slot.
-  const [tabs, setTabs] = useState(() => [makeTab(DEFAULT_URL), makeTab(PEERIT_URL)])
+  // then p2pbuilders, then peerit. Restored session tabs stay behind those
+  // defaults so an app homepage such as Dealroom cannot hijack the release
+  // landing slot.
+  const [tabs, setTabs] = useState(() => [makeTab(DEFAULT_URL), makeTab(P2PBUILDERS_URL), makeTab(PEERIT_URL)])
   const [browseActiveId, setBrowseActiveId] = useState(() => 'placeholder')
   const [closedTabs, setClosedTabs] = useState(() => [])
   // Tracks whether we've completed the one-time tabs-restore from
@@ -4838,7 +4846,7 @@ export function App ({ rpc, C, storagePath }) {
         // are preserved.
         const savedTabs = Array.isArray(s?.browseTabs) ? s.browseTabs : null
         if (savedTabs && savedTabs.length > 0) {
-          const restored = restoreStartupTabs(savedTabs, [DEFAULT_URL, PEERIT_URL])
+          const restored = restoreStartupTabs(savedTabs, [DEFAULT_URL, P2PBUILDERS_URL, PEERIT_URL])
           if (restored.tabs.length > 0) {
             setTabs(restored.tabs)
             setBrowseActiveId(restored.activeId)

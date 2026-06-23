@@ -4,11 +4,19 @@ A local-first peer-to-peer browser, app store, search engine, naming layer, Nost
 
 **No accounts. No DNS. No manual app updates.** Sites and apps are addressed by stable Pear/Hyperdrive keys and pinned 24/7 on the [HiveRelay](https://github.com/bigdestiny2/P2P-Hiverelay) backbone. The publisher's laptop being offline doesn't matter — the relays carry the bytes, and users launch the current release from the catalogue without hunting for a download or applying an updater.
 
-**Current release:** `v0.5.0` · production length `18552` · pinned on the HiveRelay backbone · fresh-peer verified · desktop packages pinned to local [`00-core/hiverelay`](/Users/localllm/Projects/pear-ecosystem/00-core/hiverelay) packages at `0.16.3`, with runtime compatibility checked through relay capability documents rather than npm package publication.
+**Current release:** `v0.5.0` · production length `18552` · pinned on the HiveRelay backbone · fresh-peer verified · desktop packages pinned to local [`00-core/hiverelay`](/Users/localllm/Projects/pear-ecosystem/00-core/hiverelay) packages at `0.20.0`, with runtime compatibility checked through relay capability documents rather than npm package publication.
 
 **Current architecture:** start with [docs/ARCHITECTURE_AND_CAPABILITIES.md](./docs/ARCHITECTURE_AND_CAPABILITIES.md). The deeper catalogue/search/naming/Nostr audit is in [docs/DEEP_AUDIT_CATALOG_SEARCH_NAMING_NOSTR_2026-06-21.md](./docs/DEEP_AUDIT_CATALOG_SEARCH_NAMING_NOSTR_2026-06-21.md).
 
-## Run it
+## Install it
+
+Primary desktop distribution is moving to native installers, but the current `v0.5.0` GitHub release has no attached installer assets yet. The target packages are:
+
+- macOS: `PearBrowser.app`
+- Windows: `PearBrowser Setup.exe`
+- Linux: `pearbrowser-desktop.deb`
+
+The stable Pear key remains available as the temporary legacy fallback for testers and recovery:
 
 ```sh
 npm i -g pear
@@ -16,9 +24,9 @@ pear
 pear run pear://tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty
 ```
 
-One install, one key, works on all three desktop platforms — Pear downloads the matching native runtime on first launch. The key above is **content-addressed and stable**: when we ship a new release, the same key starts serving the new version. Existing installs hot-sync on next launch.
+The key above is **content-addressed and stable**: when we ship a new release, the same key starts serving the new version. Existing installs hot-sync on next launch.
 
-> **Heads up:** `pear run` is officially deprecated in Pear runtime `v2.4.0` ("use `pear-runtime` module instead for embeddable runtime with P2P OTA updates"). It still works today; the migration path is to ship as a signed native installer (see [Distribution](#distribution) below). The `pear run pear://...` command above continues to work for the foreseeable future.
+> **Heads up:** `pear run` is officially deprecated in Pear runtime `v2.4.0` ("use `pear-runtime` module instead for embeddable runtime with P2P OTA updates"). It still works today, but it is no longer the recommended install path.
 
 ## What's inside
 
@@ -134,7 +142,7 @@ npm install
 pear run --dev .
 ```
 
-The desktop currently consumes HiveRelay as local workspace packages at `../../00-core/hiverelay/packages/{core,client,verifier}`. Those `0.16.3` packages are not published to npm yet, so the sibling checkout is required for community source installs until the relay packages are published.
+The desktop currently consumes HiveRelay as local workspace packages at `../../00-core/hiverelay/packages/{core,client,verifier}`. Those `0.20.0` packages are not published to npm yet, so the sibling checkout is required for community source installs until the relay packages are published.
 
 UI files use htm + React (no build step). Backend in `backend/` is CommonJS. See `package.json` `pear` field for runtime config, and `pear.json` for multisig signing config.
 
@@ -169,7 +177,7 @@ node scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --
 | `scripts/extract-drive.js <key>` | Pull a drive's full content out to a local directory. |
 | `scripts/list-drive.js <key>` | Diagnose what's inside a drive's manifest. |
 | `scripts/check-relays.js` | Discovery probe — print all HiveRelays reachable via DHT. |
-| `scripts/verify-pin.js --expect <length>` | Fresh-peer production-drive check: proves the released browser drive is reachable and serving at least the expected length. |
+| `scripts/verify-pin.js --expect <length> --hiverelay` | Fresh-peer production-drive check plus optional HiveRelay `proveSeeded` evidence when upgraded relays expose storage-proof. |
 | `scripts/verify-release-contents.js --expect <length> --missing <path>` | Fresh-peer release metadata scan: proves ignored scratch/docs/scripts/tests paths are absent from the production drive after purge staging. |
 | `scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --expect-app hiveworm` | Fresh-peer Hyperbee catalogue check: proves the live app catalogue key is reachable and contains expected release rows and Peercord launch metadata. |
 | `scripts/runtime-rpc-smoke.mjs` | Runtime GUI smoke: after launching PearBrowser, checks the diagnostic RPC path reports DHT, proxy, relay, peer-count, and storage readiness without becoming the renderer. |
@@ -180,7 +188,7 @@ node scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --
 
 ## Distribution
 
-The `appling/` directory contains the multi-architecture native shell — Bare + CMake builds for macOS / Windows / Linux. Currently optional (most users `pear run` the production key); future v0.5+ will ship signed installers via `pear build` (Pear runtime v2.5.0+).
+The `appling/` directory contains the multi-architecture native shell — Bare + CMake builds for macOS / Windows / Linux. Native installers are the target distribution path, but `v0.5.0` has no attached installer assets yet; the Pear CLI command is retained as a temporary legacy fallback while packaged and signed per-platform artifacts are attached to releases.
 
 ```sh
 cd appling
@@ -201,7 +209,7 @@ Code signing is per-platform:
 | [`bigdestiny2/hyper-fetch`](https://github.com/bigdestiny2/hyper-fetch) | ~5 KB JS library — read `hyper://` drives from any browser via the HiveRelay HTTP gateway. Pair with PearBrowser to embed hyper:// content in regular web pages. |
 | [`bigdestiny2/hiveworm`](https://github.com/bigdestiny2/hiveworm) | Featured multiplayer life-sim. Uses `window.pear.swarm.v1` for direct peer gossip. Live at `pear://d1xbkcpc…`. |
 | [`mastercodeon/Peercord`](https://git.churchofmalware.org/mastercodeon/Peercord) | Featured decentralized Discord-style chat. Current Pear release: `pear://wmir47w7…`, window-class desktop app. |
-| [`bigdestiny2/P2P-Hiverelay`](https://github.com/bigdestiny2/P2P-Hiverelay) | The always-on relay backbone keeping the whole network alive; this desktop checkout currently consumes the local `0.16.3` workspace packages and verifies live relay compatibility through capability docs. |
+| [`bigdestiny2/P2P-Hiverelay`](https://github.com/bigdestiny2/P2P-Hiverelay) | The always-on relay backbone keeping the whole network alive; this desktop checkout currently consumes the local `0.20.0` workspace packages and verifies live relay compatibility through capability docs. |
 | [`bigdestiny2/PearBrowser`](https://github.com/bigdestiny2/PearBrowser) | Mobile-focused sibling — iOS / Android port. Bare-kit-based. |
 
 ## Credits

@@ -2,9 +2,9 @@ import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 const expected = [
-  ['p2p-hiverelay', '0.16.3', '../../00-core/hiverelay/packages/core/package.json'],
-  ['p2p-hiverelay-client', '0.16.3', '../../00-core/hiverelay/packages/client/package.json'],
-  ['p2p-hiverelay-verifier', '0.16.3', '../../00-core/hiverelay/packages/verifier/package.json']
+  ['p2p-hiverelay', '0.20.0', '../../00-core/hiverelay/packages/core/package.json'],
+  ['p2p-hiverelay-client', '0.20.0', '../../00-core/hiverelay/packages/client/package.json'],
+  ['p2p-hiverelay-verifier', '0.20.0', '../../00-core/hiverelay/packages/verifier/package.json']
 ]
 
 const missing = []
@@ -49,6 +49,6 @@ if (missing.length || mismatched.length) {
     for (const msg of mismatched) console.error(`  - ${msg}`)
   }
   console.error('')
-  console.error('Release note: the HiveRelay 0.16.3 packages are not published to npm, so a standalone pearbrowser-desktop clone is not enough yet.')
+  console.error('Release note: the HiveRelay 0.20.0 packages are not published to npm, so a standalone pearbrowser-desktop clone is not enough yet.')
   process.exit(1)
 }

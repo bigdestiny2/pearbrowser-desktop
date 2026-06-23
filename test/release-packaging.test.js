@@ -10,6 +10,8 @@ const bootEntry = readFileSync(new URL('../ui/boot.js', import.meta.url), 'utf8'
 const tabRuntime = readFileSync(new URL('../backend/tab-runtime.js', import.meta.url), 'utf8')
 const runtimeSmoke = readFileSync(new URL('../scripts/runtime-rpc-smoke.mjs', import.meta.url), 'utf8')
 const liveCatalogVerifier = readFileSync(new URL('../scripts/verify-live-catalog.js', import.meta.url), 'utf8')
+const hiveRelayLayout = readFileSync(new URL('../scripts/check-hiverelay-layout.mjs', import.meta.url), 'utf8')
+const verifyPin = readFileSync(new URL('../scripts/verify-pin.js', import.meta.url), 'utf8')
 
 test('Pear stage ignore excludes local release/operator scratch files', () => {
   const ignored = pkg.pear?.stage?.ignore || []
@@ -22,6 +24,19 @@ test('Pear stage ignore excludes local release/operator scratch files', () => {
 
 test('release script purges ignored files from previous Pear stages', () => {
   assert.match(releaseScript, /pear stage --purge/)
+})
+
+test('release verification asks HiveRelay for signed seed proof evidence', () => {
+  assert.match(releaseScript, /verify-pin\.js --expect \$NEW_LEN --hiverelay/)
+  assert.match(verifyPin, /HiveRelayClient/)
+  assert.match(verifyPin, /proveSeeded/)
+  assert.match(verifyPin, /verifySeededFallback/)
+})
+
+test('HiveRelay workspace pin is v0.20.0 trustless verification release', () => {
+  assert.match(hiveRelayLayout, /p2p-hiverelay', '0\.20\.0/)
+  assert.match(hiveRelayLayout, /p2p-hiverelay-client', '0\.20\.0/)
+  assert.match(hiveRelayLayout, /p2p-hiverelay-verifier', '0\.20\.0/)
 })
 
 test('release evidence checker is exposed as an operator script', () => {
