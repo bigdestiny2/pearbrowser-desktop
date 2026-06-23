@@ -18,8 +18,8 @@ The release is in strong shape for a community launch. The core protocol tests a
 - Production browser drive fresh-peer verification passed at length `16898`, with `/CHANGELOG.md` blob fetch proving content blocks are reachable.
 - Live catalogue fresh-peer verification passed at Hyperbee core length `222`, with signed meta present and Peercord/HiveWorm rows matching expected release metadata, including Peercord `type: "standalone"`.
 - Desktop GUI runtime is up in dev mode with Pear Runtime renderer connected to the backend RPC socket on `127.0.0.1:9876`.
-- Real-DHT relay health passed again after the latest doc/native fix push, with 1 unique HiveRelay reachable and 7 live relay connections. A restricted/sandboxed network run can false-negative DHT discovery, so release checks should run with real network access.
-- PearBrowser homepage, Peercord, and Keet bundle drives were fresh-peer sampled without executing third-party code; all returned peers, file listings, and zero missing sampled blobs.
+- Real-DHT relay health passed again after the latest doc/native fix push, with 1 unique HiveRelay reachable and 10 live relay connections. A restricted/sandboxed network run can false-negative DHT discovery, so release checks should run with real network access.
+- PearBrowser homepage, Peercord, and Keet bundle drives were fresh-peer sampled without executing third-party code; all returned peers, file listings, and zero missing sampled blobs. Latest samples: PearBrowser homepage peers `1`, entries `2`, sampled `2/2`; Peercord peers `1`, entries `14730`, sampled `12/12`; Keet peers `9`, entries `7449`, sampled `12/12`.
 - Native simulator/device smoke is mostly cleared: the generated Expo iOS project exposed a real missing native module (`ExpoLinking`), the tracked dependency is now added and autolinked, and the tracked SwiftUI `ios-native` shell now builds, installs, launches, recovers from stale Corestore layout, and reaches a green `Connected` worklet state on the iPhone 17 simulator. Generated Expo iOS Debug and Release simulator builds now pass; the Release helper pins `HERMES_CLI_PATH` to the Pods `hermesc` as an Xcode build setting so the bundle phase does not hang on the node_modules compiler path. Android native now builds a fresh debug APK with a verified JDK 17, installs it on a headless `pp_avd` emulator, launches `com.pearbrowser.app/.MainActivity`, loads `libbare-kit.so`, extracts `backend.android.bundle`, starts the local proxy, and reaches a green `Connected` Home screen. Android native release APK/AAB builds also pass with R8/resource shrink, and the env-driven signing path verifies with a disposable test key (`apksigner` for APK, `jarsigner` for AAB).
 
 One earlier desktop `npm test` run reported `401/402`; the immediately repeated compact full run passed `402/402`, and the current release branch now passes `404/404` after the Peercord launch-mode coverage landed. No code change was needed for that earlier blip.
@@ -129,8 +129,7 @@ The release script is in better shape after the recent verify-step fix:
 
 Required external smoke before a public announcement:
 
-- If time allows, run `node scripts/verify-app-full.js --key 1868916a7a282ff0f211b11b536e9642828c32d3a817a254e1ef7e602709e25d --name pearbrowser --samples 12`.
-- Launch Peercord and one existing featured Pear app from the catalogue after explicitly approving Pear's trust prompt for Peercord.
+- Launch Peercord and one existing featured Pear app from the catalogue after explicitly approving Pear's trust prompt for Peercord. Automated launch is intentionally not treated as a safe substitute for this gate because it executes third-party code and creates a persistent trust decision for `pear://wmir47w7mai3b1skj66mx7fzso6k6o91kipaney7gtt69npimouy`.
 - Clear remaining native mobile smoke before any app-store-style mobile announcement: production Apple/Android signing and store validation plus broader real-device testing.
 
 ## Evidence
@@ -152,12 +151,12 @@ npm audit --audit-level=high # mobile/native after fix
 npm run validate # publisher catalogue
 node scripts/gen-catalogue-seed.mjs
 node scripts/publish-catalog-bee.js catalog-source/pearbrowser-network.catalog.json --storage /Users/localllm/Projects/pear-ecosystem/03-sites/pearbrowser-publishers/catalog
-node scripts/check-relays.js
-node scripts/verify-pin.js --expect 16898 # latest rerun: length 16898, peers 2, /CHANGELOG.md sampled
+node scripts/check-relays.js # latest rerun: 1 unique relay reachable, 10 live connections
+node scripts/verify-pin.js --expect 16898 # latest rerun: length 16898, peers 1, /CHANGELOG.md sampled
 node scripts/verify-live-catalog.js --expect-app peercord --expect-app hiveworm # latest rerun: length 222, peers 1, 13 apps, Peercord type standalone
-node scripts/verify-app-full.js --key 1868916a7a282ff0f211b11b536e9642828c32d3a817a254e1ef7e602709e25d --name pearbrowser-homepage --samples 12 --timeout 90
+node scripts/verify-app-full.js --key 1868916a7a282ff0f211b11b536e9642828c32d3a817a254e1ef7e602709e25d --name pearbrowser-homepage --samples 12 --timeout 90 # latest rerun: peers 1, entries 2, sampled 2, missing 0
 node scripts/verify-app-full.js --key a2ea4d769d5e2b90caca4fbcb7f4b7b43caf43f2555b81201d3463ef89b55c26 --name peercord --samples 12 --timeout 90 # latest rerun: peers 1, entries 14730, sampled 12, missing 0
-node scripts/verify-app-full.js --key 82110be69e2a531e840bc886dc7b9cab16729c587815295f55035109b45e4ddb --name keet --samples 12 --timeout 90
+node scripts/verify-app-full.js --key 82110be69e2a531e840bc886dc7b9cab16729c587815295f55035109b45e4ddb --name keet --samples 12 --timeout 90 # latest rerun: peers 9, entries 7449, sampled 12, missing 0
 xcodebuild -workspace ios/PearBrowser.xcworkspace -list # mobile/native, succeeded
 xcrun simctl list devices available # mobile/native, selected booted iPhone 17, OS 26.4.1
 ./gradlew :app:tasks --all # mobile/native, failed: no Java Runtime
@@ -193,7 +192,7 @@ Key live values:
 
 ## Residual Risks
 
-- Live GUI process health was proven for PearBrowser itself, and Peercord/Keet bundle availability was proven without executing them. A real Peercord window launch still requires explicit human approval of Pear's trust prompt for that third-party key.
+- Live GUI process health was proven for PearBrowser itself, and Peercord/Keet bundle availability was proven without executing them. A real Peercord window launch still requires explicit human approval of Pear's trust prompt for that third-party key; automation should not bypass that persistent trust decision.
 - Network replication can vary by relay health and NAT conditions. This pass saw reachable relays, a reachable production drive, and a reachable live catalogue, but a second-network spot check remains useful before a high-visibility announcement.
 - Peercord cannot honestly be marketed as headless-in-tab until upstream ships a compatible pear-request worker. PearBrowser does launch it from the featured catalogue without manual download/update.
 - Public Nostr relay behavior is not part of this release; the shipped feature is the trusted-contact bridge.
