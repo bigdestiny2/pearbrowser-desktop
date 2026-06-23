@@ -27,6 +27,9 @@ module.exports = {
       ],
       "description": "P2P browser, decentralized app store, and site publisher. macOS / Windows / Linux. Talks to peers directly over Hyperswarm. Pinned 24/7 on HiveRelay.",
       "version": "0.4.5",
+      "homepage": "hyper://1868916a7a282ff0f211b11b536e9642828c32d3a817a254e1ef7e602709e25d/",
+      "sourceUrl": "https://github.com/bigdestiny2/pearbrowser-desktop",
+      "license": "MIT",
       "verification": "relay-listed"
     },
     {
@@ -44,6 +47,9 @@ module.exports = {
       ],
       "description": "The front page of the P2P internet — a peer-to-peer Reddit. Communities, posts, threaded comments and votes live in a shared Holepunch log (Autobase + Hyperbee) and replicate directly between peers. No servers, no data center. Runs as a P2P site inside PearBrowser, seeded 24/7 on HiveRelay.",
       "version": "1.0.0",
+      "homepage": "hyper://ec6e2d6d9d22b9d6b40e11a9ca3042be3197e4bdca9e9a7f079be6ee830761b4/",
+      "sourceUrl": "pear-ecosystem/02-apps/peerit",
+      "license": "MIT",
       "verification": "relay-listed"
     },
     {
@@ -57,6 +63,8 @@ module.exports = {
       ],
       "description": "Always-on relay infrastructure for the Pear and Hyperswarm ecosystem. Blind peering, NAT traversal, HTTP gateway. Apache-2.0.",
       "version": "0.16.3",
+      "sourceUrl": "https://github.com/bigdestiny2/P2P-Hiverelay",
+      "license": "Apache-2.0",
       "verification": "relay-listed"
     },
     {
@@ -70,6 +78,8 @@ module.exports = {
       ],
       "description": "Permissionless peer-to-peer hacker news for anons who build P2P. Runs in your terminal — no servers, no accounts.",
       "version": "1.0.0",
+      "sourceUrl": "https://github.com/bigdestiny2/p2pbuilders",
+      "license": "Apache-2.0",
       "verification": "relay-listed"
     },
     {
@@ -85,6 +95,9 @@ module.exports = {
       ],
       "description": "Zero-infrastructure P2P virtual data room for M&A and due diligence. End-to-end encrypted documents, a signed tamper-evident audit trail, and cryptographic access tiers — no cloud, no server, no vendor. Built on Holepunch.",
       "version": "1.0.0",
+      "homepage": "hyper://0724aabf2ad6394983f91c6b24ebd417cb3d25addcf29c98eb246c512dc77f90/",
+      "sourceUrl": "pear-ecosystem/02-apps/pear-dealroom",
+      "license": "MIT",
       "verification": "relay-listed"
     },
     {
@@ -101,6 +114,9 @@ module.exports = {
       ],
       "description": "Local-first, end-to-end encrypted notes & clipboard sync for your own devices. No account, no hosted database, no plaintext replication — built on Pear, Holepunch, Hypercore, Hyperbee, Autobase and Hyperswarm. Tap-to-decrypt rows keep secrets sealed until you reveal them. Desktop (macOS / Windows / Linux) + Expo mobile.",
       "version": "0.1.0",
+      "homepage": "hyper://25a06bb3dddec8138e9eda606cc4a11e9ebbe47815fd5d22064b30cff752bb5b/",
+      "sourceUrl": "https://github.com/bigdestiny2/pearpaste",
+      "license": "Apache-2.0",
       "verification": "relay-listed"
     },
     {
@@ -117,6 +133,7 @@ module.exports = {
       ],
       "description": "Peer-to-peer poker — play directly between players over Hyperswarm. No server, no house, no rake.",
       "version": "1.0.0",
+      "license": "MIT",
       "verification": "relay-listed"
     },
     {
@@ -162,6 +179,9 @@ module.exports = {
       ],
       "description": "Decentralized Discord-style chat powered by Pear Runtime and Hyperswarm. Text, voice, video, screen sharing, local identity, and P2P file transfer without central servers.",
       "version": "1.0.8",
+      "homepage": "https://git.churchofmalware.org/mastercodeon/Peercord",
+      "sourceUrl": "https://git.churchofmalware.org/mastercodeon/Peercord",
+      "license": "GPL-3.0",
       "verification": "relay-listed"
     },
     {

@@ -216,6 +216,7 @@
       "version": "1.0.8",
       "verification": "relay-listed",
       "homepage": "https://git.churchofmalware.org/mastercodeon/Peercord",
+      "source": "https://git.churchofmalware.org/mastercodeon/Peercord",
       "license": "GPL-3.0",
       "pearLink": "pear://wmir47w7mai3b1skj66mx7fzso6k6o91kipaney7gtt69npimouy",
       "publishedAt": "2026-06-22T00:00:00Z"

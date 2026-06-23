@@ -93,6 +93,7 @@ function normalizeAppType (value) {
 function normalizeCatalogApp (app, opts = {}) {
   if (!app || typeof app !== 'object' || Array.isArray(app)) return null
   const out = { ...app }
+  const upstreamSource = trimString(out.sourceUrl) || (opts.source ? trimString(out.source) : '')
 
   const key = trimString(out.driveKey) ||
     trimString(out.appKey) ||
@@ -116,7 +117,8 @@ function normalizeCatalogApp (app, opts = {}) {
   out.version = out.version == null ? '' : String(out.version).trim()
   out.categories = normalizeCategories(out.categories)
   out.verification = normalizeVerification(out.verification)
-  if (opts.source && !out.source) out.source = opts.source
+  if (upstreamSource) out.sourceUrl = upstreamSource
+  if (opts.source) out.source = opts.source
   if (opts.catalogKey && !out.catalogKey) out.catalogKey = opts.catalogKey
   if (opts.catalogName && !out.catalogName) out.catalogName = opts.catalogName
   return out
@@ -223,6 +225,9 @@ function catalogAppSearchText (app) {
     app.name,
     app.description,
     app.author,
+    app.homepage,
+    app.sourceUrl,
+    app.license,
     app.id,
     app.version,
     app.source,

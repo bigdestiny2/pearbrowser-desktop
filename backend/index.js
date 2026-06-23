@@ -2708,7 +2708,8 @@ async function ensureDevCatalogue () {
   let existing = await sc.listApps()
   const sig = JSON.stringify(SEED_APPS.map((a) => [
     a.name || '', a.type || '', a.driveKey || '', a.link || '', a.iconData || '',
-    a.author || '', a.description || '', a.verification || '',
+    a.author || '', a.description || '', a.homepage || '', a.sourceUrl || '',
+    a.license || '', a.verification || '',
     (Array.isArray(a.categories) ? a.categories : []).join(',')
   ]))
   let storedSig = null

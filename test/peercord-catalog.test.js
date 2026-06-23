@@ -16,6 +16,8 @@ test('Peercord is seeded as a launchable standalone Pear app', () => {
   assert.equal(app.driveKey, undefined)
   assert.equal(app.author, 'Mastercodeon')
   assert.equal(app.version, '1.0.8')
+  assert.equal(app.sourceUrl, 'https://git.churchofmalware.org/mastercodeon/Peercord')
+  assert.equal(app.license, 'GPL-3.0')
   assert.ok(app.categories.includes('featured'))
   assert.ok(app.description.toLowerCase().includes('discord-style'))
 })
@@ -27,6 +29,9 @@ test('Peercord catalogue source declares window launch mode explicitly', () => {
   assert.equal(app.type, 'standalone')
   assert.equal(app.link, PEERCORD_LINK)
   assert.equal(app.driveKey, undefined)
+  assert.equal(app.homepage, 'https://git.churchofmalware.org/mastercodeon/Peercord')
+  assert.equal(app.source, 'https://git.churchofmalware.org/mastercodeon/Peercord')
+  assert.equal(app.license, 'GPL-3.0')
 })
 
 test('Featured Peercord card uses the window launch path until a headless worker exists', () => {

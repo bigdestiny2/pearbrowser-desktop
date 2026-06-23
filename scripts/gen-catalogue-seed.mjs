@@ -11,9 +11,10 @@
 //   node scripts/gen-catalogue-seed.mjs
 //   node scripts/gen-catalogue-seed.mjs --source /path/to/catalog.json
 //
-// The manifest is rich (id, pearLink, homepage, license, platforms, …); the seed
-// rows are validated against the strict APPS_SCHEMA (additionalProperties:false),
-// so we project onto exactly its allowed fields and infer `type` from `link`.
+// The manifest is rich (id, pearLink, homepage, source, license, platforms, …);
+// seed rows are validated against the strict APPS_SCHEMA
+// (additionalProperties:false), so we project onto exactly its allowed fields and
+// infer `type` from `link`.
 
 import { readFileSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -58,6 +59,9 @@ function toSeedRow (a) {
   if (Array.isArray(a.categories) && a.categories.length) row.categories = a.categories
   if (a.description) row.description = a.description
   if (a.version) row.version = String(a.version)
+  if (a.homepage) row.homepage = a.homepage
+  if (a.sourceUrl || a.source) row.sourceUrl = a.sourceUrl || a.source
+  if (a.license) row.license = a.license
   row.verification = a.verification || 'relay-listed'
   return row
 }
