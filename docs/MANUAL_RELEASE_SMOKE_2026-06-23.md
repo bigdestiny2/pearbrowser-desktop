@@ -14,8 +14,9 @@ logs next to each checked item before public announcement.
   - Desktop repo: `bigdestiny2/pearbrowser-desktop`, PR #4 head recorded for
     this release pass.
   - Mobile repo evidence:
-    `bigdestiny2/PearBrowser@de85d420c942d433905324c3e098acc34458a23a` or
-    newer.
+    `bigdestiny2/PearBrowser@c98f329521f10257372ef38f8b750e84f3b2580a`
+    or newer; runtime checks in the evidence docs use source baseline
+    `de85d420c942d433905324c3e098acc34458a23a`.
   - Desktop CI for the head is green.
 - [ ] Run local desktop smoke commands with real network access:
   - `npm test`
