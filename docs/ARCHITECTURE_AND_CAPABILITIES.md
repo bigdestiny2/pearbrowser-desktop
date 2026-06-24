@@ -158,7 +158,7 @@ The current 2026-06-23 release audit verified:
   and high-severity audit on the release branch.
 - Mobile automated tests: `npm test` passing, 136 tests.
 - Live PearBrowser Network catalogue: `hyperbee://f5fb7500bccd60a976d2b1d24246108f4444a210b9ca591533114dffc089934d` reachable from a fresh peer, signed, and carrying 14 apps including Peercord, peerit, and HiveWorm.
-- Production PearBrowser drive: reachable from a fresh peer at length 18640, with blob sampling proving content blocks replicate and a metadata scan proving ignored operator paths are absent.
+- Production PearBrowser drive: reachable from a fresh peer at length 18614, with blob sampling proving content blocks replicate and a metadata scan proving ignored operator paths are absent.
 - Featured app bundles: Peercord and Keet fresh-peer sampled with zero missing sampled blobs.
 - Focused automated coverage includes catalogue safety, signed Hyperbee
   catalogues, Peercord catalogue wiring, name resolution, search planning and

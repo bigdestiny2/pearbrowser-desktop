@@ -3,6 +3,12 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
+const pearConfig = JSON.parse(readFileSync(new URL('../pear.json', import.meta.url), 'utf8'))
+const applingPkg = JSON.parse(readFileSync(new URL('../appling/package.json', import.meta.url), 'utf8'))
+const applingCmake = readFileSync(new URL('../appling/CMakeLists.txt', import.meta.url), 'utf8')
+const nativeReleaseWorkflow = readFileSync(new URL('../.github/workflows/desktop-native-release.yml', import.meta.url), 'utf8')
+const applingReleaseCheck = readFileSync(new URL('../scripts/check-appling-release.mjs', import.meta.url), 'utf8')
+const applingArtifactCollector = readFileSync(new URL('../scripts/collect-appling-artifacts.mjs', import.meta.url), 'utf8')
 const releaseScript = readFileSync(new URL('../scripts/release-prod.sh', import.meta.url), 'utf8')
 const sheetsBundleScript = readFileSync(new URL('../scripts/build-sheets-bundle.sh', import.meta.url), 'utf8')
 const mainEntry = readFileSync(new URL('../index.js', import.meta.url), 'utf8')
@@ -41,6 +47,44 @@ test('HiveRelay workspace pin is v0.20.0 trustless verification release', () => 
 
 test('release evidence checker is exposed as an operator script', () => {
   assert.equal(pkg.scripts?.['check:release-evidence'], 'node scripts/check-release-evidence.mjs')
+})
+
+test('appling release metadata stays in sync with the production Pear channel', () => {
+  const productionId = pearConfig.links.production.replace(/^pear:\/\//, '')
+  assert.match(applingCmake, new RegExp(`ID "${productionId}"`))
+  assert.match(applingCmake, new RegExp(`VERSION ${pkg.version.replace(/\./g, '\\.')}`))
+  assert.equal(applingPkg.name, 'pearbrowser-desktop-appling')
+  assert.equal(applingPkg.scripts.generate, 'bare-make generate')
+  assert.equal(applingPkg.scripts.build, 'bare-make build')
+  assert.equal(pkg.scripts?.['check:appling-release'], 'node scripts/check-appling-release.mjs')
+  assert.equal(pkg.scripts?.['package:appling'], 'node scripts/collect-appling-artifacts.mjs')
+  assert.match(applingReleaseCheck, /appling CMake ID/)
+  assert.match(applingReleaseCheck, /release tag must look like vX\.Y\.Z/)
+})
+
+test('native release workflow builds and attaches appling artifacts for every desktop OS', () => {
+  assert.match(nativeReleaseWorkflow, /name: Desktop Native Release/)
+  assert.match(nativeReleaseWorkflow, /workflow_dispatch:/)
+  assert.match(nativeReleaseWorkflow, /release:/)
+  assert.match(nativeReleaseWorkflow, /push:\n\s+tags:/)
+  assert.match(nativeReleaseWorkflow, /macos-latest/)
+  assert.match(nativeReleaseWorkflow, /windows-latest/)
+  assert.match(nativeReleaseWorkflow, /ubuntu-latest/)
+  assert.match(nativeReleaseWorkflow, /npm install -g bare-make/)
+  assert.match(nativeReleaseWorkflow, /npm run --prefix appling generate/)
+  assert.match(nativeReleaseWorkflow, /npm run --prefix appling build/)
+  assert.match(nativeReleaseWorkflow, /actions\/upload-artifact@v4/)
+  assert.match(nativeReleaseWorkflow, /actions\/download-artifact@v4/)
+  assert.match(nativeReleaseWorkflow, /gh release upload "\$RELEASE_TAG" release-assets\/\*/)
+  assert.match(nativeReleaseWorkflow, /contents: write/)
+})
+
+test('appling artifact collector emits checksummed release assets', () => {
+  assert.match(applingArtifactCollector, /createHash\('sha256'\)/)
+  assert.match(applingArtifactCollector, /\.app\.zip/)
+  assert.match(applingArtifactCollector, /SHA256SUMS-\$\{releasePlatform\}-\$\{arch\}\.txt/)
+  assert.match(applingArtifactCollector, /\$\{appName\}-\$\{version\}-\$\{releasePlatform\}-\$\{arch\}/)
+  assert.match(applingArtifactCollector, /no \$\{releasePlatform\} appling artifacts found/)
 })
 
 test('schema-sheets bundle keeps native addons in package context', () => {

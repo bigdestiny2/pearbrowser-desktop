@@ -8,7 +8,7 @@ add_pear_appling(
   pearbrowser_desktop
   ID "tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty"
   NAME "PearBrowser"
-  VERSION 0.4.5
+  VERSION 0.5.0
   AUTHOR "pearbrowser-desktop contributors"
   DESCRIPTION "P2P browser, app store, and publishing platform — no servers required."
 

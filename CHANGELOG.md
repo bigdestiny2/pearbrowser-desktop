@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.5.0 hotfix — 2026-06-24
+
+Shipped as production pear release length `33841` on the stable
+`pear://tco5k7…` key.
+
+- Added a browser-side app sync metadata registry so remembered scoped sync
+  groups are classified by source app and raw app id.
+- Added Lighthouse indexing for public Peerit and P2PBuilders communities,
+  boards, posts, and comments as app-routed search documents.
+- Reindex known app sync groups on startup, so searchable app data recovers
+  after relaunch once a remembered group can be reopened.
+- Preserved `hyper://.../#/...` hash routes through the proxy navigation path,
+  so search results can open directly into Peerit/P2PBuilders routes.
+- Verified `npm test` at `455/455`, production release contents at length
+  `33841`, and the live app catalogue with Peercord, peerit, and HiveWorm.
+
 ## v0.5.0 — 2026-06-23
 
 The peer-to-peer platform release. v0.4.x made PearBrowser a browser and
@@ -7,7 +23,7 @@ decentralized app store; v0.5.0 turns it into a full local-first P2P
 platform — a federated search engine, a Nostr bridge, a self-certifying
 naming layer, a unified catalogue, and **peerit**, the front page of the
 P2P internet. Everything that crosses the network is signature-verified
-and fail-closed. Shipped as production pear release length `18552` on the
+and fail-closed. Shipped as production pear release length `18614` on the
 same stable key `pear://tco5k7…` — existing installs hot-sync on next
 launch.
 

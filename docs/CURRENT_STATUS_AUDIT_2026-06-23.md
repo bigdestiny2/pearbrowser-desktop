@@ -6,7 +6,7 @@ and remaining operator gates before doing Level 1 or Level 2 work.
 
 ## Current Read
 
-PearBrowser Desktop is a mature v0.4.5 release candidate for a P2P-native
+PearBrowser Desktop is a mature v0.5.0 release candidate for a P2P-native
 browser, app catalogue, site publisher, local-first search engine, naming layer,
 trusted-contact Nostr bridge, and Pear app launcher.
 
@@ -20,7 +20,7 @@ The strongest current evidence is local and protocol-level. The release notes
 record `npm test` passing with 427/427 desktop tests, Desktop CI passing on the
 release branch, high-severity dependency audit passing, the live catalogue
 fresh-peer check passing at Hyperbee length 273 with 14 apps, and the production
-browser drive fresh-peer check passing at length 18552. The search handover
+browser drive fresh-peer check passing at length 18614. The search handover
 also records that local self-search is live and opt-in trusted-peer federation
 is wired through `QueryPlanner`.
 
@@ -32,7 +32,7 @@ validation, and broader real-device smoke.
 
 ## Source Evidence Read
 
-- `package.json` declares `pearbrowser-desktop` v0.4.5 and a compact local test
+- `package.json` declares `pearbrowser-desktop` v0.5.0 and a compact local test
   command: `node --test 'test/*.test.js'`.
 - `README.md` describes the current release key, HiveRelay pinning model,
   catalogue shape, app launch behavior, search, naming, Nostr, identity,
@@ -135,8 +135,8 @@ Real-network release checks:
 
 ```bash
 node scripts/check-relays.js
-node scripts/verify-pin.js --expect 18552 --hiverelay
-node scripts/verify-release-contents.js --expect 18552 --missing /.landing-seed.mjs --missing /pearbrowser-storage --missing /docs --missing /scripts --missing /examples --missing /test
+node scripts/verify-pin.js --expect 18614 --hiverelay
+node scripts/verify-release-contents.js --expect 18614 --missing /.landing-seed.mjs --missing /pearbrowser-storage --missing /docs --missing /scripts --missing /examples --missing /test
 node scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --expect-app hiveworm
 node scripts/verify-app-full.js --key 1868916a7a282ff0f211b11b536e9642828c32d3a817a254e1ef7e602709e25d --name pearbrowser-homepage --samples 12 --timeout 90
 node scripts/verify-app-full.js --key a2ea4d769d5e2b90caca4fbcb7f4b7b43caf43f2555b81201d3463ef89b55c26 --name peercord --samples 12 --timeout 90

@@ -4,7 +4,7 @@ A local-first peer-to-peer browser, app store, search engine, naming layer, Nost
 
 **No accounts. No DNS. No manual app updates.** Sites and apps are addressed by stable Pear/Hyperdrive keys and pinned 24/7 on the [HiveRelay](https://github.com/bigdestiny2/P2P-Hiverelay) backbone. The publisher's laptop being offline doesn't matter — the relays carry the bytes, and users launch the current release from the catalogue without hunting for a download or applying an updater.
 
-**Current release:** `v0.5.0` · production length `18640` · pinned on the HiveRelay backbone · fresh-peer verified · desktop packages pinned to local [`00-core/hiverelay`](/Users/localllm/Projects/pear-ecosystem/00-core/hiverelay) packages at `0.20.0`, with runtime compatibility checked through relay capability documents rather than npm package publication.
+**Current release:** `v0.5.0` · production length `33841` · pinned on the HiveRelay backbone · fresh-peer verified · desktop packages pinned to local [`00-core/hiverelay`](/Users/localllm/Projects/pear-ecosystem/00-core/hiverelay) packages at `0.20.0`, with runtime compatibility checked through relay capability documents rather than npm package publication.
 
 **Current architecture:** start with [docs/ARCHITECTURE_AND_CAPABILITIES.md](./docs/ARCHITECTURE_AND_CAPABILITIES.md). The deeper catalogue/search/naming/Nostr audit is in [docs/DEEP_AUDIT_CATALOG_SEARCH_NAMING_NOSTR_2026-06-21.md](./docs/DEEP_AUDIT_CATALOG_SEARCH_NAMING_NOSTR_2026-06-21.md).
 
@@ -188,14 +188,19 @@ node scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --
 
 ## Distribution
 
-The `appling/` directory contains the multi-architecture native shell — Bare + CMake builds for macOS / Windows / Linux. Native installers are the target distribution path, but `v0.5.0` has no attached installer assets yet; the Pear CLI command is retained as a temporary legacy fallback while packaged and signed per-platform artifacts are attached to releases.
+The `appling/` directory contains the multi-architecture native shell — Bare + CMake builds for macOS / Windows / Linux. GitHub release assets are produced by `.github/workflows/desktop-native-release.yml`, which builds the appling on hosted macOS, Windows, and Linux runners, collects the native artifacts, writes SHA-256 sidecars, and attaches them to the matching release tag. Run the workflow manually with `v0.5.0` to backfill the assetless release.
 
 ```sh
+npm run check:appling-release -- --tag v0.5.0
 cd appling
 npm i
-bare-make generate
-bare-make build                      # produces unsigned .app/.exe/.deb
+npm run generate
+npm run build
+cd ..
+npm run package:appling -- --tag v0.5.0
 ```
+
+See `docs/NATIVE_RELEASE_PACKAGING.md` for the full release packaging contract.
 
 Code signing is per-platform:
 - macOS: `MACOS_SIGNING_IDENTITY` in `appling/CMakeLists.txt`

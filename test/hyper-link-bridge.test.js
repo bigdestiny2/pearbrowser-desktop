@@ -12,3 +12,9 @@ test('Browse routes hyper:// iframe link messages through owned tabs', () => {
   assert.match(shell, /go\(url, sourceTab\.id\)/)
   assert.match(shell, /go\(url, t\.id\)/)
 })
+
+test('backend hyper navigation preserves hash routes in the proxied iframe URL', () => {
+  const backend = readFileSync(new URL('../backend/index.js', import.meta.url), 'utf8')
+
+  assert.match(backend, /parsed\.search \|\| ''}\$\{parsed\.hash \|\| ''}/)
+})

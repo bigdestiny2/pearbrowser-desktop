@@ -12,7 +12,7 @@ announcement.
 ## Desktop Release Candidate
 
 - [ ] Confirm branch/head:
-  - Desktop repo: `bigdestiny2/pearbrowser-desktop`, PR #4 head recorded for
+  - Desktop repo: `bigdestiny2/pearbrowser-desktop`, PR #5 head recorded for
     this release pass.
   - Mobile repo evidence:
     `bigdestiny2/PearBrowser@c98f329521f10257372ef38f8b750e84f3b2580a`
@@ -24,8 +24,8 @@ announcement.
   - `git diff --check`
   - `npm audit --audit-level=high`
   - `node scripts/check-relays.js`
-  - `node scripts/verify-pin.js --expect 18552 --hiverelay`
-  - `node scripts/verify-release-contents.js --expect 18640 --missing /.landing-seed.mjs --missing /pearbrowser-storage --missing /docs --missing /scripts --missing /examples --missing /test`
+  - `node scripts/verify-pin.js --expect 18614 --hiverelay`
+  - `node scripts/verify-release-contents.js --expect 18614 --missing /.landing-seed.mjs --missing /pearbrowser-storage --missing /docs --missing /scripts --missing /examples --missing /test`
   - `node scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --expect-app hiveworm`
 - [ ] After filling `docs/RELEASE_SMOKE_EVIDENCE_LOG_2026-06-23.md`, run
   `npm run check:release-evidence`.

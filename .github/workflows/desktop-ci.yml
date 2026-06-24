@@ -39,6 +39,40 @@ jobs:
           cache: npm
           cache-dependency-path: pear-ecosystem/01-browser/pearbrowser-desktop/package-lock.json
 
+      - name: Guard HiveRelay 0.20.0 workspace layout
+        run: |
+          node <<'NODE'
+          const { readFileSync } = require('node:fs')
+          const { resolve } = require('node:path')
+
+          const expected = [
+            ['p2p-hiverelay', '0.20.0', 'pear-ecosystem/00-core/hiverelay/packages/core/package.json'],
+            ['p2p-hiverelay-client', '0.20.0', 'pear-ecosystem/00-core/hiverelay/packages/client/package.json'],
+            ['p2p-hiverelay-verifier', '0.20.0', 'pear-ecosystem/00-core/hiverelay/packages/verifier/package.json']
+          ]
+
+          const errors = []
+
+          for (const [name, version, rel] of expected) {
+            try {
+              const pkgPath = resolve(process.cwd(), rel)
+              const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'))
+              if (pkg.name !== name || pkg.version !== version) {
+                errors.push(`${rel}: expected ${name}@${version}, found ${pkg.name || '(missing name)'}@${pkg.version || '(missing version)'}`)
+              }
+            } catch (err) {
+              errors.push(`${rel}: ${err.message}`)
+            }
+          }
+
+          if (errors.length) {
+            console.error('HiveRelay checkout no longer matches the documented 0.20.0 workspace layout.')
+            console.error('Expected packages under pear-ecosystem/00-core/hiverelay/packages/{core,client,verifier}.')
+            for (const error of errors) console.error(`- ${error}`)
+            process.exit(1)
+          }
+          NODE
+
       - name: Verify HiveRelay layout
         working-directory: pear-ecosystem/01-browser/pearbrowser-desktop
         run: node scripts/check-hiverelay-layout.mjs

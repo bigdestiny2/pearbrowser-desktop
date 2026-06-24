@@ -15,7 +15,7 @@ manual gate.
 | Operator | Codex local release audit |
 | Date/time started | 2026-06-23T16:36:00Z |
 | Desktop repo/branch/head | `bigdestiny2/pearbrowser-desktop`, `feat/p2p-infra-naming`, branch head containing this evidence log |
-| Desktop PR/CI URL | PR #4: `https://github.com/bigdestiny2/pearbrowser-desktop/pull/4`; latest pushed CI before this local checker change: Desktop CI #43 success on `1e484ae` |
+| Desktop PR/CI URL | PR #5 merged: `https://github.com/bigdestiny2/pearbrowser-desktop/pull/5`; head `a52b3f0`, merge commit `36bafe0`; latest production release length `33841` |
 | Mobile repo/head | `bigdestiny2/PearBrowser`, `main`, `01eb8c7fbfada50672ddbb3ec79aec25621229bb` |
 | macOS machine | `Locals-Mac-Studio.local`, macOS 26.4.1 build 25E253 |
 | iOS simulator/device(s) | Prior simulator proof in `PearBrowser/ios-native/BUILD.md`: iPhone 17 simulator green `Connected`; not rerun in this loop |
@@ -27,14 +27,14 @@ manual gate.
 
 | Gate | Expected | Result | Evidence |
 | --- | --- | --- | --- |
-| `npm test` | 432/432 pass | PASS | 2026-06-24 local run: `node --test 'test/*.test.js'`, pass `432/432` |
+| `npm test` | 455/455 pass | PASS | 2026-06-24 local run: `node --test 'test/*.test.js'`, pass `455/455` |
 | `git diff --check` | clean | PASS | 2026-06-24 local run exited 0 before evidence-log edits |
 | `npm audit --audit-level=high` | 0 high vulnerabilities | PASS | 2026-06-24 local run: `found 0 vulnerabilities` |
 | Desktop CI | install/test/audit success |  |  |
 | `node scripts/check-relays.js` | real-DHT relay reachable |  |  |
-| `node scripts/verify-pin.js --expect 18640 --hiverelay` | length >= 18640, sampled blob present, HiveRelay proof captured when available | PASS | 2026-06-24 release-prod fresh-peer run: length `18640`, peers `1`, sampled `/backend/anongpt-buyer.js` `11652` bytes; HiveRelay storage-proof route not yet enabled on fleet |
-| `node scripts/verify-release-contents.js ...` | forbidden paths absent | PASS | 2026-06-24 fresh-peer scan: length `18640`, `10233` entries, forbidden paths absent |
-| `node scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --expect-app hiveworm` | signed catalogue, 14 apps, expected rows | PASS | 2026-06-23 real-network run: length `273`, peers `1`, 14 apps, Peercord `standalone`, source URL, `GPL-3.0` |
+| `node scripts/verify-pin.js --expect 33841 --hiverelay` | length >= 33841, sampled blob present, HiveRelay proof captured when available | PASS | 2026-06-24 release-prod fresh-peer run: length `33841`, peers `3`, sampled `/backend/anongpt-buyer.js` `11652` bytes; HiveRelay storage-proof route not yet enabled on fleet |
+| `node scripts/verify-release-contents.js --expect 33841 --missing /.landing-seed.mjs --missing /pearbrowser-storage --missing /docs --missing /scripts --missing /examples --missing /test` | forbidden paths absent | PASS | 2026-06-24 fresh-peer scan: length `33841`, 10250 entries, forbidden paths absent |
+| `node scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --expect-app hiveworm` | signed catalogue, 14 apps, expected rows | PASS | 2026-06-24 real-network run: length `273`, peers `1`, 14 apps, Peercord `standalone`, source URL, `GPL-3.0` |
 | `node scripts/verify-app-full.js` homepage | sampled blobs present |  |  |
 | `node scripts/verify-app-full.js` Peercord | sampled blobs present, no execution |  |  |
 | `node scripts/verify-app-full.js` Keet | sampled blobs present, no execution |  |  |

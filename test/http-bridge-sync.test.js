@@ -53,6 +53,8 @@ async function request (bridge, method, path, opts) {
 
 function makeBridge () {
   const calls = []
+  const registryRecords = []
+  const indexedAppends = []
   const bridge = {
     async createSyncGroup (appId) {
       calls.push(['createSyncGroup', appId])
@@ -81,6 +83,18 @@ function makeBridge () {
   }
   const http = new HttpBridge(bridge, null, null, {
     validateToken: (token) => token === 'good' ? driveKey : null,
+    appSyncRegistry: {
+      remember (record) {
+        registryRecords.push(record)
+        return record
+      }
+    },
+    getAppDataIndexer: () => ({
+      async indexAppend (record) {
+        indexedAppends.push(record)
+        return { indexed: true, docId: 'doc-1' }
+      }
+    }),
     identity: {
       getAppKeypair (keyHex) {
         assert.equal(keyHex, driveKey)
@@ -98,11 +112,11 @@ function makeBridge () {
       }
     }
   })
-  return { http, calls }
+  return { http, calls, registryRecords, indexedAppends }
 }
 
 test('HttpBridge sync API requires a token and scopes app IDs to the drive', async () => {
-  const { http, calls } = makeBridge()
+  const { http, calls, registryRecords } = makeBridge()
 
   const unauthorized = await request(http, 'POST', '/api/sync/create', {
     body: { appId: 'shop' }
@@ -126,10 +140,16 @@ test('HttpBridge sync API requires a token and scopes app IDs to the drive', asy
   assert.equal(create.res.json.appId, 'shop')
   assert.ok(scope('shop').length <= 64, 'scoped appId must fit the bridge 64-char limit')
   assert.deepEqual(calls, [['createSyncGroup', scope('shop')]])
+  assert.deepEqual(registryRecords, [{
+    scopedAppId: scope('shop'),
+    appDriveKey: driveKey,
+    rawAppId: 'shop',
+    inviteKey: 'c'.repeat(64)
+  }])
 })
 
 test('HttpBridge routes sync operations and identity through the authenticated app scope', async () => {
-  const { http, calls } = makeBridge()
+  const { http, calls, registryRecords, indexedAppends } = makeBridge()
   const auth = { 'x-pear-token': 'good' }
 
   const inviteKey = '1'.repeat(64)
@@ -172,6 +192,19 @@ test('HttpBridge routes sync operations and identity through the authenticated a
   assert.equal(signed.res.json.payload, 'hello')
   assert.equal(signed.res.json.namespace, 'peerit')
 
+  assert.deepEqual(registryRecords, [{
+    scopedAppId: scope('shop'),
+    appDriveKey: driveKey,
+    rawAppId: 'shop',
+    inviteKey
+  }])
+  assert.deepEqual(indexedAppends, [{
+    appDriveKey: driveKey,
+    rawAppId: 'shop',
+    scopedAppId: scope('shop'),
+    op: { type: 'product:create', data: { id: 'p1' } }
+  }])
+
   assert.deepEqual(calls, [
     ['joinSyncGroup', scope('shop'), inviteKey],
     ['append', scope('shop'), { type: 'product:create', data: { id: 'p1' } }],
@@ -197,7 +230,7 @@ test('HttpBridge login uses the already parsed POST body', async () => {
   const result = await Promise.race([
     request(http, 'POST', '/api/login', {
       headers: { 'x-pear-token': 'good' },
-      body: { scopes: ['contacts:read', 7], appName: 'Peerit', reason: 'Restore posts' }
+      body: { scopes: ['contacts:read', 7], appName: 'Peerit', reason: 'Restore posts', challenge: 'nonce-1' }
     }),
     new Promise((resolve) => setTimeout(() => resolve({ timeout: true }), 200))
   ])
@@ -209,6 +242,7 @@ test('HttpBridge login uses the already parsed POST body', async () => {
     driveKeyHex: driveKey,
     scopes: ['contacts:read', '7'],
     appName: 'Peerit',
-    reason: 'Restore posts'
+    reason: 'Restore posts',
+    challenge: 'nonce-1'
   }])
 })

@@ -31,6 +31,10 @@ class HttpBridge {
     this._swarmBridge = opts.swarmBridge || null   // SwarmBridge instance — see backend/swarm-bridge.js
     this._anongptBuyer = opts.anongptBuyer || null // AnongptBuyer — see backend/anongpt-buyer.js
     this._anongptDriveKey = (opts.anongptDriveKey || '').toLowerCase()
+    this._appSyncRegistry = opts.appSyncRegistry || null
+    this._getAppDataIndexer = typeof opts.getAppDataIndexer === 'function'
+      ? opts.getAppDataIndexer
+      : () => opts.appDataIndexer || null
     this._rateLimiter = new Map() // Simple rate limiting per IP
   }
 
@@ -80,6 +84,37 @@ class HttpBridge {
   // different apps stay isolated.
   _scopeAppId (driveKeyHex, appId) {
     return b4a.toString(hypercoreCrypto.data(b4a.from(`${driveKeyHex}:${appId}`)), 'hex')
+  }
+
+  _rememberAppSyncGroup ({ auth, rawAppId, scopedAppId, inviteKey }) {
+    if (!this._appSyncRegistry || !inviteKey) return null
+    try {
+      return this._appSyncRegistry.remember({
+        scopedAppId,
+        appDriveKey: auth.driveKeyHex,
+        rawAppId,
+        inviteKey
+      })
+    } catch (err) {
+      console.warn('[HttpBridge] sync registry remember failed:', err && err.message)
+      return null
+    }
+  }
+
+  async _indexAppSyncAppend ({ auth, rawAppId, scopedAppId, op }) {
+    let indexer = null
+    try { indexer = this._getAppDataIndexer && this._getAppDataIndexer() } catch (_) {}
+    if (!indexer || typeof indexer.indexAppend !== 'function') return
+    try {
+      await indexer.indexAppend({
+        appDriveKey: auth.driveKeyHex,
+        rawAppId,
+        scopedAppId,
+        op
+      })
+    } catch (err) {
+      console.warn('[HttpBridge] app data index failed:', err && err.message)
+    }
   }
 
   _requireToken (req, res, urlObj) {
@@ -150,6 +185,7 @@ class HttpBridge {
         }
         const scopedAppId = this._scopeAppId(auth.driveKeyHex, body.appId)
         const result = await this._bridge.createSyncGroup(scopedAppId)
+        this._rememberAppSyncGroup({ auth, rawAppId: body.appId, scopedAppId, inviteKey: result && result.inviteKey })
         return this._json(res, { ...result, appId: body.appId })
       }
 
@@ -165,6 +201,7 @@ class HttpBridge {
         }
         const scopedAppId = this._scopeAppId(auth.driveKeyHex, body.appId)
         const result = await this._bridge.joinSyncGroup(scopedAppId, body.inviteKey)
+        this._rememberAppSyncGroup({ auth, rawAppId: body.appId, scopedAppId, inviteKey: (result && result.inviteKey) || body.inviteKey })
         return this._json(res, { ...result, appId: body.appId })
       }
 
@@ -181,7 +218,9 @@ class HttpBridge {
           return this._jsonError(res, 'Operation too large', 413)
         }
         const scopedAppId = this._scopeAppId(auth.driveKeyHex, body.appId)
-        const result = await this._bridge.append(scopedAppId, body.op || body)
+        const op = body.op || body
+        const result = await this._bridge.append(scopedAppId, op)
+        await this._indexAppSyncAppend({ auth, rawAppId: body.appId, scopedAppId, op })
         return this._json(res, result)
       }
 
@@ -324,9 +363,10 @@ class HttpBridge {
         const scopes = Array.isArray(loginBody.scopes) ? loginBody.scopes.map(String) : []
         const appName = typeof loginBody.appName === 'string' ? loginBody.appName.slice(0, 128) : null
         const reason = typeof loginBody.reason === 'string' ? loginBody.reason.slice(0, 512) : null
+        const challenge = typeof loginBody.challenge === 'string' ? loginBody.challenge : null
         try {
           const attestation = await this._requestLogin({
-            driveKeyHex: auth.driveKeyHex, scopes, appName, reason,
+            driveKeyHex: auth.driveKeyHex, scopes, appName, reason, challenge,
           })
           // Attach the visible profile fields the app is allowed to see.
           let profileFields = null

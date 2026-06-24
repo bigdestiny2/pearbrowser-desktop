@@ -55,7 +55,7 @@ const REVOKE_TAG = 'pear.idbinding.revoke.v3:'
 // satisfy a 'nostr'/'merchant'/... resolve, even with a valid root signature.
 // Add purposes here as tracks land; every resolver MUST pass the purpose it
 // expects. (v3 cut from v2 is free — no live bindings predate it.)
-const PURPOSES = ['search', 'name', 'merchant', 'nostr', 'routing']
+const PURPOSES = ['search', 'name', 'merchant', 'nostr', 'routing', 'login', 'launch']
 const PURPOSE_SEARCH = 'search'
 
 // Canonical, stable bytes a binding/revocation signs (sorted keys, no clock).

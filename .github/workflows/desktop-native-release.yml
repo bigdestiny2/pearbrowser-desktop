@@ -1,0 +1,125 @@
+name: Desktop Native Release
+
+"on":
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: GitHub release tag to build and attach assets to
+        required: true
+        default: v0.5.0
+  release:
+    types:
+      - published
+  push:
+    tags:
+      - v*
+
+permissions:
+  contents: write
+
+concurrency:
+  group: desktop-native-release-${{ github.event.release.tag_name || github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ github.event.release.tag_name || github.event.inputs.tag || github.ref_name }}
+  NODE_VERSION: 22
+
+jobs:
+  build-native:
+    name: Build ${{ matrix.name }} appling
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            os: macos-latest
+            platform: darwin
+          - name: Windows
+            os: windows-latest
+            platform: win32
+          - name: Linux
+            os: ubuntu-latest
+            platform: linux
+
+    defaults:
+      run:
+        shell: bash
+        working-directory: pear-ecosystem/01-browser/pearbrowser-desktop
+
+    steps:
+      - name: Checkout PearBrowser desktop
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          path: pear-ecosystem/01-browser/pearbrowser-desktop
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup Python for CMake
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install CMake 4 toolchain
+        run: |
+          python -m pip install --upgrade cmake
+          cmake --version
+
+      - name: Install appling build tools
+        run: |
+          npm install -g bare-make
+          npm install --prefix appling
+
+      - name: Verify appling release metadata
+        run: node scripts/check-appling-release.mjs --tag "$RELEASE_TAG"
+
+      - name: Generate native project
+        run: npm run --prefix appling generate
+
+      - name: Build native package
+        run: npm run --prefix appling build
+
+      - name: Collect release artifacts
+        run: >
+          node scripts/collect-appling-artifacts.mjs
+          --tag "$RELEASE_TAG"
+          --platform "${{ matrix.platform }}"
+          --arch "${{ runner.arch }}"
+          --out-dir "dist/appling-release/$RELEASE_TAG/${{ matrix.platform }}"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pearbrowser-desktop-${{ env.RELEASE_TAG }}-${{ matrix.platform }}-${{ runner.arch }}
+          path: pear-ecosystem/01-browser/pearbrowser-desktop/dist/appling-release/${{ env.RELEASE_TAG }}/${{ matrix.platform }}/*
+          if-no-files-found: error
+
+  attach-release:
+    name: Attach assets to GitHub release
+    needs: build-native
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download native artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          pattern: pearbrowser-desktop-${{ env.RELEASE_TAG }}-*
+          merge-multiple: true
+
+      - name: Attach assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          ls -la release-assets
+          if ! gh release view "$RELEASE_TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --repo "$GH_REPO" --title "$RELEASE_TAG" --notes "Native PearBrowser Desktop release artifacts for $RELEASE_TAG."
+          fi
+          gh release upload "$RELEASE_TAG" release-assets/* --repo "$GH_REPO" --clobber

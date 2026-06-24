@@ -2,7 +2,7 @@
  * Verify release metadata from a fresh peer, including paths that must be absent.
  *
  * Usage:
- *   node scripts/verify-release-contents.js --expect 18552 \
+ *   node scripts/verify-release-contents.js --expect 18614 \
  *     --missing /.landing-seed.mjs --missing /docs --missing /scripts
  */
 

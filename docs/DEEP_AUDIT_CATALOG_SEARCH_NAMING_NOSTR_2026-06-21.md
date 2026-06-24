@@ -642,7 +642,7 @@ catalogue.
   14 apps, Peercord, peerit, and HiveWorm rows present, Peercord marked
   `standalone` with upstream source/licence metadata, and peerit marked
   `hypersite`.
-- Production drive check: fresh peer reached length 18552 and fetched 11652
+- Production drive check: fresh peer reached length 18614 and fetched 11652
   bytes from `/backend/anongpt-buyer.js`; a fresh-peer metadata scan also
   confirmed `/.landing-seed.mjs`, `/pearbrowser-storage`, `/docs`, `/scripts`,
   `/examples`, and `/test` are absent from the production drive.

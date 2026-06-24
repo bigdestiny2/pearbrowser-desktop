@@ -271,6 +271,8 @@ Full-GUI app expecting tab embedding; HTTP status for control flow; multi-frame/
 
 **Applies to:** both, with a **large platform asymmetry**. PearBrowser does **not** expose the Pear Runtime global. Mobile injects a full `window.pear` object; **desktop injects only `window.pear.swarm.v1`** (plus a drive-gated `window.pear.anongpt.infer`). For everything else on desktop, call `/api/*` directly.
 
+For the cross-app identity and key-management contract behind `identity`, `login`, recovery, and future standalone launch tickets, see [Pear Identity Protocol (PIP) v1](./PEAR-IDENTITY-PROTOCOL.md).
+
 ### Requirements
 
 - **PB-BRIDGECAPABILITIES-1 (MUST, both).** Feature-detect every capability with optional chaining: `if (window.pear?.swarm?.v1) {…}`, `if (window.pear?.login) {…}`. Treat the entire bridge as possibly absent.
@@ -285,7 +287,7 @@ Full-GUI app expecting tab embedding; HTTP status for control flow; multi-frame/
 
 - **PB-BRIDGECAPABILITIES-6 (MUST, both).** Do **not** target the real Pear Runtime global. The injected surface is exactly `{sync, identity, bridge, swarm, login, contacts, navigate, share}` (mobile) / `{swarm.v1, anongpt.infer}` (desktop). `Pear.config/updates/teardown/versions/worker/messages` do **not** exist. An app needing the runtime global is window-class and cannot run in a tab.
 
-- **PB-BRIDGECAPABILITIES-7 (MUST, both — `pay` corrected).** Call `await window.pear.login({ scopes, appName, reason })` (or POST `/api/login` on desktop) requesting the **minimal** scopes from: `profile:read`, `profile:name`, `profile:contact`, `profile:avatar`, `profile:email`, `profile:website`, `contacts:read`. Pass human-readable `appName`/`reason`. Empty/omitted `scopes` = sign-in-only (you get your stable per-app pubkey; `profile` stays null). **Correction:** `pay` is **not** an enforced scope — it exists only as a type-level token with no backend enforcement or consent label. Do not request it expecting any capability. *(PROPOSED if/when payments land.)*
+- **PB-BRIDGECAPABILITIES-7 (MUST, both — `pay` corrected).** Call `await window.pear.login({ scopes, appName, reason, challenge })` (or POST `/api/login` on desktop) requesting the **minimal** scopes from: `profile:read`, `profile:name`, `profile:contact`, `profile:avatar`, `profile:email`, `profile:website`, `contacts:read`. Pass human-readable `appName`/`reason`, and for account sign-in pass a fresh high-entropy `challenge` nonce that you verify in `attestation.claims.challenge`. Empty/omitted `scopes` = sign-in-only (you get your stable per-app pubkey; `profile` stays null). **Correction:** `pay` is **not** an enforced scope — it exists only as a type-level token with no backend enforcement or consent label. Do not request it expecting any capability. *(PROPOSED if/when payments land.)*
 
 - **PB-BRIDGECAPABILITIES-8 (MUST, both).** Treat the returned `attestation.scopes` and `profile` as authoritative — never assume you got everything requested. Desktop consent presents per-scope checkboxes the user can uncheck; mobile is all-or-nothing for the requested set. `profile` is null if no `profile:*` scope was granted. Branch your feature set on `attestation.scopes`.
 
@@ -293,7 +295,7 @@ Full-GUI app expecting tab embedding; HTTP status for control flow; multi-frame/
 
 - **PB-BRIDGECAPABILITIES-10 (MUST, both).** Before `contacts.list()`/`lookup()` (or GET `/api/contacts`), hold a grant including `contacts:read`, else 403 *"contacts:read scope required — call pear.login first"*. Contact pubkeys are the **other** user's stable root pubkey.
 
-- **PB-BRIDGECAPABILITIES-11 (SHOULD, both — TTL corrected).** Check `await window.pear.login.status()` (or GET `/api/login/status`) on load to read `{loggedIn, scopes, expiresAt, profile}` without prompting, and be ready to re-prompt after expiry/revocation. **Correction:** the grant TTL default is **30 days** (uniform on both platforms), **not 7 days** — re-derive any re-prompt timing from 30 days. Grants are per-app (keyed by `driveKey`) and user-revocable. *(Note: the login ceremony passes a 30-day `expiresAt`; treat loss of access as expected/recoverable.)*
+- **PB-BRIDGECAPABILITIES-11 (SHOULD, both — TTL corrected).** Check `await window.pear.login.status()` (or GET `/api/login/status`) on load to read `{loggedIn, scopes, expiresAt, profile}` without prompting, and be ready to re-prompt after expiry/revocation. **Correction:** the grant TTL default and maximum are **30 days** (uniform on both platforms), **not 7 days** — re-derive any re-prompt timing from 30 days. Grants are per-app (keyed by `driveKey`) and user-revocable. *(Note: the login ceremony passes a 30-day `expiresAt`; treat loss of access as expected/recoverable.)*
 
 - **PB-BRIDGECAPABILITIES-12 (MUST, both).** Do not treat `identity.getPublicKey()` as a cross-app/global user id. It is a per-app ed25519 sub-key = `SHA-256(rootSeed || 'pear-app-v1:' || driveKey)` — stable per user+app, different in every other app. You cannot correlate a human across apps; the root key never leaves the worklet.
 

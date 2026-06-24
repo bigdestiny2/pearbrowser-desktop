@@ -35,9 +35,17 @@ const { AppManager } = require('./app-manager.js')
 const { SiteManager } = require('./site-manager.js')
 const { PearBridge, PEAR_SWARM_V1_SHIM, PEAR_SYNC_SHIM, PEAR_ANONGPT_SHIM } = require('./pear-bridge.js')
 const { HttpBridge } = require('./http-bridge.js')
+const { AppSyncRegistry } = require('./app-sync-registry.cjs')
 const { AnongptBuyer } = require('./anongpt-buyer.js')
 const { UserData } = require('./user-data.js')
 const { Identity, validateMnemonic } = require('./identity.js')
+const {
+  DEFAULT_LOGIN_GRANT_TTL_MS,
+  makeLoginAttestation,
+  normalizeLoginChallenge,
+  normalizeLoginGrantTtlMs,
+  normalizeLoginScopes,
+} = require('./identity-protocol.cjs')
 const { Profile } = require('./profile.js')
 const { Contacts } = require('./contacts.js')
 const { Names } = require('./names.cjs')
@@ -92,6 +100,8 @@ let personalIndex = null // Lighthouse Phase-0 local self-search (search-core)
 let appManager = null
 let siteManager = null
 let pearBridge = null
+let appSyncRegistry = null
+let appDataIndexer = null
 let relayClient = null
 let hiveRelay = null // p2p-hiverelay HiveRelayClient — always-on pinning
 let userData = null
@@ -153,7 +163,7 @@ rpc.handle(C.CMD_NAVIGATE, async (data) => {
   })
 
   return {
-    localUrl: `http://127.0.0.1:${proxy.port}/hyper/${key}${path}${parsed.search || ''}`,
+    localUrl: `http://127.0.0.1:${proxy.port}/hyper/${key}${path}${parsed.search || ''}${parsed.hash || ''}`,
     key,
     path,
     apiToken
@@ -1398,16 +1408,18 @@ rpc.handle(C.CMD_PROFILE_CLEAR, async () => {
 //      the attestation to the page.
 
 const LOGIN_TIMEOUT_MS = 2 * 60 * 1000
-const LOGIN_DEFAULT_TTL = 7 * 24 * 60 * 60 * 1000
+const LOGIN_DEFAULT_TTL = DEFAULT_LOGIN_GRANT_TTL_MS
 
-async function openLoginCeremony ({ driveKeyHex, scopes = [], appName = null, reason = null }) {
+async function openLoginCeremony ({ driveKeyHex, scopes = [], appName = null, reason = null, challenge = null }) {
   if (!identity) throw new Error('Identity not available')
   if (!profile) throw new Error('Profile not available')
+  scopes = normalizeLoginScopes(scopes)
+  challenge = normalizeLoginChallenge(challenge)
 
   // Reuse an existing valid grant covering ALL requested scopes.
   const existing = await profile.getGrant(driveKeyHex)
   if (existing && scopes.every((s) => existing.scopes.includes(s))) {
-    return buildAttestation(driveKeyHex, existing)
+    return buildAttestation(driveKeyHex, existing, { challenge })
   }
 
   // Fresh consent — park, ask UI, wait.
@@ -1418,6 +1430,7 @@ async function openLoginCeremony ({ driveKeyHex, scopes = [], appName = null, re
     scopes,
     appName,
     reason,
+    challenge,
     currentGrant: existing || null,
   }
 
@@ -1433,30 +1446,14 @@ async function openLoginCeremony ({ driveKeyHex, scopes = [], appName = null, re
       driveKeyHex,
       requestedScopes: scopes,
       requestedAppName: appName,
+      requestedChallenge: challenge,
     })
     rpc.event(C.EVT_LOGIN_REQUEST, payload)
   })
 }
 
-function buildAttestation (driveKeyHex, grant) {
-  // The attestation is:
-  //   pear.login.v1:<driveKey>:<appPubkey>:<scopes-joined>:<expiresAt>
-  // signed with the per-app sub-key. Apps + third parties can verify
-  // by recomputing the app sub-pubkey from the user's root pubkey
-  // (but since root never leaves the device, they verify the
-  // attestation directly with appPubkey which is embedded).
-  const keypair = identity.getAppKeypair(driveKeyHex)
-  const appPubkey = keypair.publicKey.toString('hex')
-  const payload = `pear.login.v1:${driveKeyHex}:${appPubkey}:${grant.scopes.join(',')}:${grant.expiresAt}`
-  const signed = identity.signForApp(driveKeyHex, payload, 'login')
-  return {
-    appPubkey,
-    scopes: grant.scopes,
-    expiresAt: grant.expiresAt,
-    grantedAt: grant.grantedAt,
-    loginProof: signed.signature,
-    tag: signed.tag,
-  }
+function buildAttestation (driveKeyHex, grant, opts = {}) {
+  return makeLoginAttestation({ identity, driveKeyHex, grant, challenge: opts.challenge })
 }
 
 rpc.handle(C.CMD_LOGIN_RESOLVE, async ({ requestId, approved, scopes, ttlMs } = {}) => {
@@ -1472,17 +1469,17 @@ rpc.handle(C.CMD_LOGIN_RESOLVE, async ({ requestId, approved, scopes, ttlMs } = 
 
   // UI decides which scopes to grant (can narrow from what was requested).
   // Fall back to whatever the page asked for if the UI doesn't echo it.
-  const finalScopes = Array.isArray(scopes) && scopes.length > 0
-    ? scopes.map(String)
+  const finalScopes = Array.isArray(scopes)
+    ? normalizeLoginScopes(scopes)
     : pending.requestedScopes
-  const expiresAt = Date.now() + (typeof ttlMs === 'number' ? ttlMs : LOGIN_DEFAULT_TTL)
+  const expiresAt = Date.now() + normalizeLoginGrantTtlMs(ttlMs, LOGIN_DEFAULT_TTL)
 
   const grant = await profile.setGrant(pending.driveKeyHex, {
     scopes: finalScopes,
     appName: pending.requestedAppName,
     expiresAt,
   })
-  const attestation = buildAttestation(pending.driveKeyHex, grant)
+  const attestation = buildAttestation(pending.driveKeyHex, grant, { challenge: pending.requestedChallenge })
   pending.resolve(attestation)
   return { ok: true, approved: true, driveKey: pending.driveKeyHex, scopes: finalScopes }
 })
@@ -2398,6 +2395,7 @@ async function boot () {
   appManager = new AppManager(store, swarm)
   siteManager = new SiteManager(store, swarm)
   pearBridge = new PearBridge(store, swarm, { storagePath })
+  appSyncRegistry = new AppSyncRegistry({ storagePath })
 
   // Phase 1 ticket 2 — Hyperbee-backed user data (bookmarks, history, etc.)
   userData = new UserData(store, swarm)
@@ -2432,6 +2430,21 @@ async function boot () {
     }
     personalIndex = await new PersonalIndex(store, { sign }).ready()
     console.log('PersonalIndex ready')
+    try {
+      const { AppDataIndexer } = require('./app-data-indexer.cjs')
+      appDataIndexer = new AppDataIndexer({ personalIndex, registry: appSyncRegistry })
+      appDataIndexer.reindexKnownGroups(pearBridge)
+        .then((summary) => {
+          if (summary && (summary.indexed || summary.removed || summary.errors.length)) {
+            console.log('[app-data] startup reindex:', JSON.stringify(summary))
+          }
+        })
+        .catch((err) => console.error('[app-data] startup reindex failed:', err && err.message))
+      console.log('AppDataIndexer ready')
+    } catch (err) {
+      console.error('AppDataIndexer init failed:', err && err.message)
+      appDataIndexer = null
+    }
   } catch (err) {
     console.error('PersonalIndex init failed:', err && err.message)
     personalIndex = null
@@ -2669,6 +2682,8 @@ async function boot () {
     swarmBridge,
     anongptBuyer,
     anongptDriveKey: C.ANONGPT_DRIVE_KEY,
+    appSyncRegistry,
+    getAppDataIndexer: () => appDataIndexer,
     // Login ceremony plumbing — http-bridge calls requestLogin() when a
     // page invokes pear.login(). We fire EVT_LOGIN_REQUEST up to the
     // UI, which calls CMD_LOGIN_RESOLVE after the user decides. See
@@ -2770,6 +2785,8 @@ async function shutdown () {
   if (siteManager) { try { await siteManager.close() } catch {} siteManager = null }
   if (appManager) { try { await appManager.close() } catch {} appManager = null }
   if (catalogManager) { try { await catalogManager.close() } catch {} catalogManager = null }
+  appDataIndexer = null
+  appSyncRegistry = null
   if (personalIndex) { try { await personalIndex.close() } catch {} personalIndex = null }
   if (browserSync) { try { await browserSync.close() } catch {} browserSync = null }
   if (nameRegistry) { try { await nameRegistry.close() } catch {} nameRegistry = null }

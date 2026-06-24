@@ -1,17 +1,23 @@
 {
   "private": true,
-  "name": "pear-appling",
-  "description": "Template repository for creating Pear applings",
+  "name": "pearbrowser-desktop-appling",
+  "description": "Native PearBrowser Desktop release wrapper built with Pear appling tooling",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/holepunchto/pear-appling.git"
+    "url": "git+https://github.com/bigdestiny2/pearbrowser-desktop.git",
+    "directory": "appling"
   },
-  "author": "Holepunch",
+  "author": "PearBrowser contributors",
   "license": "Apache-2.0",
   "bugs": {
-    "url": "https://github.com/holepunchto/pear-appling/issues"
+    "url": "https://github.com/bigdestiny2/pearbrowser-desktop/issues"
   },
-  "homepage": "https://github.com/holepunchto/pear-appling#readme",
+  "homepage": "https://github.com/bigdestiny2/pearbrowser-desktop#readme",
+  "scripts": {
+    "generate": "bare-make generate",
+    "build": "bare-make build",
+    "package": "node ../scripts/collect-appling-artifacts.mjs"
+  },
   "devDependencies": {
     "cmake-pear": "^3.0.2"
   }
