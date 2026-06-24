@@ -320,11 +320,10 @@ class HttpBridge {
         const auth = this._requireToken(req, res)
         if (!auth) return true
         if (!this._requestLogin) return this._jsonError(res, 'login not available', 503)
-        let body
-        try { body = await this._readBody(req) } catch { return this._jsonError(res, 'Invalid JSON body', 400) }
-        const scopes = Array.isArray(body.scopes) ? body.scopes.map(String) : []
-        const appName = typeof body.appName === 'string' ? body.appName.slice(0, 128) : null
-        const reason = typeof body.reason === 'string' ? body.reason.slice(0, 512) : null
+        const loginBody = body || {}
+        const scopes = Array.isArray(loginBody.scopes) ? loginBody.scopes.map(String) : []
+        const appName = typeof loginBody.appName === 'string' ? loginBody.appName.slice(0, 128) : null
+        const reason = typeof loginBody.reason === 'string' ? loginBody.reason.slice(0, 512) : null
         try {
           const attestation = await this._requestLogin({
             driveKeyHex: auth.driveKeyHex, scopes, appName, reason,

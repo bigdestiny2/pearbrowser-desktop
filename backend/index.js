@@ -2397,7 +2397,7 @@ async function boot () {
   catalogManager = new CatalogManager(store, swarm)
   appManager = new AppManager(store, swarm)
   siteManager = new SiteManager(store, swarm)
-  pearBridge = new PearBridge(store, swarm)
+  pearBridge = new PearBridge(store, swarm, { storagePath })
 
   // Phase 1 ticket 2 — Hyperbee-backed user data (bookmarks, history, etc.)
   userData = new UserData(store, swarm)

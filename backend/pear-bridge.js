@@ -15,13 +15,30 @@
 const Autobase = require('autobase')
 const Hyperbee = require('hyperbee')
 const crypto = require('bare-crypto')
+let fs = null
+let path = null
+try {
+  fs = require('bare-fs')
+  path = require('bare-path')
+} catch (_) {
+  try {
+    fs = require('node:fs')
+    path = require('node:path')
+  } catch (_) {}
+}
+
+const HEX64 = /^[0-9a-f]{64}$/i
 
 class PearBridge {
-  constructor (store, swarm) {
+  constructor (store, swarm, opts = {}) {
     this.store = store
     this.swarm = swarm
     this._syncGroups = new Map() // groupId → { base, swarm topic }
     this._appDrives = new Map() // appId → Hyperdrive
+    this._syncStateFile = opts && opts.storagePath && fs && path
+      ? path.join(opts.storagePath, 'pear-bridge-sync-groups.json')
+      : null
+    this._rememberedSyncGroups = this._loadRememberedSyncGroups()
   }
 
   // Validate appId format to prevent path traversal
@@ -48,12 +65,92 @@ class PearBridge {
   // Sync Groups (Autobase)
   // ---------------------------------------------------------------------------
 
+  _loadRememberedSyncGroups () {
+    if (!this._syncStateFile || !fs) return {}
+    try {
+      const parsed = JSON.parse(fs.readFileSync(this._syncStateFile, 'utf-8'))
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+      const out = {}
+      for (const [appId, inviteKey] of Object.entries(parsed)) {
+        try {
+          this._validateAppId(appId)
+          if (typeof inviteKey === 'string' && HEX64.test(inviteKey)) out[appId] = inviteKey
+        } catch (_) {}
+      }
+      return out
+    } catch (_) {
+      return {}
+    }
+  }
+
+  _persistRememberedSyncGroups () {
+    if (!this._syncStateFile || !fs || !path) return
+    try {
+      const dir = path.dirname(this._syncStateFile)
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+      fs.writeFileSync(this._syncStateFile, JSON.stringify(this._rememberedSyncGroups))
+    } catch (err) {
+      console.warn('[PearBridge] could not persist sync groups:', err && err.message)
+    }
+  }
+
+  _rememberSyncGroup (appId, inviteKey) {
+    if (!appId || !inviteKey || !HEX64.test(inviteKey)) return
+    if (this._rememberedSyncGroups[appId] === inviteKey) return
+    this._rememberedSyncGroups[appId] = inviteKey
+    this._persistRememberedSyncGroups()
+  }
+
+  _forgetSyncGroup (appId, inviteKey) {
+    if (!this._rememberedSyncGroups[appId]) return
+    if (inviteKey && this._rememberedSyncGroups[appId] !== inviteKey) return
+    delete this._rememberedSyncGroups[appId]
+    this._persistRememberedSyncGroups()
+  }
+
+  async _openRememberedSyncGroup (appId) {
+    if (this._syncGroups.has(appId)) return this._syncGroups.get(appId)
+    const inviteKey = this._rememberedSyncGroups[appId]
+    if (!inviteKey) return null
+    try {
+      await this.joinSyncGroup(appId, inviteKey)
+      return this._syncGroups.get(appId) || null
+    } catch (err) {
+      console.warn('[PearBridge] remembered sync group failed to reopen:', appId, err && err.message)
+      this._forgetSyncGroup(appId, inviteKey)
+      return null
+    }
+  }
+
+  _syncStatusForGroup (appId, group) {
+    if (!group) return null
+    return {
+      appId,
+      inviteKey: group.inviteKey,
+      writerCount: group.base.inputs?.length || 1,
+      viewLength: group.base.view?.version || 0
+    }
+  }
+
   /**
    * Create a new sync group — returns an invite key others can join with
    */
   async createSyncGroup (appId, applyFn) {
     // Validate appId
     this._validateAppId(appId)
+    const existing = this._syncGroups.get(appId)
+    if (existing) return this._syncStatusForGroup(appId, existing)
+
+    const remembered = this._rememberedSyncGroups[appId]
+    if (remembered) {
+      try {
+        return await this.joinSyncGroup(appId, remembered, applyFn)
+      } catch (err) {
+        console.warn('[PearBridge] remembered sync group failed during create:', appId, err && err.message)
+        this._forgetSyncGroup(appId, remembered)
+      }
+    }
+
     const localWriter = this.store.get({ name: `pear-app-${appId}-writer` })
     await localWriter.ready()
 
@@ -84,6 +181,7 @@ class PearBridge {
     this.swarm.join(topic, { server: true, client: true })
 
     this._syncGroups.set(appId, { base, topic, inviteKey })
+    this._rememberSyncGroup(appId, inviteKey)
 
     return { inviteKey, appId, writerPublicKey }
   }
@@ -95,9 +193,12 @@ class PearBridge {
     // Validate appId
     this._validateAppId(appId)
     // Validate invite key format
-    if (!inviteKeyHex || !/^[0-9a-f]{64}$/i.test(inviteKeyHex)) {
+    if (!inviteKeyHex || !HEX64.test(inviteKeyHex)) {
       throw new Error('Invalid invite key format')
     }
+    const existing = this._syncGroups.get(appId)
+    if (existing) return this._syncStatusForGroup(appId, existing)
+
     const bootstrapKey = Buffer.from(inviteKeyHex, 'hex')
 
     // Per-appId substore — see createSyncGroup: keeps each group's cores out of
@@ -121,6 +222,7 @@ class PearBridge {
     this.swarm.join(topic, { server: true, client: true })
 
     this._syncGroups.set(appId, { base, topic, inviteKey: inviteKeyHex })
+    this._rememberSyncGroup(appId, inviteKeyHex)
 
     const writerPublicKey = base.local.key.toString('hex')
     return { inviteKey: inviteKeyHex, appId, writerPublicKey }
@@ -132,7 +234,7 @@ class PearBridge {
   async append (appId, operation) {
     // Validate appId
     this._validateAppId(appId)
-    const group = this._syncGroups.get(appId)
+    const group = this._syncGroups.get(appId) || await this._openRememberedSyncGroup(appId)
     if (!group) throw new Error('Sync group not found: ' + appId)
 
     const entry = {
@@ -159,6 +261,7 @@ class PearBridge {
       throw new Error('Invalid key')
     }
     const group = this._syncGroups.get(appId)
+      || await this._openRememberedSyncGroup(appId)
     if (!group) throw new Error('Sync group not found: ' + appId)
 
     await group.base.view.update()
@@ -173,7 +276,7 @@ class PearBridge {
   async list (appId, prefix, opts = {}) {
     // Validate appId
     this._validateAppId(appId)
-    const group = this._syncGroups.get(appId)
+    const group = this._syncGroups.get(appId) || await this._openRememberedSyncGroup(appId)
     if (!group) throw new Error('Sync group not found: ' + appId)
 
     // Validate limit
@@ -223,7 +326,7 @@ class PearBridge {
    */
   async range (appId, opts = {}) {
     this._validateAppId(appId)
-    const group = this._syncGroups.get(appId)
+    const group = this._syncGroups.get(appId) || await this._openRememberedSyncGroup(appId)
     if (!group) throw new Error('Sync group not found: ' + appId)
 
     // Validate + clamp limit
@@ -268,7 +371,7 @@ class PearBridge {
    */
   async count (appId, prefix) {
     this._validateAppId(appId)
-    const group = this._syncGroups.get(appId)
+    const group = this._syncGroups.get(appId) || await this._openRememberedSyncGroup(appId)
     if (!group) throw new Error('Sync group not found: ' + appId)
 
     if (prefix !== undefined && (typeof prefix !== 'string' || prefix.length > 1024)) {
@@ -296,13 +399,7 @@ class PearBridge {
     // Validate appId
     this._validateAppId(appId)
     const group = this._syncGroups.get(appId)
-    if (!group) return null
-    return {
-      appId,
-      inviteKey: group.inviteKey,
-      writerCount: group.base.inputs?.length || 1,
-      viewLength: group.base.view?.version || 0
-    }
+    return this._syncStatusForGroup(appId, group)
   }
 
   /**

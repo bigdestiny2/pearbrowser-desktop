@@ -85,6 +85,16 @@ function makeBridge () {
       getAppKeypair (keyHex) {
         assert.equal(keyHex, driveKey)
         return { publicKey: Buffer.from(appPubkey, 'hex') }
+      },
+      signForApp (keyHex, payload, namespace) {
+        assert.equal(keyHex, driveKey)
+        return {
+          signature: '1'.repeat(128),
+          publicKey: appPubkey,
+          driveKey,
+          namespace,
+          payload
+        }
       }
     }
   })
@@ -153,6 +163,15 @@ test('HttpBridge routes sync operations and identity through the authenticated a
     algorithm: 'ed25519'
   })
 
+  const signed = await request(http, 'POST', '/api/identity/sign', {
+    headers: auth,
+    body: { payload: 'hello', namespace: 'peerit' }
+  })
+  assert.equal(signed.res.statusCode, 200)
+  assert.equal(signed.res.json.signature, '1'.repeat(128))
+  assert.equal(signed.res.json.payload, 'hello')
+  assert.equal(signed.res.json.namespace, 'peerit')
+
   assert.deepEqual(calls, [
     ['joinSyncGroup', scope('shop'), inviteKey],
     ['append', scope('shop'), { type: 'product:create', data: { id: 'p1' } }],
@@ -160,4 +179,36 @@ test('HttpBridge routes sync operations and identity through the authenticated a
     ['list', scope('shop'), 'products', { limit: 1000 }],
     ['status', scope('shop')]
   ])
+})
+
+test('HttpBridge login uses the already parsed POST body', async () => {
+  const seen = []
+  const http = new HttpBridge({}, null, null, {
+    validateToken: (token) => token === 'good' ? driveKey : null,
+    requestLogin: async (args) => {
+      seen.push(args)
+      return { attestation: 'ok' }
+    },
+    profile: {
+      getVisibleProfile: async () => ({ name: 'builder' })
+    }
+  })
+
+  const result = await Promise.race([
+    request(http, 'POST', '/api/login', {
+      headers: { 'x-pear-token': 'good' },
+      body: { scopes: ['contacts:read', 7], appName: 'Peerit', reason: 'Restore posts' }
+    }),
+    new Promise((resolve) => setTimeout(() => resolve({ timeout: true }), 200))
+  ])
+
+  assert.equal(result.timeout, undefined)
+  assert.equal(result.res.statusCode, 200)
+  assert.deepEqual(result.res.json, { attestation: 'ok', profile: { name: 'builder' } })
+  assert.deepEqual(seen, [{
+    driveKeyHex: driveKey,
+    scopes: ['contacts:read', '7'],
+    appName: 'Peerit',
+    reason: 'Restore posts'
+  }])
 })

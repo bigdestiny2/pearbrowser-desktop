@@ -126,6 +126,7 @@ const HYPER_LINK_BRIDGE_SHIM = `<script>
 })()
 </script>`
 const HYPER_LINK_BRIDGE_SHIM_HASH = sha256ScriptBody(HYPER_LINK_BRIDGE_SHIM)
+const PREFERRED_PROXY_PORT = 18788
 
 /**
  * Modify a page's Content-Security-Policy meta tag to authorize the
@@ -436,15 +437,31 @@ class HyperProxy {
   get port () { return this._port }
 
   async start () {
-    this._server = http.createServer((req, res) => this._handle(req, res))
-
-    return new Promise((resolve, reject) => {
-      this._server.on('error', reject)
-      this._server.listen(0, '127.0.0.1', () => {
-        this._port = this._server.address().port
-        resolve(this._port)
+    const listen = (port) => {
+      this._server = http.createServer((req, res) => this._handle(req, res))
+      return new Promise((resolve, reject) => {
+        const cleanup = () => {
+          this._server.removeListener('error', onError)
+          this._server.removeListener('listening', onListening)
+        }
+        const onError = (err) => { cleanup(); reject(err) }
+        const onListening = () => {
+          cleanup()
+          this._port = this._server.address().port
+          resolve(this._port)
+        }
+        this._server.once('error', onError)
+        this._server.once('listening', onListening)
+        this._server.listen(port, '127.0.0.1')
       })
-    })
+    }
+
+    try {
+      return await listen(PREFERRED_PROXY_PORT)
+    } catch (err) {
+      if (!err || (err.code !== 'EADDRINUSE' && err.code !== 'EACCES')) throw err
+      return listen(0)
+    }
   }
 
   async stop () {

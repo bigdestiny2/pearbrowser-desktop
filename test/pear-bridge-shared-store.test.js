@@ -70,3 +70,21 @@ test('two PearBridge sync groups coexist on ONE shared store without colliding',
     await bee.close()
   } finally { await store.close(); await rm(dir, { recursive: true, force: true }) }
 })
+
+test('createSyncGroup reopens a remembered group after bridge restart', async () => {
+  const { store, dir } = await newStore()
+  try {
+    const first = new PearBridge(store, stubSwarm(), { storagePath: dir })
+    const created = await first.createSyncGroup('sticky-app')
+    await first.append('sticky-app', { type: 'post', data: { id: 'p1', title: 'remember me' } })
+    await first.close()
+
+    const second = new PearBridge(store, stubSwarm(), { storagePath: dir })
+    const reopened = await second.createSyncGroup('sticky-app')
+    assert.equal(reopened.inviteKey, created.inviteKey, 'remembered invite key should be reused')
+
+    const rows = await second.list('sticky-app', 'post', { limit: 10 })
+    assert.deepEqual(rows, [{ key: 'post!p1', value: { id: 'p1', title: 'remember me' } }])
+    await second.close()
+  } finally { await store.close(); await rm(dir, { recursive: true, force: true }) }
+})
