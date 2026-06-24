@@ -41,6 +41,57 @@ if [[ -z "$PROD_LINK" ]]; then
   exit 1
 fi
 
+LOCAL_FILE_DEPS=(
+  p2p-hiverelay
+  p2p-hiverelay-client
+  p2p-hiverelay-verifier
+)
+
+materialize_local_file_dep() {
+  local name="$1"
+  local dest="node_modules/$name"
+  local target
+
+  if [[ ! -e "$dest" ]]; then
+    echo "✗ Missing dependency: $dest" >&2
+    echo "  Run npm install before releasing." >&2
+    exit 1
+  fi
+
+  if [[ ! -L "$dest" ]]; then
+    if [[ -f "$dest/package.json" ]]; then
+      return 0
+    fi
+    echo "✗ Dependency is not a package directory: $dest" >&2
+    exit 1
+  fi
+
+  local link
+  link=$(readlink "$dest")
+  if [[ "$link" == /* ]]; then
+    target=$(cd "$link" && pwd -P)
+  else
+    target=$(cd "$(dirname "$dest")" && cd "$link" && pwd -P)
+  fi
+
+  if [[ ! -f "$target/package.json" ]]; then
+    echo "✗ Local file dependency target is not a package: $target" >&2
+    exit 1
+  fi
+
+  echo "  ▸ materializing $name from $target"
+  rm "$dest"
+  cp -R "$target" "$dest"
+}
+
+materialize_local_file_deps() {
+  echo "▸ materializing local file dependencies for Pear stage"
+  for dep in "${LOCAL_FILE_DEPS[@]}"; do
+    materialize_local_file_dep "$dep"
+  done
+  echo
+}
+
 strip_ansi() {
   sed -E $'s/\x1B\\[[0-9;?]*[[:alpha:]]//g'
 }
@@ -51,6 +102,8 @@ echo
 PREV_LEN=$(pear info "$PROD_LINK" 2>/dev/null | grep -E "^\s*release\s" | awk '{print $2}')
 echo "▸ previous released length: $PREV_LEN"
 echo
+
+materialize_local_file_deps
 
 # ── 1. stage ──────────────────────────────────────────────
 echo "============================================================"
