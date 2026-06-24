@@ -35,6 +35,8 @@ class HttpBridge {
     this._getAppDataIndexer = typeof opts.getAppDataIndexer === 'function'
       ? opts.getAppDataIndexer
       : () => opts.appDataIndexer || null
+    this._syncPinGroup = typeof opts.syncPinGroup === 'function' ? opts.syncPinGroup : null
+    this._lighthouseOutboxes = opts.lighthouseOutboxes || null
     this._rateLimiter = new Map() // Simple rate limiting per IP
   }
 
@@ -305,6 +307,24 @@ class HttpBridge {
         return this._json(res, result ? { ...result, appId } : null)
       }
 
+      if (req.method === 'POST' && path === '/api/sync/pin') {
+        const auth = this._requireToken(req, res)
+        if (!auth) return true
+        if (!this._syncPinGroup) return this._jsonError(res, 'sync pinning not available', 503)
+        const appId = body && body.appId
+        if (!this._isValidAppId(appId)) {
+          return this._jsonError(res, 'Invalid appId format', 400)
+        }
+        try {
+          return this._json(res, await this._syncPinGroup({
+            rawAppId: appId,
+            appDriveKey: auth.driveKeyHex
+          }, { appDriveKey: auth.driveKeyHex }))
+        } catch (err) {
+          return this._jsonError(res, err.message || 'sync pin failed', 400)
+        }
+      }
+
       // --- Identity ---
 
       if (req.method === 'GET' && path === '/api/identity') {
@@ -347,6 +367,46 @@ class HttpBridge {
         } catch (err) {
           return this._jsonError(res, err.message || 'sign failed', 500)
         }
+      }
+
+      // --- Lighthouse app-outbox descriptors ---
+
+      if (path.startsWith('/api/lighthouse/outboxes')) {
+        const auth = this._requireToken(req, res)
+        if (!auth) return true
+        if (!this._lighthouseOutboxes) return this._jsonError(res, 'lighthouse outboxes not available', 503)
+
+        if (req.method === 'POST' && path === '/api/lighthouse/outboxes/publish') {
+          const input = { ...(body || {}), appDriveKey: auth.driveKeyHex }
+          try {
+            return this._json(res, await this._lighthouseOutboxes.publish(input, { appDriveKey: auth.driveKeyHex }))
+          } catch (err) {
+            return this._jsonError(res, err.message || 'outbox publish failed', 400)
+          }
+        }
+
+        if (req.method === 'GET' && path === '/api/lighthouse/outboxes/find') {
+          const requestedDrive = url.searchParams.get('appDriveKey')
+          if (requestedDrive && requestedDrive.toLowerCase() !== auth.driveKeyHex) {
+            return this._jsonError(res, 'Forbidden for this app drive', 403)
+          }
+          const query = {
+            appSlug: url.searchParams.get('appSlug') || undefined,
+            appDriveKey: auth.driveKeyHex,
+            rawAppId: url.searchParams.get('rawAppId') || undefined,
+            authorPubkey: url.searchParams.get('authorPubkey') || undefined,
+            recordType: url.searchParams.get('recordType') || undefined,
+            limit: parseInt(url.searchParams.get('limit') || '100'),
+            includePeers: url.searchParams.get('includePeers') !== '0'
+          }
+          try {
+            return this._json(res, await this._lighthouseOutboxes.find(query))
+          } catch (err) {
+            return this._jsonError(res, err.message || 'outbox find failed', 400)
+          }
+        }
+
+        return this._jsonError(res, 'Not found', 404)
       }
 
       // --- Login ceremony (Identity Plan Phase C) ---

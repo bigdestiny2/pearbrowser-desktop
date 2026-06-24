@@ -785,7 +785,7 @@ const PEAR_SWARM_V1_SHIM = `<script>(function () {
  * forward the token (X-Pear-Token), exactly like the swarm shim.
  */
 const PEAR_SYNC_SHIM = `<script>(function () {
-  if (window.pear && window.pear.sync && window.pear.identity) return
+  if (window.pear && window.pear.sync && window.pear.identity && window.pear.lighthouse) return
   function readToken () {
     var m = document.querySelector('meta[name="pear-api-token"]')
     return m ? m.content : ''
@@ -838,15 +838,34 @@ const PEAR_SYNC_SHIM = `<script>(function () {
       if (prefix) url += '&prefix=' + encodeURIComponent(prefix)
       return apiGet(url)
     },
+    pin: function (appId) { return apiPost('/api/sync/pin', { appId: appId }) },
     status: function (appId) { return apiGet('/api/sync/status?appId=' + encodeURIComponent(appId)) }
   }
   var identity = {
     getPublicKey: function () { return apiGet('/api/identity') },
     sign: function (payload, namespace) { return apiPost('/api/identity/sign', { payload: String(payload), namespace: namespace || '' }) }
   }
+  var lighthouse = {
+    outboxes: {
+      publish: function (descriptor) { return apiPost('/api/lighthouse/outboxes/publish', descriptor || {}) },
+      find: function (opts) {
+        opts = opts || {}
+        var url = '/api/lighthouse/outboxes/find'
+        var qs = []
+        ;['appSlug', 'appDriveKey', 'rawAppId', 'authorPubkey', 'recordType'].forEach(function (k) {
+          if (opts[k]) qs.push(k + '=' + encodeURIComponent(opts[k]))
+        })
+        if (opts.limit) qs.push('limit=' + encodeURIComponent(opts.limit))
+        if (opts.includePeers === false) qs.push('includePeers=0')
+        if (qs.length) url += '?' + qs.join('&')
+        return apiGet(url)
+      }
+    }
+  }
   if (!window.pear) window.pear = {}
   if (!window.pear.sync) window.pear.sync = sync
   if (!window.pear.identity) window.pear.identity = identity
+  if (!window.pear.lighthouse) window.pear.lighthouse = lighthouse
 })();</script>`
 
 /**

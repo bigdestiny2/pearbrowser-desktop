@@ -62,6 +62,50 @@ test('federated:true emits exactly one enriched event with the planner results +
   assert.deepEqual(events[0].provenance, { digestHit: true, fallbackPull: false, partial: true, plannedPeers: 2, pulledPeers: 1, digestSkipped: 1 })
 })
 
+test('federated:true forwards incremental batch events before the final enriched event', async () => {
+  const events = []
+  const h = createSearchHandler({
+    getPersonalIndex: () => fakePI([{ docId: 'local' }]),
+    getQueryPlanner: () => ({
+      planAndSearch: async (query, opts) => {
+        opts.onPeerBatch({
+          results: [{ docId: 'local' }, { docId: 'remote-batch' }],
+          verifyBudgetExhausted: false,
+          digestHit: true,
+          fallbackPull: false,
+          partial: true,
+          provenance: { plannedPeers: 2, pulledPeers: 2, completedPeers: 1 },
+          peerFetchStats: [{ rootPubkey: 'aa', reason: 'ok', hits: 1 }],
+          phase: 'batch'
+        })
+        return {
+          results: [{ docId: 'local' }, { docId: 'remote-final' }],
+          verifyBudgetExhausted: false,
+          digestHit: true,
+          fallbackPull: false,
+          partial: false,
+          provenance: { plannedPeers: 2, pulledPeers: 2, digestSkipped: 0 },
+          peerFetchStats: [{ rootPubkey: 'aa', reason: 'ok', hits: 1 }, { rootPubkey: 'bb', reason: 'no-hits', hits: 0 }],
+          phase: 'enriched'
+        }
+      }
+    }),
+    emit: (e) => events.push(e),
+  })
+  const res = await h({ query: 'x', federated: true })
+  await tick()
+  assert.equal(events.length, 2)
+  assert.equal(events[0].queryId, res.queryId)
+  assert.equal(events[0].phase, 'batch')
+  assert.deepEqual(events[0].results.map((r) => r.docId), ['local', 'remote-batch'])
+  assert.equal(events[0].partial, true)
+  assert.deepEqual(events[0].provenance, { plannedPeers: 2, pulledPeers: 2, completedPeers: 1 })
+  assert.equal(events[1].queryId, res.queryId)
+  assert.equal(events[1].phase, 'enriched')
+  assert.deepEqual(events[1].results.map((r) => r.docId), ['local', 'remote-final'])
+  assert.equal(events[1].partial, false)
+})
+
 test('federating is false when no planner exists, even with federated:true', async () => {
   const events = []
   const h = createSearchHandler({

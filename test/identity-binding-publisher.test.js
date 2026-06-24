@@ -13,12 +13,14 @@ import piMod from '../backend/personal-index.cjs'
 import ibMod from '../backend/identity-binding.cjs'
 import cmpMod from '../backend/search-completeness.cjs'
 import dgMod from '../backend/search-digest.cjs'
+import lobMod from '../backend/lighthouse-outbox.cjs'
 import pubMod from '../backend/identity-binding-publisher.js'
 const { PersonalIndex } = piMod
 const { IdentityBindingPublisher } = pubMod
 const ib = ibMod
 const cmp = cmpMod
 const dg = dgMod
+const lob = lobMod
 
 const hex = (b) => b4a.toString(b, 'hex')
 
@@ -39,6 +41,19 @@ function fakeIdentity () {
     getAppKeypair: (name) => {
       if (!appKeys.has(name)) appKeys.set(name, crypto.keyPair())
       return appKeys.get(name)
+    },
+    signForApp: (driveKey, payload, namespace = '') => {
+      const kp = appKeys.has(driveKey) ? appKeys.get(driveKey) : crypto.keyPair()
+      appKeys.set(driveKey, kp)
+      const msg = b4a.concat([
+        b4a.from(`pear.app.${driveKey}:${namespace}:`, 'utf-8'),
+        b4a.from(payload, 'utf-8')
+      ])
+      return {
+        signature: hex(crypto.sign(msg, kp.secretKey)),
+        publicKey: hex(kp.publicKey),
+        algorithm: 'ed25519'
+      }
     },
   }
 }
@@ -189,6 +204,15 @@ test('resolve() drops a validly-signed binding from an unknown (non-contact) roo
   })
 })
 
+test('resolve() can explicitly verify an unlisted peer for signed TRUST-row routes', async () => {
+  await withPublisher(async ({ pub, identity }) => {
+    const res = await pub.publish()
+    const got = await pub.resolve({ contactPubkey: identity.rootHex, dhtPubkey: res.dhtPubkey, allowUnlisted: true })
+    assert.equal(got.searchPubkey, res.searchPubkey)
+    assert.equal(got.indexKey, res.indexKey)
+  })
+})
+
 test('putMeta/getMeta round-trip and stay serialized against indexDoc', async () => {
   await withPublisher(async ({ personalIndex }) => {
     await Promise.all([
@@ -237,5 +261,56 @@ test('publish() emits a digest whose head reflects the index (digest-first gatin
     assert.equal(dg.digestWorthPulling(res.digest, ['nope']), false)
     const got = await pub.resolve({ contactPubkey: identity.rootHex, dhtPubkey: res.dhtPubkey })
     assert.ok(got.digest && dg.digestWorthPulling(got.digest, ['chat'])) // resolves from the DHT record
+  })
+})
+
+test('publish() advertises verified app-outbox descriptors in the binding wrapper', async () => {
+  const appDriveKey = 'ec6e2d6d9d22b9d6b40e11a9ca3042be3197e4bdca9e9a7f079be6ee830761b4'
+  let appOutboxes = []
+  await withPublisher(async ({ pub, identity, contacts }) => {
+    const authorPubkey = hex(identity.getAppKeypair(appDriveKey).publicKey)
+    appOutboxes = [
+      lob.makeSignedDescriptor({
+        appSlug: 'peerit',
+        appDriveKey,
+        rawAppId: 'peerit',
+        inviteKey: 'a'.repeat(64),
+        recordTypes: ['post', 'comment'],
+        updatedAt: 1710000000000
+      }, {
+        authorPubkey,
+        signForApp: (driveKey, payload, namespace) => identity.signForApp(driveKey, payload, namespace)
+      }),
+      { kind: 'app-outbox', appSlug: 'peerit', sig: 'bad' }
+    ]
+    contacts._add(identity.rootHex)
+    const res = await pub.publish()
+    assert.equal(res.appOutboxes.length, 1)
+    assert.equal(res.appOutboxes[0].appSlug, 'peerit')
+    const got = await pub.resolve({ contactPubkey: identity.rootHex, dhtPubkey: res.dhtPubkey })
+    assert.equal(got.appOutboxes.length, 1)
+    assert.equal(got.appOutboxes[0].inviteKey, 'a'.repeat(64))
+  }, {
+    getAppOutboxes: async () => appOutboxes
+  })
+})
+
+test('publish() carries normalized index availability evidence', async () => {
+  await withPublisher(async ({ pub, identity, contacts }) => {
+    contacts._add(identity.rootHex)
+    const res = await pub.publish()
+    assert.equal(res.indexAvailability.state, 'relay-confirmed')
+    const got = await pub.resolve({ contactPubkey: identity.rootHex, dhtPubkey: res.dhtPubkey })
+    assert.equal(got.indexAvailability.state, 'relay-confirmed')
+    assert.equal(got.indexAvailability.seedAcceptances, 2)
+  }, {
+    getIndexAvailability: async () => ({
+      kind: 'personal-index',
+      keyHex: 'd'.repeat(64),
+      state: 'relay-confirmed',
+      seedAcceptances: 2,
+      durable: true,
+      checkedAt: 1710000000000
+    })
   })
 })

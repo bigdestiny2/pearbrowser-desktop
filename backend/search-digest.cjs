@@ -20,30 +20,65 @@ function hashPair (str) {
 function optimalM (n, p) { return Math.max(8, Math.ceil(-(n * Math.log(p)) / (Math.log(2) ** 2))) }
 function optimalK (m, n) { return Math.max(1, Math.round((m / Math.max(1, n)) * Math.log(2))) }
 
-// Build a digest from the author's docIds + per-term document frequencies.
-// termDf: [{ term, df }]. p = target false-positive rate. topK = head size.
-function buildDigest (docIds, termDf = [], { p = 0.001, topK = 2048 } = {}) {
-  // clamp p into (0,0.5]: p≤0 → -log(p)=∞ → RangeError; non-finite → corrupt m
+function bloomBuild (items, { p = 0.001 } = {}) {
   const pp = Math.min(Math.max(Number(p) || 0.001, 1e-12), 0.5)
-  const ids = [...new Set(docIds || [])]
-  const m = optimalM(Math.max(1, ids.length), pp)
-  const k = optimalK(m, ids.length)
+  const vals = [...new Set((items || []).filter((x) => typeof x === 'string' && x))]
+  const m = optimalM(Math.max(1, vals.length), pp)
+  const k = optimalK(m, vals.length)
   const bytes = new Uint8Array(Math.ceil(m / 8))
-  for (const id of ids) {
-    const [h1, h2] = hashPair(id)
+  for (const val of vals) {
+    const [h1, h2] = hashPair(val)
     for (let i = 0; i < k; i++) {
       const bit = (h1 + i * h2) % m
-      // Math.floor/%, not >>3/&7: a bit index ≥ 2^31 would sign-overflow the
-      // 32-bit bitwise op (negative index → silent corruption / false negatives).
       bytes[Math.floor(bit / 8)] |= (1 << (bit % 8))
     }
   }
+  return { m, k, n: vals.length, bits: b4a.toString(b4a.from(bytes), 'base64') }
+}
+
+function bloomMayContain (filter, value) {
+  if (!filter || typeof filter.bits !== 'string' || !filter.bits ||
+      !Number.isInteger(filter.m) || filter.m <= 0 ||
+      !Number.isInteger(filter.k) || filter.k <= 0) return false
+  let bytes
+  try { bytes = b4a.from(filter.bits, 'base64') } catch { return false }
+  if (bytes.length !== Math.ceil(filter.m / 8)) return false
+  const [h1, h2] = hashPair(value)
+  for (let i = 0; i < filter.k; i++) {
+    const bit = (h1 + i * h2) % filter.m
+    if (!(bytes[Math.floor(bit / 8)] & (1 << (bit % 8)))) return false
+  }
+  return true
+}
+
+// Build a digest from the author's docIds + per-term document frequencies.
+// termDf: [{ term, df }]. p = target false-positive rate. topK = head size.
+function buildDigest (docIds, termDf = [], { p = 0.001, termP = 0.001, topK = 2048 } = {}) {
+  const ids = [...new Set(docIds || [])]
+  const docBloom = bloomBuild(ids, { p })
+  const termRows = [...(termDf || [])]
+    .filter((t) => t && typeof t.term === 'string' && t.term && Number.isFinite(t.df))
   const topTerms = [...(termDf || [])]
     .filter((t) => t && typeof t.term === 'string' && Number.isFinite(t.df))
     .sort((a, b) => (b.df - a.df) || (a.term < b.term ? -1 : a.term > b.term ? 1 : 0))
     .slice(0, topK)
     .map((t) => t.term)
-  return { v: 1, m, k, n: ids.length, bits: b4a.toString(b4a.from(bytes), 'base64'), topTerms }
+  // The top-term head is a hot-query optimization, not a complete term
+  // directory. A separate all-term Bloom filter prevents rare terms from being
+  // silently skipped during federated fanout.
+  const termBloom = bloomBuild(termRows.map((t) => t.term), { p: termP })
+  return {
+    v: 2,
+    m: docBloom.m,
+    k: docBloom.k,
+    n: ids.length,
+    bits: docBloom.bits,
+    topTerms,
+    termM: termBloom.m,
+    termK: termBloom.k,
+    termN: termBloom.n,
+    termBits: termBloom.bits
+  }
 }
 
 function digestMayContainDoc (digest, docId) {
@@ -51,21 +86,7 @@ function digestMayContainDoc (digest, docId) {
   // m/k ≤ 0, or wrong bit-buffer length) must fail CLOSED (no-hit), never
   // fail-open to "probably present" for every docId — otherwise a corrupt or
   // hostile digest triggers false withholding accusations and pointless pulls.
-  if (!digest || typeof digest.bits !== 'string' || !digest.bits ||
-      !Number.isInteger(digest.m) || digest.m <= 0 ||
-      !Number.isInteger(digest.k) || digest.k <= 0) return false
-  // a truthy NON-string bits (e.g. a hostile JSON {"bits":999}) would throw in
-  // b4a.from — catch it and fail CLOSED, never crash withholding detection.
-  let bytes
-  try { bytes = b4a.from(digest.bits, 'base64') } catch { return false }
-  if (bytes.length !== Math.ceil(digest.m / 8)) return false
-  const { m, k } = digest
-  const [h1, h2] = hashPair(docId)
-  for (let i = 0; i < k; i++) {
-    const bit = (h1 + i * h2) % m
-    if (!(bytes[Math.floor(bit / 8)] & (1 << (bit % 8)))) return false // definitely absent
-  }
-  return true // probably present
+  return bloomMayContain({ bits: digest && digest.bits, m: digest && digest.m, k: digest && digest.k }, docId)
 }
 
 // True if the peer's head advertises this query term — the cheap pre-check that
@@ -74,11 +95,17 @@ function digestHasTerm (digest, term) {
   return !!(digest && Array.isArray(digest.topTerms) && digest.topTerms.includes(term))
 }
 
+function digestMayContainTerm (digest, term) {
+  if (digestHasTerm(digest, term)) return true
+  if (!digest || typeof digest.termBits !== 'string') return false
+  return bloomMayContain({ bits: digest.termBits, m: digest.termM, k: digest.termK }, term)
+}
+
 // Whether it's worth pulling this contact's full shard for a query: any query
 // term in the head, OR (for rarer terms not in the head) we fall back to
 // pulling — callers can choose. Here: head hit on ANY query term.
 function digestWorthPulling (digest, queryTerms) {
-  return (queryTerms || []).some((t) => digestHasTerm(digest, t))
+  return (queryTerms || []).some((t) => digestMayContainTerm(digest, t))
 }
 
 // True serialized wire size of the digest (for fan-out budgeting) — the actual
@@ -88,6 +115,6 @@ function digestBytes (digest) {
 }
 
 module.exports = {
-  buildDigest, digestMayContainDoc, digestHasTerm, digestWorthPulling, digestBytes,
-  hashPair, optimalM, optimalK,
+  buildDigest, digestMayContainDoc, digestHasTerm, digestMayContainTerm, digestWorthPulling, digestBytes,
+  bloomBuild, bloomMayContain, hashPair, optimalM, optimalK
 }

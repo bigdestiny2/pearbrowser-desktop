@@ -55,6 +55,8 @@ const { NostrEventStore } = require('./nostr-events-store.cjs')
 const { SwarmBridge } = require('./swarm-bridge.js')
 const { SwarmGrants } = require('./swarm-grants.js')
 const C = require('./constants.js')
+const lighthouseOutbox = require('./lighthouse-outbox.cjs')
+const lighthouseAvailability = require('./lighthouse-availability.cjs')
 
 const { IPC } = BareKit
 const storagePath = Bare.argv[0] || './pearbrowser-storage'
@@ -384,7 +386,10 @@ rpc.handle(C.CMD_SEARCH_FEDERATED, async (data = {}) => {
 rpc.handle(C.CMD_IDENTITY_BINDING_PUBLISH, async (data) => {
   await whenReady()
   if (!identityBindingPublisher) throw new Error('binding publisher unavailable')
-  return await identityBindingPublisher.publish({ rotate: !!(data && data.rotate) })
+  let published = await identityBindingPublisher.publish({ rotate: !!(data && data.rotate) })
+  const availability = await pinPersonalIndexBestEffort()
+  if (availability) published = await identityBindingPublisher.publish()
+  return { ...published, availability }
 })
 
 rpc.handle(C.CMD_IDENTITY_BINDING_RESOLVE, async (data) => {
@@ -397,6 +402,16 @@ rpc.handle(C.CMD_IDENTITY_BINDING_RESOLVE, async (data) => {
   return resolved || { searchPubkey: null, indexKey: null }
 })
 
+rpc.handle(C.CMD_LIGHTHOUSE_OUTBOX_PUBLISH, async (data = {}) => {
+  await whenReady()
+  return publishLighthouseOutbox(data)
+})
+
+rpc.handle(C.CMD_LIGHTHOUSE_OUTBOX_FIND, async (data = {}) => {
+  await whenReady()
+  return findLighthouseOutboxes(data)
+})
+
 rpc.handle(C.CMD_SEARCH_INDEX, async (data) => {
   await whenReady()
   if (!personalIndex || !data || !data.driveKey) return { ok: false }
@@ -407,6 +422,7 @@ rpc.handle(C.CMD_SEARCH_INDEX, async (data) => {
       title: data.title || '',
       body: data.text || data.body || '',
       publishedAt: Number.isFinite(data.publishedAt) ? data.publishedAt : 0,
+      source: { kind: 'page', verifiedAs: 'browser-indexed' },
     })
     return { ok: !!docId, docId }
   } catch (err) {
@@ -1263,6 +1279,11 @@ rpc.handle(C.CMD_SYNC_PUSH_LOCAL, async () => {
   return { pushed, ...(await sy.state()) }
 })
 
+rpc.handle(C.CMD_SYNC_PIN_GROUP, async (data = {}) => {
+  await whenReady()
+  return pinSyncGroup(data)
+})
+
 rpc.handle(C.CMD_USERDATA_LIST_BOOKMARKS, async () => {
   if (!userData) return { bookmarks: [] }
   return { bookmarks: await userData.listBookmarks() }
@@ -1371,6 +1392,288 @@ rpc.handle(C.CMD_IDENTITY_VERIFY, async ({ payload, signature, publicKey, driveK
     : id.verify(payload, signature, publicKey)
   return { ok: !!ok, algorithm: 'ed25519' }
 })
+
+async function publishLighthouseOutbox (data = {}, opts = {}) {
+  if (!personalIndex) throw new Error('personal index unavailable')
+  if (!identity) throw new Error('identity unavailable')
+  const rawInput = data && data.descriptor && typeof data.descriptor === 'object'
+    ? data.descriptor
+    : data
+  const appDriveKey = normalizeDriveKey(opts.appDriveKey || rawInput.appDriveKey)
+  if (!/^[0-9a-f]{64}$/i.test(appDriveKey || '')) throw new Error('appDriveKey must be 64 hex chars')
+  const raw = { ...rawInput, appDriveKey }
+
+  let descriptor = null
+  if (raw.sig) {
+    descriptor = lighthouseOutbox.normalizeDescriptor(raw, { verify: true })
+    if (!descriptor) throw new Error('descriptor signature invalid')
+  } else {
+    const authorPubkey = b4a.toString(identity.getAppKeypair(appDriveKey).publicKey, 'hex')
+    descriptor = lighthouseOutbox.makeSignedDescriptor(raw, {
+      authorPubkey,
+      signForApp: (driveKey, payload, namespace) => identity.signForApp(driveKey, payload, namespace),
+    })
+  }
+
+  const stored = await lighthouseOutbox.storeDescriptor(personalIndex, descriptor)
+  try {
+    appSyncRegistry?.remember?.({
+      scopedAppId: descriptor.scopedAppId,
+      appDriveKey: descriptor.appDriveKey,
+      rawAppId: descriptor.rawAppId,
+      inviteKey: descriptor.inviteKey,
+      appSlug: descriptor.appSlug,
+      lastSeenAt: descriptor.updatedAt || Date.now()
+    })
+  } catch (err) {
+    console.warn('[lighthouse] outbox registry remember failed:', err && err.message)
+  }
+
+  let advertised = null
+  if (identityBindingPublisher) {
+    try {
+      const published = await identityBindingPublisher.publish()
+      advertised = {
+        dhtPubkey: published.dhtPubkey || null,
+        dhtSeq: published.dhtSeq || null,
+        appOutboxes: Array.isArray(published.appOutboxes) ? published.appOutboxes.length : 0
+      }
+    } catch (err) {
+      advertised = { error: err && err.message }
+    }
+  }
+
+  let availability = null
+  if (data && data.pin) {
+    try {
+      availability = await pinSyncGroup({
+        appDriveKey: descriptor.appDriveKey,
+        rawAppId: descriptor.rawAppId,
+        scopedAppId: descriptor.scopedAppId,
+        inviteKey: descriptor.inviteKey
+      })
+    } catch (err) {
+      availability = { ok: false, error: err && err.message }
+    }
+  }
+
+  return {
+    ok: true,
+    descriptor: stored.descriptor,
+    count: stored.descriptors.length,
+    advertised,
+    availability
+  }
+}
+
+async function findLighthouseOutboxes (data = {}) {
+  const limit = Math.max(0, Math.min(Number(data.limit) || 100, 1000))
+  const query = { ...data, limit, verify: true }
+  const rows = []
+  const stats = { local: 0, peers: 0, skippedPeers: [] }
+
+  if (personalIndex) {
+    const local = lighthouseOutbox.filterDescriptors(
+      await lighthouseOutbox.readStoredDescriptors(personalIndex),
+      query
+    )
+    for (const descriptor of local) {
+      const record = appSyncRegistry && typeof appSyncRegistry.get === 'function'
+        ? appSyncRegistry.get(descriptor.scopedAppId)
+        : null
+      rows.push({
+        descriptor,
+        provenance: {
+          kind: 'local',
+          availability: lighthouseAvailability.availabilitySummary(record && record.pin)
+        }
+      })
+    }
+    stats.local = local.length
+  }
+
+  if (data.includePeers !== false && contacts && identityBindingPublisher) {
+    let contactList = []
+    try { contactList = await contacts.list({ limit: Math.min(Number(data.contactLimit) || 100, 500) }) } catch (_) {}
+    for (const contact of contactList) {
+      if (!contact || !contact.pubkey || !contact.verifiedAt || !contact.bindingKey) {
+        if (contact && contact.pubkey) stats.skippedPeers.push({ rootPubkey: contact.pubkey, reason: 'unverified-contact' })
+        continue
+      }
+      let resolved = null
+      try {
+        resolved = await identityBindingPublisher.resolve({
+          contactPubkey: contact.pubkey,
+          dhtPubkey: contact.bindingKey
+        })
+      } catch (err) {
+        stats.skippedPeers.push({ rootPubkey: contact.pubkey, reason: 'resolve-error', error: err && err.message })
+        continue
+      }
+      if (!resolved || !Array.isArray(resolved.appOutboxes) || resolved.appOutboxes.length === 0) {
+        stats.skippedPeers.push({ rootPubkey: contact.pubkey, reason: 'no-outboxes' })
+        continue
+      }
+      const peerRows = lighthouseOutbox.filterDescriptors(resolved.appOutboxes, query)
+      for (const descriptor of peerRows) {
+        rows.push({
+          descriptor,
+          provenance: {
+            kind: 'trusted-contact',
+            rootPubkey: contact.pubkey,
+            displayName: contact.displayName || ''
+          }
+        })
+      }
+      stats.peers += peerRows.length
+    }
+  }
+
+  const deduped = []
+  const seen = new Set()
+  for (const row of rows.sort((a, b) => (b.descriptor.updatedAt || 0) - (a.descriptor.updatedAt || 0))) {
+    const key = lighthouseOutbox.descriptorKey(row.descriptor)
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    deduped.push(row)
+    if (limit && deduped.length >= limit) break
+  }
+
+  return {
+    ok: true,
+    results: deduped,
+    descriptors: deduped.map((row) => row.descriptor),
+    stats
+  }
+}
+
+async function readLighthouseTrustRows ({ limit = 2000 } = {}) {
+  if (!personalIndex || typeof personalIndex.getMeta !== 'function') return []
+  const cap = Math.max(0, Math.min(Number(limit) || 0, 2000))
+  if (!cap) return []
+  const rows = await personalIndex.getMeta('lighthouse!trustRows', []).catch(() => [])
+  return Array.isArray(rows) ? rows.slice(0, cap) : []
+}
+
+async function pinKeyWithEvidence ({ kind, keyHex, discoveryKey } = {}) {
+  const requestedAt = Date.now()
+  const evidence = {
+    kind: kind || 'unknown',
+    keyHex: /^[0-9a-f]{64}$/i.test(String(keyHex || '')) ? String(keyHex).toLowerCase() : null,
+    discoveryKey: /^[0-9a-f]{64}$/i.test(String(discoveryKey || '')) ? String(discoveryKey).toLowerCase() : null,
+    requestedAt,
+    checkedAt: requestedAt,
+    connectedRelays: hiveRelay?.getRelays ? hiveRelay.getRelays().length : 0,
+    seedAcceptances: 0,
+    seedRelays: [],
+    durable: false,
+    activePeers: 0,
+    byteLengthLocal: 0,
+    byteLengthRemoteMax: 0,
+    state: 'local-only'
+  }
+  if (!evidence.keyHex) {
+    evidence.error = 'missing key'
+    return lighthouseAvailability.normalizePinEvidence(evidence)
+  }
+  if (!hiveRelay || typeof hiveRelay.seed !== 'function') {
+    evidence.error = 'hiverelay unavailable'
+    return lighthouseAvailability.normalizePinEvidence(evidence)
+  }
+
+  try {
+    const acceptances = await hiveRelay.seed(evidence.keyHex, {
+      replicas: 3,
+      timeout: 10000,
+      ttlDays: 365,
+      discoveryKey: evidence.discoveryKey || undefined
+    })
+    const accepted = Array.isArray(acceptances) ? acceptances : []
+    evidence.seedAcceptances = accepted.length
+    evidence.seedRelays = accepted.map((row) => {
+      if (typeof row === 'string') return { pubkey: row, accepted: true }
+      return {
+        pubkey: row?.pubkey || row?.relayPubkey || row?.relay || null,
+        accepted: row?.accepted !== false
+      }
+    })
+  } catch (err) {
+    evidence.error = err && err.message
+  }
+
+  try {
+    if (typeof hiveRelay.waitForDurable === 'function' && evidence.seedAcceptances > 0) {
+      const status = await hiveRelay.waitForDurable(evidence.keyHex, { timeoutMs: 30000, minPeers: 1 })
+      evidence.durable = !!status?.durable
+      evidence.activePeers = status?.activePeers || 0
+      evidence.byteLengthLocal = status?.byteLengthLocal || 0
+      evidence.byteLengthRemoteMax = status?.byteLengthRemoteMax || 0
+    } else if (typeof hiveRelay.getDurableStatus === 'function') {
+      const status = hiveRelay.getDurableStatus(evidence.keyHex)
+      evidence.durable = !!status?.durable
+      evidence.activePeers = status?.activePeers || 0
+      evidence.byteLengthLocal = status?.byteLengthLocal || 0
+      evidence.byteLengthRemoteMax = status?.byteLengthRemoteMax || 0
+    }
+  } catch (err) {
+    if (!evidence.error) evidence.error = err && err.message
+  }
+
+  evidence.checkedAt = Date.now()
+  evidence.state = lighthouseAvailability.availabilityState(evidence)
+  return lighthouseAvailability.normalizePinEvidence(evidence)
+}
+
+async function pinPersonalIndexBestEffort () {
+  if (!personalIndex || typeof personalIndex.coreState !== 'function') return null
+  const state = await personalIndex.coreState().catch(() => null)
+  if (!state || !state.key) return null
+  const evidence = await pinKeyWithEvidence({
+    kind: 'personal-index',
+    keyHex: state.key,
+    discoveryKey: state.discoveryKey
+  })
+  try { await personalIndex.putMeta('availability!personal-index', evidence) } catch {}
+  return {
+    searchable: true,
+    discoverable: !!identityBindingPublisher,
+    available: evidence ? evidence.state : 'local-only',
+    evidence
+  }
+}
+
+async function pinSyncGroup (data = {}, opts = {}) {
+  const rawAppId = String((data && data.rawAppId) || (data && data.appId) || '').trim()
+  const appDriveKey = normalizeDriveKey(opts.appDriveKey || data.appDriveKey)
+  if (!rawAppId || !/^[a-zA-Z0-9_-]{1,64}$/.test(rawAppId)) throw new Error('rawAppId required')
+  if (!/^[0-9a-f]{64}$/i.test(appDriveKey || '')) throw new Error('appDriveKey must be 64 hex chars')
+  const scopedAppId = lighthouseOutbox.scopedAppIdFor(appDriveKey, rawAppId)
+  const remembered = appSyncRegistry && typeof appSyncRegistry.get === 'function'
+    ? appSyncRegistry.get(scopedAppId)
+    : null
+  let status = null
+  try { status = pearBridge && pearBridge.getSyncStatus(scopedAppId) } catch {}
+  const inviteKey = status?.inviteKey || remembered?.inviteKey || (typeof data.inviteKey === 'string' ? data.inviteKey.toLowerCase() : null)
+  if (!inviteKey || !/^[0-9a-f]{64}$/i.test(inviteKey)) throw new Error('known sync group inviteKey required before pinning')
+
+  const evidence = await pinKeyWithEvidence({
+    kind: 'app-outbox',
+    keyHex: inviteKey
+  })
+  const record = appSyncRegistry && typeof appSyncRegistry.recordPinEvidence === 'function'
+    ? appSyncRegistry.recordPinEvidence(scopedAppId, evidence)
+    : null
+  return {
+    ok: true,
+    scopedAppId,
+    appDriveKey,
+    rawAppId,
+    inviteKey,
+    viewLength: status?.viewLength || 0,
+    availability: lighthouseAvailability.availabilitySummary(evidence),
+    record
+  }
+}
 
 // --- Profile (Identity Plan Phase B) ---
 
@@ -2497,8 +2800,13 @@ async function boot () {
         getNostrEventKey: async () => { try { return (await requireUserData().getSettings()).nostrEventKey || null } catch { return null } },
         getNostrBind: async () => { try { const st = nostrBindingStore ? await nostrBindingStore.getState() : null; return st ? st.binding : null } catch { return null } },
         getNostrRevocations: async () => { try { return nostrBindingStore ? await nostrBindingStore.getRevocations() : [] } catch { return [] } },
+        getAppOutboxes: async () => lighthouseOutbox.readStoredDescriptors(personalIndex),
+        getIndexAvailability: async () => personalIndex.getMeta('availability!personal-index', null),
       }).ready()
-      identityBindingPublisher.publish().catch((e) => console.error('[binding] publish failed:', e && e.message))
+      identityBindingPublisher.publish()
+        .then(() => pinPersonalIndexBestEffort())
+        .then((availability) => availability ? identityBindingPublisher.publish() : null)
+        .catch((e) => console.error('[binding] publish failed:', e && e.message))
       console.log('IdentityBindingPublisher ready')
     } catch (err) {
       console.error('IdentityBindingPublisher init failed:', err && err.message)
@@ -2559,6 +2867,7 @@ async function boot () {
       queryPlanner = new QueryPlanner({
         personalIndex, contacts, identity, swarm, store,
         budget: new SearchFanoutBudget(), bindingPublisher: identityBindingPublisher,
+        getTrustRows: readLighthouseTrustRows,
       })
       console.log('QueryPlanner ready')
     } catch (err) {
@@ -2684,6 +2993,11 @@ async function boot () {
     anongptDriveKey: C.ANONGPT_DRIVE_KEY,
     appSyncRegistry,
     getAppDataIndexer: () => appDataIndexer,
+    syncPinGroup: pinSyncGroup,
+    lighthouseOutboxes: {
+      publish: publishLighthouseOutbox,
+      find: findLighthouseOutboxes
+    },
     // Login ceremony plumbing — http-bridge calls requestLogin() when a
     // page invokes pear.login(). We fire EVT_LOGIN_REQUEST up to the
     // UI, which calls CMD_LOGIN_RESOLVE after the user decides. See

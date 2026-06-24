@@ -162,6 +162,8 @@ const CMD_NAMEREG_STATUS = 270
 const CMD_IDENTITY_BINDING_PUBLISH = 260  // publish/refresh our binding to DHT + meta
 const CMD_IDENTITY_BINDING_RESOLVE = 261  // resolve a contact's current search pubkey
 const CMD_SEARCH_FEDERATED = 262          // explicit federated trigger (v1 folds into CMD_SEARCH)
+const CMD_LIGHTHOUSE_OUTBOX_PUBLISH = 263 // publish a signed app-outbox descriptor
+const CMD_LIGHTHOUSE_OUTBOX_FIND = 271    // find verified app-outbox descriptors
 
 // Nostr bridge Phase 1 — npub + cross-curve identity binding (NOSTR0-2).
 // See docs/research/nostr-bridge.md. Request/response only (no EVT in Phase 1).
@@ -171,6 +173,7 @@ const CMD_NOSTR_REVOKE = 190       // root-signed revoke of the current epoch �
 // Phase 2 — local event store: author + read your own NIP-01 events.
 const CMD_NOSTR_PUBLISH = 191      // { kind, content, tags? } → sign + store → { event }
 const CMD_NOSTR_QUERY = 192        // { filter } → { events } (NIP-01 filter over your store)
+const CMD_SYNC_PIN_GROUP = 193     // { appDriveKey, rawAppId } → seed app outbox core + record availability evidence
 
 // Community app submission + moderation (2026-06-22). Anyone can submit their
 // app to the COMMUNITY catalogue (5d961fdc…); an in-app moderator panel reviews
@@ -178,8 +181,8 @@ const CMD_NOSTR_QUERY = 192        // { filter } → { events } (NIP-01 filter o
 // re-pins it. See backend/community-submit.js + ui/shell.js (submit form + panel).
 const CMD_SUBMIT_APP = 210   // { name, link|driveKey, description?, author?, categories?, iconData? } → publish manifest + seed → { id, status:'pending-review' }
 const CMD_MOD_PENDING = 211  // → { pending: [...] } pulled from the relay review queue
-const CMD_MOD_APPROVE = 212  // { id } → relay approve + write app into community bee + re-pin
-const CMD_MOD_REJECT = 213   // { id, reason? } → relay reject
+const CMD_MOD_APPROVE = 212  // { appKey } → relay approve + write app into community bee + re-pin
+const CMD_MOD_REJECT = 213   // { appKey, reason? } → relay reject
 
 // Pear Bridge (WebView → worklet via RN relay)
 const CMD_BRIDGE = 200
@@ -204,7 +207,7 @@ const EVT_LOGIN_REQUEST = 106
 const EVT_SWARM_REQUEST = 107
 
 // Lighthouse Phase 2 — federated search push results + binding lifecycle.
-const EVT_SEARCH_FEDERATED = 108           // { queryId, results, phase:'enriched', verifyBudgetExhausted, digestHit, fallbackPull, partial, provenance }
+const EVT_SEARCH_FEDERATED = 108           // { queryId, results, phase:'batch'|'enriched', verifyBudgetExhausted, digestHit, fallbackPull, partial, provenance }
 const EVT_IDENTITY_BINDING_PUBLISHED = 109 // { searchPubkey, version }
 const EVT_LAUNCH_PROGRESS = 110            // { key, link, phase:'connecting'|'downloading'|'launching'|'done'|'error', downloaded, total, percent, peers, error }
 
@@ -288,8 +291,9 @@ module.exports = {
   CMD_NAMEREG_CLAIM, CMD_NAMEREG_ROTATE, CMD_NAMEREG_RELEASE, CMD_NAMEREG_REVOKE,
   CMD_NAMEREG_LIST, CMD_NAMEREG_RESOLVE, CMD_NAMEREG_STATUS,
   CMD_IDENTITY_BINDING_PUBLISH, CMD_IDENTITY_BINDING_RESOLVE, CMD_SEARCH_FEDERATED,
+  CMD_LIGHTHOUSE_OUTBOX_PUBLISH, CMD_LIGHTHOUSE_OUTBOX_FIND,
   CMD_NOSTR_GET_IDENTITY, CMD_NOSTR_BIND, CMD_NOSTR_REVOKE,
-  CMD_NOSTR_PUBLISH, CMD_NOSTR_QUERY,
+  CMD_NOSTR_PUBLISH, CMD_NOSTR_QUERY, CMD_SYNC_PIN_GROUP,
   CMD_SUBMIT_APP, CMD_MOD_PENDING, CMD_MOD_APPROVE, CMD_MOD_REJECT,
   CMD_BRIDGE,
   CMD_STOP,

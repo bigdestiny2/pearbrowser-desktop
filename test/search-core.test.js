@@ -10,7 +10,8 @@ import Hyperbee from 'hyperbee'
 import core from '../backend/search-core.cjs'
 const {
   tokenize, docIdFor, invScore, postingKey, docKey, postingSetHash,
-  buildDocRecords, rankCandidates, searchIndex, RANK, MAX_TERMS_PER_DOC,
+  parseQuery, buildDocRecords, canonDocBytes, rankCandidates, searchIndex, RANK, MAX_TERMS_PER_DOC,
+  editDistanceAtMost, editDistanceBounded,
 } = core
 
 test('tokenize lowercases, drops stopwords + short tokens, counts tf, canonical order', () => {
@@ -59,6 +60,46 @@ test('buildDocRecords: one signed d! + thin t! postings bound by the hash', () =
     assert.deepEqual(Object.keys(v).sort(), ['ff', 'tf'])
     assert.ok(k.endsWith('!' + docId))
   }
+})
+
+test('buildDocRecords signs compact source metadata, link, and excerpt when present', () => {
+  let signedPayload = null
+  const sign = (payload) => { signedPayload = payload; return { sig: 'SIG', pubkey: 'PUB' } }
+  const { records } = buildDocRecords({
+    driveKey: 'dk',
+    path: '/p',
+    title: 'App Post',
+    body: 'A long-ish body that becomes a stable result excerpt for display.',
+    link: 'hyper://app/#/post/1',
+    source: {
+      kind: 'app-data',
+      appSlug: 'peerit',
+      recordType: 'post',
+      recordKey: 'post!p2p!1',
+      ignored: 'not signed'
+    }
+  }, sign)
+  const rec = records.find(([k]) => k.startsWith('d!'))[1]
+  assert.equal(rec.source.kind, 'app-data')
+  assert.equal(rec.source.appSlug, 'peerit')
+  assert.equal(rec.source.ignored, undefined)
+  assert.match(rec.excerpt, /stable result excerpt/)
+  assert.equal(rec.link, 'hyper://app/#/post/1')
+  assert.deepEqual(JSON.parse(canonDocBytes(rec)), signedPayload)
+})
+
+test('parseQuery extracts filters and prefix terms without polluting full-text terms', () => {
+  const q = parseQuery('app:peerit type:post hyper* "p2p search"')
+  assert.deepEqual(q.filters, { appSlug: 'peerit', recordType: 'post' })
+  assert.deepEqual(q.prefixes, ['hyper'])
+  assert.deepEqual(q.phrases, [['p2p', 'search']])
+  assert.deepEqual(q.terms, ['p2p', 'search'])
+})
+
+test('bounded typo distance accepts adjacent transpositions without widening tiny terms', () => {
+  assert.equal(editDistanceAtMost('lighthosue', 'lighthouse', 1), true)
+  assert.equal(editDistanceBounded('lighthosue', 'lighthouse', 2), 1)
+  assert.equal(editDistanceAtMost('lighthouse', 'builder', 2), false)
 })
 
 test('rankCandidates is deterministic, caps endorsers, and diversifies by driveKey', () => {
@@ -148,6 +189,105 @@ test('searchIndex: end-to-end tokenize → range-scan → AND → rank over a re
 
     // empty / stopword-only query → no results, no throw
     assert.deepEqual(await searchIndex(bee, 'the and of'), [])
+
+    await store.close()
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('searchIndex supports prefix, source filters, and soft OR fallback', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'search-core-query-'))
+  try {
+    const store = new Corestore(dir)
+    await store.ready()
+    const bee = new Hyperbee(store.get({ name: 'idx' }), { keyEncoding: 'utf-8', valueEncoding: 'json' })
+    await bee.ready()
+    const sign = (p) => ({ sig: 's', pubkey: 'p' })
+    for (const d of [
+      { driveKey: 'page', path: '/', title: 'Hyperdrive notes', body: 'personal page content', source: { kind: 'page' } },
+      { driveKey: 'post', path: '/', title: 'Hypercore search', body: 'peerit post about indexing', source: { kind: 'app-data', appSlug: 'peerit', recordType: 'post' } },
+      { driveKey: 'comment', path: '/', title: 'Different topic', body: 'comment mentioning search only', source: { kind: 'app-data', appSlug: 'peerit', recordType: 'comment' } },
+    ]) {
+      const { records } = buildDocRecords(d, sign)
+      for (const [k, v] of records) await bee.put(k, v)
+    }
+
+    assert.deepEqual((await searchIndex(bee, 'hyp* app:peerit type:post')).map((r) => r.driveKey), ['post'])
+    const fallback = await searchIndex(bee, 'hypercore absentterm app:peerit')
+    assert.deepEqual(fallback.map((r) => r.driveKey), ['post'])
+    assert.equal(fallback[0].matchMode, 'soft-or')
+    assert.ok(fallback[0].fieldHits.includes('title'))
+
+    await store.close()
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('searchIndex uses fuzzy fallback while preserving source filters', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'search-core-fuzzy-'))
+  try {
+    const store = new Corestore(dir)
+    await store.ready()
+    const bee = new Hyperbee(store.get({ name: 'idx' }), { keyEncoding: 'utf-8', valueEncoding: 'json' })
+    await bee.ready()
+    const sign = (p) => ({ sig: 's', pubkey: 'p' })
+    for (const d of [
+      {
+        driveKey: 'peerit',
+        path: '/',
+        title: 'Lighthouse outbox discovery',
+        body: 'Peerit app search rows are searchable through signed descriptors.',
+        source: { kind: 'app-data', appSlug: 'peerit', recordType: 'post' }
+      },
+      {
+        driveKey: 'p2pbuilders',
+        path: '/',
+        title: 'Lighthouse availability dashboard',
+        body: 'P2PBuilders app data has relay confirmed search availability.',
+        source: { kind: 'app-data', appSlug: 'p2pbuilders', recordType: 'post' }
+      }
+    ]) {
+      const { records } = buildDocRecords(d, sign)
+      for (const [k, v] of records) await bee.put(k, v)
+    }
+
+    const fuzzy = await searchIndex(bee, 'lighthosue app:peerit')
+    assert.deepEqual(fuzzy.map((r) => r.driveKey), ['peerit'])
+    assert.equal(fuzzy[0].matchMode, 'fuzzy')
+    assert.ok(fuzzy[0].fieldHits.includes('title'))
+    assert.deepEqual(await searchIndex(bee, 'zzzzzz app:peerit'), [])
+
+    await store.close()
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('searchIndex treats quoted phrases as a high-confidence lane before AND fallback', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'search-core-phrase-'))
+  try {
+    const store = new Corestore(dir)
+    await store.ready()
+    const bee = new Hyperbee(store.get({ name: 'idx' }), { keyEncoding: 'utf-8', valueEncoding: 'json' })
+    await bee.ready()
+    const sign = (p) => ({ sig: 's', pubkey: 'p' })
+    for (const d of [
+      { driveKey: 'phrase', path: '/', title: 'Lighthouse outbox discovery', body: 'descriptor search', source: { kind: 'app-data', appSlug: 'peerit' } },
+      { driveKey: 'and', path: '/', title: 'Outbox status', body: 'Lighthouse discovery uses signed descriptors', source: { kind: 'app-data', appSlug: 'peerit' } }
+    ]) {
+      const { records } = buildDocRecords(d, sign)
+      for (const [k, v] of records) await bee.put(k, v)
+    }
+
+    const phrase = await searchIndex(bee, '"lighthouse outbox" app:peerit')
+    assert.deepEqual(phrase.map((r) => r.driveKey), ['phrase'])
+    assert.equal(phrase[0].matchMode, 'phrase')
+
+    const fallback = await searchIndex(bee, '"lighthouse signed" app:peerit')
+    assert.deepEqual(fallback.map((r) => r.driveKey), ['and'])
+    assert.equal(fallback[0].matchMode, 'and')
 
     await store.close()
   } finally {

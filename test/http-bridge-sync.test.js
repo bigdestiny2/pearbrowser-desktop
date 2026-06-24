@@ -55,6 +55,7 @@ function makeBridge () {
   const calls = []
   const registryRecords = []
   const indexedAppends = []
+  const pinnedGroups = []
   const bridge = {
     async createSyncGroup (appId) {
       calls.push(['createSyncGroup', appId])
@@ -95,6 +96,10 @@ function makeBridge () {
         return { indexed: true, docId: 'doc-1' }
       }
     }),
+    syncPinGroup: async (record, opts) => {
+      pinnedGroups.push([record, opts])
+      return { ok: true, scopedAppId: scope(record.rawAppId), availability: { available: 'seeded' } }
+    },
     identity: {
       getAppKeypair (keyHex) {
         assert.equal(keyHex, driveKey)
@@ -112,7 +117,7 @@ function makeBridge () {
       }
     }
   })
-  return { http, calls, registryRecords, indexedAppends }
+  return { http, calls, registryRecords, indexedAppends, pinnedGroups }
 }
 
 test('HttpBridge sync API requires a token and scopes app IDs to the drive', async () => {
@@ -212,6 +217,21 @@ test('HttpBridge routes sync operations and identity through the authenticated a
     ['list', scope('shop'), 'products', { limit: 1000 }],
     ['status', scope('shop')]
   ])
+})
+
+test('HttpBridge exposes sync pinning through the authenticated app scope', async () => {
+  const { http, pinnedGroups } = makeBridge()
+  const pin = await request(http, 'POST', '/api/sync/pin', {
+    headers: { 'x-pear-token': 'good' },
+    body: { appId: 'shop' }
+  })
+
+  assert.equal(pin.res.statusCode, 200)
+  assert.equal(pin.res.json.availability.available, 'seeded')
+  assert.deepEqual(pinnedGroups, [[
+    { rawAppId: 'shop', appDriveKey: driveKey },
+    { appDriveKey: driveKey }
+  ]])
 })
 
 test('HttpBridge login uses the already parsed POST body', async () => {

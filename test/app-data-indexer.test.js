@@ -64,6 +64,18 @@ test('AppDataIndexer maps Peerit posts to launchable Lighthouse documents', asyn
   assert.equal(personalIndex.docs[0].path, '/')
   assert.match(personalIndex.docs[0].title, /Lighthouse persistence/)
   assert.match(personalIndex.docs[0].body, /peerit post/)
+  assert.deepEqual(personalIndex.docs[0].source, {
+    kind: 'app-data',
+    appSlug: 'peerit',
+    recordType: 'post',
+    recordKey: 'post!p2p!abc',
+    author: '',
+    appDriveKey: peeritDrive,
+    rawAppId: 'peerit',
+    scopedAppId: 'a'.repeat(64),
+    verifiedAs: 'browser-observed',
+    availability: 'local-only'
+  })
 })
 
 test('AppDataIndexer removes tombstoned Peerit rows from Lighthouse', async () => {

@@ -143,6 +143,50 @@ test('_trustSnapshot puts direct contacts at hop 1 (followed), others at default
   })
 })
 
+test('_trustSnapshot ingests bounded signed TRUST rows into graph and frontier bindings', async () => {
+  await withPlanner(async ({ planner, setContacts }) => {
+    const friend = '66'.repeat(32)
+    const curator = '77'.repeat(32)
+    const unreachable = '88'.repeat(32)
+    const bindingKey = '99'.repeat(32)
+    setContacts([{ pubkey: friend }])
+    planner.getTrustRows = async () => [
+      { memberkey: b4a.from(friend, 'hex'), json: { curatorRoot: curator, bindingKey } },
+      { memberkey: b4a.from(unreachable, 'hex'), json: { curatorRoot: 'aa'.repeat(32), bindingKey: 'bb'.repeat(32) } },
+      { memberkey: b4a.from(friend, 'hex'), curatorRoot: 'cc'.repeat(32), bindingKey: 'dd'.repeat(32) }
+    ]
+
+    const snap = await planner._trustSnapshot()
+    assert.deepEqual(snap.contactRoots, [friend])
+    assert.deepEqual(snap.frontierRoots, [friend, curator])
+    assert.equal(snap.graph.hopOf(friend), 1)
+    assert.equal(snap.graph.hopOf(curator), 2)
+    assert.equal(snap.graph.tierOf(curator), 'followed')
+    assert.equal(snap.trustedBindings.get(curator).bindingKey, bindingKey)
+    assert.equal(snap.trustedBindings.has('aa'.repeat(32)), false)
+  })
+})
+
+test('_fetchOnePeerHits may resolve a reachable TRUST-row binding for a non-contact peer', async () => {
+  await withPlanner(async ({ planner }) => {
+    const peer = '77'.repeat(32)
+    const bindingKey = '99'.repeat(32)
+    let resolveArg = null
+    planner.contacts = { lookup: async () => null }
+    planner.bindingPublisher = {
+      resolve: async (arg) => {
+        resolveArg = arg
+        return null
+      }
+    }
+    planner._trustedPeerBindings = new Map([[peer, { bindingKey, vouchedBy: '66'.repeat(32), hop: 1 }]])
+
+    const res = await planner._fetchOnePeerHits(peer, 'peer', ['peer'], Date.now() + 1000)
+    assert.deepEqual(resolveArg, { contactPubkey: peer, dhtPubkey: bindingKey, allowUnlisted: true })
+    assert.equal(res.stat.reason, 'no-binding')
+  })
+})
+
 test('planAndSearch pulls digest-hit peers and skips known digest misses', async () => {
   await withPlanner(async ({ planner, setContacts }) => {
     const hit = '11'.repeat(32)
@@ -187,5 +231,47 @@ test('planAndSearch marks no-digest peer fanout as fallback and partial', async 
       pulledPeers: 1,
       digestSkipped: 0
     })
+  })
+})
+
+test('planAndSearch emits incremental peer batches as verified peer data arrives', async () => {
+  await withPlanner(async ({ planner, setContacts }) => {
+    const friend = '55'.repeat(32)
+    setContacts([{ pubkey: friend }])
+
+    const peerData = { rootPubkey: friend, searchPubkey: 'p', hits: [{ tf: 4, rec: { docId: 'remote' } }] }
+    planner._fetchPeerHits = async (roots, query, opts = {}) => {
+      assert.deepEqual(roots, [friend])
+      await opts.onPeerData(peerData, { rootPubkey: friend, reason: 'ok', hits: 1 }, [{ rootPubkey: friend, reason: 'ok', hits: 1 }])
+      return [peerData]
+    }
+    planner._verifyPeerSources = (rows) => rows.map((row) => ({
+      rootPubkey: row.rootPubkey,
+      candidates: [{
+        docId: 'remote',
+        driveKey: 'remote-drive',
+        path: '/',
+        title: 'Remote peer search',
+        tf: 4,
+        publishedAt: 0,
+        contentHash: 'remote-hash',
+        signerPubkey: row.searchPubkey
+      }]
+    }))
+
+    const batches = []
+    const fed = await planner.planAndSearch('peer', {
+      now0: 1,
+      limit: 50,
+      onPeerBatch: (payload) => batches.push(payload)
+    })
+
+    assert.equal(batches.length, 1)
+    assert.equal(batches[0].phase, 'batch')
+    assert.equal(batches[0].partial, true)
+    assert.deepEqual(batches[0].results.map((r) => r.docId), ['remote'])
+    assert.equal(batches[0].provenance.completedPeers, 1)
+    assert.deepEqual(fed.results.map((r) => r.docId), ['remote'])
+    assert.equal(fed.phase, 'enriched')
   })
 })

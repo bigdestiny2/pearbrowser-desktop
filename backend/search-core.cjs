@@ -12,6 +12,7 @@ const b4a = require('b4a')
 
 const SCHEMA_VERSION = 2
 const MAX_TERMS_PER_DOC = 64
+const MAX_EXCERPT_CHARS = 320
 const INV_WIDTH = 18 // zero-pad width for inverted-score keys
 
 // A compact English stoplist — enough to drop the highest-frequency noise
@@ -40,8 +41,111 @@ function tokenize (text) {
   return top.map(([term, n]) => ({ term, tf: n })).sort((a, b) => (a.term < b.term ? -1 : a.term > b.term ? 1 : 0))
 }
 
+function phraseTokens (text) {
+  if (typeof text !== 'string' || !text) return []
+  const norm = text.normalize('NFKC').toLowerCase()
+  const out = []
+  for (const raw of norm.split(/[^\p{L}\p{N}]+/u)) {
+    if (raw.length < 2 || raw.length > 40) continue
+    if (STOPWORDS.has(raw)) continue
+    out.push(raw)
+  }
+  return out
+}
+
 function hashHex (str) {
   return b4a.toString(crypto.data(b4a.from(String(str))), 'hex')
+}
+
+function compactText (value, max = MAX_EXCERPT_CHARS) {
+  if (typeof value !== 'string') return ''
+  return value.normalize('NFKC').replace(/\s+/g, ' ').trim().slice(0, max)
+}
+
+function cleanString (value, max = 256) {
+  if (typeof value !== 'string') return null
+  const s = value.normalize('NFKC').trim().slice(0, max)
+  return s || null
+}
+
+// Result/source metadata is signed when present, but kept deliberately compact:
+// only stable scalar fields that explain where a row came from. Unknown object
+// shape is not copied into the signed record because app rows can be large and
+// schema-specific.
+function normalizeSource (source) {
+  if (!source || typeof source !== 'object' || Array.isArray(source)) return null
+  const out = {}
+  for (const [from, to, max] of [
+    ['kind', 'kind', 40],
+    ['appSlug', 'appSlug', 64],
+    ['recordType', 'recordType', 64],
+    ['recordKey', 'recordKey', 256],
+    ['author', 'author', 128],
+    ['authorPubkey', 'authorPubkey', 128],
+    ['outbox', 'outbox', 128],
+    ['appDriveKey', 'appDriveKey', 128],
+    ['rawAppId', 'rawAppId', 128],
+    ['scopedAppId', 'scopedAppId', 128],
+    ['verifiedAs', 'verifiedAs', 64],
+    ['availability', 'availability', 64]
+  ]) {
+    const s = cleanString(source[from], max)
+    if (s) out[to] = s
+  }
+  return Object.keys(out).length ? out : null
+}
+
+function makeExcerpt (doc) {
+  const explicit = compactText(doc && doc.excerpt)
+  if (explicit) return explicit
+  const body = compactText(doc && doc.body)
+  if (body) return body
+  return compactText(doc && doc.title, 200)
+}
+
+function uniqueSorted (values) {
+  return [...new Set(values.filter(Boolean))].sort((a, b) => cmp(a, b))
+}
+
+// Parse a small user-facing query language while still preserving the old free
+// text path. Filters are additive and local-only:
+//   app:peerit       source.appSlug
+//   type:post        source.recordType
+//   kind:app-data    source.kind
+//   author:<key>     source author/outbox
+// A trailing '*' means prefix match, e.g. "hyp*". Quoted phrases run as a
+// high-confidence lane over stored display fields before falling back to normal
+// AND/OR execution.
+function parseQuery (query) {
+  const raw = String(query || '').normalize('NFKC').trim()
+  const filters = {}
+  let text = raw.replace(/(?:^|\s)(app|type|kind|source|author):("[^"]+"|\S+)/ig, (m, key, value) => {
+    const v = value.replace(/^"|"$/g, '').trim().toLowerCase()
+    if (!v) return ' '
+    if (key.toLowerCase() === 'app') filters.appSlug = v
+    else if (key.toLowerCase() === 'type') filters.recordType = v
+    else if (key.toLowerCase() === 'author') filters.author = v
+    else filters.sourceKind = v
+    return ' '
+  })
+  const phraseTerms = []
+  const phrases = []
+  text = text.replace(/"([^"]+)"/g, (_, phrase) => {
+    const terms = phraseTokens(phrase)
+    if (terms.length) {
+      phraseTerms.push(...terms)
+      phrases.push(terms)
+    }
+    return ' '
+  })
+  const prefixes = []
+  text = text.replace(/(^|\s)([\p{L}\p{N}][\p{L}\p{N}_-]{1,39})\*/gu, (_, lead, prefix) => {
+    const term = tokenize(prefix).map((t) => t.term)[0]
+    if (term) prefixes.push(term)
+    return lead || ' '
+  })
+  const terms = uniqueSorted([...phraseTerms, ...tokenize(text).map((t) => t.term)])
+  return { raw, terms, prefixes: uniqueSorted(prefixes), phrases, filters }
 }
 
 // Stable doc id = hash(len(driveKey)|driveKey|path)[:16]. Length-prefixed so
@@ -87,6 +191,12 @@ function buildDocRecords (doc, sign) {
   const docId = docIdFor(driveKey, path)
   const h = postingSetHash(terms)
   const canonDoc = { v: SCHEMA_VERSION, docId, driveKey, path, title: String(title).slice(0, 200), terms, h, publishedAt }
+  const excerpt = makeExcerpt(doc)
+  const source = normalizeSource(doc && doc.source)
+  const link = cleanString(doc && doc.link, 512)
+  if (excerpt) canonDoc.excerpt = excerpt
+  if (source) canonDoc.source = source
+  if (link) canonDoc.link = link
   const signed = sign ? sign(canonDoc) : { sig: '', pubkey: '' }
   const records = []
   records.push([docKey(docId), { ...canonDoc, sig: signed.sig, signerPubkey: signed.pubkey }])
@@ -102,10 +212,23 @@ function buildDocRecords (doc, sign) {
 // signature is checked over identical bytes — any tampering changes these bytes
 // and fails the check.
 function canonDocBytes (rec) {
-  return JSON.stringify({
-    v: rec.v, docId: rec.docId, driveKey: rec.driveKey, path: rec.path,
-    title: rec.title, terms: rec.terms, h: rec.h, publishedAt: rec.publishedAt,
-  })
+  const canon = {
+    v: rec.v,
+    docId: rec.docId,
+    driveKey: rec.driveKey,
+    path: rec.path,
+    title: rec.title,
+    terms: rec.terms,
+    h: rec.h,
+    publishedAt: rec.publishedAt
+  }
+  const excerpt = compactText(rec.excerpt)
+  const source = normalizeSource(rec.source)
+  const link = cleanString(rec.link, 512)
+  if (excerpt) canon.excerpt = excerpt
+  if (source) canon.source = source
+  if (link) canon.link = link
+  return JSON.stringify(canon)
 }
 
 // FNV-1a over a string → a deterministic [0,1) dither for exploration that
@@ -125,11 +248,11 @@ const RANK = {
   // zero/low feature (e.g. 0 endorsers) would dominate the log-product and bury
   // a strong text match. 0.15 keeps every feature's contribution bounded.
   EPS: 0.15,
-  E_CAP: 8,         // hard cap on endorser breadth (sybil-proof)
+  E_CAP: 8, // hard cap on endorser breadth (sybil-proof)
   HALFLIFE_DAYS: 30,
-  LAMBDA: 0.05,     // exploration dither magnitude (small, deterministic)
+  LAMBDA: 0.05, // exploration dither magnitude (small, deterministic)
   TIER: { self: 1.0, followed: 0.8, default: 0.5 },
-  K1: 1.2,          // BM25-style tf saturation
+  K1: 1.2 // BM25-style tf saturation
 }
 
 // The v2 ranker: a pure, deterministic, capped-additive-in-log-space score.
@@ -194,53 +317,310 @@ function rankCandidates (candidates, { now0 = 0, diversity = true } = {}) {
   return scored
 }
 
-// Extract candidate rows (PRE-rank) for a query over a ready Hyperbee holding v2
-// records: tokenize → bounded range-scan per term → AND-intersect by docId →
-// hydrate d! records. The rank+slice is split out (searchIndex) so a federated
-// planner can pull raw candidates from many peer bees and rank them together
-// exactly once (search-federation.mergeFederated). `tier`/`trustHop` describe
-// the source (hop-0 self = {tier:'self', trustHop:0}).
-// Scan a ready v2 Hyperbee for query hits: tokenize → bounded range-scan per
-// term → AND-intersect by docId → hydrate the d! record. Returns
-// [{ docId, tf, rec }] in intersection order (rec is the full signed d! record,
-// or null if missing). Shared by searchCandidates (local rank) and
-// searchSignedHits (federated verify).
-async function scanHits (bee, query, { perTerm = 500 } = {}) {
-  const qterms = tokenize(query).map((t) => t.term)
-  if (qterms.length === 0) return []
-  const lists = []
-  for (const term of qterms) {
-    const m = new Map()
-    for await (const e of bee.createReadStream({ gte: `t!${term}!`, lt: `t!${term}!~`, limit: perTerm })) {
-      const k = e.key
-      const docId = k.slice(k.lastIndexOf('!') + 1)
-      m.set(docId, (m.get(docId) || 0) + (e.value && e.value.tf ? e.value.tf : 1))
+function getPlan (query) {
+  return query && Array.isArray(query.terms) && Array.isArray(query.prefixes)
+    ? query
+    : parseQuery(query)
+}
+
+function planUnits (plan) {
+  return [
+    ...plan.terms.map((term) => ({ term, prefix: false })),
+    ...plan.prefixes.map((term) => ({ term, prefix: true }))
+  ]
+}
+
+function termMapOf (rec) {
+  const map = new Map()
+  for (const t of (rec && rec.terms) || []) {
+    if (!t || typeof t.term !== 'string') continue
+    const tf = Number.isFinite(Number(t.tf)) ? Number(t.tf) : 1
+    map.set(t.term, Math.max(map.get(t.term) || 0, tf))
+  }
+  return map
+}
+
+function sourceValue (rec, key) {
+  const s = (rec && rec.source) || {}
+  if (key === 'kind') return (s.kind || 'page').toLowerCase()
+  return typeof s[key] === 'string' ? s[key].toLowerCase() : ''
+}
+
+function matchesFilters (rec, filters = {}) {
+  if (filters.appSlug && sourceValue(rec, 'appSlug') !== filters.appSlug) return false
+  if (filters.recordType && sourceValue(rec, 'recordType') !== filters.recordType) return false
+  if (filters.sourceKind && sourceValue(rec, 'kind') !== filters.sourceKind) return false
+  if (filters.author) {
+    const author = filters.author.toLowerCase()
+    const candidates = ['author', 'authorPubkey', 'outbox']
+      .map((key) => sourceValue(rec, key))
+      .filter(Boolean)
+    if (!candidates.some((v) => v === author || v.startsWith(author))) return false
+  }
+  return true
+}
+
+function termMatches (terms, term, prefix) {
+  if (!prefix) return terms.has(term)
+  for (const key of terms.keys()) if (key.startsWith(term)) return true
+  return false
+}
+
+function phraseFields (rec) {
+  const fields = [rec && rec.title, rec && rec.excerpt, rec && rec.path, rec && rec.link]
+  const source = rec && rec.source
+  if (source) fields.push(Object.values(source).join(' '))
+  return fields
+    .map((value) => phraseTokens(String(value || '')).join(' '))
+    .filter(Boolean)
+}
+
+function phraseMatchesPlan (rec, plan) {
+  const phrases = Array.isArray(plan && plan.phrases) ? plan.phrases : []
+  if (!phrases.length) return true
+  const fields = phraseFields(rec)
+  return phrases.every((terms) => {
+    const needle = Array.isArray(terms) ? terms.join(' ') : String(terms || '')
+    return needle && fields.some((field) => field.includes(needle))
+  })
+}
+
+function editDistanceAtMost (a, b, max) {
+  if (a === b) return true
+  if (!a || !b || Math.abs(a.length - b.length) > max) return false
+  if (a.length === b.length) {
+    for (let i = 0; i < a.length - 1; i++) {
+      if (a[i] === b[i + 1] && a[i + 1] === b[i] &&
+          a.slice(0, i) === b.slice(0, i) &&
+          a.slice(i + 2) === b.slice(i + 2)) return true
     }
-    lists.push(m)
   }
-  lists.sort((a, b) => a.size - b.size)
-  let hits = lists[0]
-  for (let i = 1; i < lists.length; i++) {
-    const next = new Map()
-    for (const [d, tf] of hits) if (lists[i].has(d)) next.set(d, tf + lists[i].get(d))
-    hits = next
+  let prev = new Array(b.length + 1)
+  let cur = new Array(b.length + 1)
+  for (let j = 0; j <= b.length; j++) prev[j] = j
+  for (let i = 1; i <= a.length; i++) {
+    cur[0] = i
+    let rowMin = cur[0]
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost)
+      if (cur[j] < rowMin) rowMin = cur[j]
+    }
+    if (rowMin > max) return false
+    const tmp = prev; prev = cur; cur = tmp
   }
-  const out = []
-  for (const [docId, tf] of hits) {
-    const rec = await bee.get(docKey(docId)).catch(() => null)
-    out.push({ docId, tf, rec: rec && rec.value ? rec.value : null })
+  return prev[b.length] <= max
+}
+
+function editDistanceBounded (a, b, max) {
+  if (!editDistanceAtMost(a, b, max)) return max + 1
+  if (a === b) return 0
+  if (a.length === b.length) {
+    for (let i = 0; i < a.length - 1; i++) {
+      if (a[i] === b[i + 1] && a[i + 1] === b[i] &&
+          a.slice(0, i) === b.slice(0, i) &&
+          a.slice(i + 2) === b.slice(i + 2)) return 1
+    }
+  }
+  let prevPrev = null
+  let prev = new Array(b.length + 1)
+  let cur = new Array(b.length + 1)
+  for (let j = 0; j <= b.length; j++) prev[j] = j
+  for (let i = 1; i <= a.length; i++) {
+    cur[0] = i
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost)
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+        cur[j] = Math.min(cur[j], (prevPrev ? prevPrev[j - 2] : j - 2) + 1)
+      }
+    }
+    prevPrev = prev
+    const tmp = prev; prev = cur; cur = tmp
+  }
+  return Math.min(prev[b.length], max + 1)
+}
+
+async function nearestIndexedTerm (bee, term, { scanLimit = 5000 } = {}) {
+  if (!term || term.length < 4) return term
+  const max = term.length >= 6 ? 2 : 1
+  let best = null
+  let bestDistance = max + 1
+  let seen = ''
+  let scanned = 0
+  for await (const e of bee.createReadStream({ gte: 't!', lt: 't!~' })) {
+    if (++scanned > scanLimit) break
+    const indexed = String(e.key || '').split('!')[1] || ''
+    if (!indexed || indexed === seen) continue
+    seen = indexed
+    if (Math.abs(indexed.length - term.length) > max) continue
+    const distance = editDistanceBounded(term, indexed, max)
+    if (distance < bestDistance || (distance === bestDistance && (best == null || indexed < best))) {
+      best = indexed
+      bestDistance = distance
+      if (distance === 0) break
+    }
+  }
+  return bestDistance <= max ? best : term
+}
+
+async function fuzzyPlan (bee, plan, opts = {}) {
+  const replacements = []
+  let changed = false
+  for (const term of plan.terms) {
+    const replacement = await nearestIndexedTerm(bee, term, opts)
+    replacements.push(replacement)
+    if (replacement !== term) changed = true
+  }
+  if (!changed) return null
+  return { ...plan, terms: uniqueSorted(replacements), fuzzyOf: plan.terms }
+}
+
+function recordMatchesPlan (rec, plan, mode, { requirePhrases = false } = {}) {
+  if (!matchesFilters(rec, plan.filters)) return false
+  const terms = termMapOf(rec)
+  const units = planUnits(plan)
+  if (!units.length) return false
+  if (requirePhrases && !phraseMatchesPlan(rec, plan)) return false
+  if (mode === 'or') return units.some((u) => termMatches(terms, u.term, u.prefix))
+  return units.every((u) => termMatches(terms, u.term, u.prefix))
+}
+
+function matchTf (rec, plan) {
+  const terms = termMapOf(rec)
+  let tf = 0
+  for (const term of plan.terms) tf += terms.get(term) || 0
+  for (const prefix of plan.prefixes) {
+    for (const [term, n] of terms) if (term.startsWith(prefix)) tf += n
+  }
+  return tf || 1
+}
+
+function fieldHits (rec, plan) {
+  const needles = [...plan.terms, ...plan.prefixes]
+  if (!needles.length) return []
+  const fields = [
+    ['title', rec && rec.title],
+    ['excerpt', rec && rec.excerpt],
+    ['path', rec && rec.path],
+    ['link', rec && rec.link]
+  ]
+  const source = rec && rec.source
+  if (source) {
+    fields.push(['source', Object.values(source).join(' ')])
+  }
+  const hits = new Set()
+  for (const [name, value] of fields) {
+    const text = String(value || '').normalize('NFKC').toLowerCase()
+    if (!text) continue
+    for (const n of needles) {
+      if (text.includes(n)) { hits.add(name); break }
+    }
+  }
+  return [...hits].sort((a, b) => cmp(a, b))
+}
+
+async function readPostingList (bee, unit, perTerm) {
+  const gte = unit.prefix ? `t!${unit.term}` : `t!${unit.term}!`
+  const lt = unit.prefix ? `t!${unit.term}~` : `t!${unit.term}!~`
+  const out = new Map()
+  for await (const e of bee.createReadStream({ gte, lt, limit: perTerm })) {
+    const k = e.key
+    const docId = k.slice(k.lastIndexOf('!') + 1)
+    out.set(docId, (out.get(docId) || 0) + (e.value && e.value.tf ? e.value.tf : 1))
   }
   return out
 }
 
-async function searchCandidates (bee, query, { perTerm = 500, tier = 'self', trustHop = 0 } = {}) {
-  const hits = await scanHits(bee, query, { perTerm })
+// Extract candidate rows (PRE-rank) for a query over a ready Hyperbee holding v2
+// records. Exact mode scans bounded posting windows, anchors on the smallest
+// list, then verifies the remaining terms against the signed d! term set. That
+// keeps the hot-term cap while avoiding the classic "common rare" recall loss
+// from intersecting two independently-capped lists.
+async function scanHits (bee, query, { perTerm = 500, mode = 'and', requirePhrases = false } = {}) {
+  const plan = getPlan(query)
+  const units = planUnits(plan)
+  if (units.length === 0) return []
+  const lists = []
+  for (const unit of units) {
+    const postings = await readPostingList(bee, unit, perTerm)
+    if (mode !== 'or' && postings.size === 0) return []
+    lists.push({ unit, postings })
+  }
+  const docIds = new Set()
+  if (mode === 'or') {
+    for (const { postings } of lists) for (const docId of postings.keys()) docIds.add(docId)
+  } else {
+    lists.sort((a, b) => (a.postings.size - b.postings.size) || cmp(a.unit.term, b.unit.term))
+    for (const docId of lists[0].postings.keys()) docIds.add(docId)
+  }
+  const out = []
+  for (const docId of docIds) {
+    const rec = await bee.get(docKey(docId)).catch(() => null)
+    const value = rec && rec.value ? rec.value : null
+    if (!value || !recordMatchesPlan(value, plan, mode, { requirePhrases })) continue
+    out.push({ docId, tf: matchTf(value, plan), rec: value, matchMode: requirePhrases ? 'phrase' : (mode === 'or' ? 'soft-or' : 'and') })
+  }
+  return out
+}
+
+async function searchCandidates (bee, query, { perTerm = 500, tier = 'self', trustHop = 0, softFallback = true, fuzzyFallback = true } = {}) {
+  const plan = getPlan(query)
+  let resultPlan = plan
+  let resultMode = 'and'
+  let hits = []
+  if (Array.isArray(plan.phrases) && plan.phrases.length > 0) {
+    hits = await scanHits(bee, plan, { perTerm, mode: 'and', requirePhrases: true })
+    if (hits.length) resultMode = 'phrase'
+  }
+  if (hits.length === 0) hits = await scanHits(bee, plan, { perTerm, mode: 'and' })
+  if (fuzzyFallback && hits.length === 0 && plan.terms.length > 0) {
+    const fp = await fuzzyPlan(bee, plan)
+    if (fp) {
+      const fuzzyHits = await scanHits(bee, fp, { perTerm, mode: 'and' })
+      if (fuzzyHits.length) {
+        hits = fuzzyHits
+        resultPlan = fp
+        resultMode = 'fuzzy'
+      }
+    }
+  }
+  if (softFallback && hits.length === 0 && planUnits(plan).length > 1) {
+    hits = await scanHits(bee, plan, { perTerm, mode: 'or' })
+    resultMode = 'soft-or'
+  }
+  if (softFallback && fuzzyFallback && hits.length === 0 && plan.terms.length > 0 && planUnits(plan).length > 1) {
+    const fp = await fuzzyPlan(bee, plan)
+    if (fp) {
+      const fuzzyHits = await scanHits(bee, fp, { perTerm, mode: 'or' })
+      if (fuzzyHits.length) {
+        hits = fuzzyHits
+        resultPlan = fp
+        resultMode = 'fuzzy-or'
+      }
+    }
+  }
   return hits.map(({ docId, tf, rec }) => {
     const d = rec || { docId, driveKey: '', path: '/', title: docId }
     return {
-      docId, driveKey: d.driveKey, path: d.path, title: d.title, tf,
-      publishedAt: d.publishedAt || 0, tier, trustHop, endorsers: 0,
-      contentHash: d.h || '', signerPubkey: d.signerPubkey || '',
+      docId,
+      driveKey: d.driveKey,
+      path: d.path,
+      title: d.title,
+      tf,
+      excerpt: d.excerpt || '',
+      source: d.source || null,
+      link: d.link || null,
+      fieldHits: fieldHits(d, resultPlan),
+      matchMode: resultMode === 'and'
+        ? (recordMatchesPlan(d, plan, 'and') ? 'and' : 'soft-or')
+        : resultMode,
+      publishedAt: d.publishedAt || 0,
+      tier,
+      trustHop,
+      endorsers: 0,
+      contentHash: d.h || '',
+      signerPubkey: d.signerPubkey || ''
     }
   })
 }
@@ -250,7 +630,17 @@ async function searchCandidates (bee, query, { perTerm = 500, tier = 'self', tru
 // are dropped (nothing to verify). The RowVerifier checks each rec against the
 // peer's resolved search key before it can rank.
 async function searchSignedHits (bee, query, { perTerm = 500 } = {}) {
-  const hits = await scanHits(bee, query, { perTerm })
+  const plan = getPlan(query)
+  let hits = []
+  if (Array.isArray(plan.phrases) && plan.phrases.length > 0) {
+    hits = await scanHits(bee, plan, { perTerm, mode: 'and', requirePhrases: true })
+  }
+  if (hits.length === 0) hits = await scanHits(bee, plan, { perTerm, mode: 'and' })
+  if (hits.length === 0 && plan.terms.length > 0) {
+    const fp = await fuzzyPlan(bee, plan)
+    if (fp) hits = await scanHits(bee, fp, { perTerm, mode: 'and' })
+  }
+  if (hits.length === 0 && planUnits(plan).length > 1) hits = await scanHits(bee, plan, { perTerm, mode: 'or' })
   const out = []
   for (const { tf, rec } of hits) if (rec) out.push({ tf, rec })
   return out
@@ -265,8 +655,11 @@ async function searchIndex (bee, query, { limit = 200, perTerm = 500, now0 = 0, 
 }
 
 module.exports = {
-  SCHEMA_VERSION, MAX_TERMS_PER_DOC, STOPWORDS, RANK,
-  tokenize, docIdFor, invScore, postingKey, docKey, postingSetHash,
+  SCHEMA_VERSION, MAX_TERMS_PER_DOC, MAX_EXCERPT_CHARS, STOPWORDS, RANK,
+  tokenize, phraseTokens, docIdFor, invScore, postingKey, docKey, postingSetHash,
+  parseQuery, normalizeSource, makeExcerpt,
   buildDocRecords, canonDocBytes, rankCandidates,
-  scanHits, searchCandidates, searchSignedHits, searchIndex, fnvUnit, hashHex,
+  scanHits, searchCandidates, searchSignedHits, searchIndex,
+  editDistanceAtMost, editDistanceBounded, nearestIndexedTerm, fuzzyPlan,
+  fnvUnit, hashHex
 }

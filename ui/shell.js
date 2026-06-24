@@ -570,7 +570,14 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
       }))
       if (rememberVisit) rpc.request(C.CMD_USERDATA_ADD_HISTORY, { url: target, title: prov ? prov.label : target }).catch(() => {})
     } catch (err) {
-      updateTab(id, { status: `error: ${err.message}` })
+      updateTab(id, {
+        src: null,
+        status: `error: ${err.message}`,
+        url: target,
+        displayUrl: target,
+        title: target,
+        nameProv: prov
+      })
     }
   }
 
@@ -2672,9 +2679,16 @@ function Apps ({ rpc, C, onLaunch }) {
               <div className="app-meta" title=${app.link}>${app.link.slice(0, 20)}…${app.link.slice(-6)}</div>
             </div>
             <div className="app-actions">
-              ${app.type === 'hypersite'
-                ? html`<button key="run-featured" className="btn primary" onClick=${() => runInTab(app)} disabled=${busy === 'run-in-tab'} title="Run headless — the app's UI streams into a tab over a pipe">Run in tab</button>`
-                : html`<button key="open-featured" className="btn primary" onClick=${() => launchFeaturedApp(app)} disabled=${busy === 'pear-link'} title="Full Pear app — opens in its own window">Open</button>`}
+              ${(() => {
+                const bk = appBundleKey(app)
+                const prog = bk && launchProg[bk]
+                if (prog && prog.phase !== 'done') {
+                  return html`<${LaunchBar} prog=${prog} onRetry=${() => (app.type === 'hypersite' ? runInTab(app) : launchFeaturedApp(app))} />`
+                }
+                return app.type === 'hypersite'
+                  ? html`<button key="run-featured" className="btn primary" onClick=${() => runInTab(app)} disabled=${busy === 'run-in-tab'} title="Run headless — the app's UI streams into a tab over a pipe">Run in tab</button>`
+                  : html`<button key="open-featured" className="btn primary" onClick=${() => launchFeaturedApp(app)} disabled=${busy === 'pear-link'} title="Full Pear app — opens in its own window">Open</button>`
+              })()}
             </div>
           </div>
         `)}
@@ -3063,6 +3077,70 @@ function SearchProvenanceBadges ({ meta }) {
   </span>`
 }
 
+function searchResultUrl (r) {
+  if (r && r.link) return r.link
+  if (r && /^(?:pear|file|hyper):\/\//i.test(r.driveKey || '')) return r.driveKey
+  return `hyper://${r.driveKey}${r.path && r.path !== '/' ? r.path : '/'}`
+}
+
+function searchTrustBadge (r, federated) {
+  if (!federated) return null
+  if (!r.tier || r.tier === 'self') return html`<span className="src-badge self">you</span>`
+  if (r.tier === 'followed') return html`<span className="src-badge followed">trusted · hop ${r.trustHop ?? 1}</span>`
+  return html`<span className="src-badge other">${r.tier}</span>`
+}
+
+function searchSourceBadge (r) {
+  const s = (r && r.source) || {}
+  const kind = s.kind || 'page'
+  if (kind === 'app-data') {
+    const label = [s.appSlug, s.recordType].filter(Boolean).join(' · ') || 'app data'
+    return html`<span className="src-badge followed">${label}</span>`
+  }
+  return html`<span className="src-badge self">${kind}</span>`
+}
+
+function searchMatchBadges (r) {
+  const hits = Array.isArray(r && r.fieldHits) ? r.fieldHits.slice(0, 3) : []
+  return html`
+    ${r && r.matchMode === 'phrase' ? html`<span className="src-badge followed">phrase</span>` : ''}
+    ${r && r.matchMode === 'soft-or' ? html`<span className="src-badge other">related</span>` : ''}
+    ${r && r.matchMode === 'fuzzy' ? html`<span className="src-badge other">typo match</span>` : ''}
+    ${r && r.matchMode === 'fuzzy-or' ? html`<span className="src-badge other">typo related</span>` : ''}
+    ${hits.map((h) => html`<span className="src-badge self" key=${h}>${h}</span>`)}
+  `
+}
+
+function searchAvailabilityBadge (r) {
+  const state = r && r.source && r.source.availability
+  if (!state) return null
+  if (state === 'relay-confirmed') return html`<span className="src-badge followed">relay-confirmed</span>`
+  if (state === 'seeded') return html`<span className="src-badge self">seeded</span>`
+  return html`<span className="src-badge other">${state}</span>`
+}
+
+function SearchResultRow ({ r, onBrowse, federated }) {
+  const url = searchResultUrl(r)
+  return html`
+    <div className="library-row" key=${r.docId || (r.driveKey + r.path)}>
+      <div className="library-row-main">
+        <div className="library-title">
+          <span>${r.title || url}</span>
+          <span className="search-result-badges">
+            ${searchSourceBadge(r)}
+            ${searchTrustBadge(r, federated)}
+            ${searchMatchBadges(r)}
+            ${searchAvailabilityBadge(r)}
+          </span>
+        </div>
+        ${r.excerpt ? html`<div className="library-snippet">${r.excerpt}</div>` : ''}
+        <div className="library-url">${url}</div>
+      </div>
+      <button className="btn small" onClick=${() => onBrowse(url)}>Open</button>
+    </div>
+  `
+}
+
 function Library ({ rpc, C, onBrowse }) {
   const [bookmarks, setBookmarks] = useState([])
   const [history, setHistory] = useState([])
@@ -3096,17 +3174,6 @@ function Library ({ rpc, C, onBrowse }) {
     } catch (e) { setErr(`search: ${e.message}`) }
     finally { setSearching(false) }
   }
-  const resultUrl = (r) => {
-    if (r && r.link) return r.link
-    if (r && /^(?:pear|file|hyper):\/\//i.test(r.driveKey || '')) return r.driveKey
-    return `hyper://${r.driveKey}${r.path && r.path !== '/' ? r.path : '/'}`
-  }
-  const srcBadge = (r) => {
-    if (!r.tier || r.tier === 'self') return html`<span className="src-badge self">you</span>`
-    if (r.tier === 'followed') return html`<span className="src-badge followed">trusted · hop ${r.trustHop ?? 1}</span>`
-    return html`<span className="src-badge other">${r.tier}</span>`
-  }
-
   // Enriched federated results push (Lighthouse Phase 2).
   useEffect(() => {
     const onFederated = (e) => {
@@ -3114,7 +3181,7 @@ function Library ({ rpc, C, onBrowse }) {
       if (d.queryId !== searchIdRef.current) return // superseded by a newer query
       if (Array.isArray(d.results)) setResults(d.results)
       setSearchMeta(d)
-      setFederating(false)
+      setFederating(d.phase === 'batch')
     }
     rpc.addEventListener(`event:${C.EVT_SEARCH_FEDERATED}`, onFederated)
     return () => rpc.removeEventListener(`event:${C.EVT_SEARCH_FEDERATED}`, onFederated)
@@ -3159,7 +3226,7 @@ function Library ({ rpc, C, onBrowse }) {
       ${err && html`<div className="apps-error">${err}</div>`}
 
       <h2>Search your P2P content</h2>
-      <p className="subtitle">Full-text search over everything you've browsed, fully local — no query ever leaves your device.${indexed ? ` ${indexed} page(s) indexed.` : ''}</p>
+      <p className="subtitle">Full-text search over everything you've browsed, local by default; trusted-peer search only runs when enabled.${indexed ? ` ${indexed} page(s) indexed.` : ''}</p>
       <div className="urlbar" style=${{ marginBottom: '12px' }}>
         <input
           type="text"
@@ -3181,13 +3248,7 @@ function Library ({ rpc, C, onBrowse }) {
         ? html`<p className="placeholder">No matches${indexed === 0 ? ' yet — browse some hyper:// pages first to build your index.' : '.'}</p>`
         : html`<div className="library-list">
             ${results.map((r) => html`
-              <div className="library-row" key=${r.docId || (r.driveKey + r.path)}>
-                <div className="library-row-main">
-                  <div className="library-title">${r.title || resultUrl(r)}${federated ? srcBadge(r) : ''}</div>
-                  <div className="library-url">${resultUrl(r)}</div>
-                </div>
-                <button className="btn small" onClick=${() => onBrowse(resultUrl(r))}>Open</button>
-              </div>
+              <${SearchResultRow} r=${r} onBrowse=${onBrowse} federated=${federated} />
             `)}
           </div>`)}
 
@@ -4727,23 +4788,13 @@ function FederatedSearch ({ rpc, C, onBrowse, placeholder }) {
     } catch (e) { setErr(`search: ${e.message}`) }
     finally { setSearching(false) }
   }
-  const resultUrl = (r) => {
-    if (r && r.link) return r.link
-    if (r && /^(?:pear|file|hyper):\/\//i.test(r.driveKey || '')) return r.driveKey
-    return `hyper://${r.driveKey}${r.path && r.path !== '/' ? r.path : '/'}`
-  }
-  const srcBadge = (r) => {
-    if (!r.tier || r.tier === 'self') return html`<span className="src-badge self">you</span>`
-    if (r.tier === 'followed') return html`<span className="src-badge followed">trusted · hop ${r.trustHop ?? 1}</span>`
-    return html`<span className="src-badge other">${r.tier}</span>`
-  }
   useEffect(() => {
     const onFederated = (e) => {
       const d = (e && e.detail) || {}
       if (d.queryId !== searchIdRef.current) return
       if (Array.isArray(d.results)) setResults(d.results)
       setSearchMeta(d)
-      setFederating(false)
+      setFederating(d.phase === 'batch')
     }
     rpc.addEventListener(`event:${C.EVT_SEARCH_FEDERATED}`, onFederated)
     return () => rpc.removeEventListener(`event:${C.EVT_SEARCH_FEDERATED}`, onFederated)
@@ -4754,7 +4805,7 @@ function FederatedSearch ({ rpc, C, onBrowse, placeholder }) {
       ${err && html`<div className="apps-error">${err}</div>`}
       <div className="urlbar" style=${{ marginBottom: '10px' }}>
         <input type="text" className="url-input"
-          placeholder=${placeholder || "Search the peer-to-peer web…"}
+          placeholder=${placeholder || 'Search the peer-to-peer web…'}
           value=${query}
           onInput=${(e) => setQuery(e.target.value)}
           onKeyDown=${(e) => e.key === 'Enter' && runSearch()} />
@@ -4770,13 +4821,7 @@ function FederatedSearch ({ rpc, C, onBrowse, placeholder }) {
         ? html`<p className="placeholder">No matches${indexed === 0 ? ' yet — browse some hyper:// pages first to build your index.' : '.'}</p>`
         : html`<div className="library-list">
             ${results.map((r) => html`
-              <div className="library-row" key=${r.docId || (r.driveKey + r.path)}>
-                <div className="library-row-main">
-                  <div className="library-title">${r.title || resultUrl(r)}${federated ? srcBadge(r) : ''}</div>
-                  <div className="library-url">${resultUrl(r)}</div>
-                </div>
-                <button className="btn small" onClick=${() => onBrowse(resultUrl(r))}>Open</button>
-              </div>
+              <${SearchResultRow} r=${r} onBrowse=${onBrowse} federated=${federated} />
             `)}
           </div>`)}
     </div>

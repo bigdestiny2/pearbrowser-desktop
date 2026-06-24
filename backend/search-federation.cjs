@@ -48,6 +48,7 @@ const TRUST_SCHEMA = {
   additionalProperties: true,
   properties: {
     curatorRoot: { type: 'string', maxLength: 128 },   // hex root pubkey you follow
+    bindingKey: { type: 'string', maxLength: 128 },     // optional lighthouse-binding DHT key for curatorRoot
     label: { type: 'string', maxLength: 120 },
     weight: { type: 'number' },                        // optional 0..1 emphasis
     addedAt: { type: 'number' },

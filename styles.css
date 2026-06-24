@@ -778,7 +778,39 @@ p { color: #8b949e; margin-bottom: 12px; }
 }
 .library-row:hover { border-color: #484f58; }
 .library-row-main { flex: 1; min-width: 0; }
-.library-title { color: #e6edf3; font-weight: 500; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.library-title {
+  color: #e6edf3;
+  font-weight: 500;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.library-title > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.search-result-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.search-result-badges .src-badge { margin-left: 0; }
+.library-snippet {
+  color: #8b949e;
+  font-size: 12px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 3px;
+}
 .library-url {
   color: #6e7681;
   font-family: "SF Mono", Menlo, monospace;

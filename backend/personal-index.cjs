@@ -147,7 +147,12 @@ class PersonalIndex {
     if (!core || !core.key) return null
     let treeHash = ''
     try { treeHash = (await core.treeHash()).toString('hex') } catch (_) { /* pre-ready */ }
-    return { key: core.key.toString('hex'), length: core.length || 0, treeHash }
+    return {
+      key: core.key.toString('hex'),
+      discoveryKey: core.discoveryKey ? core.discoveryKey.toString('hex') : null,
+      length: core.length || 0,
+      treeHash
+    }
   }
 
   // Build the cheap digest (docId Bloom + top-term head) a contact replicates by

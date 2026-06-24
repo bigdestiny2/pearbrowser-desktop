@@ -2,9 +2,10 @@
 // contract, extracted from index.js so it is Node-testable (index.js itself
 // needs Bare globals). The renderer gets local (hop-0) results synchronously at
 // first paint (~5ms). If it asked to federate AND a query planner exists, the
-// enriched trusted-peer set arrives later as a single EVT_SEARCH_FEDERATED push,
-// correlated by queryId. A newer query supersedes older in-flight federations,
-// so a stale enrichment never overwrites fresher results.
+// trusted-peer set arrives later as EVT_SEARCH_FEDERATED pushes correlated by
+// queryId: optional incremental `phase:"batch"` payloads as peers finish, then
+// a final `phase:"enriched"` payload. A newer query supersedes older in-flight
+// federations, so stale enrichments never overwrite fresher results.
 //
 // Deps are injected as getters (the live values are mutable boot-time globals in
 // index.js) plus an emit callback, so the whole contract is unit-testable.
@@ -43,23 +44,24 @@ function createSearchHandler ({ getPersonalIndex, getQueryPlanner, emit, onError
     const federating = !!(data && data.federated) && !!queryPlanner
 
     if (federating) {
-      // fire-and-forget; never blocks the synchronous first-paint reply
-      Promise.resolve(queryPlanner.planAndSearch(query, { now0, limit }))
-        .then((fed) => {
-          if (id !== queryId) return // superseded by a newer query — drop the stale event
-          if (typeof emit === 'function') {
-            emit({
-              queryId: id,
-              results: (fed && fed.results) || [],
-              phase: 'enriched',
-              verifyBudgetExhausted: !!(fed && fed.verifyBudgetExhausted),
-              digestHit: !!(fed && fed.digestHit),
-              fallbackPull: !!(fed && fed.fallbackPull),
-              partial: !!(fed && fed.partial),
-              provenance: (fed && fed.provenance) || null,
-            })
-          }
+      const emitFederated = (fed, phase) => {
+        if (id !== queryId) return // superseded by a newer query — drop the stale event
+        if (typeof emit !== 'function') return
+        emit({
+          queryId: id,
+          results: (fed && fed.results) || [],
+          phase: (fed && fed.phase) || phase,
+          verifyBudgetExhausted: !!(fed && fed.verifyBudgetExhausted),
+          digestHit: !!(fed && fed.digestHit),
+          fallbackPull: !!(fed && fed.fallbackPull),
+          partial: !!(fed && fed.partial),
+          provenance: (fed && fed.provenance) || null,
+          peerFetchStats: Array.isArray(fed && fed.peerFetchStats) ? fed.peerFetchStats : []
         })
+      }
+      // fire-and-forget; never blocks the synchronous first-paint reply
+      Promise.resolve(queryPlanner.planAndSearch(query, { now0, limit, onPeerBatch: (batch) => emitFederated(batch, 'batch') }))
+        .then((fed) => emitFederated(fed, 'enriched'))
         .catch(fail)
     }
 

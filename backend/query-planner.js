@@ -17,12 +17,14 @@ const dg = require('./search-digest.cjs')
 const Hyperbee = require('hyperbee')
 const b4a = require('b4a')
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const JOIN_WINDOW_MS = 60_000
 // per-peer cap on how long we wait for a replicated index to sync before
 // scanning it, so a dead/slow peer can't stall the federated query. Kept low
 // because it multiplies by maxConnectsPerQuery in the sequential fetch loop.
 const PEER_FETCH_TIMEOUT_MS = 3000
+const FEDERATION_DEADLINE_MS = 1500
+const MAX_PEER_FETCH_PARALLELISM = 4
 // per-app signing domain for search postings (mirrors the PersonalIndex sign
 // hook + identity-binding-publisher.signDocSync).
 const DOC_NAMESPACE = 'lighthouse-doc-v2'
@@ -33,6 +35,19 @@ const MAX_VERIFIES_PER_WINDOW = 256
 // fairness: no single peer may consume the whole shared budget, so one trusted
 // contact with a huge index can't starve every other peer's results.
 const MAX_VERIFIES_PER_PEER = 128
+const MAX_TRUST_ROWS = 2000
+
+function memberRootHex (v) {
+  if (v == null) return ''
+  if (typeof v === 'string') return v.toLowerCase()
+  try { return b4a.toString(v, 'hex') } catch { return '' }
+}
+
+function signedTrustBindingKey (row) {
+  const j = row && row.json
+  const key = j && (j.bindingKey || j.dhtPubkey || j.lighthouseBindingKey)
+  return typeof key === 'string' && /^[0-9a-f]{64}$/i.test(key) ? key.toLowerCase() : null
+}
 
 // Live connection budget for first-party search fan-out. Wraps search-frontier's
 // PURE DEFAULT_BUDGET (maxFrontier/maxConnectsPerQuery/maxLiveSessions) with the
@@ -64,6 +79,9 @@ class SearchFanoutBudget {
       this._joinsInWindow() < this.maxNewJoinsPerMinute
   }
 
+  isWarm (root) { return this.sessions.has(root) }
+  canUsePeer (root) { return this.isWarm(root) || this.canConnect() }
+
   noteConnect () { this._queryConnects++; this._joinTimestamps.push(this._now()) }
 
   warmRoots () { return new Set(this.sessions.keys()) }
@@ -89,13 +107,16 @@ class SearchFanoutBudget {
     return {
       maxFrontier: this.maxFrontier,
       maxConnectsPerQuery: Math.max(0, this.maxConnectsPerQuery - this._queryConnects),
-      maxLiveSessions: this.maxLiveSessions,
+      maxLiveSessions: this.maxLiveSessions
     }
   }
 }
 
 class QueryPlanner {
-  constructor ({ personalIndex, contacts, identity, swarm, store, budget, bindingPublisher, log } = {}) {
+  constructor ({
+    personalIndex, contacts, identity, swarm, store, budget, bindingPublisher, log,
+    peerFetchTimeoutMs, federationDeadlineMs, maxPeerFetchParallelism, getTrustRows
+  } = {}) {
     if (!identity) throw new Error('QueryPlanner requires identity')
     this.personalIndex = personalIndex || null
     this.contacts = contacts || null
@@ -105,9 +126,21 @@ class QueryPlanner {
     this.budget = budget || new SearchFanoutBudget()
     this.bindingPublisher = bindingPublisher || null
     this.log = typeof log === 'function' ? log : () => {}
+    this.peerFetchTimeoutMs = Number.isFinite(Number(peerFetchTimeoutMs))
+      ? Math.max(1, Number(peerFetchTimeoutMs))
+      : PEER_FETCH_TIMEOUT_MS
+    this.federationDeadlineMs = Number.isFinite(Number(federationDeadlineMs))
+      ? Math.max(1, Number(federationDeadlineMs))
+      : FEDERATION_DEADLINE_MS
+    this.maxPeerFetchParallelism = Number.isInteger(maxPeerFetchParallelism) && maxPeerFetchParallelism > 0
+      ? maxPeerFetchParallelism
+      : MAX_PEER_FETCH_PARALLELISM
+    this.getTrustRows = typeof getTrustRows === 'function' ? getTrustRows : null
     this._digestCache = new Map() // rootPubkey -> peer digest (populated in Step 5)
     this._anchorCache = new Map() // rootPubkey -> last verified completeness anchor
     this._verifyBudgetExhausted = false
+    this._lastPeerFetchStats = []
+    this._trustedPeerBindings = new Map() // rootPubkey -> { bindingKey, vouchedBy }
   }
 
   // Completeness Layer 1: a peer can serve valid-but-PARTIAL results. A ROOT-
@@ -133,9 +166,29 @@ class QueryPlanner {
     const contactsList = this.contacts ? await this.contacts.list({ limit: 1000 }).catch(() => []) : []
     const contactRoots = []
     for (const c of contactsList || []) { if (c && c.pubkey) contactRoots.push(c.pubkey) }
-    const edges = contactRoots.map((to) => ({ from: selfRoot, to }))
+    const trustRows = this.getTrustRows
+      ? (await this.getTrustRows({ limit: MAX_TRUST_ROWS }).catch(() => []))
+      : []
+    const boundedTrustRows = Array.isArray(trustRows) ? trustRows.slice(0, MAX_TRUST_ROWS) : []
+    const trustEdges = sf.trustRowsToEdges(boundedTrustRows)
+    const edges = [...contactRoots.map((to) => ({ from: selfRoot, to })), ...trustEdges]
     const graph = sf.buildTrustGraph(selfRoot, edges, { maxFollowHops: 2 })
-    return { selfRoot, contactRoots, graph }
+    const trustedBindings = new Map()
+    for (const row of boundedTrustRows) {
+      const from = memberRootHex(row && row.memberkey)
+      const to = row && row.json && row.json.curatorRoot
+      const bindingKey = signedTrustBindingKey(row)
+      if (!from || typeof to !== 'string' || !bindingKey) continue
+      const fromHop = graph.hopOf(from)
+      const toHop = graph.hopOf(to)
+      if (!Number.isFinite(fromHop) || !Number.isFinite(toHop) || toHop === 0 || toHop > graph.maxFollowHops) continue
+      const prev = trustedBindings.get(to)
+      if (!prev || fromHop < prev.hop || (fromHop === prev.hop && from < prev.vouchedBy)) {
+        trustedBindings.set(to, { bindingKey, vouchedBy: from, hop: fromHop })
+      }
+    }
+    const frontierRoots = [...new Set([...contactRoots, ...trustedBindings.keys()])]
+    return { selfRoot, contactRoots, frontierRoots, graph, trustedBindings }
   }
 
   // Verify one peer's matched docs against the peer's RESOLVED search key,
@@ -153,8 +206,17 @@ class QueryPlanner {
       ctx.verifies++; perPeer++
       if (!rec || !ib.verifyAppSig('search', sc.canonDocBytes(rec), rec.sig, searchPubkey, DOC_NAMESPACE)) break
       out.push({
-        docId: rec.docId, driveKey: rec.driveKey, path: rec.path, title: rec.title,
-        tf: tf || 1, publishedAt: rec.publishedAt || 0, contentHash: rec.h || '', signerPubkey: searchPubkey,
+        docId: rec.docId,
+        driveKey: rec.driveKey,
+        path: rec.path,
+        title: rec.title,
+        excerpt: rec.excerpt || '',
+        source: rec.source || null,
+        link: rec.link || null,
+        tf: tf || 1,
+        publishedAt: rec.publishedAt || 0,
+        contentHash: rec.h || '',
+        signerPubkey: searchPubkey
       })
     }
     return out
@@ -163,16 +225,16 @@ class QueryPlanner {
   // Turn fetched + key-resolved peer data into verified mergeFederated sources,
   // sharing ONE verify budget across all peers this query.
   // peerData: [{ rootPubkey, searchPubkey, hits }].
-  _verifyPeerSources (peerData) {
-    const ctx = { verifies: 0, exhausted: false }
+  _verifyPeerSources (peerData, ctx) {
+    const verifyCtx = ctx || { verifies: 0, exhausted: false }
     const sources = []
     for (const peer of (peerData || [])) {
       if (!peer || !peer.rootPubkey) continue
-      const candidates = this._verifyPeerHits(peer.rootPubkey, peer.searchPubkey, peer.hits, ctx)
+      const candidates = this._verifyPeerHits(peer.rootPubkey, peer.searchPubkey, peer.hits, verifyCtx)
       if (candidates.length) sources.push({ rootPubkey: peer.rootPubkey, candidates })
-      if (ctx.exhausted) break
+      if (verifyCtx.exhausted) break
     }
-    this._verifyBudgetExhausted = ctx.exhausted
+    this._verifyBudgetExhausted = verifyCtx.exhausted
     return sources
   }
 
@@ -182,48 +244,93 @@ class QueryPlanner {
   // hits. Best-effort + fully graceful — a peer with no binding key, a failed
   // resolve, or a sync timeout is skipped, so search degrades to local/partial.
   // Returns [{ rootPubkey, searchPubkey, hits }] for the RowVerifier.
-  async _fetchPeerHits (peerRoots, query) {
+  async _fetchOnePeerHits (peerRoot, query, queryTerms, deadlineAt) {
+    const stat = { rootPubkey: peerRoot, reason: 'ok', hits: 0 }
+    if (!this.budget.canUsePeer(peerRoot)) return { stat: { ...stat, reason: 'budget' } }
+    if (Date.now() >= deadlineAt) return { stat: { ...stat, reason: 'deadline' } }
+    try {
+      const contact = await this.contacts.lookup(peerRoot).catch(() => null)
+      // only federate with a VERIFIED contact whose binding key we trust —
+      // contacts.add() already drops an unverified bindingKey, this is
+      // defense-in-depth at the consumption boundary.
+      let bindingKey = contact && contact.verifiedAt ? contact.bindingKey : null
+      let allowUnlisted = false
+      if (!bindingKey) {
+        const trusted = this._trustedPeerBindings.get(peerRoot)
+        if (trusted && trusted.bindingKey) {
+          bindingKey = trusted.bindingKey
+          allowUnlisted = true
+        }
+      }
+      if (!bindingKey) return { stat: { ...stat, reason: 'unverified-contact' } }
+      const resolved = await this.bindingPublisher.resolve({ contactPubkey: peerRoot, dhtPubkey: bindingKey, allowUnlisted })
+      if (!resolved || !resolved.searchPubkey || !resolved.indexKey) return { stat: { ...stat, reason: 'no-binding' } }
+      // completeness gate: drop a peer whose anchor is forged or equivocates
+      if (!this._checkPeerAnchor(peerRoot, resolved.anchor)) return { stat: { ...stat, reason: 'bad-anchor' } }
+      // digest-first: skip the (expensive) index replication when the peer's
+      // cheap digest advertises NONE of the query terms. _digestCache lets a
+      // later query reuse it without re-resolving.
+      if (resolved.digest) this._digestCache.set(peerRoot, resolved.digest)
+      if (resolved.digest && !dg.digestWorthPulling(resolved.digest, queryTerms)) return { stat: { ...stat, reason: 'digest-miss' } }
+      const warm = this.budget.isWarm(peerRoot)
+      if (!warm && !this.budget.canConnect()) return { stat: { ...stat, reason: 'budget' } }
+      const core = this.store.get({ key: b4a.from(resolved.indexKey, 'hex') })
+      await core.ready()
+      try { this.swarm.join(core.discoveryKey, { server: false, client: true }) } catch (_) { /* already joined */ }
+      if (!warm) this.budget.noteConnect()
+      this.budget.touch(peerRoot, core)
+      // bounded best-effort sync, then scan whatever blocks we have
+      const remaining = Math.max(1, Math.min(this.peerFetchTimeoutMs, deadlineAt - Date.now()))
+      await Promise.race([core.update({ wait: true }), sleep(remaining)]).catch(() => {})
+      const bee = new Hyperbee(core, { keyEncoding: 'utf-8', valueEncoding: 'json' })
+      await bee.ready()
+      const hits = await sc.searchSignedHits(bee, query)
+      stat.hits = hits.length
+      if (!hits.length) return { stat: { ...stat, reason: 'no-hits' } }
+      return { stat, data: { rootPubkey: peerRoot, searchPubkey: resolved.searchPubkey, hits } }
+    } catch (err) {
+      this.log('[search] peer fetch skipped ' + String(peerRoot).slice(0, 8) + ': ' + (err && err.message))
+      return { stat: { ...stat, reason: 'error', error: (err && err.message) || String(err) } }
+    }
+  }
+
+  async _fetchPeerHits (peerRoots, query, { onPeerData } = {}) {
+    this._lastPeerFetchStats = []
     if (!this.store || !this.swarm || !this.bindingPublisher || !this.contacts) return []
-    const queryTerms = sc.tokenize(query).map((t) => t.term)
+    const plan = sc.parseQuery(query)
+    const queryTerms = [...plan.terms, ...plan.prefixes]
+    const roots = [...(peerRoots || [])]
     const out = []
-    for (const peerRoot of (peerRoots || [])) {
-      if (!this.budget.canConnect()) break
-      try {
-        const contact = await this.contacts.lookup(peerRoot).catch(() => null)
-        // only federate with a VERIFIED contact whose binding key we trust —
-        // contacts.add() already drops an unverified bindingKey, this is
-        // defense-in-depth at the consumption boundary.
-        if (!contact || !contact.bindingKey || !contact.verifiedAt) continue
-        const resolved = await this.bindingPublisher.resolve({ contactPubkey: peerRoot, dhtPubkey: contact.bindingKey })
-        if (!resolved || !resolved.searchPubkey || !resolved.indexKey) continue
-        // completeness gate: drop a peer whose anchor is forged or equivocates
-        if (!this._checkPeerAnchor(peerRoot, resolved.anchor)) continue
-        // digest-first: skip the (expensive) index replication when the peer's
-        // cheap digest advertises NONE of the query terms. _digestCache lets a
-        // later query reuse it without re-resolving.
-        if (resolved.digest) this._digestCache.set(peerRoot, resolved.digest)
-        if (resolved.digest && !dg.digestWorthPulling(resolved.digest, queryTerms)) continue
-        const core = this.store.get({ key: b4a.from(resolved.indexKey, 'hex') })
-        await core.ready()
-        try { this.swarm.join(core.discoveryKey, { server: false, client: true }) } catch (_) { /* already joined */ }
-        this.budget.noteConnect(); this.budget.touch(peerRoot, core)
-        // bounded best-effort sync, then scan whatever blocks we have
-        await Promise.race([core.update({ wait: true }), sleep(PEER_FETCH_TIMEOUT_MS)]).catch(() => {})
-        const bee = new Hyperbee(core, { keyEncoding: 'utf-8', valueEncoding: 'json' })
-        await bee.ready()
-        const hits = await sc.searchSignedHits(bee, query)
-        if (hits.length) out.push({ rootPubkey: peerRoot, searchPubkey: resolved.searchPubkey, hits })
-      } catch (err) {
-        this.log('[search] peer fetch skipped ' + String(peerRoot).slice(0, 8) + ': ' + (err && err.message))
+    const stats = []
+    const deadlineAt = Date.now() + this.federationDeadlineMs
+    let next = 0
+    const worker = async () => {
+      while (next < roots.length && Date.now() < deadlineAt) {
+        const peerRoot = roots[next++]
+        const res = await this._fetchOnePeerHits(peerRoot, query, queryTerms, deadlineAt)
+        if (res && res.stat) stats.push(res.stat)
+        if (res && res.data) {
+          out.push(res.data)
+          if (typeof onPeerData === 'function') {
+            try {
+              await onPeerData(res.data, res.stat || null, stats.slice())
+            } catch (err) {
+              this.log('[search] peer batch skipped ' + String(peerRoot).slice(0, 8) + ': ' + (err && err.message))
+            }
+          }
+        }
       }
     }
+    const n = Math.max(1, Math.min(this.maxPeerFetchParallelism, roots.length))
+    await Promise.all(Array.from({ length: n }, () => worker()))
+    this._lastPeerFetchStats = stats
     return out
   }
 
   // Federated query: hop-0 self candidates + trusted-peer candidates, deduped
   // (best-trust-wins) and ranked together exactly once. Returns the enriched set;
   // the synchronous local-first reply lives in the CMD_SEARCH handler (Step 4).
-  async planAndSearch (query, { now0 = 0, limit = 50 } = {}) {
+  async planAndSearch (query, { now0 = 0, limit = 50, onPeerBatch } = {}) {
     if (!this.personalIndex) {
       return {
         results: [],
@@ -235,13 +342,16 @@ class QueryPlanner {
         phase: 'enriched'
       }
     }
-    const { selfRoot, contactRoots, graph } = await this._trustSnapshot()
+    this._verifyBudgetExhausted = false
+    const { selfRoot, frontierRoots, graph, trustedBindings } = await this._trustSnapshot()
+    this._trustedPeerBindings = trustedBindings || new Map()
 
     const selfCandidates = await sc.searchCandidates(this.personalIndex.bee, query, { tier: 'self', trustHop: 0 })
 
     // plan the peer fan-out (frontier + budget), then replicate + verify peers
-    const queryTerms = sc.tokenize(query).map((t) => t.term)
-    const frontier = fr.buildFrontier(contactRoots, graph, { digests: this._digestCache, warm: this.budget.warmRoots() })
+    const queryPlan = sc.parseQuery(query)
+    const queryTerms = [...queryPlan.terms, ...queryPlan.prefixes]
+    const frontier = fr.buildFrontier(frontierRoots, graph, { digests: this._digestCache, warm: this.budget.warmRoots() })
     this.budget.beginQuery()
     const plan = fr.planFanout(frontier, queryTerms, this.budget.toBudgetArg())
     // Prefer digest-positive peers. While some contacts still lack digest
@@ -254,20 +364,53 @@ class QueryPlanner {
     const fetchRoots = fetchPlan.map((f) => f.rootPubkey)
     const digestHit = plan.pull.length > 0
     const fallbackPull = !digestHit && fetchRoots.length > 0
-    const peerData = await this._fetchPeerHits(fetchRoots, query)
-    const peerSources = this._verifyPeerSources(peerData)
-
-    const sources = [{ rootPubkey: selfRoot, candidates: selfCandidates }, ...peerSources]
-    const results = sf.mergeFederated(sources, graph, { now0, limit })
-    const partial = fallbackPull || this._verifyBudgetExhausted || fetchRoots.length < frontier.length
-    const provenance = {
+    const verifyCtx = { verifies: 0, exhausted: false }
+    const peerSources = []
+    const streamedPeerRoots = new Set()
+    const digestSkipped = (plan.skipped || []).filter((p) => p && p.digest).length
+    const baseProvenance = (partial = true) => ({
       digestHit,
       fallbackPull,
       partial,
       plannedPeers: frontier.length,
       pulledPeers: fetchRoots.length,
-      digestSkipped: (plan.skipped || []).filter((p) => p && p.digest).length
+      digestSkipped
+    })
+    const emitBatch = (stats) => {
+      if (typeof onPeerBatch !== 'function') return
+      const sources = [{ rootPubkey: selfRoot, candidates: selfCandidates }, ...peerSources]
+      onPeerBatch({
+        results: sf.mergeFederated(sources, graph, { now0, limit }),
+        verifyBudgetExhausted: this._verifyBudgetExhausted,
+        digestHit,
+        fallbackPull,
+        partial: true,
+        provenance: {
+          ...baseProvenance(true),
+          completedPeers: Array.isArray(stats) ? stats.length : 0
+        },
+        peerFetchStats: Array.isArray(stats) ? stats : [],
+        phase: 'batch'
+      })
     }
+    const peerData = await this._fetchPeerHits(fetchRoots, query, {
+      onPeerData: (data, stat, stats) => {
+        const added = this._verifyPeerSources([data], verifyCtx)
+        if (!added.length) return
+        streamedPeerRoots.add(data.rootPubkey)
+        peerSources.push(...added)
+        emitBatch(stats)
+      }
+    })
+    const unstreamedPeerData = typeof onPeerBatch === 'function'
+      ? peerData.filter((p) => p && !streamedPeerRoots.has(p.rootPubkey))
+      : peerData
+    if (unstreamedPeerData.length) peerSources.push(...this._verifyPeerSources(unstreamedPeerData, verifyCtx))
+
+    const sources = [{ rootPubkey: selfRoot, candidates: selfCandidates }, ...peerSources]
+    const results = sf.mergeFederated(sources, graph, { now0, limit })
+    const partial = fallbackPull || this._verifyBudgetExhausted || fetchRoots.length < frontier.length
+    const provenance = baseProvenance(partial)
     return {
       results,
       verifyBudgetExhausted: this._verifyBudgetExhausted,
@@ -275,6 +418,7 @@ class QueryPlanner {
       fallbackPull,
       partial,
       provenance,
+      peerFetchStats: this._lastPeerFetchStats,
       phase: 'enriched'
     }
   }

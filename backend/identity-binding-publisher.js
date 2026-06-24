@@ -22,6 +22,8 @@
 const crypto = require('hypercore-crypto')
 const b4a = require('b4a')
 const cmp = require('./search-completeness.cjs')
+const lob = require('./lighthouse-outbox.cjs')
+const lav = require('./lighthouse-availability.cjs')
 
 const SEARCH_KEY_META = 'searchkey'
 const BINDING_META = 'binding'
@@ -34,7 +36,7 @@ const DHT_BINDING_NAMESPACE = 'lighthouse-binding'
 const DOC_NAMESPACE = 'lighthouse-doc-v2'
 
 class IdentityBindingPublisher {
-  constructor ({ ib, identity, personalIndex, contacts, dht, log, getNameRegKey, getNostrEventKey, getNostrBind, getNostrRevocations } = {}) {
+  constructor ({ ib, identity, personalIndex, contacts, dht, log, getNameRegKey, getNostrEventKey, getNostrBind, getNostrRevocations, getAppOutboxes, getIndexAvailability } = {}) {
     if (!ib) throw new Error('IdentityBindingPublisher requires ib (identity-binding.cjs)')
     if (!identity) throw new Error('IdentityBindingPublisher requires identity')
     if (!personalIndex) throw new Error('IdentityBindingPublisher requires personalIndex')
@@ -53,6 +55,8 @@ class IdentityBindingPublisher {
     this.getNostrEventKey = typeof getNostrEventKey === 'function' ? getNostrEventKey : null
     this.getNostrBind = typeof getNostrBind === 'function' ? getNostrBind : null
     this.getNostrRevocations = typeof getNostrRevocations === 'function' ? getNostrRevocations : null
+    this.getAppOutboxes = typeof getAppOutboxes === 'function' ? getAppOutboxes : null
+    this.getIndexAvailability = typeof getIndexAvailability === 'function' ? getIndexAvailability : null
     this._searchKp = null // cached bound search keypair (Buffers), loaded in ready()
   }
 
@@ -191,6 +195,11 @@ class IdentityBindingPublisher {
     const nostrEventKey = this.getNostrEventKey ? await this.getNostrEventKey().catch(() => null) : null
     const nostrBind = this.getNostrBind ? await this.getNostrBind().catch(() => null) : null
     const nostrRevocations = this.getNostrRevocations ? await this.getNostrRevocations().catch(() => []) : []
+    const appOutboxes = this.getAppOutboxes ? await this.getAppOutboxes().catch(() => []) : []
+    const verifiedAppOutboxes = lob.filterDescriptors(appOutboxes, { limit: 512, verify: true })
+    const indexAvailability = this.getIndexAvailability
+      ? lav.normalizePinEvidence(await this.getIndexAvailability().catch(() => null))
+      : null
 
     let dhtPubkey = null
     let dhtSeq = null
@@ -207,6 +216,8 @@ class IdentityBindingPublisher {
         nostrEventKey,
         nostrBind,
         nostrRevocations: Array.isArray(nostrRevocations) ? nostrRevocations : [],
+        appOutboxes: verifiedAppOutboxes,
+        indexAvailability,
       }), 'utf-8')
       // REAL hyperdht signature: mutablePut(keyPair, value, { seq }). The DHT
       // sequence is wrapper-level, not search-key version-level: name registry,
@@ -215,7 +226,7 @@ class IdentityBindingPublisher {
       await this.dht.mutablePut(dhtKp, value, { seq: dhtSeq })
     }
     this.log('[binding] published v' + version + ' search=' + binding.searchPubkey.slice(0, 12) + '…')
-    return { searchPubkey: binding.searchPubkey, version, dhtPubkey, dhtSeq, indexKey, anchor, digest }
+    return { searchPubkey: binding.searchPubkey, version, dhtPubkey, dhtSeq, indexKey, anchor, digest, appOutboxes: verifiedAppOutboxes, indexAvailability }
   }
 
   async _makeAnchor (rootHex, indexKey) {
@@ -229,17 +240,20 @@ class IdentityBindingPublisher {
   }
 
   /**
-   * Resolve a contact's CURRENT search pubkey. `contactPubkey` is their ROOT
-   * pubkey (the trust anchor held in Contacts); `dhtPubkey` is their advertised
-   * lighthouse-binding DHT key. Fails closed to null: unknown contact, no DHT,
-   * missing record, or a binding that doesn't verify against the contact's root.
+   * Resolve a peer's CURRENT search pubkey. `contactPubkey` is their ROOT
+   * pubkey; `dhtPubkey` is their advertised lighthouse-binding DHT key. By
+   * default the root must already be in Contacts. Trusted transitive discovery
+   * may pass allowUnlisted:true after a reachable signed TRUST row supplied the
+   * DHT key; the returned wrapper still has to verify against contactPubkey.
+   * Fails closed to null: unknown contact, no DHT, missing record, or a binding
+   * that doesn't verify against the peer's root.
    */
-  async resolve ({ contactPubkey, dhtPubkey } = {}) {
+  async resolve ({ contactPubkey, dhtPubkey, allowUnlisted = false } = {}) {
     if (!contactPubkey || !dhtPubkey) return null
     // frontier gate: only resolve roots we actually have in Contacts
     if (this.contacts) {
       const known = await this.contacts.lookup(contactPubkey).catch(() => null)
-      if (!known) return null
+      if (!known && !allowUnlisted) return null
     }
     if (!this.dht) return null
     let res
@@ -261,6 +275,8 @@ class IdentityBindingPublisher {
       // root by the consumer, so passing them through untrusted is safe.
       nostrBind: (rec.nostrBind && typeof rec.nostrBind === 'object') ? rec.nostrBind : null,
       nostrRevocations: Array.isArray(rec.nostrRevocations) ? rec.nostrRevocations.filter((r) => r && typeof r === 'object') : [],
+      appOutboxes: lob.filterDescriptors(rec.appOutboxes, { limit: 512, verify: true }),
+      indexAvailability: lav.normalizePinEvidence(rec.indexAvailability),
     }
   }
 }

@@ -124,7 +124,7 @@ test('digest has no false negatives and bounded false positives', () => {
   assert.ok(fp / trials < 0.02, `false-positive rate ${fp}/${trials} should be well under 2% (target 0.1%)`)
 })
 
-test('digest head keeps the highest-df terms and gates fan-out', () => {
+test('digest keeps a top-term head plus all-term rare query gating', () => {
   const termDf = [
     { term: 'chat', df: 100 }, { term: 'peer', df: 80 }, { term: 'rare', df: 1 },
     { term: 'video', df: 50 },
@@ -132,9 +132,11 @@ test('digest head keeps the highest-df terms and gates fan-out', () => {
   const digest = dg.buildDigest(['d1', 'd2'], termDf, { topK: 3 })
   assert.deepEqual(digest.topTerms, ['chat', 'peer', 'video']) // top-3 by df
   assert.equal(dg.digestHasTerm(digest, 'chat'), true)
-  assert.equal(dg.digestHasTerm(digest, 'rare'), false)
+  assert.equal(dg.digestHasTerm(digest, 'rare'), false) // not in the hot-term head
+  assert.equal(dg.digestMayContainTerm(digest, 'rare'), true) // still present in the all-term filter
   assert.equal(dg.digestWorthPulling(digest, ['rare', 'video']), true)  // 'video' in head
-  assert.equal(dg.digestWorthPulling(digest, ['rare', 'nope']), false)  // skip this contact
+  assert.equal(dg.digestWorthPulling(digest, ['rare', 'nope']), true)   // rare term still pulls
+  assert.equal(dg.digestWorthPulling(digest, ['nope']), false)          // true miss skips
 })
 
 test('digest size is small (KB-scale) for thousands of docs', () => {

@@ -1,5 +1,6 @@
 const { appSlugForDrive } = require('./app-sync-registry.cjs')
 const { docIdFor } = require('./search-core.cjs')
+const { availabilityState } = require('./lighthouse-availability.cjs')
 
 const DEFAULT_PAGE_SIZE = 250
 const DEFAULT_MAX_GROUPS = 32
@@ -45,7 +46,38 @@ function deletedDoc (doc) {
   return doc ? { ...doc, deleted: true } : null
 }
 
-function peeritDoc (driveKey, key, value) {
+function recordTypeOf (key) {
+  return String(key || '').split('!')[0] || ''
+}
+
+function recordAuthor (value) {
+  if (!value || typeof value !== 'object') return null
+  for (const key of ['author', 'authorPubkey', 'pubkey', 'pub', 'owner']) {
+    if (typeof value[key] === 'string' && value[key]) return value[key]
+  }
+  return null
+}
+
+function sourceForRecord (meta, key, value, appSlug) {
+  return {
+    kind: 'app-data',
+    appSlug,
+    recordType: recordTypeOf(key),
+    recordKey: key,
+    author: recordAuthor(value) || '',
+    appDriveKey: meta && meta.appDriveKey,
+    rawAppId: meta && meta.rawAppId,
+    scopedAppId: meta && meta.scopedAppId,
+    verifiedAs: value && (value.sig || value.signature) ? 'app-signed-observed' : 'browser-observed',
+    availability: availabilityState(meta && meta.pin)
+  }
+}
+
+function withSource (doc, meta, key, value, appSlug) {
+  return doc ? { ...doc, source: sourceForRecord(meta, key, value, appSlug) } : null
+}
+
+function peeritDoc (meta, driveKey, key, value) {
   if (!value || typeof value !== 'object') return null
   const parts = String(key || '').split('!')
   const kind = parts[0]
@@ -53,26 +85,26 @@ function peeritDoc (driveKey, key, value) {
   if (kind === 'community') {
     const slug = value.slug || parts[1]
     if (!slug) return null
-    return {
+    return withSource({
       driveKey: launchUrl(driveKey, `/r/${enc(slug)}`),
       path: '/',
       title: text(`r/${slug}`, value.title),
       body: text('peerit community', value.description, value.rules),
       publishedAt: ts(value.createdAt || value.updatedAt)
-    }
+    }, meta, key, value, 'peerit')
   }
 
   if (kind === 'post') {
     const community = value.community || parts[1]
     const cid = value.cid || parts[2]
     if (!community || !cid) return null
-    const doc = {
+    const doc = withSource({
       driveKey: launchUrl(driveKey, `/r/${enc(community)}/comments/${enc(cid)}`),
       path: '/',
       title: text(value.title, `r/${community}`) || `Post in r/${community}`,
       body: text('peerit post', value.body, value.url, value.kind),
       publishedAt: ts(value.createdAt || value.editedAt)
-    }
+    }, meta, key, value, 'peerit')
     return value.deleted ? deletedDoc(doc) : doc
   }
 
@@ -80,20 +112,20 @@ function peeritDoc (driveKey, key, value) {
     const community = value.community || parts[1]
     const postCid = value.postCid || parts[2]
     if (!community || !postCid) return null
-    const doc = {
+    const doc = withSource({
       driveKey: launchUrl(driveKey, `/r/${enc(community)}/comments/${enc(postCid)}`),
       path: `/${parts.slice(0, 4).join('/') || 'comment'}`,
       title: `Comment in r/${community}`,
       body: text('peerit comment', value.body),
       publishedAt: ts(value.createdAt || value.editedAt)
-    }
+    }, meta, key, value, 'peerit')
     return value.deleted ? deletedDoc(doc) : doc
   }
 
   return null
 }
 
-function p2pBuildersDoc (driveKey, key, value) {
+function p2pBuildersDoc (meta, driveKey, key, value) {
   if (!value || typeof value !== 'object') return null
   const parts = String(key || '').split('!')
   const kind = parts[0]
@@ -101,26 +133,26 @@ function p2pBuildersDoc (driveKey, key, value) {
   if (kind === 'board') {
     const name = value.name || parts[1]
     if (!name) return null
-    return {
+    return withSource({
       driveKey: launchUrl(driveKey, `/b/${enc(name)}`),
       path: '/',
       title: text(`b/${name}`, value.description),
       body: text('p2pbuilders board', value.description),
       publishedAt: ts(value.createdAt)
-    }
+    }, meta, key, value, 'p2pbuilders')
   }
 
   if (kind === 'post') {
     const board = value.board || parts[1] || 'front'
     const cid = value.cid || parts[2]
     if (!cid) return null
-    const doc = {
+    const doc = withSource({
       driveKey: launchUrl(driveKey, `/b/${enc(board)}/item/${enc(cid)}`),
       path: '/',
       title: text(value.title, `b/${board}`) || `Post in b/${board}`,
       body: text('p2pbuilders post', value.text, value.url),
       publishedAt: ts(value.createdAt || value.editedAt)
-    }
+    }, meta, key, value, 'p2pbuilders')
     return value.deleted ? deletedDoc(doc) : doc
   }
 
@@ -128,13 +160,13 @@ function p2pBuildersDoc (driveKey, key, value) {
     const postCid = value.postCid || parts[1]
     const board = value.board || 'front'
     if (!postCid) return null
-    const doc = {
+    const doc = withSource({
       driveKey: launchUrl(driveKey, `/b/${enc(board)}/item/${enc(postCid)}`),
       path: `/${parts.slice(0, 3).join('/') || 'comment'}`,
       title: `Comment in b/${board}`,
       body: text('p2pbuilders comment', value.body),
       publishedAt: ts(value.createdAt || value.editedAt)
-    }
+    }, meta, key, value, 'p2pbuilders')
     return value.deleted ? deletedDoc(doc) : doc
   }
 
@@ -144,8 +176,8 @@ function p2pBuildersDoc (driveKey, key, value) {
 function docForRecord (meta, key, value) {
   const driveKey = meta && typeof meta.appDriveKey === 'string' ? meta.appDriveKey.toLowerCase() : ''
   const slug = (meta && meta.appSlug) || appSlugForDrive(driveKey)
-  if (slug === 'peerit') return peeritDoc(driveKey, key, value)
-  if (slug === 'p2pbuilders') return p2pBuildersDoc(driveKey, key, value)
+  if (slug === 'peerit') return peeritDoc(meta, driveKey, key, value)
+  if (slug === 'p2pbuilders') return p2pBuildersDoc(meta, driveKey, key, value)
   return null
 }
 
@@ -242,5 +274,6 @@ module.exports = {
   AppDataIndexer,
   docForRecord,
   keyFromOperation,
-  launchUrl
+  launchUrl,
+  sourceForRecord
 }

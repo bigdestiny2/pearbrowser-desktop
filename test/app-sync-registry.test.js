@@ -66,6 +66,34 @@ test('AppSyncRegistry ignores corrupt or unsafe records on load', () => {
   }
 })
 
+test('AppSyncRegistry records relay pin evidence for a sync group', () => {
+  const dir = tmp()
+  try {
+    const registry = new AppSyncRegistry({ storagePath: dir })
+    registry.remember({
+      scopedAppId: 'e'.repeat(64),
+      appDriveKey: peeritDrive,
+      rawAppId: 'peerit',
+      inviteKey: 'f'.repeat(64),
+      lastSeenAt: 1000
+    })
+    const record = registry.recordPinEvidence('e'.repeat(64), {
+      kind: 'app-outbox',
+      keyHex: 'f'.repeat(64),
+      state: 'relay-confirmed',
+      seedAcceptances: 2,
+      durable: true,
+      checkedAt: 2000
+    })
+
+    assert.equal(record.pin.state, 'relay-confirmed')
+    assert.equal(record.updatedAt, 2000)
+    assert.equal(new AppSyncRegistry({ storagePath: dir }).get('e'.repeat(64)).pin.durable, true)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('appSlugForDrive recognizes live featured app drives', () => {
   assert.equal(appSlugForDrive(peeritDrive), 'peerit')
   assert.equal(appSlugForDrive(p2pBuildersDrive), 'p2pbuilders')

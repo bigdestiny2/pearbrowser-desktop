@@ -1,5 +1,6 @@
 const HEX64 = /^[0-9a-f]{64}$/i
 const APP_ID = /^[a-zA-Z0-9_-]{1,64}$/
+const { normalizePinEvidence } = require('./lighthouse-availability.cjs')
 
 let fs = null
 let path = null
@@ -46,10 +47,11 @@ function normalizeRecord (record) {
     const inviteKey = normalizeHex64(record.inviteKey, 'inviteKey')
     if (!validRawAppId(record.rawAppId)) return null
     const appSlug = normalizeAppSlug(record.appSlug) || appSlugForDrive(appDriveKey)
+    const pin = normalizePinEvidence(record.pin)
     const createdAt = Number.isFinite(record.createdAt) ? record.createdAt : Date.now()
     const updatedAt = Number.isFinite(record.updatedAt) ? record.updatedAt : createdAt
     const lastSeenAt = Number.isFinite(record.lastSeenAt) ? record.lastSeenAt : updatedAt
-    return {
+    const out = {
       scopedAppId,
       appDriveKey,
       rawAppId: record.rawAppId,
@@ -59,6 +61,8 @@ function normalizeRecord (record) {
       updatedAt,
       lastSeenAt
     }
+    if (pin) out.pin = pin
+    return out
   } catch (_) {
     return null
   }
@@ -120,7 +124,8 @@ class AppSyncRegistry {
       appSlug: normalizeAppSlug(appSlug) || appSlugForDrive(drive),
       createdAt: Number.isFinite(prev.createdAt) ? prev.createdAt : now,
       updatedAt: now,
-      lastSeenAt: now
+      lastSeenAt: now,
+      ...(prev.pin ? { pin: prev.pin } : {})
     }
     this.state.groups[scoped] = record
     this._persist()
@@ -141,6 +146,19 @@ class AppSyncRegistry {
       .filter((record) => !appDriveKey || record.appDriveKey === appDriveKey)
       .map((record) => ({ ...record }))
       .sort((a, b) => (b.lastSeenAt || 0) - (a.lastSeenAt || 0))
+  }
+
+  recordPinEvidence (scopedAppId, evidence) {
+    const scoped = normalizeHex64(scopedAppId, 'scopedAppId')
+    const record = this.state.groups[scoped]
+    if (!record) return null
+    const pin = normalizePinEvidence(evidence)
+    if (!pin) return null
+    const now = Number.isFinite(pin.checkedAt) ? pin.checkedAt : Date.now()
+    const next = { ...record, pin, updatedAt: now, lastSeenAt: now }
+    this.state.groups[scoped] = next
+    this._persist()
+    return { ...next }
   }
 }
 
