@@ -5,19 +5,47 @@
  * Fetches content from HiveRelay gateway endpoints.
  */
 
+/* global Bare */
+
 const http = require('bare-http1')
+const https = require('bare-https')
 const b4a = require('b4a')
 const { getUserFriendlyError } = require('./hyper-proxy')
 const { mergeRelayDirectory } = require('./relay-directory')
 const { resolveBootstrapRelays } = require('./relay-record')
 
+const DEFAULT_MAX_RESPONSE_BYTES = 16 * 1024 * 1024
+const DEFAULT_MAX_CONTROL_RESPONSE_BYTES = 1024 * 1024
+
 const ENV = (typeof Bare !== 'undefined' && Bare.env) ||
   (typeof process !== 'undefined' && process.env) || {}
+
+function relayTransportForUrl (parsed) {
+  if (parsed.protocol === 'http:') return http
+  if (parsed.protocol === 'https:') return https
+  throw new Error(`unsupported relay URL protocol: ${parsed.protocol}`)
+}
+
+function relayRequestOptions (parsed, headers) {
+  return {
+    hostname: parsed.hostname,
+    port: parsed.port ? parseInt(parsed.port, 10) : (parsed.protocol === 'https:' ? 443 : 80),
+    path: parsed.pathname + parsed.search,
+    headers
+  }
+}
+
+function positiveIntegerOption (value, fallback) {
+  const n = Number(value)
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback
+}
 
 class RelayClient {
   constructor (opts = {}) {
     this.relays = opts.relays || ['http://127.0.0.1:9100']
     this.timeout = opts.timeout || 5000
+    this.maxResponseBytes = positiveIntegerOption(opts.maxResponseBytes, DEFAULT_MAX_RESPONSE_BYTES)
+    this.maxControlResponseBytes = positiveIntegerOption(opts.maxControlResponseBytes, DEFAULT_MAX_CONTROL_RESPONSE_BYTES)
     this.enabled = opts.enabled !== false // default on; explicit false disables hybrid fetch
     this.apiKey = opts.apiKey || ENV.HIVE_RELAY_API_KEY || null
     this._stats = { hits: 0, misses: 0, errors: 0 }
@@ -69,8 +97,8 @@ class RelayClient {
       circuitBreakers: Array.from(this._circuitBreakers.entries()).map(([url, cb]) => ({
         url,
         failures: cb.failures,
-        open: cb.open,
-      })),
+        open: cb.open
+      }))
     }
   }
 
@@ -130,13 +158,12 @@ class RelayClient {
       // Skip if circuit is open
       if (!this._checkCircuit(relayUrl)) continue
 
-      let lastError = null
-
       for (let attempt = 0; attempt < retries; attempt++) {
         try {
           const result = await this._httpGet(
             `${relayUrl}/v1/hyper/${keyHex}${filePath}`,
-            this.timeout
+            this.timeout,
+            this.maxResponseBytes
           )
 
           if (result.status === 200) {
@@ -152,11 +179,10 @@ class RelayClient {
           // Non-200 is not a retryable error
           break
         } catch (err) {
-          lastError = err
           if (attempt < retries - 1) {
             // Exponential backoff: 1s, 2s, 4s
             const delay = Math.pow(2, attempt) * 1000
-            await new Promise(r => setTimeout(r, delay))
+            await new Promise(resolve => setTimeout(resolve, delay))
           }
         }
       }
@@ -165,6 +191,36 @@ class RelayClient {
       this._recordFailure(relayUrl)
     }
 
+    this._stats.misses++
+    return null
+  }
+
+  async stream (keyHex, filePath, opts = {}) {
+    if (!this.enabled) return null
+    const range = typeof opts.range === 'string' && opts.range ? opts.range : ''
+    for (const relayUrl of this.relays) {
+      if (!this._checkCircuit(relayUrl)) continue
+      try {
+        const result = await this._httpStream(
+          `${relayUrl}/v1/hyper/${keyHex}${filePath}`,
+          this.timeout,
+          range ? { Range: range } : {}
+        )
+        if (range && result.status === 200) {
+          result.close?.()
+          continue
+        }
+        if (result.status === 200 || result.status === 206 || result.status === 416) {
+          this._recordSuccess(relayUrl)
+          this._stats.hits++
+          return { ...result, source: relayUrl }
+        }
+        result.close?.()
+      } catch (err) {
+        this._recordFailure(relayUrl)
+        continue
+      }
+    }
     this._stats.misses++
     return null
   }
@@ -179,7 +235,7 @@ class RelayClient {
     for (const relayUrl of this.relays) {
       const start = Date.now()
       try {
-        const result = await this._httpGet(`${relayUrl}/health`, 3000)
+        const result = await this._httpGet(`${relayUrl}/health`, 3000, this.maxControlResponseBytes)
         const latency = Date.now() - start
         results.push({
           url: relayUrl,
@@ -230,7 +286,8 @@ class RelayClient {
           `${relayUrl}/seed`,
           body,
           5000,
-          headers
+          headers,
+          this.maxControlResponseBytes
         )
         if (result.status >= 200 && result.status < 300) {
           this._recordSuccess(relayUrl)
@@ -254,35 +311,91 @@ class RelayClient {
   /**
    * HTTP GET using bare-http1
    */
-  _httpGet (url, timeout) {
+  _httpGet (url, timeout, maxBytes = this.maxResponseBytes) {
     return new Promise((resolve, reject) => {
       const parsed = new URL(url)
-      const timer = setTimeout(() => reject(new Error(getUserFriendlyError('Timeout'))), timeout)
+      const transport = relayTransportForUrl(parsed)
+      let done = false
+      let received = 0
+      let req = null
+      const finish = (err, value) => {
+        if (done) return
+        done = true
+        clearTimeout(timer)
+        if (err) reject(err)
+        else resolve(value)
+      }
+      const timer = setTimeout(() => {
+        try { req?.destroy?.() } catch {}
+        finish(new Error(getUserFriendlyError('Timeout')))
+      }, timeout)
 
-      const req = http.get({
-        hostname: parsed.hostname,
-        port: parseInt(parsed.port) || 80,
-        path: parsed.pathname + parsed.search
-      }, (res) => {
+      req = transport.get(relayRequestOptions(parsed), (res) => {
         const chunks = []
-        res.on('data', (chunk) => chunks.push(chunk))
+        res.on('data', (chunk) => {
+          if (done) return
+          received += chunk.length
+          if (received > maxBytes) {
+            try { req?.destroy?.() } catch {}
+            finish(new Error(`relay response exceeded ${maxBytes} bytes`))
+            return
+          }
+          chunks.push(chunk)
+        })
         res.on('end', () => {
-          clearTimeout(timer)
-          resolve({
+          finish(null, {
             status: res.statusCode,
             contentType: res.headers['content-type'] || 'application/octet-stream',
             body: Buffer.concat(chunks)
           })
         })
         res.on('error', (err) => {
-          clearTimeout(timer)
-          reject(err)
+          finish(err)
         })
       })
 
       req.on('error', (err) => {
+        finish(err)
+      })
+    })
+  }
+
+  _httpStream (url, timeout, headers = {}) {
+    return new Promise((resolve, reject) => {
+      const parsed = new URL(url)
+      const transport = relayTransportForUrl(parsed)
+      let done = false
+      let req = null
+      const finish = (err, value) => {
+        if (done) return
+        done = true
         clearTimeout(timer)
-        reject(err)
+        if (err) reject(err)
+        else resolve(value)
+      }
+      const timer = setTimeout(() => {
+        try { req?.destroy?.() } catch {}
+        finish(new Error(getUserFriendlyError('Timeout')))
+      }, timeout)
+
+      req = transport.get(relayRequestOptions(parsed, headers), (res) => {
+        clearTimeout(timer)
+        finish(null, {
+          status: res.statusCode,
+          contentType: res.headers['content-type'] || 'application/octet-stream',
+          contentLength: Number(res.headers['content-length']) || null,
+          contentRange: res.headers['content-range'] || null,
+          acceptRanges: res.headers['accept-ranges'] || null,
+          stream: res,
+          close: () => {
+            try { req?.destroy?.() } catch {}
+            try { res?.destroy?.() } catch {}
+          }
+        })
+      })
+
+      req.on('error', (err) => {
+        finish(err)
       })
     })
   }
@@ -290,23 +403,42 @@ class RelayClient {
   /**
    * HTTP POST using bare-http1
    */
-  _httpPost (url, body, timeout, headers = { 'Content-Type': 'application/json' }) {
+  _httpPost (url, body, timeout, headers = { 'Content-Type': 'application/json' }, maxBytes = this.maxControlResponseBytes) {
     return new Promise((resolve, reject) => {
       const parsed = new URL(url)
-      const timer = setTimeout(() => reject(new Error(getUserFriendlyError('Timeout'))), timeout)
+      const transport = relayTransportForUrl(parsed)
+      let done = false
+      let received = 0
+      let req = null
+      const finish = (err, value) => {
+        if (done) return
+        done = true
+        clearTimeout(timer)
+        if (err) reject(err)
+        else resolve(value)
+      }
+      const timer = setTimeout(() => {
+        try { req?.destroy?.() } catch {}
+        finish(new Error(getUserFriendlyError('Timeout')))
+      }, timeout)
 
-      const req = http.request({
+      req = transport.request({
         method: 'POST',
-        hostname: parsed.hostname,
-        port: parseInt(parsed.port) || 80,
-        path: parsed.pathname + parsed.search,
-        headers
+        ...relayRequestOptions(parsed, headers)
       }, (res) => {
         const chunks = []
-        res.on('data', (chunk) => chunks.push(chunk))
+        res.on('data', (chunk) => {
+          if (done) return
+          received += chunk.length
+          if (received > maxBytes) {
+            try { req?.destroy?.() } catch {}
+            finish(new Error(`relay response exceeded ${maxBytes} bytes`))
+            return
+          }
+          chunks.push(chunk)
+        })
         res.on('end', () => {
-          clearTimeout(timer)
-          resolve({
+          finish(null, {
             status: res.statusCode,
             body: Buffer.concat(chunks)
           })
@@ -314,8 +446,7 @@ class RelayClient {
       })
 
       req.on('error', (err) => {
-        clearTimeout(timer)
-        reject(err)
+        finish(err)
       })
 
       req.write(body)
@@ -411,4 +542,4 @@ class RelayClient {
   }
 }
 
-module.exports = { RelayClient }
+module.exports = { RelayClient, relayRequestOptions }

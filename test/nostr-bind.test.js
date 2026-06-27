@@ -13,6 +13,7 @@ const hex = (b) => b4a.toString(b, 'hex')
 const rootSigner = (kp) => (msg) => hex(crypto.sign(b4a.from(msg, 'utf-8'), kp.secretKey))
 const nostrSigner = (skHex) => (msg32Hex) => secp.schnorrSign(msg32Hex, skHex)
 const npk = (skHex) => secp.schnorrGetPublicKey(skHex)
+const mutateHex = (s) => s.slice(0, -2) + (s.endsWith('00') ? '01' : '00')
 const mkBind = (rootKp, nostrSk, epoch = 1) =>
   nb.makeNostrBind({ rootPubkey: hex(rootKp.publicKey), nostrPubkey: npk(nostrSk), epoch }, rootSigner(rootKp), nostrSigner(nostrSk))
 
@@ -26,8 +27,8 @@ test('tampering the nostr pubkey or epoch breaks the signatures', () => {
   const bind = mkBind(root, '11'.repeat(32))
   assert.equal(nb.verifyNostrBind({ ...bind, nostrPubkey: npk('22'.repeat(32)) }, rootHex), false)
   assert.equal(nb.verifyNostrBind({ ...bind, epoch: 2 }, rootHex), false)
-  assert.equal(nb.verifyNostrBind({ ...bind, nostrSig: bind.nostrSig.slice(0, -2) + '00' }, rootHex), false)
-  assert.equal(nb.verifyNostrBind({ ...bind, rootSig: bind.rootSig.slice(0, -2) + '00' }, rootHex), false)
+  assert.equal(nb.verifyNostrBind({ ...bind, nostrSig: mutateHex(bind.nostrSig) }, rootHex), false)
+  assert.equal(nb.verifyNostrBind({ ...bind, rootSig: mutateHex(bind.rootSig) }, rootHex), false)
 })
 
 test('cannot bind a Nostr key you do NOT control (forged nostr attestation)', () => {

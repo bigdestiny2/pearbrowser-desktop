@@ -9,6 +9,8 @@
     "run": "pear run .",
     "check:appling-release": "node scripts/check-appling-release.mjs",
     "check:release-evidence": "node scripts/check-release-evidence.mjs",
+    "evidence:desktop": "node scripts/collect-desktop-release-evidence.mjs",
+    "evidence:desktop:ci": "node scripts/collect-desktop-release-evidence.mjs --ci-only --json",
     "package:appling": "node scripts/collect-appling-artifacts.mjs",
     "smoke:runtime": "node scripts/runtime-rpc-smoke.mjs",
     "test": "node --test 'test/*.test.js'"
@@ -31,6 +33,7 @@
         "/appling",
         "/docs",
         "/examples",
+        "/outputs",
         "/scripts",
         "/test",
         "/pearbrowser-storage"
@@ -57,8 +60,10 @@
     "bare-events": "^2.0.0",
     "bare-fs": "^4.0.0",
     "bare-http1": "^4.5.5",
+    "bare-https": "^2.1.3",
     "bare-path": "^3.0.0",
     "bare-ws": "^2.1.0",
+    "compact-encoding": "^2.19.2",
     "corestore": "^7.9.2",
     "framed-stream": "^1.0.0",
     "htm": "^3.1.1",
@@ -73,6 +78,7 @@
     "pear-bridge": "latest",
     "pear-electron": "latest",
     "pear-run": "latest",
+    "protomux": "^3.10.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "schema-sheets": "^3.1.1"

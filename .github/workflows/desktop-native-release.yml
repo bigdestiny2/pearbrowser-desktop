@@ -36,12 +36,15 @@ jobs:
           - name: macOS
             os: macos-latest
             platform: darwin
+            release-platform: macos
           - name: Windows
             os: windows-latest
             platform: win32
+            release-platform: windows
           - name: Linux
             os: ubuntu-latest
             platform: linux
+            release-platform: linux
 
     defaults:
       run:
@@ -90,19 +93,23 @@ jobs:
           --tag "$RELEASE_TAG"
           --platform "${{ matrix.platform }}"
           --arch "${{ runner.arch }}"
-          --out-dir "dist/appling-release/$RELEASE_TAG/${{ matrix.platform }}"
+          --out-dir "dist/appling-release/$RELEASE_TAG/${{ matrix.release-platform }}"
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: pearbrowser-desktop-${{ env.RELEASE_TAG }}-${{ matrix.platform }}-${{ runner.arch }}
-          path: pear-ecosystem/01-browser/pearbrowser-desktop/dist/appling-release/${{ env.RELEASE_TAG }}/${{ matrix.platform }}/*
+          name: pearbrowser-desktop-${{ env.RELEASE_TAG }}-${{ matrix.release-platform }}-${{ runner.arch }}
+          path: pear-ecosystem/01-browser/pearbrowser-desktop/dist/appling-release/${{ env.RELEASE_TAG }}/${{ matrix.release-platform }}/*
           if-no-files-found: error
 
   attach-release:
     name: Attach assets to GitHub release
     needs: build-native
     runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - name: Download native artifacts
@@ -112,14 +119,51 @@ jobs:
           pattern: pearbrowser-desktop-${{ env.RELEASE_TAG }}-*
           merge-multiple: true
 
-      - name: Attach assets
+      - name: Verify release asset bundle
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           ls -la release-assets
-          if ! gh release view "$RELEASE_TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
-            gh release create "$RELEASE_TAG" --repo "$GH_REPO" --title "$RELEASE_TAG" --notes "Native PearBrowser Desktop release artifacts for $RELEASE_TAG."
+          gh release view "$RELEASE_TAG" --repo "$GH_REPO" >/dev/null
+
+          shopt -s nullglob
+          assets=(release-assets/*)
+          if (( ${#assets[@]} == 0 )); then
+            echo "::error::No native release assets were downloaded"
+            exit 1
           fi
-          gh release upload "$RELEASE_TAG" release-assets/* --repo "$GH_REPO" --clobber
+
+          for platform in macos windows linux; do
+            sums=(release-assets/SHA256SUMS-${platform}-*.txt)
+            manifests=(release-assets/manifest-${platform}-*.json)
+            if (( ${#sums[@]} != 1 )); then
+              echo "::error::Expected exactly one SHA256SUMS file for ${platform}, found ${#sums[@]}"
+              exit 1
+            fi
+            if (( ${#manifests[@]} != 1 )); then
+              echo "::error::Expected exactly one manifest file for ${platform}, found ${#manifests[@]}"
+              exit 1
+            fi
+          done
+
+          for asset in "${assets[@]}"; do
+            case "$(basename "$asset")" in
+              *.sha256|SHA256SUMS-*|manifest-*) continue ;;
+            esac
+            if [[ ! -f "${asset}.sha256" ]]; then
+              echo "::error::Missing SHA-256 sidecar for ${asset}"
+              exit 1
+            fi
+          done
+
+      - name: Attach assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          assets=(release-assets/*)
+          gh release upload "$RELEASE_TAG" "${assets[@]}" --repo "$GH_REPO" --clobber

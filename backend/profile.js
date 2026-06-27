@@ -30,6 +30,15 @@ const PROFILE_FIELDS = new Set([
   'location',
   'website',
 ])
+const LOGIN_SCOPES = new Set([
+  'profile:read',
+  'profile:name',
+  'profile:contact',
+  'profile:avatar',
+  'profile:email',
+  'profile:website',
+  'contacts:read',
+])
 
 class Profile {
   constructor (store) {
@@ -156,6 +165,44 @@ class Profile {
     }
     for (const key of keys) await this._bee.del(key).catch(() => {})
     return keys.length
+  }
+
+  async replaceGrants (grants) {
+    this._requireReady()
+    const list = Array.isArray(grants) ? grants : []
+    const next = []
+    const seen = new Set()
+    for (const grant of list) {
+      if (!grant || typeof grant !== 'object' || Array.isArray(grant)) continue
+      const driveKeyHex = String(grant.driveKeyHex || grant.driveKey || '').trim().toLowerCase()
+      if (!/^[0-9a-f]{64}$/.test(driveKeyHex) || seen.has(driveKeyHex)) continue
+      const scopes = []
+      const scopeSeen = new Set()
+      for (const raw of Array.isArray(grant.scopes) ? grant.scopes : []) {
+        const scope = String(raw || '').trim()
+        if (!LOGIN_SCOPES.has(scope) || scopeSeen.has(scope)) continue
+        scopeSeen.add(scope)
+        scopes.push(scope)
+      }
+      const record = {
+        scopes,
+        appName: typeof grant.appName === 'string' && grant.appName.trim() ? grant.appName.slice(0, 128) : null,
+        grantedAt: Number.isFinite(grant.grantedAt) ? Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.floor(grant.grantedAt))) : Date.now(),
+        expiresAt: Number.isFinite(grant.expiresAt) ? Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.floor(grant.expiresAt))) : Date.now() + 30 * 24 * 60 * 60 * 1000
+      }
+      next.push({ driveKeyHex, record })
+      seen.add(driveKeyHex)
+    }
+
+    const keys = []
+    for await (const entry of this._bee.createReadStream({ gte: 'grant!', lt: 'grant!~' })) {
+      keys.push(entry.key)
+    }
+    for (const key of keys) await this._bee.del(key).catch(() => {})
+    for (const { driveKeyHex, record } of next) {
+      await this._bee.put('grant!' + driveKeyHex, record)
+    }
+    return next.length
   }
 
   /**

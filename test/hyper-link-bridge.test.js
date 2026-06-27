@@ -3,14 +3,14 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
 test('Browse routes hyper:// iframe link messages through owned tabs', () => {
-  const shell = readFileSync(new URL('../ui/shell.js', import.meta.url), 'utf8')
+  const browse = readFileSync(new URL('../ui/components/browse.js', import.meta.url), 'utf8')
 
-  assert.match(shell, /window\.addEventListener\('message', onFrameMessage\)/)
-  assert.match(shell, /data\.type !== 'pearbrowser:navigate'/)
-  assert.ok(shell.includes(String.raw`if (!/^hyper:\/\//i.test(url)) return`))
-  assert.match(shell, /iframeRefs\.current\[t\.id\]\?\.contentWindow === event\.source/)
-  assert.match(shell, /go\(url, sourceTab\.id\)/)
-  assert.match(shell, /go\(url, t\.id\)/)
+  assert.match(browse, /window\.addEventListener\('message', onFrameMessage\)/)
+  assert.match(browse, /data\.type !== 'pearbrowser:navigate'/)
+  assert.ok(browse.includes(String.raw`if (!/^hyper:\/\//i.test(url)) return`))
+  assert.match(browse, /iframeRefs\.current\[t\.id\]\?\.contentWindow === event\.source/)
+  assert.match(browse, /go\(url, sourceTab\.id\)/)
+  assert.match(browse, /go\(url, t\.id\)/)
 })
 
 test('backend hyper navigation preserves hash routes in the proxied iframe URL', () => {

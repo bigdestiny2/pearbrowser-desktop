@@ -13,7 +13,13 @@ Shipped as production pear release length `33841` on the stable
   after relaunch once a remembered group can be reopened.
 - Preserved `hyper://.../#/...` hash routes through the proxy navigation path,
   so search results can open directly into Peerit/P2PBuilders routes.
-- Verified `npm test` at `455/455`, production release contents at length
+- Hardened `window.pear.swarm.v1` so page channels use Protomux sub-channels
+  keyed by `(protocol, topic)`, allowing shared peer connections without
+  cross-delivery and without relying on `info.topics`.
+- Bounded HiveRelay HTTP fast-path responses and actively destroyed timed-out
+  relay requests, so an oversized or hanging relay cannot turn hybrid fetch
+  into an unbounded desktop memory sink.
+- Verified `npm test` at `484/484`, production release contents at length
   `33841`, and the live app catalogue with Peercord, peerit, and HiveWorm.
 
 ## v0.5.0 — 2026-06-23

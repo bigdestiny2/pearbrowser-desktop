@@ -11,19 +11,30 @@ import {
   statSync,
   writeFileSync
 } from 'node:fs'
-import { basename, dirname, extname, join, relative, resolve } from 'node:path'
+import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
 const args = parseArgs(process.argv.slice(2))
-const version = versionFromTag(args.tag) || args.version || pkg.version
-const tag = args.tag || `v${version}`
+const tagVersion = args.tag ? versionFromTag(args.tag) : ''
+const version = tagVersion || args.version || pkg.version
+if (args.version && tagVersion && args.version !== tagVersion) {
+  fail(`--version ${args.version} does not match --tag ${args.tag}`)
+}
+if (!/^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$/.test(version)) {
+  fail(`release version must look like X.Y.Z, got ${version}`)
+}
+if (version !== pkg.version) {
+  fail(`release version ${version} does not match package.json version ${pkg.version}`)
+}
+const tag = args.tag ? normalizeTag(args.tag) : `v${version}`
 const platform = normalizePlatform(args.platform || process.platform)
 const releasePlatform = platform === 'darwin' ? 'macos' : platform === 'win32' ? 'windows' : 'linux'
 const arch = normalizeArch(args.arch || process.env.RUNNER_ARCH || process.arch)
 const buildDir = resolve(args.buildDir || 'appling/build')
-const outDir = resolve(args.outDir || join('dist', 'appling-release', tag, releasePlatform))
-const appName = args.appName || 'PearBrowser'
+const releaseRoot = resolve('dist', 'appling-release')
+const outDir = resolve(args.outDir || join(releaseRoot, tag, releasePlatform))
+const appName = sanitizeName(args.appName || 'PearBrowser')
 
 const filePatterns = {
   darwin: [/\.dmg$/i, /\.pkg$/i, /\.zip$/i],
@@ -32,8 +43,7 @@ const filePatterns = {
 }
 
 if (!existsSync(buildDir)) {
-  console.error(`error: build directory does not exist: ${buildDir}`)
-  process.exit(1)
+  fail(`build directory does not exist: ${buildDir}`)
 }
 
 assertSafeOutputDir(outDir)
@@ -89,27 +99,37 @@ for (const output of outputs) {
 console.log(`Output: ${outDir}`)
 
 function parseArgs (argv) {
+  const options = new Map([
+    ['--platform', 'platform'],
+    ['--arch', 'arch'],
+    ['--version', 'version'],
+    ['--tag', 'tag'],
+    ['--build-dir', 'buildDir'],
+    ['--out-dir', 'outDir'],
+    ['--app-name', 'appName']
+  ])
   const parsed = {}
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
-    if (arg === '--platform') parsed.platform = argv[++i]
-    else if (arg === '--arch') parsed.arch = argv[++i]
-    else if (arg === '--version') parsed.version = argv[++i]
-    else if (arg === '--tag') parsed.tag = argv[++i]
-    else if (arg === '--build-dir') parsed.buildDir = argv[++i]
-    else if (arg === '--out-dir') parsed.outDir = argv[++i]
-    else if (arg === '--app-name') parsed.appName = argv[++i]
+    const key = options.get(arg)
+    if (!key) fail(`unknown argument: ${arg}`)
+    const value = argv[++i] || ''
+    if (!value || value.startsWith('--')) fail(`${arg} requires a value`)
+    parsed[key] = value
   }
   return parsed
 }
 
 function versionFromTag (tag) {
-  if (!tag) return ''
-  const version = tag.replace(/^refs\/tags\//, '').replace(/^v/, '')
-  if (!/^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$/.test(version)) {
-    throw new Error(`release tag must look like vX.Y.Z, got ${tag}`)
+  return normalizeTag(tag).slice(1)
+}
+
+function normalizeTag (tag) {
+  const normalized = String(tag || '').replace(/^refs\/tags\//, '')
+  if (!/^v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$/.test(normalized)) {
+    fail(`release tag must look like vX.Y.Z, got ${tag}`)
   }
-  return version
+  return normalized
 }
 
 function normalizePlatform (value) {
@@ -117,7 +137,7 @@ function normalizePlatform (value) {
   if (platform === 'macos' || platform === 'mac' || platform === 'darwin') return 'darwin'
   if (platform === 'windows' || platform === 'win' || platform === 'win32') return 'win32'
   if (platform === 'linux') return 'linux'
-  throw new Error(`unsupported platform: ${value}`)
+  fail(`unsupported platform: ${value}`)
 }
 
 function normalizeArch (value) {
@@ -132,15 +152,32 @@ function assertSafeOutputDir (dir) {
   const forbidden = new Set([
     cwd,
     resolve('/'),
+    releaseRoot,
     resolve('appling'),
     buildDir,
     dirname(buildDir)
   ])
   if (process.env.HOME) forbidden.add(resolve(process.env.HOME))
-  if (forbidden.has(dir)) {
-    console.error(`error: refusing to clear unsafe output directory: ${dir}`)
-    process.exit(1)
+
+  if (!isWithin(dir, releaseRoot) || forbidden.has(dir)) {
+    fail(`refusing to clear unsafe output directory: ${dir} (must be below ${releaseRoot})`)
   }
+
+  for (const unsafeRoot of [resolve('appling'), dirname(buildDir), buildDir]) {
+    if (isSameOrWithin(dir, unsafeRoot) || isSameOrWithin(unsafeRoot, dir)) {
+      fail(`refusing to clear unsafe output directory: ${dir} (overlaps ${unsafeRoot})`)
+    }
+  }
+}
+
+function isWithin (target, root) {
+  const path = relative(root, target)
+  return path !== '' && !path.startsWith('..') && !isAbsolute(path)
+}
+
+function isSameOrWithin (target, root) {
+  const path = relative(root, target)
+  return path === '' || (!path.startsWith('..') && !isAbsolute(path))
 }
 
 function findArtifacts (root, targetPlatform) {
@@ -159,7 +196,8 @@ function findArtifacts (root, targetPlatform) {
         if (shouldSkipDir(entry.name)) continue
         walk(path)
       } else if (entry.isFile() && isReleaseFile(entry.name, targetPlatform)) {
-        found.push({ kind: 'file', path })
+        const stats = statSync(path)
+        if (stats.size > 0) found.push({ kind: 'file', path })
       }
     }
   }
@@ -213,4 +251,9 @@ function hashFile (path) {
   const hash = createHash('sha256')
   hash.update(readFileSync(path))
   return hash.digest('hex')
+}
+
+function fail (message) {
+  console.error(`error: ${message}`)
+  process.exit(1)
 }

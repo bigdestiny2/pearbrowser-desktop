@@ -78,15 +78,16 @@ sandboxed environments.
 
 | Command | Scope |
 | --- | --- |
-| `node scripts/check-relays.js` | HiveRelay discovery/connection health |
+| `npm run evidence:desktop -- --write --ci-url <Desktop CI run URL>` | Runs the safe desktop release-evidence gates and patches matching rows in the evidence log |
+| `node scripts/check-relays.js --require-relay --json` | HiveRelay discovery/connection health; exits non-zero when no real-DHT relay is reachable |
 | `node scripts/verify-pin.js --expect 18614 --hiverelay` | Fresh-peer production browser drive reachability and length, plus HiveRelay proof evidence when available |
 | `node scripts/verify-release-contents.js --expect 18614 --missing /.landing-seed.mjs --missing /pearbrowser-storage --missing /docs --missing /scripts --missing /examples --missing /test` | Fresh-peer release contents and forbidden-path absence |
 | `node scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --expect-app hiveworm` | Live PearBrowser Network catalogue contents |
-| `node scripts/verify-app-full.js --key 1868916a7a282ff0f211b11b536e9642828c32d3a817a254e1ef7e602709e25d --name pearbrowser-homepage --samples 12 --timeout 90` | Fresh-peer homepage drive sampling |
-| `node scripts/verify-app-full.js --key a2ea4d769d5e2b90caca4fbcb7f4b7b43caf43f2555b81201d3463ef89b55c26 --name peercord --samples 12 --timeout 90` | Fresh-peer Peercord bundle sampling without executing it |
-| `node scripts/verify-app-full.js --key 82110be69e2a531e840bc886dc7b9cab16729c587815295f55035109b45e4ddb --name keet --samples 12 --timeout 90` | Fresh-peer Keet bundle sampling without executing it |
-| `node scripts/verify-pear-bundle-contract.js --key a2ea4d769d5e2b90caca4fbcb7f4b7b43caf43f2555b81201d3463ef89b55c26 --name peercord-linux --app-root by-arch/linux-x64/app/peercord/resources/app --expect-type desktop --expect-main index.js --contains index.js:BrowserWindow --absent index.js:Pear.worker.pipe` | Peercord Linux bundle contract without execution |
-| `node scripts/verify-pear-bundle-contract.js --key a2ea4d769d5e2b90caca4fbcb7f4b7b43caf43f2555b81201d3463ef89b55c26 --name peercord-windows --app-root by-arch/win32-x64/app/peercord/resources/app --expect-type desktop --expect-main index.js --contains index.js:BrowserWindow --absent index.js:Pear.worker.pipe` | Peercord Windows bundle contract without execution |
+| `node scripts/verify-app-full.js homepage` | Fresh-peer homepage drive sampling |
+| `node scripts/verify-app-full.js peercord` | Fresh-peer Peercord bundle sampling without executing it |
+| `node scripts/verify-app-full.js keet` | Fresh-peer Keet bundle sampling without executing it |
+| `node scripts/verify-pear-bundle-contract.js peercord-linux` | Peercord Linux bundle contract without execution |
+| `node scripts/verify-pear-bundle-contract.js peercord-windows` | Peercord Windows bundle contract without execution |
 
 ## Third-Party Trust Gate
 

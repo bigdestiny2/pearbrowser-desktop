@@ -10,6 +10,9 @@
  * Emits a single JSON result line prefixed with RESULT: for easy parsing.
  *
  * Usage:
+ *   node scripts/verify-app-full.js homepage
+ *   node scripts/verify-app-full.js peercord
+ *   node scripts/verify-app-full.js keet
  *   node scripts/verify-app-full.js --key <64-hex> [--name x] [--samples 12] [--timeout 90]
  */
 
@@ -20,16 +23,49 @@ import b4a from 'b4a'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { APP_FULL_TARGETS, normalizeTargetName } from './lib/release-evidence-targets.mjs'
 
 function parseArgs (argv) {
-  const a = { key: null, name: 'app', samples: 12, timeout: 90 }
+  const a = { key: null, name: 'app', samples: null, timeout: null, target: '', listTargets: false }
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === '--key') a.key = argv[++i]
-    else if (argv[i] === '--name') a.name = argv[++i]
-    else if (argv[i] === '--samples') a.samples = parseInt(argv[++i], 10)
-    else if (argv[i] === '--timeout') a.timeout = parseInt(argv[++i], 10)
+    const arg = argv[i]
+    if (arg === '--key') a.key = argv[++i]
+    else if (arg === '--name') a.name = argv[++i]
+    else if (arg === '--samples') a.samples = parseInt(argv[++i], 10)
+    else if (arg === '--timeout') a.timeout = parseInt(argv[++i], 10)
+    else if (arg === '--target') a.target = argv[++i] || ''
+    else if (arg === '--list-targets') a.listTargets = true
+    else if (arg === '-h' || arg === '--help') usage(0)
+    else if (!arg.startsWith('-') && !a.target) a.target = arg
+    else usage(2, `unknown option: ${arg}`)
   }
+
+  if (a.listTargets) {
+    console.log(Object.keys(APP_FULL_TARGETS).join('\n'))
+    process.exit(0)
+  }
+
+  const targetName = normalizeTargetName(a.target)
+  if (targetName) {
+    const preset = APP_FULL_TARGETS[targetName]
+    if (!preset) usage(2, `unknown target: ${a.target}`)
+    a.key = a.key || preset.key
+    if (a.name === 'app') a.name = preset.name
+    if (!Number.isFinite(a.samples)) a.samples = preset.samples
+    if (!Number.isFinite(a.timeout)) a.timeout = preset.timeout
+    a.target = targetName
+  }
+
+  if (!Number.isFinite(a.samples)) a.samples = 12
+  if (!Number.isFinite(a.timeout)) a.timeout = 90
   return a
+}
+
+function usage (code, message = '') {
+  if (message) console.error('error:', message)
+  console.error('usage: node scripts/verify-app-full.js <homepage|peercord|keet>')
+  console.error('   or: node scripts/verify-app-full.js --key <64-hex> [--name x] [--samples 12] [--timeout 90]')
+  process.exit(code)
 }
 
 const args = parseArgs(process.argv.slice(2))
@@ -40,6 +76,7 @@ if (!/^[0-9a-f]{64}$/i.test(args.key || '')) {
 
 const PEER_TIMEOUT_MS = 30_000
 const result = {
+  target: args.target || null,
   name: args.name,
   key: args.key,
   peers: 0,

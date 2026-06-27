@@ -273,7 +273,7 @@ test('publish() advertises verified app-outbox descriptors in the binding wrappe
       lob.makeSignedDescriptor({
         appSlug: 'peerit',
         appDriveKey,
-        rawAppId: 'peerit',
+        rawAppId: authorPubkey,
         inviteKey: 'a'.repeat(64),
         recordTypes: ['post', 'comment'],
         updatedAt: 1710000000000

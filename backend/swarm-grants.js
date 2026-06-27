@@ -152,6 +152,38 @@ class SwarmGrants {
     out.sort((a, b) => (b.grantedAt || 0) - (a.grantedAt || 0))
     return out
   }
+
+  async replace (grants) {
+    this._requireReady()
+    const list = Array.isArray(grants) ? grants : []
+    const next = []
+    const seen = new Set()
+    for (const grant of list) {
+      if (!grant || typeof grant !== 'object' || Array.isArray(grant)) continue
+      const d = String(grant.driveKey || grant.driveKeyHex || '').trim().toLowerCase()
+      const t = String(grant.topicHex || '').trim().toLowerCase()
+      if (!HEX64.test(d) || !HEX64.test(t)) continue
+      const id = d + '!' + t
+      if (seen.has(id)) continue
+      seen.add(id)
+      next.push({
+        driveKey: d,
+        topicHex: t,
+        protocol: typeof grant.protocol === 'string' && grant.protocol.trim() ? grant.protocol.slice(0, 120) : null,
+        appName: typeof grant.appName === 'string' && grant.appName.trim() ? grant.appName.slice(0, 128) : null,
+        grantedAt: Number.isFinite(grant.grantedAt) ? Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.floor(grant.grantedAt))) : Date.now(),
+        lastUsedAt: Number.isFinite(grant.lastUsedAt) ? Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.floor(grant.lastUsedAt))) : Date.now()
+      })
+    }
+
+    const keys = []
+    for await (const entry of this._bee.createReadStream({ gte: ENTRY_PREFIX, lt: ENTRY_PREFIX + '~' })) {
+      keys.push(entry.key)
+    }
+    for (const k of keys) await this._bee.del(k)
+    for (const grant of next) await this._bee.put(key(grant.driveKey, grant.topicHex), grant)
+    return next.length
+  }
 }
 
 module.exports = { SwarmGrants }

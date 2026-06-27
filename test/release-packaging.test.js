@@ -1,14 +1,20 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { execFileSync, spawnSync } from 'node:child_process'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
 const pearConfig = JSON.parse(readFileSync(new URL('../pear.json', import.meta.url), 'utf8'))
 const applingPkg = JSON.parse(readFileSync(new URL('../appling/package.json', import.meta.url), 'utf8'))
 const applingCmake = readFileSync(new URL('../appling/CMakeLists.txt', import.meta.url), 'utf8')
+const desktopCiWorkflow = readFileSync(new URL('../.github/workflows/desktop-ci.yml', import.meta.url), 'utf8')
 const nativeReleaseWorkflow = readFileSync(new URL('../.github/workflows/desktop-native-release.yml', import.meta.url), 'utf8')
 const applingReleaseCheck = readFileSync(new URL('../scripts/check-appling-release.mjs', import.meta.url), 'utf8')
 const applingArtifactCollector = readFileSync(new URL('../scripts/collect-appling-artifacts.mjs', import.meta.url), 'utf8')
+const applingArtifactCollectorPath = fileURLToPath(new URL('../scripts/collect-appling-artifacts.mjs', import.meta.url))
 const releaseScript = readFileSync(new URL('../scripts/release-prod.sh', import.meta.url), 'utf8')
 const sheetsBundleScript = readFileSync(new URL('../scripts/build-sheets-bundle.sh', import.meta.url), 'utf8')
 const mainEntry = readFileSync(new URL('../index.js', import.meta.url), 'utf8')
@@ -18,12 +24,14 @@ const runtimeSmoke = readFileSync(new URL('../scripts/runtime-rpc-smoke.mjs', im
 const liveCatalogVerifier = readFileSync(new URL('../scripts/verify-live-catalog.js', import.meta.url), 'utf8')
 const hiveRelayLayout = readFileSync(new URL('../scripts/check-hiverelay-layout.mjs', import.meta.url), 'utf8')
 const verifyPin = readFileSync(new URL('../scripts/verify-pin.js', import.meta.url), 'utf8')
+const relayClient = readFileSync(new URL('../backend/relay-client.js', import.meta.url), 'utf8')
 
 test('Pear stage ignore excludes local release/operator scratch files', () => {
   const ignored = pkg.pear?.stage?.ignore || []
   assert.ok(ignored.includes('/.landing-seed.mjs'))
   assert.ok(ignored.includes('/pearbrowser-storage'))
   assert.ok(ignored.includes('/docs'))
+  assert.ok(ignored.includes('/outputs'))
   assert.ok(ignored.includes('/scripts'))
   assert.ok(ignored.includes('/test'))
 })
@@ -39,14 +47,31 @@ test('release verification asks HiveRelay for signed seed proof evidence', () =>
   assert.match(verifyPin, /verifySeededFallback/)
 })
 
-test('HiveRelay workspace pin is v0.20.0 trustless verification release', () => {
-  assert.match(hiveRelayLayout, /p2p-hiverelay', '0\.20\.0/)
-  assert.match(hiveRelayLayout, /p2p-hiverelay-client', '0\.20\.0/)
-  assert.match(hiveRelayLayout, /p2p-hiverelay-verifier', '0\.20\.0/)
+test('HiveRelay workspace pin is v0.20.2 trustless verification release', () => {
+  assert.match(hiveRelayLayout, /p2p-hiverelay', '0\.20\.2/)
+  assert.match(hiveRelayLayout, /p2p-hiverelay-client', '0\.20\.2/)
+  assert.match(hiveRelayLayout, /p2p-hiverelay-verifier', '0\.20\.2/)
+})
+
+test('RelayClient uses scheme-aware transport for public HTTPS gateways', () => {
+  assert.match(relayClient, /require\('bare-https'\)/)
+  assert.match(relayClient, /DEFAULT_MAX_RESPONSE_BYTES = 16 \* 1024 \* 1024/)
+  assert.match(relayClient, /DEFAULT_MAX_CONTROL_RESPONSE_BYTES = 1024 \* 1024/)
+  assert.match(relayClient, /function relayTransportForUrl/)
+  assert.match(relayClient, /positiveIntegerOption/)
+  assert.match(relayClient, /parsed\.protocol === 'https:' \? 443 : 80/)
+  assert.match(relayClient, /relay response exceeded \$\{maxBytes\} bytes/)
+  assert.match(relayClient, /req\?\.destroy\?\.\(\)/)
+  assert.match(relayClient, /transport\.get\(relayRequestOptions\(parsed\)/)
+  assert.match(relayClient, /transport\.request\(\{/)
+  assert.match(relayClient, /module\.exports = \{ RelayClient, relayRequestOptions \}/)
 })
 
 test('release evidence checker is exposed as an operator script', () => {
   assert.equal(pkg.scripts?.['check:release-evidence'], 'node scripts/check-release-evidence.mjs')
+  assert.equal(pkg.scripts?.['evidence:desktop'], 'node scripts/collect-desktop-release-evidence.mjs')
+  assert.equal(pkg.scripts?.['evidence:desktop:ci'], 'node scripts/collect-desktop-release-evidence.mjs --ci-only --json')
+  assert.match(desktopCiWorkflow, /npm run evidence:desktop:ci/)
 })
 
 test('appling release metadata stays in sync with the production Pear channel', () => {
@@ -60,6 +85,8 @@ test('appling release metadata stays in sync with the production Pear channel', 
   assert.equal(pkg.scripts?.['package:appling'], 'node scripts/collect-appling-artifacts.mjs')
   assert.match(applingReleaseCheck, /appling CMake ID/)
   assert.match(applingReleaseCheck, /release tag must look like vX\.Y\.Z/)
+  assert.match(applingReleaseCheck, /\['macOS icon', '\.\.\/appling\/assets\/darwin\/icon\.png'\]/)
+  assert.match(applingReleaseCheck, /bare-make generate/)
 })
 
 test('native release workflow builds and attaches appling artifacts for every desktop OS', () => {
@@ -75,7 +102,12 @@ test('native release workflow builds and attaches appling artifacts for every de
   assert.match(nativeReleaseWorkflow, /npm run --prefix appling build/)
   assert.match(nativeReleaseWorkflow, /actions\/upload-artifact@v4/)
   assert.match(nativeReleaseWorkflow, /actions\/download-artifact@v4/)
-  assert.match(nativeReleaseWorkflow, /gh release upload "\$RELEASE_TAG" release-assets\/\*/)
+  assert.match(nativeReleaseWorkflow, /release-platform: macos/)
+  assert.match(nativeReleaseWorkflow, /gh release view "\$RELEASE_TAG"/)
+  assert.match(nativeReleaseWorkflow, /SHA256SUMS-\$\{platform\}-\*\.txt/)
+  assert.match(nativeReleaseWorkflow, /Missing SHA-256 sidecar/)
+  assert.match(nativeReleaseWorkflow, /gh release upload "\$RELEASE_TAG" "\$\{assets\[@\]\}"/)
+  assert.doesNotMatch(nativeReleaseWorkflow, /gh release create/)
   assert.match(nativeReleaseWorkflow, /contents: write/)
 })
 
@@ -85,6 +117,89 @@ test('appling artifact collector emits checksummed release assets', () => {
   assert.match(applingArtifactCollector, /SHA256SUMS-\$\{releasePlatform\}-\$\{arch\}\.txt/)
   assert.match(applingArtifactCollector, /\$\{appName\}-\$\{version\}-\$\{releasePlatform\}-\$\{arch\}/)
   assert.match(applingArtifactCollector, /no \$\{releasePlatform\} appling artifacts found/)
+  assert.match(applingArtifactCollector, /release version \$\{version\} does not match package\.json version/)
+  assert.match(applingArtifactCollector, /refusing to clear unsafe output directory/)
+})
+
+test('appling artifact collector emits normalized assets and checksum manifests', () => {
+  const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'pear-appling-release-')))
+  try {
+    const buildDir = join(fixture, 'appling', 'build', 'nested')
+    mkdirSync(buildDir, { recursive: true })
+    writeFileSync(join(buildDir, 'PearBrowser Setup.exe'), 'windows installer bytes')
+    writeFileSync(join(buildDir, 'PearBrowser.dmg'), 'wrong platform bytes')
+    writeFileSync(join(buildDir, 'notes.txt'), 'not a release artifact')
+
+    execFileSync(process.execPath, [
+      applingArtifactCollectorPath,
+      '--tag',
+      'v0.5.0',
+      '--platform',
+      'windows',
+      '--arch',
+      'X64',
+      '--build-dir',
+      join(fixture, 'appling', 'build')
+    ], { cwd: fixture, encoding: 'utf8' })
+
+    const outDir = join(fixture, 'dist', 'appling-release', 'v0.5.0', 'windows')
+    assert.deepEqual(readdirSync(outDir).sort(), [
+      'PearBrowser-0.5.0-windows-x64.exe',
+      'PearBrowser-0.5.0-windows-x64.exe.sha256',
+      'SHA256SUMS-windows-x64.txt',
+      'manifest-windows-x64.json'
+    ])
+
+    const sidecar = readFileSync(join(outDir, 'PearBrowser-0.5.0-windows-x64.exe.sha256'), 'utf8')
+    assert.match(sidecar, /^[a-f0-9]{64}  PearBrowser-0\.5\.0-windows-x64\.exe\n$/)
+
+    const sums = readFileSync(join(outDir, 'SHA256SUMS-windows-x64.txt'), 'utf8')
+    assert.equal(sums, sidecar)
+
+    const manifest = JSON.parse(readFileSync(join(outDir, 'manifest-windows-x64.json'), 'utf8'))
+    assert.equal(manifest.tag, 'v0.5.0')
+    assert.equal(manifest.version, '0.5.0')
+    assert.equal(manifest.platform, 'windows')
+    assert.equal(manifest.arch, 'x64')
+    assert.equal(manifest.artifacts.length, 1)
+    assert.equal(manifest.artifacts[0].name, 'PearBrowser-0.5.0-windows-x64.exe')
+    assert.equal(manifest.artifacts[0].source, 'appling/build/nested/PearBrowser Setup.exe')
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
+})
+
+test('appling artifact collector refuses unsafe output directories before clearing them', () => {
+  const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'pear-appling-release-')))
+  try {
+    const buildDir = join(fixture, 'appling', 'build')
+    const unsafeDir = join(fixture, 'unsafe-output')
+    const sentinel = join(unsafeDir, 'keep.txt')
+    mkdirSync(buildDir, { recursive: true })
+    mkdirSync(unsafeDir, { recursive: true })
+    writeFileSync(join(buildDir, 'PearBrowser.exe'), 'windows installer bytes')
+    writeFileSync(sentinel, 'do not delete')
+
+    const result = spawnSync(process.execPath, [
+      applingArtifactCollectorPath,
+      '--tag',
+      'v0.5.0',
+      '--platform',
+      'windows',
+      '--arch',
+      'x64',
+      '--build-dir',
+      buildDir,
+      '--out-dir',
+      unsafeDir
+    ], { cwd: fixture, encoding: 'utf8' })
+
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /refusing to clear unsafe output directory/)
+    assert.equal(readFileSync(sentinel, 'utf8'), 'do not delete')
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
 })
 
 test('schema-sheets bundle keeps native addons in package context', () => {

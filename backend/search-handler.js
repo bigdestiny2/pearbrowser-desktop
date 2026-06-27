@@ -51,6 +51,7 @@ function createSearchHandler ({ getPersonalIndex, getQueryPlanner, emit, onError
           queryId: id,
           results: (fed && fed.results) || [],
           phase: (fed && fed.phase) || phase,
+          federated: true,
           verifyBudgetExhausted: !!(fed && fed.verifyBudgetExhausted),
           digestHit: !!(fed && fed.digestHit),
           fallbackPull: !!(fed && fed.fallbackPull),

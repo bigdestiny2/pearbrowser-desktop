@@ -47,6 +47,9 @@ function normalizeRecord (record) {
     const inviteKey = normalizeHex64(record.inviteKey, 'inviteKey')
     if (!validRawAppId(record.rawAppId)) return null
     const appSlug = normalizeAppSlug(record.appSlug) || appSlugForDrive(appDriveKey)
+    const authorPubkey = record.authorPubkey && HEX64.test(record.authorPubkey)
+      ? record.authorPubkey.toLowerCase()
+      : (HEX64.test(record.rawAppId || '') ? record.rawAppId.toLowerCase() : null)
     const pin = normalizePinEvidence(record.pin)
     const createdAt = Number.isFinite(record.createdAt) ? record.createdAt : Date.now()
     const updatedAt = Number.isFinite(record.updatedAt) ? record.updatedAt : createdAt
@@ -57,6 +60,7 @@ function normalizeRecord (record) {
       rawAppId: record.rawAppId,
       inviteKey,
       appSlug,
+      authorPubkey,
       createdAt,
       updatedAt,
       lastSeenAt
@@ -108,7 +112,7 @@ class AppSyncRegistry {
     }
   }
 
-  remember ({ scopedAppId, appDriveKey, rawAppId, inviteKey, appSlug, lastSeenAt } = {}) {
+  remember ({ scopedAppId, appDriveKey, rawAppId, inviteKey, appSlug, authorPubkey, lastSeenAt } = {}) {
     const scoped = normalizeHex64(scopedAppId, 'scopedAppId')
     const drive = normalizeHex64(appDriveKey, 'appDriveKey')
     const invite = normalizeHex64(inviteKey, 'inviteKey')
@@ -122,6 +126,7 @@ class AppSyncRegistry {
       rawAppId,
       inviteKey: invite,
       appSlug: normalizeAppSlug(appSlug) || appSlugForDrive(drive),
+      authorPubkey: authorPubkey && HEX64.test(authorPubkey) ? authorPubkey.toLowerCase() : (HEX64.test(rawAppId || '') ? rawAppId.toLowerCase() : null),
       createdAt: Number.isFinite(prev.createdAt) ? prev.createdAt : now,
       updatedAt: now,
       lastSeenAt: now,

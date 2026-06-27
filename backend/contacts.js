@@ -174,6 +174,78 @@ class Contacts {
     await this._bee.del('contact!' + key)
   }
 
+  async replaceContacts (entries) {
+    this._requireReady()
+    const list = Array.isArray(entries) ? entries : []
+    const next = []
+    const seen = new Set()
+
+    for (const entry of list) {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
+      let key = ''
+      try { key = this._validatePubkey(entry.pubkey) } catch { continue }
+      if (seen.has(key)) continue
+
+      const displayName = typeof entry.displayName === 'string' ? entry.displayName.trim().slice(0, 128) : ''
+      const avatar = typeof entry.avatar === 'string' && entry.avatar.trim() ? entry.avatar.slice(0, 1024) : null
+      const tags = Array.isArray(entry.tags)
+        ? entry.tags.map((tag) => String(tag || '').trim()).filter(Boolean).slice(0, 16)
+        : []
+      const notes = typeof entry.notes === 'string' && entry.notes.trim() ? entry.notes.slice(0, 512) : null
+      const bindingKey = typeof entry.bindingKey === 'string' && /^[0-9a-f]{64}$/i.test(entry.bindingKey)
+        ? entry.bindingKey.toLowerCase()
+        : null
+      const signature = typeof entry.signature === 'string' && /^[0-9a-f]+$/i.test(entry.signature)
+        ? entry.signature.toLowerCase()
+        : null
+
+      let storedSig = null
+      let verifiedAt = null
+      let trustedBindingKey = null
+      if (signature && this._verify) {
+        const message = bindingKey
+          ? `pear.contact:${key}:${displayName}:${bindingKey}`
+          : `pear.contact:${key}:${displayName}`
+        let ok = false
+        try { ok = this._verify(message, signature, key) === true } catch (_) { ok = false }
+        if (ok) {
+          storedSig = signature
+          verifiedAt = Number.isFinite(entry.verifiedAt) ? Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.floor(entry.verifiedAt))) : this._now()
+          trustedBindingKey = bindingKey
+        }
+      }
+
+      const addedAt = Number.isFinite(entry.addedAt) ? Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.floor(entry.addedAt))) : this._now()
+      const updatedAt = Number.isFinite(entry.updatedAt) ? Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.floor(entry.updatedAt))) : this._now()
+      next.push({
+        key,
+        record: {
+          displayName,
+          addedAt,
+          avatar,
+          tags,
+          notes,
+          signature: storedSig,
+          verifiedAt,
+          bindingKey: trustedBindingKey,
+          updatedAt
+        }
+      })
+      seen.add(key)
+      if (next.length >= MAX_CONTACTS) break
+    }
+
+    const keys = []
+    for await (const entry of this._bee.createReadStream({ gte: 'contact!', lt: 'contact!~' })) {
+      keys.push(entry.key)
+    }
+    for (const key of keys) await this._bee.del(key)
+    for (const { key, record } of next) {
+      await this._bee.put('contact!' + key, record)
+    }
+    return next.length
+  }
+
   /**
    * Parse a `pear://contact?pk=<hex>&name=<url-encoded>&sig=<hex>` URL
    * into a contact record. `sig` is optional (ed25519 signature over

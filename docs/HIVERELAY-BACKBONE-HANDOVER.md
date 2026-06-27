@@ -167,7 +167,7 @@ manifest rows via keet attestations, anchored claims via `auditAnchors` / the an
 ## 8. Where things are
 
 - Full design + phased plan + schema field lists: [`HIVERELAY-SCHEMA-SHEETS-DESIGN.md`](./HIVERELAY-SCHEMA-SHEETS-DESIGN.md) §5, §6, §7 (Phases 4–5), §8.
-- Relay core: `p2p-hiverelay` (npm v0.8.12) — `core/index.js`, `core/relay-node/api.js`, `core/plugin-loader.js`.
+- Relay core: `p2p-hiverelay` `0.20.2` from the local HiveRelay workspace — `core/index.js`, `core/relay-node/api.js`, `core/plugin-loader.js`.
 - Verifier: `p2p-hiverelay-verifier`. Client: `p2p-hiverelay-client`.
 - Desktop integration points it consumes: `backend/relay-client.js`, `backend/catalog-manager.js`, `backend/index-room-client.js` (new).
 - schema-sheets reference usage: Drache93's Pear Browser `app.js`.

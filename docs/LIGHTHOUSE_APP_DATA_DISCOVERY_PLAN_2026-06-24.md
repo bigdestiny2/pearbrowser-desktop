@@ -60,10 +60,28 @@ Shipped in the production PearBrowser release at length `33841`:
 - `CMD_NAVIGATE` preserves URL hashes in proxied `hyper://` iframe URLs, so
   app search results open the intended Peerit/P2PBuilders route.
 
+Current branch update, 2026-06-27:
+
+- Signed `app-outbox` descriptors are normalized, signature-verified, stored in
+  bounded Lighthouse metadata, and advertised through the Lighthouse identity
+  binding wrapper so trusted contacts can discover public outboxes later.
+- Peerit and P2PBuilders descriptors now verify the known app drive and require
+  `rawAppId === authorPubkey`, matching both apps' per-user outbox model.
+- `HttpBridge` auto-publishes the local user's signed descriptor for known
+  Peerit/P2PBuilders outboxes when the app creates or rejoins its own group.
+- Joining a discovered app outbox now triggers a focused app-data reindex, so
+  rows served by an online peer or relay become searchable without waiting for a
+  browser restart.
+- `AppDataIndexer` re-verifies Peerit/P2PBuilders record signatures before
+  indexing: key binding, signer/owner binding, app-drive namespace, descriptor
+  outbox author, and Ed25519 signature must all pass.
+
 Verification:
 
 - Focused implementation tests: 13/13 passing.
 - Full desktop suite: 455/455 passing.
+- Current branch, 2026-06-27: focused descriptor/sync/index tests 34/34
+  passing; full desktop suite 498/498 passing.
 - Production release: `pear://tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty`
   at length `33841`.
 - Fresh-peer release-content scan: length `33841`, 10250 entries, forbidden
@@ -73,11 +91,10 @@ Verification:
 
 Still future work:
 
-- Signed outbox descriptor room for cross-user discovery when an app author is
-  offline.
-- Descriptor verification against app record signatures before auto-joining or
-  trust-ranking third-party outboxes.
-- HiveRelay pinning of selected outbox cores and explicit durability evidence.
+- A standalone schema-sheets descriptor room if contact identity-binding
+  advertisement is not enough for broader cross-user discovery.
+- HiveRelay pinning of selected outbox cores and explicit durability evidence
+  beyond the current best-effort sync-group pin path.
 
 ## What Already Exists
 
@@ -484,6 +501,13 @@ after they are written or discovered locally.
 
 Outcome: app startup can populate from known public outboxes even when no live
 peer happens to announce over swarm at that moment.
+
+Status, 2026-06-27: implemented in the browser using bounded Lighthouse
+metadata plus the existing identity-binding DHT wrapper, rather than a separate
+schema-sheets room. Descriptor ingest is verify-and-drop; Peerit/P2PBuilders
+descriptors must bind the known app drive, author pubkey, scoped id, invite key,
+and signature. The sync join path immediately feeds verified discovered
+outboxes into the app-data reindexer.
 
 ### Slice 4: pinning and availability
 

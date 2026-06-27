@@ -141,6 +141,79 @@ test('catalog app normalizer keeps only supported launch types', () => {
   assert.equal(invalid.type, undefined)
 })
 
+test('catalog app normalizer canonicalizes community moderation evidence', () => {
+  const app = normalizeCatalogApp({
+    name: 'Pending App',
+    link: `hyper://${key('e')}/`,
+    status: 'pending',
+    moderation: {
+      reason: 'Needs icon',
+      relayResponse: 'Queued by relay',
+      submittedAt: 42,
+      decidedAt: 84,
+      reviewer: 'operator',
+      unsafe: 'drop'
+    }
+  })
+
+  assert.equal(app.status, 'pending-review')
+  assert.equal(app.moderationStatus, 'pending-review')
+  assert.equal(app.moderationReason, 'Needs icon')
+  assert.deepEqual(app.moderation, {
+    status: 'pending-review',
+    reason: 'Needs icon',
+    relayResponse: 'Queued by relay',
+    submittedAt: 42,
+    decidedAt: 84,
+    reviewer: 'operator'
+  })
+})
+
+test('catalog app normalizer preserves bounded release history evidence', () => {
+  const app = normalizeCatalogApp({
+    name: 'Versioned App',
+    link: `hyper://${key('e')}/`,
+    version: '2.0.0',
+    publishedAt: 1710000000000,
+    updatedAt: '2026-06-27T10:00:00.000Z',
+    releaseHistory: [
+      {
+        version: '2.0.0',
+        publishedAt: 1710000000000,
+        notes: 'Security update',
+        driveKey: key('f'),
+        unsafe: 'drop'
+      },
+      {
+        version: '1.0.0',
+        releasedAt: '2024-01-01T00:00:00.000Z',
+        notes: 'Initial release',
+        __proto__: { polluted: true }
+      }
+    ],
+    releases: [{ version: 'drop-me' }]
+  })
+
+  assert.equal(app.version, '2.0.0')
+  assert.equal(app.publishedAt, 1710000000000)
+  assert.equal(app.updatedAt, '2026-06-27T10:00:00.000Z')
+  assert.equal(app.releases, undefined)
+  assert.deepEqual(app.releaseHistory, [
+    {
+      version: '2.0.0',
+      publishedAt: 1710000000000,
+      notes: 'Security update',
+      driveKey: key('f')
+    },
+    {
+      version: '1.0.0',
+      publishedAt: '2024-01-01T00:00:00.000Z',
+      notes: 'Initial release'
+    }
+  ])
+  assert.equal({}.polluted, undefined)
+})
+
 test('personal catalog entry sanitizer accepts link-only apps and rejects targetless rows', () => {
   assert.deepEqual(sanitizePersonalCatalogEntry({
     id: 'keet',
@@ -159,6 +232,98 @@ test('personal catalog entry sanitizer accepts link-only apps and rejects target
 
   assert.equal(sanitizePersonalCatalogEntry({ id: 'site', link: `hyper://${key('a')}/app` }).driveKey, key('a'))
   assert.throws(() => sanitizePersonalCatalogEntry({ id: 'empty', name: 'No target' }), /valid 64-hex drive key/)
+})
+
+test('personal catalog entry sanitizer preserves bounded import attribution', () => {
+  const saved = sanitizePersonalCatalogEntry({
+    id: 'peerit',
+    name: 'Peerit',
+    link: 'pear://peerit',
+    homepage: 'https://peerit.example',
+    sourceUrl: 'https://github.example/peerit',
+    license: 'MIT',
+    publisherKey: key('c'),
+    version: '2.0.0',
+    publishedAt: 1710000000000,
+    releaseHistory: [
+      { version: '2.0.0', publishedAt: 1710000000000, notes: 'Security update', unsafe: 'drop' },
+      { version: '1.0.0', publishedAt: 1700000000000, notes: 'Initial release' }
+    ],
+    status: 'pending',
+    moderation: {
+      reason: 'Needs icon',
+      relayResponse: 'Relay queued the pin request',
+      submittedAt: 42,
+      decidedAt: 84,
+      reviewer: 'operator',
+      unsafe: 'drop',
+      __proto__: { polluted: true }
+    },
+    pin: {
+      ok: true,
+      durable: true,
+      acceptances: 2,
+      replicatedPeers: 1,
+      connectedRelays: 3,
+      unsafe: 'drop',
+      __proto__: { polluted: true }
+    },
+    importedFrom: {
+      catalogName: 'PearBrowser Network',
+      catalogKey: 'bee:' + key('d'),
+      source: 'hyperbee',
+      verification: 'author-signed',
+      appId: 'peerit',
+      importedAt: '2026-06-27T12:00:00.000Z',
+      sources: ['PearBrowser Network', 'Community Catalog'],
+      __proto__: { polluted: true }
+    }
+  })
+
+  assert.equal(saved.homepage, 'https://peerit.example')
+  assert.equal(saved.sourceUrl, 'https://github.example/peerit')
+  assert.equal(saved.license, 'MIT')
+  assert.equal(saved.publisherKey, key('c'))
+  assert.equal(saved.version, '2.0.0')
+  assert.equal(saved.publishedAt, 1710000000000)
+  assert.deepEqual(saved.releaseHistory, [
+    { version: '2.0.0', publishedAt: 1710000000000, notes: 'Security update' },
+    { version: '1.0.0', publishedAt: 1700000000000, notes: 'Initial release' }
+  ])
+  assert.equal(saved.status, 'pending-review')
+  assert.equal(saved.moderationStatus, 'pending-review')
+  assert.equal(saved.moderationReason, 'Needs icon')
+  assert.equal(saved.submittedAt, 42)
+  assert.equal(saved.reviewedAt, 84)
+  assert.deepEqual(saved.moderation, {
+    status: 'pending-review',
+    reason: 'Needs icon',
+    relayResponse: 'Relay queued the pin request',
+    submittedAt: 42,
+    decidedAt: 84,
+    reviewer: 'operator'
+  })
+  assert.deepEqual(saved.pin, {
+    ok: true,
+    durable: true,
+    replicationTimedOut: false,
+    acceptances: 2,
+    replicatedPeers: 1,
+    connectedRelays: 3
+  })
+  assert.deepEqual(saved.importedFrom, {
+    catalogName: 'PearBrowser Network',
+    catalogKey: 'bee:' + key('d'),
+    source: 'hyperbee',
+    verification: 'author-signed',
+    appId: 'peerit',
+    importedAt: '2026-06-27T12:00:00.000Z',
+    sources: ['PearBrowser Network', 'Community Catalog']
+  })
+  assert.deepEqual(searchAppsList([saved], 'community catalog').map((app) => app.id), ['peerit'])
+  assert.deepEqual(searchAppsList([saved], 'queued the pin').map((app) => app.id), ['peerit'])
+  assert.deepEqual(searchAppsList([saved], 'security update').map((app) => app.id), ['peerit'])
+  assert.equal({}.polluted, undefined)
 })
 
 test('backend aggregation dedupes by stable target across all catalog sources', () => {

@@ -19,7 +19,7 @@ npm i
 npm run generate
 npm run build
 cd ..
-npm run package:appling
+npm run package:appling -- --tag v0.5.0
 ```
 
 Run `npm run check:appling-release -- --tag v0.5.0` before cutting a release.

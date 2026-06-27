@@ -5,10 +5,22 @@ import quota from '../backend/storage-quota.cjs'
 const {
   DEFAULT_STORAGE_LIMIT,
   DEFAULT_EVICT_THRESHOLD,
+  StorageUsageSampler,
   browseDriveEvictionKeys,
   cleanupBrowseStorage,
-  shouldCleanupStorage
+  shouldCleanupStorage,
+  walkStorageUsage
 } = quota
+
+function deferred () {
+  let resolve
+  let reject
+  const promise = new Promise((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
+}
 
 test('storage cleanup starts only above the configured threshold', () => {
   const thresholdBytes = DEFAULT_STORAGE_LIMIT * DEFAULT_EVICT_THRESHOLD
@@ -74,4 +86,133 @@ test('cleanupBrowseStorage evicts least-recent drives and clears proxy cache', a
     ['close', 'cold'],
     ['proxy-clear']
   ])
+})
+
+test('StorageUsageSampler refreshes in the background and snapshots immediately', async () => {
+  let now = 1000
+  const scan = deferred()
+  const sampler = new StorageUsageSampler({
+    scan: () => scan.promise,
+    now: () => now,
+    maxAgeMs: 5000
+  })
+
+  const first = sampler.snapshot({ refresh: true })
+  assert.equal(first.bytes, null)
+  assert.equal(first.sampling, true)
+  assert.equal(first.sampleStartedAt, 1000)
+
+  now = 1250
+  scan.resolve(1234)
+  await sampler.pending
+
+  const done = sampler.snapshot()
+  assert.equal(done.bytes, 1234)
+  assert.equal(done.sampledAt, 1250)
+  assert.equal(done.sampling, false)
+  assert.equal(done.fresh, true)
+})
+
+test('walkStorageUsage scans incrementally and yields between chunks', async () => {
+  const dirs = new Set(['/root', '/root/a', '/root/b'])
+  const children = new Map([
+    ['/root', ['one.bin', 'a', 'b']],
+    ['/root/a', ['two.bin']],
+    ['/root/b', ['three.bin']]
+  ])
+  const sizes = new Map([
+    ['/root/one.bin', 10],
+    ['/root/a/two.bin', 20],
+    ['/root/b/three.bin', 30]
+  ])
+  const waits = []
+  const progress = []
+
+  const result = await walkStorageUsage('/root', {
+    readdir: async (dir) => children.get(dir) || [],
+    stat: async (path) => ({
+      size: sizes.get(path) || 0,
+      isDirectory: () => dirs.has(path)
+    }),
+    join: (base, name) => `${base}/${name}`,
+    yieldEvery: 2,
+    yieldDelayMs: 7,
+    wait: async (ms) => waits.push(ms),
+    onProgress: (row) => progress.push(row)
+  })
+
+  assert.equal(result.bytes, 60)
+  assert.equal(result.progress.files, 3)
+  assert.equal(result.progress.dirs, 3)
+  assert.ok(waits.length >= 2)
+  assert.ok(waits.every((ms) => ms === 7))
+  assert.equal(progress.at(-1).state, 'complete')
+  assert.ok(progress.some((row) => row.yielded > 0))
+})
+
+test('StorageUsageSampler exposes low-priority sample progress', async () => {
+  const sampler = new StorageUsageSampler({
+    scan: async ({ onProgress }) => {
+      onProgress({ state: 'running', files: 2, dirs: 1, entries: 3, bytes: 64, yielded: 1 })
+      return { bytes: 96, progress: { state: 'complete', files: 3, dirs: 1, entries: 4, bytes: 96, yielded: 2 } }
+    },
+    now: () => 50,
+    maxAgeMs: 1000
+  })
+
+  await sampler.sample({ force: true })
+  const snapshot = sampler.snapshot()
+  assert.equal(snapshot.bytes, 96)
+  assert.equal(snapshot.sampleProgress.state, 'complete')
+  assert.equal(snapshot.sampleProgress.files, 3)
+  assert.equal(snapshot.sampleProgress.yielded, 2)
+  assert.equal(snapshot.sampleProgress.lowPriority, true)
+})
+
+test('StorageUsageSampler reuses fresh samples and refreshes stale ones once', async () => {
+  let now = 0
+  let scans = 0
+  const sampler = new StorageUsageSampler({
+    scan: async () => ++scans * 100,
+    now: () => now,
+    maxAgeMs: 1000
+  })
+
+  await sampler.sample({ force: true })
+  assert.equal(sampler.snapshot().bytes, 100)
+
+  sampler.snapshot({ refresh: true })
+  assert.equal(scans, 1, 'fresh sample should not trigger another scan')
+
+  now = 1001
+  const stale = sampler.snapshot({ refresh: true })
+  assert.equal(stale.bytes, 100)
+  assert.equal(stale.sampling, true)
+  const pending = sampler.pending
+  sampler.snapshot({ refresh: true })
+  assert.equal(sampler.pending, pending, 'pending stale refresh should be shared')
+  await sampler.pending
+  assert.equal(scans, 2)
+  assert.equal(sampler.snapshot().bytes, 200)
+})
+
+test('StorageUsageSampler records scan errors without dropping last good sample', async () => {
+  let fail = false
+  const sampler = new StorageUsageSampler({
+    scan: async () => {
+      if (fail) throw new Error('walk failed')
+      return 42
+    },
+    now: () => 10,
+    maxAgeMs: 0
+  })
+
+  await sampler.sample({ force: true })
+  assert.equal(sampler.snapshot().bytes, 42)
+
+  fail = true
+  await sampler.sample({ force: true })
+  const after = sampler.snapshot()
+  assert.equal(after.bytes, 42)
+  assert.equal(after.error, 'walk failed')
 })

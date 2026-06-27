@@ -16,6 +16,39 @@
 
 const HEX64 = /^[0-9a-f]{64}$/i
 
+function str (value, max = 200) {
+  return String(value == null ? '' : value).trim().slice(0, max)
+}
+
+function num (value) {
+  const n = Number(value)
+  return Number.isFinite(n) ? n : null
+}
+
+function toHex (value) {
+  if (typeof value === 'string') return value.toLowerCase()
+  if (!value) return ''
+  try {
+    const source = value.data || value
+    return Buffer.from(source).toString('hex').toLowerCase()
+  } catch {
+    return ''
+  }
+}
+
+function firstObject (...values) {
+  for (const value of values) {
+    if (value && typeof value === 'object' && !Array.isArray(value)) return value
+  }
+  return null
+}
+
+function normalizeCategories (value) {
+  if (Array.isArray(value)) return value.map((c) => str(c, 40)).filter(Boolean).slice(0, 12)
+  if (typeof value === 'string') return value.split(',').map((c) => str(c, 40)).filter(Boolean).slice(0, 12)
+  return []
+}
+
 /** Slug an arbitrary string into a stable, catalogue-safe app id. */
 function slugify (s) {
   const out = String(s == null ? '' : s)
@@ -100,7 +133,15 @@ function buildSubmissionManifest (input = {}, ctx = {}) {
     type: derived.kind === 'pear' ? 'standalone' : 'hypersite',
     list: 'community',
     submittedBy: ctx.submittedBy || null,
-    submittedAt: now
+    submittedAt: now,
+    status: 'pending-review',
+    moderationStatus: 'pending-review',
+    moderationReason: 'Submitted to the community catalog review queue.',
+    moderation: {
+      status: 'pending-review',
+      reason: 'Submitted to the community catalog review queue.',
+      submittedAt: now
+    }
   }
   // A pear:// app keeps its launchable pearLink alongside the generic link so
   // the browser's launcher can route it without re-deriving.
@@ -135,14 +176,92 @@ function manageRequest (action, opts = {}) {
   if (action === 'approve' || action === 'reject') {
     const appKey = String(opts.appKey || '').toLowerCase()
     if (!HEX64.test(appKey)) return { error: action + ' needs a 64-hex appKey.' }
+    const body = { appKey }
+    if (action === 'reject' && opts.reason) body.reason = String(opts.reason).slice(0, 300)
     return {
       url: base + '/api/manage/catalog/' + action,
       method: 'POST',
       headers,
-      body: JSON.stringify({ appKey })
+      body: JSON.stringify(body)
     }
   }
   return { error: 'Unknown moderation action: ' + action }
+}
+
+function sanitizePendingManifest (raw, opts = {}) {
+  const input = firstObject(raw)
+  if (!input) return null
+  const hasPreviewField = [
+    'id', 'appId', 'slug', 'name', 'title', 'appName', 'description', 'summary',
+    'about', 'author', 'publisher', 'publisherName', 'owner', 'version',
+    'release', 'tag', 'type', 'launchMode', 'kind', 'link', 'url', 'pearLink',
+    'categories', 'tags', 'manifestKey', 'manifestDriveKey', 'metadataKey'
+  ].some((key) => input[key] != null && input[key] !== '')
+  if (!hasPreviewField) return null
+
+  const driveKey = toHex(input.driveKey || input.keyHex || input.key || input.appKey || opts.appKey)
+  const link = str(input.link || input.url || input.pearLink || (HEX64.test(driveKey) ? 'hyper://' + driveKey + '/' : ''), 512)
+  const categories = normalizeCategories(input.categories || input.tags)
+  const manifest = {
+    id: str(input.id || input.appId || input.slug || input.name, 80),
+    name: str(input.name || input.title || input.appName, 160),
+    description: str(input.description || input.summary || input.about, 1200),
+    author: str(input.author || input.publisher || input.publisherName || input.owner, 160),
+    version: str(input.version || input.release || input.tag, 80),
+    type: str(input.type || input.launchMode || input.kind, 40),
+    link,
+    driveKey: HEX64.test(driveKey) ? driveKey : '',
+    pearLink: str(input.pearLink || (/^pear:\/\//i.test(link) ? link : ''), 512),
+    categories,
+    submittedAt: num(input.submittedAt || input.createdAt || input.discoveredAt),
+    manifestKey: str(input.manifestKey || input.manifestDriveKey || input.metadataKey, 128),
+    publisherKey: str(input.publisherKey || input.publisherPubkey || input.authorKey || input.signerPubkey, 128)
+  }
+
+  for (const key of Object.keys(manifest)) {
+    if (manifest[key] === '' || manifest[key] === null || (Array.isArray(manifest[key]) && manifest[key].length === 0)) {
+      delete manifest[key]
+    }
+  }
+  return Object.keys(manifest).length ? manifest : null
+}
+
+function normalizePendingReview (raw = {}, opts = {}) {
+  const r = raw && typeof raw === 'object' ? raw : {}
+  const appKey = toHex(r.appKey || r.driveKey || r.key || r.keyHex)
+  const publisherPubkey = toHex(r.publisherPubkey || r.publisherKey || r.authorKey || r.signerPubkey)
+  const manifestSource = firstObject(
+    r.manifest,
+    r.submission,
+    r.metadata,
+    r.catalogEntry,
+    r.app,
+    r.value,
+    r
+  )
+  const manifest = sanitizePendingManifest(manifestSource, { appKey })
+  const discoveredAt = num(r.discoveredAt || r.submittedAt || manifest?.submittedAt)
+  const relayMode = str(opts.mode, 80)
+
+  const out = {
+    appKey: HEX64.test(appKey) ? appKey : '',
+    publisherPubkey: HEX64.test(publisherPubkey) ? publisherPubkey : '',
+    discoveredAt,
+    ttlSeconds: num(r.ttlSeconds || r.ttl || r.expiresIn),
+    currentRelays: num(r.currentRelays || r.relays || r.relayCount) || 0,
+    status: 'pending-review',
+    moderationStatus: 'pending-review',
+    moderationReason: 'Waiting for community catalog review.',
+    moderation: {
+      status: 'pending-review',
+      reason: 'Waiting for community catalog review.',
+      submittedAt: discoveredAt,
+      relayResponse: relayMode ? `Relay review mode: ${relayMode}` : undefined
+    }
+  }
+  if (manifest) out.manifest = manifest
+  for (const key of Object.keys(out.moderation)) if (out.moderation[key] === undefined || out.moderation[key] === null || out.moderation[key] === '') delete out.moderation[key]
+  return out
 }
 
 /**
@@ -150,8 +269,11 @@ function manageRequest (action, opts = {}) {
  * app, matching scripts/lib/catalog-bee.js's `app!<id>` schema that
  * backend/catalog-manager.js loadCatalogBee() reads back.
  */
-function communityBeeEntry (manifest, now = Date.now()) {
+function communityBeeEntry (manifest, now = Date.now(), opts = {}) {
   const id = slugify(manifest.id || manifest.driveKey || manifest.link)
+  const approvedAt = Number.isFinite(opts.approvedAt) ? opts.approvedAt : now
+  const reason = String(opts.reason || 'Approved by the community catalog.').slice(0, 200)
+  const relayResponse = String(opts.relayResponse || '').slice(0, 300)
   const entry = {
     id,
     name: manifest.name || id,
@@ -161,8 +283,23 @@ function communityBeeEntry (manifest, now = Date.now()) {
     version: manifest.version || '',
     author: manifest.author || '',
     categories: Array.isArray(manifest.categories) ? manifest.categories : [],
-    publishedAt: Number.isFinite(manifest.submittedAt) ? manifest.submittedAt : now
+    publishedAt: Number.isFinite(manifest.submittedAt) ? manifest.submittedAt : now,
+    submittedAt: Number.isFinite(manifest.submittedAt) ? manifest.submittedAt : undefined,
+    reviewedAt: approvedAt,
+    status: 'approved',
+    moderationStatus: 'approved',
+    moderationReason: reason,
+    moderation: {
+      status: 'approved',
+      reason,
+      submittedAt: Number.isFinite(manifest.submittedAt) ? manifest.submittedAt : undefined,
+      decidedAt: approvedAt,
+      relayResponse: relayResponse || undefined,
+      reviewer: opts.reviewer ? String(opts.reviewer).slice(0, 128) : undefined
+    }
   }
+  for (const key of Object.keys(entry.moderation)) if (entry.moderation[key] === undefined || entry.moderation[key] === '') delete entry.moderation[key]
+  if (entry.submittedAt === undefined) delete entry.submittedAt
   if (typeof manifest.iconData === 'string' && manifest.iconData) entry.iconData = manifest.iconData
   return { key: 'app!' + id, value: entry }
 }
@@ -173,5 +310,7 @@ module.exports = {
   deriveKeyAndLink,
   buildSubmissionManifest,
   manageRequest,
+  sanitizePendingManifest,
+  normalizePendingReview,
   communityBeeEntry
 }

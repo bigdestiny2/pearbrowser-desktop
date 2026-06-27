@@ -62,7 +62,7 @@ module.exports = {
         "site"
       ],
       "description": "Always-on relay infrastructure for the Pear and Hyperswarm ecosystem. Blind peering, NAT traversal, HTTP gateway. Apache-2.0.",
-      "version": "0.16.3",
+      "version": "0.20.2",
       "sourceUrl": "https://github.com/bigdestiny2/P2P-Hiverelay",
       "license": "Apache-2.0",
       "verification": "relay-listed"

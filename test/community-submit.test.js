@@ -10,6 +10,7 @@ const {
   deriveKeyAndLink,
   buildSubmissionManifest,
   manageRequest,
+  normalizePendingReview,
   communityBeeEntry
 } = communitySubmit
 
@@ -83,6 +84,13 @@ test('buildSubmissionManifest: full hyper submission', () => {
   assert.equal(manifest.type, 'hypersite')
   assert.equal(manifest.list, 'community')
   assert.equal(manifest.submittedAt, 1000)
+  assert.equal(manifest.status, 'pending-review')
+  assert.equal(manifest.moderationStatus, 'pending-review')
+  assert.deepEqual(manifest.moderation, {
+    status: 'pending-review',
+    reason: 'Submitted to the community catalog review queue.',
+    submittedAt: 1000
+  })
   assert.deepEqual(manifest.categories, ['tools', 'social'])
   assert.equal(manifest.pearLink, undefined) // hyper apps carry no pearLink
   assert.equal(manifest.iconData, 'data:image/svg+xml,<svg/>')
@@ -125,8 +133,9 @@ test('manageRequest: approve/reject POST a 64-hex appKey', () => {
   assert.equal(a.method, 'POST')
   assert.equal(a.url, 'https://relay.example/api/manage/catalog/approve')
   assert.deepEqual(JSON.parse(a.body), { appKey: HEX }) // lowercased
-  const j = manageRequest('reject', { baseUrl: 'https://relay.example', appKey: HEX })
+  const j = manageRequest('reject', { baseUrl: 'https://relay.example', appKey: HEX, reason: 'Needs a working icon' })
   assert.equal(j.url, 'https://relay.example/api/manage/catalog/reject')
+  assert.deepEqual(JSON.parse(j.body), { appKey: HEX, reason: 'Needs a working icon' })
 })
 
 test('manageRequest: guards missing url + bad appKey + bad action', () => {
@@ -136,15 +145,64 @@ test('manageRequest: guards missing url + bad appKey + bad action', () => {
   assert.ok(manageRequest('bogus', { baseUrl: 'http://x' }).error)
 })
 
+test('normalizePendingReview preserves bounded manifest preview metadata', () => {
+  const row = normalizePendingReview({
+    appKey: HEX.toUpperCase(),
+    publisherPubkey: 'a'.repeat(64),
+    currentRelays: 2,
+    discoveredAt: 1234,
+    manifest: {
+      id: 'demo',
+      name: 'Demo App',
+      description: 'desc '.repeat(400),
+      author: 'alice',
+      version: '2.0.0',
+      type: 'standalone',
+      link: 'pear://' + Z32,
+      driveKey: HEX,
+      categories: ['tools', 'social', 'x'.repeat(80)],
+      manifestKey: 'b'.repeat(64)
+    }
+  }, { mode: 'review' })
+
+  assert.equal(row.appKey, HEX)
+  assert.equal(row.publisherPubkey, 'a'.repeat(64))
+  assert.equal(row.currentRelays, 2)
+  assert.equal(row.moderation.relayResponse, 'Relay review mode: review')
+  assert.equal(row.manifest.name, 'Demo App')
+  assert.equal(row.manifest.description.length, 1200)
+  assert.deepEqual(row.manifest.categories, ['tools', 'social', 'x'.repeat(40)])
+  assert.equal(row.manifest.driveKey, HEX)
+  assert.equal(row.manifest.manifestKey, 'b'.repeat(64))
+})
+
+test('normalizePendingReview leaves bare pin requests without a manifest preview', () => {
+  const row = normalizePendingReview({ appKey: HEX, publisherPubkey: 'a'.repeat(64) })
+  assert.equal(row.appKey, HEX)
+  assert.equal(row.manifest, undefined)
+})
+
 test('communityBeeEntry: maps a manifest to the app!<id> schema', () => {
   const { manifest } = buildSubmissionManifest(
     { name: 'Entry App', link: HEX, description: 'd', author: 'a' },
     { now: 42, normalizeKey: fakeNormalize }
   )
-  const { key, value } = communityBeeEntry(manifest)
+  const { key, value } = communityBeeEntry(manifest, 84, { relayResponse: 'seed accepted', reviewer: 'operator' })
   assert.equal(key, 'app!entry-app')
   assert.equal(value.id, 'entry-app')
   assert.equal(value.driveKey, HEX)
   assert.equal(value.publishedAt, 42) // carried from submittedAt
+  assert.equal(value.submittedAt, 42)
+  assert.equal(value.reviewedAt, 84)
+  assert.equal(value.status, 'approved')
+  assert.equal(value.moderationStatus, 'approved')
+  assert.deepEqual(value.moderation, {
+    status: 'approved',
+    reason: 'Approved by the community catalog.',
+    submittedAt: 42,
+    decidedAt: 84,
+    relayResponse: 'seed accepted',
+    reviewer: 'operator'
+  })
   assert.equal(value.name, 'Entry App')
 })

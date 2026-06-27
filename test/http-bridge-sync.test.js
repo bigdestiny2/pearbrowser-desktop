@@ -8,6 +8,7 @@ const { HttpBridge } = (await import('../backend/http-bridge.js')).default
 
 const driveKey = 'a'.repeat(64)
 const appPubkey = 'b'.repeat(64)
+const peeritDrive = 'ec6e2d6d9d22b9d6b40e11a9ca3042be3197e4bdca9e9a7f079be6ee830761b4'
 // Mirror HttpBridge._scopeAppId: a per-drive 64-hex HASH, not a `driveKey:appId`
 // concat (which is ≥65 chars and exceeds the Autobase bridge's 64-char appId cap —
 // the bug that silently broke every sync call and forced apps into dev mode).
@@ -149,7 +150,9 @@ test('HttpBridge sync API requires a token and scopes app IDs to the drive', asy
     scopedAppId: scope('shop'),
     appDriveKey: driveKey,
     rawAppId: 'shop',
-    inviteKey: 'c'.repeat(64)
+    inviteKey: 'c'.repeat(64),
+    appSlug: null,
+    authorPubkey: null
   }])
 })
 
@@ -201,7 +204,9 @@ test('HttpBridge routes sync operations and identity through the authenticated a
     scopedAppId: scope('shop'),
     appDriveKey: driveKey,
     rawAppId: 'shop',
-    inviteKey
+    inviteKey,
+    appSlug: null,
+    authorPubkey: null
   }])
   assert.deepEqual(indexedAppends, [{
     appDriveKey: driveKey,
@@ -232,6 +237,90 @@ test('HttpBridge exposes sync pinning through the authenticated app scope', asyn
     { rawAppId: 'shop', appDriveKey: driveKey },
     { appDriveKey: driveKey }
   ]])
+})
+
+test('HttpBridge auto-publishes known app outbox descriptors and reindexes joined outboxes', async () => {
+  const authorPubkey = '1'.repeat(64)
+  const inviteKey = '2'.repeat(64)
+  const calls = []
+  const registryRecords = []
+  const publishes = []
+  const reindexes = []
+  const scoped = (appId) => b4a.toString(hypercoreCrypto.data(b4a.from(`${peeritDrive}:${appId}`)), 'hex')
+  const backend = {
+    async createSyncGroup (appId) {
+      calls.push(['createSyncGroup', appId])
+      return { inviteKey, appId, writerPublicKey: '3'.repeat(64) }
+    },
+    async joinSyncGroup (appId, key) {
+      calls.push(['joinSyncGroup', appId, key])
+      return { inviteKey: key, appId, writerPublicKey: '4'.repeat(64) }
+    }
+  }
+  const http = new HttpBridge(backend, null, null, {
+    validateToken: (token) => token === 'good' ? peeritDrive : null,
+    appSyncRegistry: {
+      remember (record) {
+        const out = { ...record }
+        registryRecords.push(out)
+        return out
+      }
+    },
+    getAppDataIndexer: () => ({
+      async reindexGroup (bridge, record, opts) {
+        reindexes.push([bridge, record, opts])
+        return { scanned: 1, indexed: 1, removed: 0, skipped: 0, errors: [] }
+      }
+    }),
+    identity: {
+      getAppKeypair (keyHex) {
+        assert.equal(keyHex, peeritDrive)
+        return { publicKey: Buffer.from(authorPubkey, 'hex') }
+      }
+    },
+    lighthouseOutboxes: {
+      async publish (descriptor, opts) {
+        publishes.push([descriptor, opts])
+        return { ok: true }
+      }
+    }
+  })
+
+  const create = await request(http, 'POST', '/api/sync/create', {
+    headers: { 'x-pear-token': 'good' },
+    body: { appId: authorPubkey }
+  })
+  assert.equal(create.res.statusCode, 200)
+  assert.deepEqual(publishes[0], [{
+    appSlug: 'peerit',
+    rawAppId: authorPubkey,
+    inviteKey,
+    authorPubkey,
+    recordTypes: ['community', 'post', 'comment', 'profile'],
+    updatedAt: publishes[0][0].updatedAt
+  }, { appDriveKey: peeritDrive, source: 'sync-create' }])
+
+  const join = await request(http, 'POST', '/api/sync/join', {
+    headers: { 'x-pear-token': 'good' },
+    body: { appId: authorPubkey, inviteKey }
+  })
+  assert.equal(join.res.statusCode, 200)
+  assert.equal(reindexes.length, 1)
+  assert.equal(reindexes[0][0], backend)
+  assert.deepEqual(reindexes[0][1], {
+    scopedAppId: scoped(authorPubkey),
+    appDriveKey: peeritDrive,
+    rawAppId: authorPubkey,
+    inviteKey,
+    appSlug: 'peerit',
+    authorPubkey
+  })
+  assert.deepEqual(reindexes[0][2], { pageSize: 250, maxRows: 5000 })
+  assert.deepEqual(calls, [
+    ['createSyncGroup', scoped(authorPubkey)],
+    ['joinSyncGroup', scoped(authorPubkey), inviteKey]
+  ])
+  assert.equal(registryRecords.length, 2)
 })
 
 test('HttpBridge login uses the already parsed POST body', async () => {

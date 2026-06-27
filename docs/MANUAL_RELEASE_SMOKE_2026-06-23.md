@@ -23,7 +23,14 @@ announcement.
   - `npm test`
   - `git diff --check`
   - `npm audit --audit-level=high`
-  - `node scripts/check-relays.js`
+  - `npm run evidence:desktop -- --write --ci-url <Desktop CI run URL>`
+    - Runs `node scripts/check-relays.js --require-relay --json`,
+      `node scripts/verify-app-full.js homepage`,
+      `node scripts/verify-app-full.js peercord`,
+      `node scripts/verify-app-full.js keet`,
+      `node scripts/verify-pear-bundle-contract.js peercord-linux`, and
+      `node scripts/verify-pear-bundle-contract.js peercord-windows`, then
+      patches the matching desktop automated rows in the evidence log.
   - `node scripts/verify-pin.js --expect 18614 --hiverelay`
   - `node scripts/verify-release-contents.js --expect 18614 --missing /.landing-seed.mjs --missing /pearbrowser-storage --missing /docs --missing /scripts --missing /examples --missing /test`
   - `node scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --expect-app hiveworm`

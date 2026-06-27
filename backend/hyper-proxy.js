@@ -10,6 +10,8 @@
 
 const http = require('bare-http1')
 const crypto = require('bare-crypto')
+const { FetchTelemetry } = require('./fetch-telemetry.cjs')
+const { parseByteRangeHeader } = require('./http-range.cjs')
 
 const USER_FRIENDLY_ERRORS = {
   'Invalid drive key': 'This link appears to be broken or incomplete',
@@ -127,6 +129,7 @@ const HYPER_LINK_BRIDGE_SHIM = `<script>
 </script>`
 const HYPER_LINK_BRIDGE_SHIM_HASH = sha256ScriptBody(HYPER_LINK_BRIDGE_SHIM)
 const PREFERRED_PROXY_PORT = 18788
+const LARGE_STREAM_THRESHOLD = 5 * 1024 * 1024
 
 /**
  * Modify a page's Content-Security-Policy meta tag to authorize the
@@ -185,6 +188,7 @@ class HyperProxy {
     this._server = null
     this._port = 0
     this._stats = { relayHits: 0, p2pHits: 0, total: 0 }
+    this._fetchTelemetry = new FetchTelemetry()
     // P2P-first relay race (privacy): wait this long for P2P before contacting
     // the relay. _relayFirst=true is the kill-switch back to the parallel race.
     this._relayGraceMs = 500
@@ -196,6 +200,7 @@ class HyperProxy {
     this._cacheMaxSize = 50 * 1024 * 1024 // 50MB
     this._cacheCurrentSize = 0
     this._cacheStats = { hits: 0, misses: 0 }
+    this._streamLargeFileThreshold = LARGE_STREAM_THRESHOLD
     this._apiTokens = new Map() // token -> { driveKeyHex, issuedAt }
     this._apiTokenTtlMs = 10 * 60 * 1000 // 10 minutes
     /**
@@ -496,6 +501,9 @@ class HyperProxy {
 
     const url = new URL(req.url, `http://localhost:${this._port}`)
     const path = url.pathname
+    const requestStartedAt = Date.now()
+    let driveKeyHex = ''
+    let filePath = ''
 
     // HTTP Bridge — direct API for WebView apps (bypasses RN relay)
     if (this._httpBridge && path.startsWith('/api/')) {
@@ -511,8 +519,6 @@ class HyperProxy {
     }
 
     try {
-      let driveKeyHex, filePath
-
       if (path.startsWith('/hyper/')) {
         // Direct hyper:// browsing: /hyper/KEY/path
         const rest = path.slice('/hyper/'.length)
@@ -567,7 +573,7 @@ class HyperProxy {
           const indexExists = await drive.entry(filePath + 'index.html').catch(() => null)
           if (!indexExists) {
             // No index, show directory listing
-            return this._serveDirectoryListing(res, drive, driveKeyHex, filePath)
+            return this._serveDirectoryListing(res, drive, driveKeyHex, filePath, requestStartedAt)
           }
           // Has index, serve it (filePath stays as directory path)
         }
@@ -577,6 +583,7 @@ class HyperProxy {
       const cacheKey = this._getCacheKey(driveKeyHex, filePath)
       const cached = this._getFromCache(cacheKey)
       if (cached) {
+        const durationMs = Date.now() - requestStartedAt
         res.setHeader('Content-Type', cached.contentType)
         res.setHeader('X-Cache', 'HIT')
         // HTML responses must STILL get the per-page api-token + shim
@@ -587,18 +594,98 @@ class HyperProxy {
         // re-inject on every HIT instead.
         if (cached.contentType.includes('text/html')) {
           const injected = await this._injectHtmlHead(cached.content, driveKeyHex, path)
+          this._fetchTelemetry.record({
+            source: 'cache',
+            cache: 'hit',
+            status: 200,
+            durationMs,
+            firstByteMs: durationMs,
+            bytes: injected.length,
+            contentType: cached.contentType,
+            path: filePath,
+            driveKeyHex
+          })
           res.statusCode = 200
           return res.end(injected)
         }
+        const range = parseByteRangeHeader(req.headers.range, cached.content.length)
+        res.setHeader('Accept-Ranges', 'bytes')
+        if (range?.unsatisfiable) {
+          this._fetchTelemetry.record({
+            source: 'cache',
+            cache: 'hit',
+            ok: false,
+            status: 416,
+            durationMs,
+            firstByteMs: durationMs,
+            bytes: 0,
+            contentType: cached.contentType,
+            path: filePath,
+            driveKeyHex
+          })
+          res.statusCode = 416
+          res.setHeader('Content-Range', `bytes */${cached.content.length}`)
+          return res.end()
+        }
+        if (range) {
+          this._fetchTelemetry.record({
+            source: 'cache',
+            cache: 'hit',
+            status: 206,
+            durationMs,
+            firstByteMs: durationMs,
+            bytes: range.length,
+            contentType: cached.contentType,
+            path: filePath,
+            driveKeyHex
+          })
+          res.statusCode = 206
+          res.setHeader('Content-Range', `bytes ${range.start}-${range.end}/${range.total}`)
+          res.setHeader('Content-Length', range.length)
+          return res.end(cached.content.slice(range.start, range.end + 1))
+        }
+        this._fetchTelemetry.record({
+          source: 'cache',
+          cache: 'hit',
+          status: 200,
+          durationMs,
+          firstByteMs: durationMs,
+          bytes: cached.content.length,
+          contentType: cached.contentType,
+          path: filePath,
+          driveKeyHex
+        })
         res.statusCode = 200
         return res.end(cached.content)
       }
       this._cacheStats.misses++
 
+      if (req.headers.range) {
+        const streamed = await this._serveP2PRange(req, res, driveKeyHex, filePath, requestStartedAt)
+        if (streamed) return
+        const relayStreamed = await this._serveRelayRange(req, res, driveKeyHex, filePath, requestStartedAt)
+        if (relayStreamed) return
+      } else {
+        const streamed = await this._serveP2PLargeFile(req, res, driveKeyHex, filePath, requestStartedAt)
+        if (streamed) return
+      }
+
       // HYBRID FETCH: race relay (fast) vs P2P (reliable)
       const result = await this._hybridFetch(driveKeyHex, filePath)
 
       if (!result) {
+        const durationMs = Date.now() - requestStartedAt
+        this._fetchTelemetry.record({
+          source: 'miss',
+          cache: 'miss',
+          ok: false,
+          status: 404,
+          durationMs,
+          firstByteMs: durationMs,
+          bytes: 0,
+          path: filePath,
+          driveKeyHex
+        })
         res.statusCode = 404
         return res.end('File not found')
       }
@@ -622,6 +709,19 @@ class HyperProxy {
       // and cache MISS use the identical injection path.
       if (contentType.includes('text/html')) {
         const injected = await this._injectHtmlHead(content, driveKeyHex, path)
+        const durationMs = Date.now() - requestStartedAt
+        this._fetchTelemetry.record({
+          source: result.source,
+          cache: 'miss',
+          status: 200,
+          durationMs,
+          firstByteMs: durationMs,
+          bytes: injected.length,
+          contentType,
+          path: filePath,
+          driveKeyHex,
+          relayContacted: !!result.relayContacted
+        })
         res.statusCode = 200
         return res.end(injected)
       }
@@ -632,36 +732,78 @@ class HyperProxy {
 
       if (rangeHeader) {
         const total = content.length
-        const match = rangeHeader.match(/bytes=(\d*)-(\d*)/)
-        if (match && (match[1] || match[2])) {
-          // Clamp the requested range to the actual content bounds. Without
-          // this, an open-ended or oversized range (e.g. `bytes=0-999999`
-          // against a smaller file) sets a Content-Length larger than the
-          // bytes we actually send, and browsers stall the media stream.
-          let start = match[1] ? parseInt(match[1], 10) : 0
-          let end = match[2] ? parseInt(match[2], 10) : total - 1
-          if (Number.isNaN(start)) start = 0
-          if (Number.isNaN(end) || end > total - 1) end = total - 1
+        const range = parseByteRangeHeader(rangeHeader, total)
+        if (range?.unsatisfiable) {
+          const durationMs = Date.now() - requestStartedAt
+          this._fetchTelemetry.record({
+            source: result.source,
+            cache: 'miss',
+            ok: false,
+            status: 416,
+            durationMs,
+            firstByteMs: durationMs,
+            bytes: 0,
+            contentType,
+            path: filePath,
+            driveKeyHex,
+            relayContacted: !!result.relayContacted
+          })
+          res.statusCode = 416
+          res.setHeader('Content-Range', `bytes */${total}`)
+          return res.end()
+        }
 
-          // Unsatisfiable range → 416 per RFC 7233.
-          if (start > end || start >= total) {
-            res.statusCode = 416
-            res.setHeader('Content-Range', `bytes */${total}`)
-            return res.end()
-          }
-
-          const chunkSize = end - start + 1
-          res.setHeader('Content-Range', `bytes ${start}-${end}/${total}`)
-          res.setHeader('Content-Length', chunkSize)
+        if (range) {
+          const durationMs = Date.now() - requestStartedAt
+          this._fetchTelemetry.record({
+            source: result.source,
+            cache: 'miss',
+            status: 206,
+            durationMs,
+            firstByteMs: durationMs,
+            bytes: range.length,
+            contentType,
+            path: filePath,
+            driveKeyHex,
+            relayContacted: !!result.relayContacted
+          })
+          res.setHeader('Content-Range', `bytes ${range.start}-${range.end}/${range.total}`)
+          res.setHeader('Content-Length', range.length)
           res.statusCode = 206
-          return res.end(content.slice(start, end + 1))
+          return res.end(content.slice(range.start, range.end + 1))
         }
       }
 
+      const durationMs = Date.now() - requestStartedAt
+      this._fetchTelemetry.record({
+        source: result.source,
+        cache: 'miss',
+        status: 200,
+        durationMs,
+        firstByteMs: durationMs,
+        bytes: content.length,
+        contentType,
+        path: filePath,
+        driveKeyHex,
+        relayContacted: !!result.relayContacted
+      })
       res.setHeader('Content-Length', content.length)
       res.statusCode = 200
       res.end(content)
     } catch (err) {
+      const durationMs = Date.now() - requestStartedAt
+      this._fetchTelemetry.record({
+        source: 'error',
+        cache: null,
+        ok: false,
+        status: 502,
+        durationMs,
+        firstByteMs: durationMs,
+        bytes: 0,
+        path: filePath || path,
+        driveKeyHex,
+        error: err && err.message
+      })
       // Log detailed error internally
       this._onError(path, err.message)
       // Return user-friendly error to client
@@ -753,7 +895,7 @@ class HyperProxy {
     // slower than _relayGraceMs, so the relay never sees a fetch P2P could have
     // served. _relayFirst restores the old parallel race.
     const { p2pFirstFetch } = require('./p2p-first-fetch.js')
-    const { result } = await p2pFirstFetch({
+    const { result, relayContacted } = await p2pFirstFetch({
       fetchP2P: () => this._fetchP2P(keyHex, resolvedPath),
       fetchRelay: this._relay ? () => this._relay.fetch(keyHex, resolvedPath) : null,
       graceMs: this._relayGraceMs,
@@ -763,11 +905,347 @@ class HyperProxy {
     if (result) {
       if (result.source === 'relay') this._stats.relayHits++
       else this._stats.p2pHits++
+      result.relayContacted = !!relayContacted
     } else {
       this._onError(keyHex + resolvedPath, 'Hybrid fetch failed: all sources unavailable')
     }
 
     return result
+  }
+
+  async _entryForP2PRange (drive, driveKeyHex, filePath) {
+    const readEntry = () => Promise.race([
+      drive.entry(filePath, { wait: true }),
+      new Promise(resolve => setTimeout(() => resolve(null), 4000))
+    ]).catch(() => null)
+
+    let entry = await readEntry()
+    if (entry || typeof drive.update !== 'function') return entry
+
+    const before = drive.version
+    try {
+      await Promise.race([
+        drive.update({ wait: true }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('update-timeout')), 4000))
+      ])
+    } catch {}
+    if (drive.version !== before) {
+      this.invalidateCache(driveKeyHex)
+      entry = await readEntry()
+    }
+    return entry
+  }
+
+  async _serveP2PRange (req, res, driveKeyHex, filePath, requestStartedAt = Date.now()) {
+    const rangeHeader = req?.headers?.range
+    if (!rangeHeader) return false
+
+    const contentType = guessType(filePath)
+    if (contentType.includes('text/html')) return false
+
+    let drive = null
+    let entry = null
+    try {
+      drive = await this._getDrive(driveKeyHex)
+      if (!drive || typeof drive.entry !== 'function' || typeof drive.createReadStream !== 'function') return false
+      entry = await this._entryForP2PRange(drive, driveKeyHex, filePath)
+    } catch (err) {
+      this._onError(filePath, err && err.message ? err.message : String(err))
+      return false
+    }
+
+    const total = Number(entry?.value?.blob?.byteLength)
+    if (!Number.isSafeInteger(total) || total < 0) return false
+
+    const range = parseByteRangeHeader(rangeHeader, total)
+    if (!range) return false
+
+    const durationBeforeBody = Date.now() - requestStartedAt
+    res.setHeader('Accept-Ranges', 'bytes')
+    res.setHeader('X-Cache', 'MISS')
+    res.setHeader('X-Source', 'p2p-stream')
+
+    if (range.unsatisfiable) {
+      this._fetchTelemetry.record({
+        source: 'p2p',
+        cache: 'miss',
+        ok: false,
+        status: 416,
+        durationMs: durationBeforeBody,
+        firstByteMs: durationBeforeBody,
+        bytes: 0,
+        contentType,
+        path: filePath,
+        driveKeyHex
+      })
+      res.statusCode = 416
+      res.setHeader('Content-Range', `bytes */${total}`)
+      res.end()
+      return true
+    }
+
+    let stream = null
+    try {
+      stream = drive.createReadStream(filePath, {
+        wait: true,
+        timeout: 15000,
+        start: range.start,
+        end: range.end
+      })
+    } catch (err) {
+      this._onError(filePath, err && err.message ? err.message : String(err))
+      return false
+    }
+
+    res.statusCode = 206
+    res.setHeader('Content-Type', contentType)
+    res.setHeader('Content-Range', `bytes ${range.start}-${range.end}/${range.total}`)
+    res.setHeader('Content-Length', range.length)
+
+    let bytes = 0
+    let firstByteMs = null
+    let streamError = null
+
+    await new Promise((resolve) => {
+      let done = false
+      const finish = (err) => {
+        if (done) return
+        done = true
+        if (err) streamError = err
+        try {
+          if (err && typeof res.destroy === 'function') res.destroy(err)
+          else res.end()
+        } catch {}
+        resolve()
+      }
+
+      stream.on('data', (chunk) => {
+        if (done) return
+        if (firstByteMs === null) firstByteMs = Date.now() - requestStartedAt
+        bytes += chunk.length
+        try {
+          res.write(chunk)
+        } catch (err) {
+          try { stream.destroy?.() } catch {}
+          finish(err)
+        }
+      })
+      stream.on('end', () => finish())
+      stream.on('error', (err) => finish(err))
+    })
+
+    const durationMs = Date.now() - requestStartedAt
+    if (streamError) {
+      this._onError(filePath, streamError && streamError.message ? streamError.message : String(streamError))
+    }
+    const ok = !streamError && bytes === range.length
+    this._fetchTelemetry.record({
+      source: 'p2p',
+      cache: 'miss',
+      ok,
+      status: ok ? 206 : 502,
+      durationMs,
+      firstByteMs: firstByteMs === null ? durationMs : firstByteMs,
+      bytes,
+      contentType,
+      path: filePath,
+      driveKeyHex
+    })
+    return true
+  }
+
+  async _serveRelayRange (req, res, driveKeyHex, filePath, requestStartedAt = Date.now()) {
+    const rangeHeader = req?.headers?.range
+    if (!rangeHeader || !this._relay || typeof this._relay.stream !== 'function') return false
+
+    const contentType = guessType(filePath)
+    if (contentType.includes('text/html')) return false
+
+    let result = null
+    try {
+      result = await this._relay.stream(driveKeyHex, filePath, { range: rangeHeader })
+    } catch (err) {
+      this._onError(filePath, err && err.message ? err.message : String(err))
+      return false
+    }
+    if (!result || !result.stream) return false
+
+    const status = Number(result.status)
+    const durationBeforeBody = Date.now() - requestStartedAt
+    res.setHeader('Accept-Ranges', result.acceptRanges || 'bytes')
+    res.setHeader('X-Cache', 'MISS')
+    res.setHeader('X-Source', 'relay-stream')
+    res.setHeader('Content-Type', result.contentType || contentType)
+    if (result.contentRange) res.setHeader('Content-Range', result.contentRange)
+    if (Number.isFinite(result.contentLength) && result.contentLength >= 0) res.setHeader('Content-Length', result.contentLength)
+
+    if (status === 416) {
+      this._fetchTelemetry.record({
+        source: 'relay',
+        cache: 'miss',
+        ok: false,
+        status: 416,
+        durationMs: durationBeforeBody,
+        firstByteMs: durationBeforeBody,
+        bytes: 0,
+        contentType: result.contentType || contentType,
+        path: filePath,
+        driveKeyHex,
+        relayContacted: true
+      })
+      res.statusCode = 416
+      try { result.close?.() } catch {}
+      res.end()
+      return true
+    }
+
+    if (status !== 206) {
+      try { result.close?.() } catch {}
+      return false
+    }
+
+    res.statusCode = 206
+    let bytes = 0
+    let firstByteMs = null
+    let streamError = null
+
+    await new Promise((resolve) => {
+      let done = false
+      const finish = (err) => {
+        if (done) return
+        done = true
+        if (err) streamError = err
+        try {
+          if (err && typeof res.destroy === 'function') res.destroy(err)
+          else res.end()
+        } catch {}
+        resolve()
+      }
+      result.stream.on('data', (chunk) => {
+        if (done) return
+        if (firstByteMs === null) firstByteMs = Date.now() - requestStartedAt
+        bytes += chunk.length
+        try {
+          res.write(chunk)
+        } catch (err) {
+          try { result.close?.() } catch {}
+          finish(err)
+        }
+      })
+      result.stream.on('end', () => finish())
+      result.stream.on('error', (err) => finish(err))
+    })
+
+    const durationMs = Date.now() - requestStartedAt
+    if (streamError) {
+      this._onError(filePath, streamError && streamError.message ? streamError.message : String(streamError))
+    }
+    const expected = Number(result.contentLength)
+    const ok = !streamError && (!Number.isFinite(expected) || expected < 0 || bytes === expected)
+    this._fetchTelemetry.record({
+      source: 'relay',
+      cache: 'miss',
+      ok,
+      status: ok ? 206 : 502,
+      durationMs,
+      firstByteMs: firstByteMs === null ? durationMs : firstByteMs,
+      bytes,
+      contentType: result.contentType || contentType,
+      path: filePath,
+      driveKeyHex,
+      relayContacted: true
+    })
+    return true
+  }
+
+  async _serveP2PLargeFile (req, res, driveKeyHex, filePath, requestStartedAt = Date.now()) {
+    if (req?.headers?.range) return false
+
+    const contentType = guessType(filePath)
+    if (contentType.includes('text/html')) return false
+
+    let drive = null
+    let entry = null
+    try {
+      drive = await this._getDrive(driveKeyHex)
+      if (!drive || typeof drive.entry !== 'function' || typeof drive.createReadStream !== 'function') return false
+      entry = await this._entryForP2PRange(drive, driveKeyHex, filePath)
+    } catch (err) {
+      this._onError(filePath, err && err.message ? err.message : String(err))
+      return false
+    }
+
+    const total = Number(entry?.value?.blob?.byteLength)
+    if (!Number.isSafeInteger(total) || total < this._streamLargeFileThreshold) return false
+
+    let stream = null
+    try {
+      stream = drive.createReadStream(filePath, {
+        wait: true,
+        timeout: 15000
+      })
+    } catch (err) {
+      this._onError(filePath, err && err.message ? err.message : String(err))
+      return false
+    }
+
+    res.statusCode = 200
+    res.setHeader('Accept-Ranges', 'bytes')
+    res.setHeader('X-Cache', 'MISS')
+    res.setHeader('X-Source', 'p2p-stream')
+    res.setHeader('Content-Type', contentType)
+    res.setHeader('Content-Length', total)
+
+    let bytes = 0
+    let firstByteMs = null
+    let streamError = null
+
+    await new Promise((resolve) => {
+      let done = false
+      const finish = (err) => {
+        if (done) return
+        done = true
+        if (err) streamError = err
+        try {
+          if (err && typeof res.destroy === 'function') res.destroy(err)
+          else res.end()
+        } catch {}
+        resolve()
+      }
+
+      stream.on('data', (chunk) => {
+        if (done) return
+        if (firstByteMs === null) firstByteMs = Date.now() - requestStartedAt
+        bytes += chunk.length
+        try {
+          res.write(chunk)
+        } catch (err) {
+          try { stream.destroy?.() } catch {}
+          finish(err)
+        }
+      })
+      stream.on('end', () => finish())
+      stream.on('error', (err) => finish(err))
+    })
+
+    const durationMs = Date.now() - requestStartedAt
+    if (streamError) {
+      this._onError(filePath, streamError && streamError.message ? streamError.message : String(streamError))
+    }
+    const ok = !streamError && bytes === total
+    this._fetchTelemetry.record({
+      source: 'p2p',
+      cache: 'miss',
+      ok,
+      status: ok ? 200 : 502,
+      durationMs,
+      firstByteMs: firstByteMs === null ? durationMs : firstByteMs,
+      bytes,
+      contentType,
+      path: filePath,
+      driveKeyHex
+    })
+    return true
   }
 
   /**
@@ -898,6 +1376,10 @@ class HyperProxy {
     }
   }
 
+  getFetchTelemetry () {
+    return this._fetchTelemetry.snapshot()
+  }
+
   /**
    * Clear the entire cache
    */
@@ -935,7 +1417,7 @@ class HyperProxy {
     }
   }
 
-  async _serveDirectoryListing (res, drive, keyHex, dirPath) {
+  async _serveDirectoryListing (res, drive, keyHex, dirPath, requestStartedAt = Date.now()) {
     const entries = []
     const MAX_ENTRIES = 1000 // Prevent memory exhaustion
     const TIMEOUT_MS = 5000
@@ -968,16 +1450,28 @@ class HyperProxy {
       return `<li><a href="/hyper/${escapeHtml(keyHex)}${escapedE}">${escapedName}</a></li>`
     }).join('\n')
 
-    res.statusCode = 200
-    res.setHeader('Content-Type', 'text/html; charset=utf-8')
-    res.end(`<!DOCTYPE html>
+    const body = `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>hyper://${escapeHtml(keyHex.slice(0, 8))}...${escapeHtml(dirPath)}</title>
 <style>body{font-family:-apple-system,sans-serif;padding:20px;background:#0a0a0a;color:#e0e0e0}
 h1{color:#ff9500;font-size:1.1em;word-break:break-all}ul{list-style:none;padding:0}
 li{padding:8px 0;border-bottom:1px solid #333}a{color:#4dabf7;text-decoration:none}</style>
 </head><body><h1>hyper://${escapeHtml(keyHex.slice(0, 8))}...${escapeHtml(dirPath)}</h1>
-<ul>${items || '<li style="color:#666">Empty directory</li>'}</ul></body></html>`)
+<ul>${items || '<li style="color:#666">Empty directory</li>'}</ul></body></html>`
+    const durationMs = Date.now() - requestStartedAt
+    this._fetchTelemetry.record({
+      source: 'directory',
+      status: 200,
+      durationMs,
+      firstByteMs: durationMs,
+      bytes: Buffer.byteLength(body),
+      contentType: 'text/html; charset=utf-8',
+      path: dirPath,
+      driveKeyHex: keyHex
+    })
+    res.statusCode = 200
+    res.setHeader('Content-Type', 'text/html; charset=utf-8')
+    res.end(body)
   }
 }
 

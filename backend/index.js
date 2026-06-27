@@ -11,6 +11,7 @@ const Corestore = require('corestore')
 const Hyperdrive = require('hyperdrive')
 const b4a = require('b4a')
 const z32 = require('z32')
+const crypto = require('crypto')
 const fs = require('bare-fs')
 
 // Normalize a Hyperdrive key from either 64-char hex or
@@ -31,6 +32,9 @@ const { TabRuntime } = require('./tab-runtime.js')
 const { RelayClient } = require('./relay-client.js')
 const { CatalogManager } = require('./catalog-manager.js')
 const communitySubmit = require('./community-submit.cjs')
+const shipCheck = require('./ship-check.cjs')
+const { verifyFreshPeer } = require('./fresh-peer-verifier.cjs')
+const trustSummary = require('./trust-summary.cjs')
 const { AppManager } = require('./app-manager.js')
 const { SiteManager } = require('./site-manager.js')
 const { PearBridge, PEAR_SWARM_V1_SHIM, PEAR_SYNC_SHIM, PEAR_ANONGPT_SHIM } = require('./pear-bridge.js')
@@ -55,6 +59,16 @@ const { NostrEventStore } = require('./nostr-events-store.cjs')
 const { SwarmBridge } = require('./swarm-bridge.js')
 const { SwarmGrants } = require('./swarm-grants.js')
 const C = require('./constants.js')
+const { normalizeDriveInfoBatch } = require('./drive-info.cjs')
+const {
+  sanitizeHistory: sanitizeBrowserSyncHistory,
+  sanitizeContacts: sanitizeBrowserSyncContacts,
+  sanitizeAppGrants: sanitizeBrowserSyncAppGrants,
+  sanitizeSettings: sanitizeBrowserSyncSettings,
+  sanitizeProfile: sanitizeBrowserSyncProfile,
+  syncKeyAudit
+} = require('./browser-state-ops.cjs')
+const { BootTimeline, bootBudgetAudit, startupDeferralAudit } = require('./performance-diagnostics.cjs')
 const lighthouseOutbox = require('./lighthouse-outbox.cjs')
 const lighthouseAvailability = require('./lighthouse-availability.cjs')
 
@@ -87,7 +101,9 @@ const {
   DEFAULT_STORAGE_LIMIT: STORAGE_LIMIT,
   DEFAULT_EVICT_THRESHOLD: EVICT_THRESHOLD,
   shouldCleanupStorage,
-  cleanupBrowseStorage
+  cleanupBrowseStorage,
+  createStorageUsageSampler,
+  walkStorageUsage
 } = require('./storage-quota.cjs')
 const STORAGE_CHECK_INTERVAL = 5 * 60 * 1000 // Check every 5 minutes
 
@@ -112,6 +128,7 @@ let profile = null
 let contacts = null
 let identityBindingPublisher = null // Lighthouse Phase 2 — root→search-key binding publish/resolve
 let nostrBindingStore = null // NOSTR2 Phase 1 — local cross-curve binding state (npub + epoch)
+let nostrBindingStoreOpening = null
 let nostrEventStore = null // NOSTR Phase 2 — the user's own NIP-01 event log; null until first publish
 let queryPlanner = null // Lighthouse Phase 2 — federated query orchestration (local-first + peer fan-out)
 let names = null // naming Phase N1 — local petname store (names.cjs); null until ready
@@ -120,6 +137,8 @@ let federatedNameResolver = null // naming Phase N5 — resolve contacts' names 
 let federatedNostrFeed = null // NOSTR Phase 3 — surface contacts' attested events in the feed
 let swarmBridge = null
 let swarmGrants = null
+let bootStartedAt = 0
+const bootTimeline = new BootTimeline()
 /** Map<requestId, { resolve, reject, timer }> for login() ceremonies. */
 const pendingLogins = new Map()
 /** Map<requestId, { resolve, reject, timer }> for swarm.join() consent ceremonies. */
@@ -128,6 +147,12 @@ const SWARM_CONSENT_TIMEOUT_MS = 2 * 60 * 1000  // 2 minutes
 let peerCount = 0
 let browseDrives = new Map() // keyHex → Hyperdrive (for ad-hoc browsing)
 let storageTimer = null // handle for the periodic storage-quota check
+let storageSampleTimer = null
+let storageUsageSampler = null
+let appDataReindexPromise = null
+let appDataReindexSummary = null
+let appDataReindexError = null
+let appDataReindexReason = null
 
 // Resolves when boot() finishes setting up all managers. Handlers that
 // need managers await this so RPC calls issued during the 1–2s boot
@@ -135,6 +160,30 @@ let storageTimer = null // handle for the periodic storage-quota check
 let bootResolve, bootReject
 const bootReady = new Promise((res, rej) => { bootResolve = res; bootReject = rej })
 async function whenReady () { return bootReady }
+
+function lazyInitSnapshot (settings = null) {
+  const syncKey = settings && typeof settings.syncKey === 'string' && /^[0-9a-f]{64}$/i.test(settings.syncKey)
+  const syncEncKey = settings && typeof settings.syncEncKey === 'string' && /^[0-9a-f]{64}$/i.test(settings.syncEncKey)
+  const syncEnabled = !!(settings && settings.experimentalDeviceSync)
+  return {
+    browserSync: browserSync
+      ? 'ready'
+      : (syncEnabled ? (syncKey && syncEncKey ? 'idle' : 'unpaired') : 'disabled'),
+    nostrBindingStore: nostrBindingStore
+      ? 'ready'
+      : (nostrBindingStoreOpening ? 'opening' : (personalIndex && identity ? 'idle' : 'unavailable')),
+    federatedNameResolver: federatedNameResolver ? 'ready' : (contacts && identityBindingPublisher ? 'idle' : 'unavailable'),
+    federatedNostrFeed: federatedNostrFeed ? 'ready' : (contacts && identityBindingPublisher ? 'idle' : 'unavailable'),
+    appDataIndexer: appDataIndexer ? 'ready' : (personalIndex && appSyncRegistry ? 'idle' : 'unavailable'),
+    appDataReindex: appDataReindexPromise
+      ? 'running'
+      : (appDataReindexError ? 'error' : (appDataReindexSummary ? 'complete' : 'idle')),
+    communityModeration: 'on-demand',
+    appDataReindexReason,
+    appDataReindexSummary,
+    appDataReindexError
+  }
+}
 
 // --- RPC ---
 
@@ -173,10 +222,13 @@ rpc.handle(C.CMD_NAVIGATE, async (data) => {
 })
 
 rpc.handle(C.CMD_GET_STATUS, async () => {
-  let storageSize = 0
-  try {
-    storageSize = await getStorageSize(storagePath)
-  } catch {}
+  const settings = userData ? await userData.getSettings().catch(() => null) : null
+  const bootSnapshot = bootTimeline.snapshot({ ready: !!(proxy && proxy.port) })
+  const lazySnapshot = lazyInitSnapshot(settings)
+  const storageSample = storageUsageSampler
+    ? storageUsageSampler.snapshot({ refresh: true })
+    : { bytes: null, sampledAt: null, sampling: false, sampleAgeMs: null, error: null }
+  const storageSize = Number.isFinite(storageSample.bytes) ? storageSample.bytes : null
 
   return {
     dhtConnected: swarm !== null,
@@ -186,9 +238,19 @@ rpc.handle(C.CMD_GET_STATUS, async () => {
     publishedSites: siteManager?.sites?.size || 0,
     proxyPort: proxy?.port || 0,
     hiveRelays: hiveRelay?.getRelays ? hiveRelay.getRelays().length : 0,
+    bootTimeline: bootSnapshot,
+    bootBudget: bootBudgetAudit(bootSnapshot),
+    fetchTelemetry: proxy?.getFetchTelemetry ? proxy.getFetchTelemetry() : null,
+    lazyInit: lazySnapshot,
+    startupDeferral: startupDeferralAudit(lazySnapshot),
     storageUsed: storageSize,
     storageLimit: STORAGE_LIMIT,
-    storagePercent: Math.round((storageSize / STORAGE_LIMIT) * 100)
+    storagePercent: Number.isFinite(storageSize) ? Math.round((storageSize / STORAGE_LIMIT) * 100) : null,
+    storageSampling: !!storageSample.sampling,
+    storageSampledAt: storageSample.sampledAt || null,
+    storageSampleAgeMs: storageSample.sampleAgeMs,
+    storageSampleError: storageSample.error || null,
+    storageSampleProgress: storageSample.sampleProgress || null
   }
 })
 
@@ -199,21 +261,31 @@ rpc.handle(C.CMD_GET_DRIVE_INFO, async (data = {}) => {
     throw new Error('Invalid drive key format')
   }
 
-  const drive = await getDriveForProxy(keyHex)
-  registerHiveRelayDrive(keyHex, drive)
-  await updateDriveBestEffort(drive)
+  return readDriveInfo(keyHex)
+})
 
-  const peers = getDrivePeerSnapshot(drive)
-  const bytes = getDriveByteSnapshot(drive)
+rpc.handle(C.CMD_GET_DRIVE_INFOS, async (data = {}) => {
+  await whenReady()
+  const batch = normalizeDriveInfoBatch(data, { normalizeDriveKey, driveKeyFromUrl })
+  const results = await Promise.all(batch.items.map(async (item) => {
+    if (item.error) return item
+    try {
+      return { ...(await readDriveInfo(item.keyHex)), input: item.input }
+    } catch (err) {
+      return {
+        input: item.input,
+        keyHex: item.keyHex,
+        ok: false,
+        error: (err && err.message) || String(err)
+      }
+    }
+  }))
 
   return {
-    keyHex,
-    discoveryKey: drive?.discoveryKey ? b4a.toString(drive.discoveryKey, 'hex') : null,
-    version: Number.isFinite(drive?.version) ? drive.version : null,
-    writable: !!drive?.writable,
-    ...peers,
-    ...bytes,
-    relay: getRelayPinSnapshot(keyHex, drive),
+    results,
+    requested: batch.requested,
+    truncated: batch.truncated,
+    max: batch.max,
     updatedAt: Date.now()
   }
 })
@@ -372,11 +444,13 @@ const handleSearch = createSearchHandler({
 })
 rpc.handle(C.CMD_SEARCH, async (data) => {
   await whenReady()
+  maybeStartAppDataReindex('search')
   return handleSearch(data)
 })
 
 rpc.handle(C.CMD_SEARCH_FEDERATED, async (data = {}) => {
   await whenReady()
+  maybeStartAppDataReindex('federated-search')
   return handleSearch({ ...data, federated: true })
 })
 
@@ -554,6 +628,263 @@ async function promoteToCommunityCatalogue (manifest) {
   return { ok: false, deferred: true, reason: 'Approved + pinned on relays. Republish the community bee (scripts/publish-catalog-bee.js) to list it for everyone.' }
 }
 
+function currentRelayStatus () {
+  let connectedRelays = 0
+  let gatewayRelays = []
+  try { connectedRelays = hiveRelay?.getRelays ? hiveRelay.getRelays().length : 0 } catch {}
+  try { gatewayRelays = Array.isArray(relayClient?.relays) ? [...relayClient.relays] : [] } catch {}
+  return {
+    hiveRelayAvailable: !!hiveRelay,
+    connectedRelays,
+    gatewayRelays,
+    hybridFetchEnabled: relayClient?.enabled !== false
+  }
+}
+
+async function firstExistingDriveFile (drive, paths) {
+  if (!drive) return null
+  for (const path of paths) {
+    try {
+      const buf = await drive.get(path)
+      if (buf) return path
+    } catch {}
+  }
+  return null
+}
+
+async function siteShipProbe (site) {
+  if (!site || !site.drive) return {}
+  const iconPath = await firstExistingDriveFile(site.drive, ['/icon.svg', '/icon.png', '/icon.jpg', '/icon.jpeg', '/icon.webp', '/favicon.ico'])
+  const indexPath = await firstExistingDriveFile(site.drive, ['/index.html'])
+  return {
+    iconPath,
+    hasIndexHtml: !!indexPath
+  }
+}
+
+function drivePathVariants (path) {
+  const clean = String(path || '').trim()
+  if (!clean) return []
+  return clean.startsWith('/') ? [clean, clean.slice(1)] : ['/' + clean, clean]
+}
+
+function driveDirname (path) {
+  const s = String(path || '').replace(/^\/+/, '')
+  const i = s.lastIndexOf('/')
+  return i > 0 ? s.slice(0, i) : ''
+}
+
+function joinDrivePath (dir, file) {
+  const cleanFile = String(file || '').replace(/^\/+/, '')
+  const cleanDir = String(dir || '').replace(/^\/+|\/+$/g, '')
+  return cleanDir ? `${cleanDir}/${cleanFile}` : cleanFile
+}
+
+async function readDriveTextBestEffort (drive, path, { timeoutMs = 1200, maxBytes = 200000 } = {}) {
+  if (!drive || typeof drive.get !== 'function') return null
+  for (const candidate of drivePathVariants(path)) {
+    const buf = await Promise.race([
+      drive.get(candidate).catch(() => null),
+      new Promise(resolve => setTimeout(() => resolve(null), timeoutMs))
+    ])
+    if (!buf) continue
+    const bytes = typeof buf.subarray === 'function' ? buf.subarray(0, Math.min(buf.length, maxBytes)) : buf
+    return {
+      path: candidate.replace(/^\/+/, ''),
+      text: b4a.toString(bytes, 'utf8')
+    }
+  }
+  return null
+}
+
+async function appShipProbe (keyHex) {
+  if (!keyHex || !/^[0-9a-f]{64}$/i.test(keyHex)) return {}
+  let drive = null
+  try {
+    drive = await getDriveForProxy(keyHex)
+    registerHiveRelayDrive(keyHex, drive)
+    updateDriveBestEffort(drive).catch(() => {})
+  } catch {
+    return {}
+  }
+
+  const compatibility = { probed: true }
+  const pearJsonFile = await readDriveTextBestEffort(drive, '/pear.json')
+  if (!pearJsonFile) return { compatibility }
+
+  compatibility.pearJsonPath = pearJsonFile.path
+  try {
+    compatibility.pearJson = safeJSONParse(pearJsonFile.text)
+    compatibility.pearType = compatibility.pearJson?.type || ''
+    compatibility.main = compatibility.pearJson?.main || ''
+  } catch (err) {
+    compatibility.pearJsonError = err && err.message
+    return { compatibility }
+  }
+
+  const main = String(compatibility.main || '').trim()
+  if (!main) return { compatibility }
+
+  const root = driveDirname(pearJsonFile.path)
+  const mainCandidates = [...new Set([joinDrivePath(root, main), main])]
+  for (const candidate of mainCandidates) {
+    const mainFile = await readDriveTextBestEffort(drive, candidate)
+    if (!mainFile) continue
+    compatibility.mainPath = mainFile.path
+    compatibility.mainText = mainFile.text
+    compatibility.pearRequestWorker = /\bPear\.worker\.pipe\b/.test(mainFile.text) || /\bpear-request\b/i.test(mainFile.text)
+    compatibility.browserWindow = /\bBrowserWindow\b/.test(mainFile.text) || /\bPear\.Window\b/.test(mainFile.text)
+    break
+  }
+
+  return { compatibility }
+}
+
+async function readShipCheckDriveInfo (keyHex, drive = null) {
+  if (!keyHex || !/^[0-9a-f]{64}$/i.test(keyHex)) return { driveInfo: null, driveInfoError: null }
+  try {
+    if (drive) {
+      registerHiveRelayDrive(keyHex, drive)
+      await updateDriveBestEffort(drive)
+      return {
+        driveInfo: {
+          input: keyHex,
+          keyHex,
+          ok: true,
+          discoveryKey: drive?.discoveryKey ? b4a.toString(drive.discoveryKey, 'hex') : null,
+          version: Number.isFinite(drive?.version) ? drive.version : null,
+          writable: !!drive?.writable,
+          ...getDrivePeerSnapshot(drive),
+          ...getDriveByteSnapshot(drive),
+          relay: getRelayPinSnapshot(keyHex, drive),
+          updatedAt: Date.now()
+        },
+        driveInfoError: null
+      }
+    }
+    return { driveInfo: await readDriveInfo(keyHex), driveInfoError: null }
+  } catch (err) {
+    return { driveInfo: null, driveInfoError: err && err.message }
+  }
+}
+
+rpc.handle(C.CMD_SHIP_CHECK, async (data = {}) => {
+  await whenReady()
+  const kind = String(data.kind || '').toLowerCase() === 'site' || data.siteId ? 'site' : 'app'
+  let input = { ...data, kind }
+  let keyHex = ''
+  let drive = null
+
+  if (kind === 'site') {
+    const site = siteManager?.sites?.get?.(data.siteId)
+    if (site) {
+      drive = site.drive || null
+      input = {
+        ...input,
+        ...(await siteShipProbe(site)),
+        siteId: data.siteId,
+        name: data.name || site.name,
+        keyHex: site.keyHex || data.keyHex,
+        published: typeof data.published === 'boolean' ? data.published : !!site.published,
+        pin: data.pin || site.pin || null
+      }
+    }
+    keyHex = normalizeDriveKey(input.keyHex || input.driveKey || input.key || '')
+  } else {
+    const derived = communitySubmit.deriveKeyAndLink(
+      data.link || data.driveKey || data.keyHex || data.key,
+      normalizeDriveKey
+    )
+    if (!derived.error) {
+      keyHex = derived.driveKey
+      const probe = await appShipProbe(keyHex)
+      if (probe.compatibility) {
+        input = {
+          ...input,
+          compatibility: {
+            ...(input.compatibility && typeof input.compatibility === 'object' ? input.compatibility : {}),
+            ...probe.compatibility
+          }
+        }
+      }
+    }
+  }
+
+  const { driveInfo, driveInfoError } = await readShipCheckDriveInfo(keyHex, drive)
+  const report = shipCheck.buildShipCheck(input, {
+    kind,
+    normalizeKey: normalizeDriveKey,
+    driveInfo,
+    driveInfoError,
+    relayStatus: currentRelayStatus()
+  })
+  if (driveInfoError) {
+    report.checks.push({
+      id: 'drive:measure-error',
+      label: 'Drive measurement',
+      status: 'info',
+      message: `Could not measure the drive yet: ${driveInfoError}`
+    })
+    report.counts.info += 1
+  }
+  return report
+})
+
+rpc.handle(C.CMD_RUN_FRESH_PEER_VERIFY, async (data = {}) => {
+  await whenReady()
+  const input = { ...data }
+  if (!input.key && !input.keyHex && !input.driveKey && input.siteId) {
+    const site = siteManager?.sites?.get?.(input.siteId)
+    if (site?.keyHex) input.keyHex = site.keyHex
+    if (!input.name && site?.name) input.name = site.name
+  }
+  if (!input.key && !input.keyHex && !input.driveKey && input.link) {
+    const derived = communitySubmit.deriveKeyAndLink(input.link, normalizeDriveKey)
+    if (!derived.error) input.driveKey = derived.driveKey
+  }
+  return verifyFreshPeer(input, {
+    normalizeKey: normalizeDriveKey,
+    storageRoot: `${storagePath}/fresh-peer-verifier`
+  })
+})
+
+rpc.handle(C.CMD_TRUST_SUMMARY, async (data = {}) => {
+  await whenReady()
+  const kind = String(data.kind || '').toLowerCase() === 'site' || data.siteId ? 'site' : 'app'
+  const ownedSite = kind === 'site' && data.siteId && siteManager?.sites?.get?.(data.siteId)
+  const record = kind === 'site'
+    ? (data.site || ownedSite || data.app || {})
+    : (data.app || data.site || {})
+  const driveKey = normalizeDriveKey(
+    data.driveKey ||
+    data.keyHex ||
+    record.driveKey ||
+    record.keyHex ||
+    driveKeyFromUrl(record.link || record.url || '')
+  )
+  const context = {
+    kind,
+    driveKey,
+    app: kind === 'app' ? record : undefined,
+    site: kind === 'site' ? record : undefined,
+    owned: data.owned === true || !!ownedSite
+  }
+
+  if (driveKey && /^[0-9a-f]{64}$/i.test(driveKey)) {
+    try { context.driveInfo = await readDriveInfo(driveKey) } catch {}
+  }
+  try { context.loginGrants = await requireProfile().listGrants() } catch { context.loginGrants = [] }
+  try {
+    context.swarmGrants = swarmGrants
+      ? (driveKey ? await swarmGrants.listForApp(driveKey) : await swarmGrants.list())
+      : []
+  } catch {
+    context.swarmGrants = []
+  }
+
+  return trustSummary.buildTrustSummary(context)
+})
+
 rpc.handle(C.CMD_SUBMIT_APP, async (data = {}) => {
   await whenReady()
   if (!hiveRelay || typeof hiveRelay.publish !== 'function') {
@@ -604,14 +935,7 @@ rpc.handle(C.CMD_MOD_PENDING, async () => {
   if (res.status === 401) throw new Error('Relay rejected the moderator API key (401). Check it in the Moderator panel.')
   if (res.status >= 400 || !res.json) throw new Error('Relay pending request failed (HTTP ' + res.status + ').')
   const requests = Array.isArray(res.json.requests) ? res.json.requests : []
-  const toHex = (v) => typeof v === 'string' ? v : (v ? Buffer.from(v.data || v).toString('hex') : '')
-  const pending = requests.map((r) => ({
-    appKey: toHex(r.appKey),
-    publisherPubkey: toHex(r.publisherPubkey),
-    discoveredAt: r.discoveredAt || null,
-    ttlSeconds: r.ttlSeconds || null,
-    currentRelays: r.currentRelays || 0
-  }))
+  const pending = requests.map((r) => communitySubmit.normalizePendingReview(r, { mode: res.json.mode }))
   return { ok: true, mode: res.json.mode || null, count: pending.length, pending }
 })
 
@@ -632,19 +956,44 @@ rpc.handle(C.CMD_MOD_APPROVE, async (data = {}) => {
       promoted = { ok: false, error: err && err.message }
     }
   }
-  return { ok: true, appKey, promoted }
+  return {
+    ok: true,
+    appKey,
+    status: 'approved',
+    moderationStatus: 'approved',
+    moderation: {
+      status: 'approved',
+      reason: 'Approved by the community catalog.',
+      decidedAt: Date.now(),
+      relayResponse: res.json ? JSON.stringify(res.json).slice(0, 300) : (res.text || '').slice(0, 300)
+    },
+    promoted
+  }
 })
 
 rpc.handle(C.CMD_MOD_REJECT, async (data = {}) => {
   await whenReady()
   const appKey = normalizeDriveKey(String(data.appKey || data.driveKey || ''))
   const { baseUrl, apiKey } = await getModSettings()
-  const spec = communitySubmit.manageRequest('reject', { baseUrl, apiKey, appKey })
+  const reason = typeof data.reason === 'string' ? data.reason.slice(0, 300) : ''
+  const spec = communitySubmit.manageRequest('reject', { baseUrl, apiKey, appKey, reason })
   if (spec.error) throw new Error(spec.error)
   const res = await relayManageHttp(spec)
   if (res.status === 401) throw new Error('Relay rejected the moderator API key (401).')
   if (res.status >= 400) throw new Error('Relay reject failed (HTTP ' + res.status + ').')
-  return { ok: true, appKey }
+  return {
+    ok: true,
+    appKey,
+    status: 'rejected',
+    moderationStatus: 'rejected',
+    moderationReason: reason || 'Rejected by the community catalog.',
+    moderation: {
+      status: 'rejected',
+      reason: reason || 'Rejected by the community catalog.',
+      decidedAt: Date.now(),
+      relayResponse: res.json ? JSON.stringify(res.json).slice(0, 300) : (res.text || '').slice(0, 300)
+    }
+  }
 })
 
 // Collaborative (Autobee) catalog authoring — Rollout Phase 3. All gated by
@@ -827,6 +1176,9 @@ rpc.handle(C.CMD_PUBLISH_SITE, async (data) => {
   }
 
   const payload = { ...result, pin }
+  const site = siteManager && siteManager.sites && siteManager.sites.get(data.siteId)
+  if (site) site.pin = pin
+  persistState()
   rpc.event(C.EVT_SITE_PUBLISHED, payload)
   return payload
 })
@@ -1160,28 +1512,160 @@ async function requireSync () {
   if (!on) throw new Error('Device sync is experimental — enable it in Settings first.')
 }
 
+function loadBrowserStateSync () {
+  return require('./browser-state-sync.cjs')
+}
+
+function makeBrowserSyncStoreName () {
+  const { DEFAULT_STORAGE_NAME } = loadBrowserStateSync()
+  return `${DEFAULT_STORAGE_NAME}-${crypto.randomBytes(8).toString('hex')}`
+}
+
+function browserSyncStoreNameFromSettings (settings = {}) {
+  const { normalizeStorageName } = loadBrowserStateSync()
+  return normalizeStorageName(settings && settings.syncStoreName)
+}
+
+async function closeBrowserSync () {
+  if (!browserSync) return
+  try { await browserSync.close() } catch {}
+  browserSync = null
+}
+
+async function seedBrowserSyncFromLocal (sy, previousState = null, session = {}) {
+  const seeded = {
+    bookmarks: 0,
+    settings: 0,
+    profile: 0,
+    history: 0,
+    contacts: 0,
+    loginGrants: 0,
+    swarmGrants: 0,
+    sessionTabs: 0
+  }
+
+  const localBookmarks = await requireUserData().listBookmarks().catch(() => [])
+  const bookmarkMap = new Map()
+  for (const b of Array.isArray(previousState?.bookmarks) ? previousState.bookmarks : []) {
+    if (b && b.url) bookmarkMap.set(String(b.url), b)
+  }
+  for (const b of Array.isArray(localBookmarks) ? localBookmarks : []) {
+    if (b && b.url) bookmarkMap.set(String(b.url), b)
+  }
+  for (const b of bookmarkMap.values()) {
+    await sy.addBookmark({
+      url: String(b.url),
+      title: String(b.title || ''),
+      addedAt: Number.isFinite(b.addedAt) ? b.addedAt : Date.now()
+    })
+    seeded.bookmarks++
+  }
+
+  const settings = sanitizeBrowserSyncSettings({
+    ...(previousState && previousState.settings ? previousState.settings : {}),
+    ...(await requireUserData().getSettings().catch(() => ({})))
+  })
+  seeded.settings = Object.keys(settings).length
+  if (seeded.settings) await sy.putSettings(settings)
+
+  const profile = sanitizeBrowserSyncProfile({
+    ...(previousState && previousState.profile ? previousState.profile : {}),
+    ...(await (async () => { try { return await requireProfile().getAll() } catch { return {} } })())
+  })
+  seeded.profile = Object.keys(profile).length
+  if (seeded.profile) await sy.putProfile(profile)
+
+  const localHistory = await requireUserData().listHistory({ limit: 200 }).catch(() => [])
+  const history = sanitizeBrowserSyncHistory([
+    ...(Array.isArray(localHistory) ? localHistory : []),
+    ...(Array.isArray(previousState?.history) ? previousState.history : [])
+  ])
+  seeded.history = history.length
+  if (seeded.history) await sy.putHistory(history)
+
+  const localContacts = await (async () => { try { return await requireContacts().list({ limit: 1000 }) } catch { return [] } })()
+  const contacts = sanitizeBrowserSyncContacts([
+    ...(Array.isArray(localContacts) ? localContacts : []),
+    ...(Array.isArray(previousState?.contacts) ? previousState.contacts : [])
+  ])
+  seeded.contacts = contacts.length
+  if (seeded.contacts) await sy.putContacts(contacts)
+
+  const localGrants = sanitizeBrowserSyncAppGrants({
+    login: await (async () => { try { return await requireProfile().listGrants() } catch { return [] } })(),
+    swarm: swarmGrants ? await swarmGrants.list().catch(() => []) : []
+  })
+  const previousGrants = sanitizeBrowserSyncAppGrants(previousState && previousState.appGrants)
+  const grants = sanitizeBrowserSyncAppGrants({
+    login: [...localGrants.login, ...previousGrants.login],
+    swarm: [...localGrants.swarm, ...previousGrants.swarm]
+  })
+  seeded.loginGrants = grants.login.length
+  seeded.swarmGrants = grants.swarm.length
+  if (seeded.loginGrants || seeded.swarmGrants) await sy.putAppGrants(grants)
+
+  const tabs = Array.isArray(session.tabs) ? session.tabs : []
+  if (tabs.length) {
+    await sy.putSession({
+      deviceId: sy.localKey,
+      label: String(session.label || session.deviceLabel || 'This device'),
+      tabs,
+      activeUrl: String(session.activeUrl || ''),
+      updatedAt: Date.now()
+    })
+    seeded.sessionTabs = tabs.length
+  }
+
+  return seeded
+}
+
 // Reopen the user's existing sync base from persisted settings, if paired.
 // Returns the live instance or null (not paired yet).
 async function ensureBrowserSync () {
   const s = await requireUserData().getSettings()
   const key = typeof s.syncKey === 'string' && /^[0-9a-f]{64}$/i.test(s.syncKey) ? s.syncKey : null
   const enc = typeof s.syncEncKey === 'string' && /^[0-9a-f]{64}$/i.test(s.syncEncKey) ? s.syncEncKey : null
+  const storageName = browserSyncStoreNameFromSettings(s)
   if (!key || !enc) return null
-  if (browserSync && browserSync.key === key) return browserSync
-  if (browserSync) { try { await browserSync.close() } catch {} browserSync = null }
-  const { BrowserStateSync } = require('./browser-state-sync.cjs')
-  browserSync = await new BrowserStateSync(store, { bootstrap: key, encryptionKey: enc }).ready()
+  if (browserSync && browserSync.key === key && browserSync.storageName === storageName) return browserSync
+  await closeBrowserSync()
+  const { BrowserStateSync } = loadBrowserStateSync()
+  browserSync = await new BrowserStateSync(store, { bootstrap: key, encryptionKey: enc, storageName }).ready()
   if (browserSync.discoveryKey) swarm.join(browserSync.discoveryKey, { server: true, client: true })
   return browserSync
 }
 
+function formatBrowserSyncInvite (key, encKey) {
+  const k = String(key || '').trim().toLowerCase()
+  const e = String(encKey || '').trim().toLowerCase()
+  if (!/^[0-9a-f]{64}$/i.test(k) || !/^[0-9a-f]{64}$/i.test(e)) return ''
+  return `sync://${k}:${e}`
+}
+
+async function browserSyncStateForResponse (sy, settings = null) {
+  const st = await sy.state()
+  const s = settings || await requireUserData().getSettings().catch(() => ({}))
+  return { ...st, keyAudit: syncKeyAudit(s, st) }
+}
+
 rpc.handle(C.CMD_SYNC_STATUS, async () => {
   await whenReady(); await requireSync()
-  const sy = await ensureBrowserSync()
-  if (!sy) return { enabled: true, paired: false }
-  const st = await sy.state()
   const s = await requireUserData().getSettings()
-  return { enabled: true, paired: true, key: sy.key, encKey: s.syncEncKey, writerKey: sy.localKey, writable: sy.writable, count: st.count, bookmarks: st.bookmarks }
+  const sy = await ensureBrowserSync()
+  if (!sy) return { enabled: true, paired: false, keyAudit: syncKeyAudit(s, {}) }
+  const st = await browserSyncStateForResponse(sy, s)
+  return { enabled: true, paired: true, key: sy.key, inviteAvailable: !!formatBrowserSyncInvite(sy.key, s.syncEncKey), writerKey: sy.localKey, writable: sy.writable, ...st }
+})
+
+rpc.handle(C.CMD_SYNC_GET_INVITE, async () => {
+  await whenReady(); await requireSync()
+  const sy = await ensureBrowserSync()
+  if (!sy) throw new Error('Sync is not set up on this device yet.')
+  const s = await requireUserData().getSettings()
+  const invite = formatBrowserSyncInvite(sy.key, s.syncEncKey)
+  if (!invite) throw new Error('Sync encryption key is not available on this device.')
+  const st = await sy.state()
+  return { key: sy.key, encKey: String(s.syncEncKey || '').trim().toLowerCase(), invite, keyAudit: syncKeyAudit(s, st) }
 })
 
 // Enable + create a fresh encrypted sync base (this device becomes the first
@@ -1190,24 +1674,25 @@ rpc.handle(C.CMD_SYNC_CREATE, async () => {
   await whenReady(); await requireSync()
   const existing = await ensureBrowserSync()
   if (existing) {
-    const st = await existing.state()
     const s = await requireUserData().getSettings()
-    return { key: existing.key, encKey: s.syncEncKey, writerKey: existing.localKey, writable: existing.writable, ...st }
+    const st = await browserSyncStateForResponse(existing, s)
+    return { key: existing.key, encKey: s.syncEncKey, invite: formatBrowserSyncInvite(existing.key, s.syncEncKey), writerKey: existing.localKey, writable: existing.writable, ...st }
   }
-  const { BrowserStateSync } = require('./browser-state-sync.cjs')
-  const encKey = require('crypto').randomBytes(32).toString('hex')
+  const { BrowserStateSync } = loadBrowserStateSync()
+  const encKey = crypto.randomBytes(32).toString('hex')
+  const storageName = makeBrowserSyncStoreName()
   // Mint the autobase key, then reopen by key (mirrors ensureNameRegistry). The
-  // store is namespaced inside BrowserStateSync by a FIXED substore, so mint and
-  // reopen-by-key share that substore (reopen stays writable) and mint.close()
-  // frees only the sync substore — never the shared root Corestore.
-  const mint = await new BrowserStateSync(store, { bootstrap: null, encryptionKey: encKey }).ready()
+  // store is namespaced inside BrowserStateSync by a stable local substore, so
+  // mint and reopen-by-key share that substore (reopen stays writable) and
+  // mint.close() frees only the sync substore — never the shared root Corestore.
+  const mint = await new BrowserStateSync(store, { bootstrap: null, encryptionKey: encKey, storageName }).ready()
   const key = mint.key
   await mint.close()
-  await requireUserData().setSettings({ syncKey: key, syncEncKey: encKey })
-  browserSync = await new BrowserStateSync(store, { bootstrap: key, encryptionKey: encKey }).ready()
+  const settings = await requireUserData().setSettings({ syncKey: key, syncEncKey: encKey, syncStoreName: storageName })
+  browserSync = await new BrowserStateSync(store, { bootstrap: key, encryptionKey: encKey, storageName }).ready()
   if (browserSync.discoveryKey) swarm.join(browserSync.discoveryKey, { server: true, client: true })
-  const st = await browserSync.state()
-  return { key, encKey, writerKey: browserSync.localKey, writable: browserSync.writable, ...st }
+  const st = await browserSyncStateForResponse(browserSync, settings)
+  return { key, encKey, invite: formatBrowserSyncInvite(key, encKey), writerKey: browserSync.localKey, writable: browserSync.writable, ...st }
 })
 
 // Pair THIS device using an invite from another device: { key, encKey }. The
@@ -1217,13 +1702,51 @@ rpc.handle(C.CMD_SYNC_JOIN, async (data) => {
   const key = normalizeDriveKey(String((data && data.key) || ''))
   const encKey = String((data && data.encKey) || '').trim().toLowerCase()
   if (!/^[0-9a-f]{64}$/i.test(key) || !/^[0-9a-f]{64}$/i.test(encKey)) throw new Error('Invalid pairing invite (need a 64-hex key and encryption key).')
-  if (browserSync) { try { await browserSync.close() } catch {} browserSync = null }
-  await requireUserData().setSettings({ syncKey: key, syncEncKey: encKey })
-  const { BrowserStateSync } = require('./browser-state-sync.cjs')
-  browserSync = await new BrowserStateSync(store, { bootstrap: key, encryptionKey: encKey }).ready()
+  await closeBrowserSync()
+  const storageName = makeBrowserSyncStoreName()
+  const settings = await requireUserData().setSettings({ syncKey: key, syncEncKey: encKey, syncStoreName: storageName })
+  const { BrowserStateSync } = loadBrowserStateSync()
+  browserSync = await new BrowserStateSync(store, { bootstrap: key, encryptionKey: encKey, storageName }).ready()
   if (browserSync.discoveryKey) swarm.join(browserSync.discoveryKey, { server: true, client: true })
-  const st = await browserSync.state()
-  return { key, encKey, writerKey: browserSync.localKey, writable: browserSync.writable, ...st }
+  const st = await browserSyncStateForResponse(browserSync, settings)
+  return { key, encKey, invite: formatBrowserSyncInvite(key, encKey), writerKey: browserSync.localKey, writable: browserSync.writable, ...st }
+})
+
+rpc.handle(C.CMD_SYNC_FORGET, async () => {
+  await whenReady(); await requireSync()
+  await closeBrowserSync()
+  await requireUserData().setSettings({ syncKey: '', syncEncKey: '', syncStoreName: '' })
+  return { ok: true, enabled: true, paired: false }
+})
+
+rpc.handle(C.CMD_SYNC_ROTATE, async (data = {}) => {
+  await whenReady(); await requireSync()
+  const previous = await ensureBrowserSync()
+  if (!previous) throw new Error('Sync is not set up on this device yet.')
+  const previousState = await previous.state().catch(() => null)
+  await closeBrowserSync()
+
+  const { BrowserStateSync } = loadBrowserStateSync()
+  const encKey = crypto.randomBytes(32).toString('hex')
+  const storageName = makeBrowserSyncStoreName()
+  const mint = await new BrowserStateSync(store, { bootstrap: null, encryptionKey: encKey, storageName }).ready()
+  const key = mint.key
+  await mint.close()
+  const settings = await requireUserData().setSettings({ syncKey: key, syncEncKey: encKey, syncStoreName: storageName })
+  browserSync = await new BrowserStateSync(store, { bootstrap: key, encryptionKey: encKey, storageName }).ready()
+  if (browserSync.discoveryKey) swarm.join(browserSync.discoveryKey, { server: true, client: true })
+
+  const seeded = await seedBrowserSyncFromLocal(browserSync, previousState, data)
+  const st = await browserSyncStateForResponse(browserSync, settings)
+  return { rotated: true, seeded, key, encKey, invite: formatBrowserSyncInvite(key, encKey), writerKey: browserSync.localKey, writable: browserSync.writable, ...st }
+})
+
+rpc.handle(C.CMD_SYNC_COMPACT, async () => {
+  await whenReady(); await requireSync()
+  const sy = await ensureBrowserSync()
+  if (!sy) throw new Error('Sync is not set up on this device yet.')
+  if (!sy.writable) throw new Error('Only a writer can compact the sync log.')
+  return { compacted: true, ...(await sy.compact()) }
 })
 
 // Add another device as a writer (paste the writerKey it showed you).
@@ -1261,6 +1784,133 @@ rpc.handle(C.CMD_SYNC_REMOVE_BOOKMARK, async (data) => {
   if (!sy.writable) throw new Error('This device is read-only.')
   await sy.removeBookmark(String((data && data.url) || ''))
   return await sy.state()
+})
+
+rpc.handle(C.CMD_SYNC_PUT_SESSION, async (data = {}) => {
+  await whenReady(); await requireSync()
+  const sy = await ensureBrowserSync()
+  if (!sy) throw new Error('Sync is not set up on this device yet.')
+  if (!sy.writable) throw new Error('This device is read-only.')
+  const label = String(data.label || data.deviceLabel || 'This device')
+  const tabs = Array.isArray(data.tabs) ? data.tabs : []
+  await sy.putSession({
+    deviceId: sy.localKey,
+    label,
+    tabs,
+    activeUrl: String(data.activeUrl || ''),
+    updatedAt: Date.now()
+  })
+  return await sy.state()
+})
+
+rpc.handle(C.CMD_SYNC_PUT_SETTINGS, async () => {
+  await whenReady(); await requireSync()
+  const sy = await ensureBrowserSync()
+  if (!sy) throw new Error('Sync is not set up on this device yet.')
+  if (!sy.writable) throw new Error('This device is read-only.')
+  const settings = sanitizeBrowserSyncSettings(await requireUserData().getSettings().catch(() => ({})))
+  await sy.putSettings(settings)
+  return { pushed: Object.keys(settings).length, ...(await sy.state()) }
+})
+
+rpc.handle(C.CMD_SYNC_APPLY_SETTINGS, async () => {
+  await whenReady(); await requireSync()
+  const sy = await ensureBrowserSync()
+  if (!sy) throw new Error('Sync is not set up on this device yet.')
+  const st = await sy.state()
+  const settings = sanitizeBrowserSyncSettings(st.settings)
+  const merged = await requireUserData().setSettings(settings)
+  return { applied: Object.keys(settings).length, settings: merged, ...st }
+})
+
+rpc.handle(C.CMD_SYNC_PUT_PROFILE, async () => {
+  await whenReady(); await requireSync()
+  const sy = await ensureBrowserSync()
+  if (!sy) throw new Error('Sync is not set up on this device yet.')
+  if (!sy.writable) throw new Error('This device is read-only.')
+  const profile = sanitizeBrowserSyncProfile(await requireProfile().getAll().catch(() => ({})))
+  await sy.putProfile(profile)
+  return { pushed: Object.keys(profile).length, ...(await sy.state()) }
+})
+
+rpc.handle(C.CMD_SYNC_APPLY_PROFILE, async () => {
+  await whenReady(); await requireSync()
+  const sy = await ensureBrowserSync()
+  if (!sy) throw new Error('Sync is not set up on this device yet.')
+  const st = await sy.state()
+  const profile = sanitizeBrowserSyncProfile(st.profile)
+  const current = await requireProfile().getAll().catch(() => ({}))
+  const updates = {}
+  for (const key of new Set([...Object.keys(current), ...Object.keys(profile)])) {
+    updates[key] = profile[key] || ''
+  }
+  const merged = await requireProfile().update(updates)
+  return { applied: Object.keys(profile).length, profile: merged, ...st }
+})
+
+rpc.handle(C.CMD_SYNC_PUT_HISTORY, async () => {
+  await whenReady(); await requireSync()
+  const sy = await ensureBrowserSync()
+  if (!sy) throw new Error('Sync is not set up on this device yet.')
+  if (!sy.writable) throw new Error('This device is read-only.')
+  const history = sanitizeBrowserSyncHistory(await requireUserData().listHistory({ limit: 200 }).catch(() => []))
+  await sy.putHistory(history)
+  return { pushed: history.length, ...(await sy.state()) }
+})
+
+rpc.handle(C.CMD_SYNC_APPLY_HISTORY, async () => {
+  await whenReady(); await requireSync()
+  const sy = await ensureBrowserSync()
+  if (!sy) throw new Error('Sync is not set up on this device yet.')
+  const st = await sy.state()
+  const history = sanitizeBrowserSyncHistory(st.history)
+  const applied = await requireUserData().replaceHistory(history)
+  return { applied, ...st, history }
+})
+
+rpc.handle(C.CMD_SYNC_PUT_CONTACTS, async () => {
+  await whenReady(); await requireSync()
+  const sy = await ensureBrowserSync()
+  if (!sy) throw new Error('Sync is not set up on this device yet.')
+  if (!sy.writable) throw new Error('This device is read-only.')
+  const contacts = sanitizeBrowserSyncContacts(await requireContacts().list({ limit: 1000 }).catch(() => []))
+  await sy.putContacts(contacts)
+  return { pushed: contacts.length, ...(await sy.state()) }
+})
+
+rpc.handle(C.CMD_SYNC_APPLY_CONTACTS, async () => {
+  await whenReady(); await requireSync()
+  const sy = await ensureBrowserSync()
+  if (!sy) throw new Error('Sync is not set up on this device yet.')
+  const st = await sy.state()
+  const contacts = sanitizeBrowserSyncContacts(st.contacts)
+  const applied = await requireContacts().replaceContacts(contacts)
+  return { applied, ...st, contacts }
+})
+
+rpc.handle(C.CMD_SYNC_PUT_APP_GRANTS, async () => {
+  await whenReady(); await requireSync()
+  const sy = await ensureBrowserSync()
+  if (!sy) throw new Error('Sync is not set up on this device yet.')
+  if (!sy.writable) throw new Error('This device is read-only.')
+  const grants = sanitizeBrowserSyncAppGrants({
+    login: await requireProfile().listGrants().catch(() => []),
+    swarm: swarmGrants ? await swarmGrants.list().catch(() => []) : []
+  })
+  await sy.putAppGrants(grants)
+  return { pushed: grants.login.length + grants.swarm.length, ...(await sy.state()) }
+})
+
+rpc.handle(C.CMD_SYNC_APPLY_APP_GRANTS, async () => {
+  await whenReady(); await requireSync()
+  const sy = await ensureBrowserSync()
+  if (!sy) throw new Error('Sync is not set up on this device yet.')
+  if (!swarmGrants) throw new Error('Swarm grants are not available on this device yet.')
+  const st = await sy.state()
+  const grants = sanitizeBrowserSyncAppGrants(st.appGrants)
+  const loginApplied = await requireProfile().replaceGrants(grants.login)
+  const swarmApplied = await swarmGrants.replace(grants.swarm)
+  return { applied: loginApplied + swarmApplied, loginApplied, swarmApplied, ...st, appGrants: grants }
 })
 
 // Push this device's LOCAL bookmarks into the synced set (one-way import).
@@ -1393,6 +2043,48 @@ rpc.handle(C.CMD_IDENTITY_VERIFY, async ({ payload, signature, publicKey, driveK
   return { ok: !!ok, algorithm: 'ed25519' }
 })
 
+function ensureAppDataIndexer () {
+  if (appDataIndexer) return appDataIndexer
+  if (!personalIndex || !appSyncRegistry) return null
+  try {
+    const { AppDataIndexer } = require('./app-data-indexer.cjs')
+    appDataIndexer = new AppDataIndexer({ personalIndex, registry: appSyncRegistry })
+    console.log('AppDataIndexer ready (lazy)')
+    return appDataIndexer
+  } catch (err) {
+    console.error('AppDataIndexer init failed:', err && err.message)
+    appDataIndexer = null
+    return null
+  }
+}
+
+function maybeStartAppDataReindex (reason = 'lazy') {
+  if (appDataReindexPromise) return appDataReindexPromise
+  const indexer = ensureAppDataIndexer()
+  if (!indexer || !pearBridge || typeof indexer.reindexKnownGroups !== 'function') return null
+
+  appDataReindexReason = reason
+  appDataReindexError = null
+  appDataReindexPromise = indexer.reindexKnownGroups(pearBridge)
+    .then((summary) => {
+      appDataReindexSummary = summary || null
+      const errors = Array.isArray(summary?.errors) ? summary.errors.length : 0
+      if (summary && (summary.indexed || summary.removed || errors)) {
+        console.log('[app-data] lazy reindex:', JSON.stringify({ reason, ...summary }))
+      }
+      return summary
+    })
+    .catch((err) => {
+      appDataReindexError = err && err.message ? err.message : String(err)
+      console.error('[app-data] lazy reindex failed:', appDataReindexError)
+      return null
+    })
+    .finally(() => {
+      appDataReindexPromise = null
+    })
+  return appDataReindexPromise
+}
+
 async function publishLighthouseOutbox (data = {}, opts = {}) {
   if (!personalIndex) throw new Error('personal index unavailable')
   if (!identity) throw new Error('identity unavailable')
@@ -1423,6 +2115,7 @@ async function publishLighthouseOutbox (data = {}, opts = {}) {
       rawAppId: descriptor.rawAppId,
       inviteKey: descriptor.inviteKey,
       appSlug: descriptor.appSlug,
+      authorPubkey: descriptor.authorPubkey,
       lastSeenAt: descriptor.updatedAt || Date.now()
     })
   } catch (err) {
@@ -1990,6 +2683,42 @@ async function openContactEventStore (keyHex, contactRoot) {
   return es
 }
 
+function ensureFederatedNameResolver () {
+  if (federatedNameResolver) return federatedNameResolver
+  if (!contacts || !identityBindingPublisher) return null
+  try {
+    const { FederatedNameResolver } = require('./federated-name-resolver.cjs')
+    federatedNameResolver = new FederatedNameResolver({
+      listContacts: () => requireContacts().list({ limit: 200 }),
+      resolveBinding: (args) => identityBindingPublisher.resolve(args),
+      openRegistry: (keyHex, contactRoot) => openContactRegistry(keyHex, contactRoot),
+    })
+    console.log('FederatedNameResolver ready (lazy)')
+  } catch (err) {
+    console.error('FederatedNameResolver init failed:', err && err.message)
+    federatedNameResolver = null
+  }
+  return federatedNameResolver
+}
+
+function ensureFederatedNostrFeed () {
+  if (federatedNostrFeed) return federatedNostrFeed
+  if (!contacts || !identityBindingPublisher) return null
+  try {
+    const { FederatedNostrFeed } = require('./federated-nostr-feed.cjs')
+    federatedNostrFeed = new FederatedNostrFeed({
+      listContacts: () => requireContacts().list({ limit: 200 }),
+      resolveBinding: (args) => identityBindingPublisher.resolve(args),
+      openEventStore: (keyHex, contactRoot) => openContactEventStore(keyHex, contactRoot),
+    })
+    console.log('FederatedNostrFeed ready (lazy)')
+  } catch (err) {
+    console.error('FederatedNostrFeed init failed:', err && err.message)
+    federatedNostrFeed = null
+  }
+  return federatedNostrFeed
+}
+
 // Resolve a typed word against the local petname store (Tier 0, wins) + the
 // curated NAME_ALIASES floor (Tier 3). Never throws for the disabled/unknown
 // case — returns { resolved: null } so the UI falls through to plain URL
@@ -2005,10 +2734,11 @@ rpc.handle(C.CMD_NAME_RESOLVE, async ({ name } = {}) => {
   // Resolve highest tiers first WITHOUT the curated floor: petname (0) + own
   // registry (2a). If those miss, try federation (2b) before falling to curated.
   let resolved = resolveName(name, { petnames, registry, aliases: false })
-  if (!resolved && federatedNameResolver) {
+  const resolver = !resolved ? ensureFederatedNameResolver() : null
+  if (!resolved && resolver) {
     // Tier 2b — trusted contacts' registries (cross-user federation).
     let fed = null
-    try { fed = await federatedNameResolver.resolve(name) } catch {}
+    try { fed = await resolver.resolve(name) } catch {}
     if (fed) resolved = { name: fed.name, key: fed.key || null, link: fed.link || null, target: fed.target || fed.link || fed.key || null, label: fed.name, provenance: 'contact', source: fed.source, candidates: fed.candidates }
   }
   // Tier 3 — curated bootstrap floor (lowest authority).
@@ -2127,7 +2857,7 @@ rpc.handle(C.CMD_NAMEREG_REVOKE, async ({ name } = {}) => {
 
 async function openSwarmConsent ({ driveKeyHex, appName, reason, topicHex, protocol }) {
   return await new Promise((resolve, reject) => {
-    const requestId = require('crypto').randomBytes(16).toString('hex')
+    const requestId = crypto.randomBytes(16).toString('hex')
     const timer = setTimeout(() => {
       if (pendingSwarmConsents.has(requestId)) {
         pendingSwarmConsents.delete(requestId)
@@ -2186,24 +2916,48 @@ rpc.handle(C.CMD_CONTACTS_REMOVE, async ({ pubkey } = {}) => {
 // bytes are built backend-side (identity.makeNostrBinding/makeNostrRevocation),
 // so a page can trigger a bind/revoke but can never get the root key to sign
 // attacker-chosen bytes (threat #10). The nsec never leaves the worklet.
-function requireNostrIdentity () {
-  if (!nostrBindingStore) throw new Error('Nostr identity not available — worklet still booting')
-  return nostrBindingStore
+async function ensureNostrBindingStore () {
+  if (nostrBindingStore) return nostrBindingStore
+  if (!personalIndex || !identity) throw new Error('Nostr identity not available — search index or identity is unavailable')
+  if (!nostrBindingStoreOpening) {
+    nostrBindingStoreOpening = (async () => {
+      const { NostrBindingStore } = require('./nostr-binding-store.cjs')
+      const store = await new NostrBindingStore({ identity, personalIndex }).ready()
+      nostrBindingStore = store
+      console.log('NostrBindingStore ready (lazy)')
+      return store
+    })()
+      .catch((err) => {
+        console.error('NostrBindingStore init failed:', err && err.message)
+        nostrBindingStore = null
+        throw err
+      })
+      .finally(() => {
+        nostrBindingStoreOpening = null
+      })
+  }
+  return nostrBindingStoreOpening
+}
+
+async function requireNostrIdentity () {
+  return ensureNostrBindingStore()
 }
 rpc.handle(C.CMD_NOSTR_GET_IDENTITY, async () => {
   await whenReady()
-  return requireNostrIdentity().getState()
+  return (await requireNostrIdentity()).getState()
 })
 rpc.handle(C.CMD_NOSTR_BIND, async () => {
   await whenReady()
-  const state = await requireNostrIdentity().bind()
+  const store = await requireNostrIdentity()
+  const state = await store.bind()
   // re-advertise our (now-linked) nostr-bind so contacts can author-verify our notes
   if (identityBindingPublisher) identityBindingPublisher.publish().catch(() => {})
   return state
 })
 rpc.handle(C.CMD_NOSTR_REVOKE, async () => {
   await whenReady()
-  const state = await requireNostrIdentity().revoke()
+  const store = await requireNostrIdentity()
+  const state = await store.revoke()
   // Re-advertise after unlinking so contacts stop trusting the last published
   // nostrBind instead of waiting for an unrelated future binding refresh.
   if (identityBindingPublisher) identityBindingPublisher.publish().catch(() => {})
@@ -2285,14 +3039,15 @@ rpc.handle(C.CMD_NOSTR_QUERY, async ({ filter, federated } = {}) => {
   try { const es = await ensureNostrEventStore({ create: false }); if (es) own = (await es.listEvents()).map((ev) => ({ ...ev, _via: null })) } catch {}
   let contactEvents = []
   let hidden = null
-  if (federated && federatedNostrFeed) {
+  const feed = federated ? ensureFederatedNostrFeed() : null
+  if (federated && feed) {
     try {
-      if (typeof federatedNostrFeed.eventsWithDiagnostics === 'function') {
-        const res = await federatedNostrFeed.eventsWithDiagnostics()
+      if (typeof feed.eventsWithDiagnostics === 'function') {
+        const res = await feed.eventsWithDiagnostics()
         contactEvents = Array.isArray(res?.events) ? res.events : []
         hidden = res?.hidden || null
       } else {
-        contactEvents = await federatedNostrFeed.events()
+        contactEvents = await feed.events()
       }
     } catch {}
   }
@@ -2319,6 +3074,28 @@ function safeJSONParse (str) {
     delete obj.constructor
   }
   return obj
+}
+
+async function readDriveInfo (keyHex) {
+  const drive = await getDriveForProxy(keyHex)
+  registerHiveRelayDrive(keyHex, drive)
+  await updateDriveBestEffort(drive)
+
+  const peers = getDrivePeerSnapshot(drive)
+  const bytes = getDriveByteSnapshot(drive)
+
+  return {
+    input: keyHex,
+    keyHex,
+    ok: true,
+    discoveryKey: drive?.discoveryKey ? b4a.toString(drive.discoveryKey, 'hex') : null,
+    version: Number.isFinite(drive?.version) ? drive.version : null,
+    writable: !!drive?.writable,
+    ...peers,
+    ...bytes,
+    relay: getRelayPinSnapshot(keyHex, drive),
+    updatedAt: Date.now()
+  }
 }
 
 async function ensureBrowseDrive (keyHex) {
@@ -2599,16 +3376,34 @@ function persistState () {
 
 // --- Boot ---
 
+function emitBootProgress (stage, message, extra = {}) {
+  const at = Date.now()
+  const payload = bootTimeline.record({
+    stage,
+    message,
+    at,
+    elapsedMs: bootStartedAt ? at - bootStartedAt : 0,
+    ...extra
+  })
+  rpc.event(C.EVT_BOOT_PROGRESS, payload)
+}
+
 async function boot () {
+  bootStartedAt = Date.now()
+  bootTimeline.reset(bootStartedAt)
   console.log('Boot starting, storagePath:', storagePath)
-  rpc.event(C.EVT_BOOT_PROGRESS, { stage: 'identity-load', message: 'Loading identity...' })
+  storageUsageSampler = createStorageUsageSampler({
+    scan: ({ onProgress } = {}) => getStorageSize(storagePath, { onProgress }),
+    maxAgeMs: STORAGE_CHECK_INTERVAL
+  })
+  emitBootProgress('identity-load', 'Loading identity...')
 
   // Phase 1 ticket 3 — load or generate the user's root identity
   identity = new Identity(storagePath)
   await identity.ready()
   console.log('Identity ready')
 
-  rpc.event(C.EVT_BOOT_PROGRESS, { stage: 'corestore-start', message: 'Initializing storage...' })
+  emitBootProgress('corestore-start', 'Initializing storage...')
 
   // Derive the Corestore from the user's identity seed so rotating the
   // identity gives a clean store. The seed is 32 bytes — exactly what
@@ -2634,15 +3429,15 @@ async function boot () {
 
   store = new Corestore(storagePath)
   console.log('Corestore created, waiting for ready...')
-  rpc.event(C.EVT_BOOT_PROGRESS, { stage: 'corestore-ready', message: 'Storage ready' })
+  emitBootProgress('corestore-ready', 'Storage ready')
   await store.ready()
   console.log('Corestore ready')
 
   console.log('Creating Hyperswarm...')
-  rpc.event(C.EVT_BOOT_PROGRESS, { stage: 'hyperswarm-start', message: 'Starting P2P network...' })
+  emitBootProgress('hyperswarm-start', 'Starting P2P network...')
   swarm = new Hyperswarm()
   console.log('Hyperswarm created')
-  rpc.event(C.EVT_BOOT_PROGRESS, { stage: 'hyperswarm-ready', message: 'P2P network ready' })
+  emitBootProgress('hyperswarm-ready', 'P2P network ready')
   swarm.on('connection', (conn) => {
     // Guard against race: incoming connection can land while a drive
     // is closing (e.g. during CMD_DELETE_SITE) and store.replicate()
@@ -2679,6 +3474,7 @@ async function boot () {
   // (`p2p-hiverelay-client`) since 0.5.x. Old `p2p-hiverelay/client`
   // subpath no longer exists. Use dynamic import() because we're in a
   // CommonJS module and the new package is `"type": "module"`.
+  emitBootProgress('hiverelay-start', 'Starting relay discovery...')
   try {
     const { HiveRelayClient } = await import('p2p-hiverelay-client')
     hiveRelay = new HiveRelayClient({ swarm, store })
@@ -2687,13 +3483,15 @@ async function boot () {
     })
     await hiveRelay.start()
     console.log('[hiverelay] client started')
+    emitBootProgress('hiverelay-ready', 'Relay discovery ready')
   } catch (err) {
     console.error('[hiverelay] init failed:', err && err.message)
     hiveRelay = null
+    emitBootProgress('hiverelay-unavailable', 'Relay discovery unavailable', { error: err && err.message })
   }
 
   // Initialize managers
-  rpc.event(C.EVT_BOOT_PROGRESS, { stage: 'managers-start', message: 'Loading app manager...' })
+  emitBootProgress('managers-start', 'Loading app manager...')
   catalogManager = new CatalogManager(store, swarm)
   appManager = new AppManager(store, swarm)
   siteManager = new SiteManager(store, swarm)
@@ -2705,9 +3503,11 @@ async function boot () {
   try {
     await userData.ready()
     console.log('UserData ready')
+    emitBootProgress('userdata-ready', 'User data ready')
   } catch (err) {
     console.error('UserData init failed:', err && err.message)
     userData = null
+    emitBootProgress('userdata-error', 'User data unavailable', { error: err && err.message })
   }
 
   // Lighthouse Phase 0 — local self-search index over the user's own browsed/
@@ -2733,30 +3533,17 @@ async function boot () {
     }
     personalIndex = await new PersonalIndex(store, { sign }).ready()
     console.log('PersonalIndex ready')
-    try {
-      const { AppDataIndexer } = require('./app-data-indexer.cjs')
-      appDataIndexer = new AppDataIndexer({ personalIndex, registry: appSyncRegistry })
-      appDataIndexer.reindexKnownGroups(pearBridge)
-        .then((summary) => {
-          if (summary && (summary.indexed || summary.removed || summary.errors.length)) {
-            console.log('[app-data] startup reindex:', JSON.stringify(summary))
-          }
-        })
-        .catch((err) => console.error('[app-data] startup reindex failed:', err && err.message))
-      console.log('AppDataIndexer ready')
-    } catch (err) {
-      console.error('AppDataIndexer init failed:', err && err.message)
-      appDataIndexer = null
-    }
+    emitBootProgress('search-index-ready', 'Search index ready')
   } catch (err) {
     console.error('PersonalIndex init failed:', err && err.message)
     personalIndex = null
+    emitBootProgress('search-index-error', 'Search index unavailable', { error: err && err.message })
   }
 
   // Identity Plan Phase B + D — profile attributes + contacts Hyperbees.
   profile = new Profile(store)
-  try { await profile.ready(); console.log('Profile ready') }
-  catch (err) { console.error('Profile init failed:', err && err.message); profile = null }
+  try { await profile.ready(); console.log('Profile ready'); emitBootProgress('profile-ready', 'Profile ready') }
+  catch (err) { console.error('Profile init failed:', err && err.message); profile = null; emitBootProgress('profile-error', 'Profile unavailable', { error: err && err.message }) }
 
   contacts = new Contacts(store, {
     // Verify invite signatures against the contact's own root key. Fails
@@ -2766,23 +3553,8 @@ async function boot () {
       return identity.verify(payload, sigHex, pubHex)
     }
   })
-  try { await contacts.ready(); console.log('Contacts ready') }
-  catch (err) { console.error('Contacts init failed:', err && err.message); contacts = null }
-
-  // NOSTR2 Phase 1 — local cross-curve binding state (npub + attested epoch),
-  // persisted in the PersonalIndex meta namespace. Initialize this before the
-  // Lighthouse binding publisher so boot-time advertisements include any
-  // previously linked Nostr binding.
-  if (personalIndex && identity) {
-    try {
-      const { NostrBindingStore } = require('./nostr-binding-store.cjs')
-      nostrBindingStore = await new NostrBindingStore({ identity, personalIndex }).ready()
-      console.log('NostrBindingStore ready')
-    } catch (err) {
-      console.error('NostrBindingStore init failed:', err && err.message)
-      nostrBindingStore = null
-    }
-  }
+  try { await contacts.ready(); console.log('Contacts ready'); emitBootProgress('contacts-ready', 'Contacts ready') }
+  catch (err) { console.error('Contacts init failed:', err && err.message); contacts = null; emitBootProgress('contacts-error', 'Contacts unavailable', { error: err && err.message }) }
 
   // Lighthouse Phase 2 — publish our self-certifying IdentityBinding (root →
   // rotatable search subkey) to the DHT + personal index, so trusted peers can
@@ -2808,53 +3580,11 @@ async function boot () {
         .then((availability) => availability ? identityBindingPublisher.publish() : null)
         .catch((e) => console.error('[binding] publish failed:', e && e.message))
       console.log('IdentityBindingPublisher ready')
+      emitBootProgress('identity-binding-ready', 'Search identity binding ready')
     } catch (err) {
       console.error('IdentityBindingPublisher init failed:', err && err.message)
       identityBindingPublisher = null
-    }
-  }
-
-  // N5 federation — resolve a typed name across TRUSTED contacts' registries.
-  // Needs contacts (the trust frontier) + the binding publisher (to find each
-  // contact's advertised registry key) + openContactRegistry (to replicate it).
-  if (contacts && identityBindingPublisher) {
-    try {
-      const { FederatedNameResolver } = require('./federated-name-resolver.cjs')
-      federatedNameResolver = new FederatedNameResolver({
-        listContacts: () => requireContacts().list({ limit: 200 }),
-        resolveBinding: (args) => identityBindingPublisher.resolve(args),
-        openRegistry: (keyHex, contactRoot) => openContactRegistry(keyHex, contactRoot),
-      })
-      console.log('FederatedNameResolver ready')
-    } catch (err) {
-      console.error('FederatedNameResolver init failed:', err && err.message)
-      federatedNameResolver = null
-    }
-
-    // NOSTR Phase 3 — surface TRUSTED contacts' attested events in the feed.
-    try {
-      const { FederatedNostrFeed } = require('./federated-nostr-feed.cjs')
-      federatedNostrFeed = new FederatedNostrFeed({
-        listContacts: () => requireContacts().list({ limit: 200 }),
-        resolveBinding: (args) => identityBindingPublisher.resolve(args),
-        openEventStore: (keyHex, contactRoot) => openContactEventStore(keyHex, contactRoot),
-      })
-      console.log('FederatedNostrFeed ready')
-    } catch (err) {
-      console.error('FederatedNostrFeed init failed:', err && err.message)
-      federatedNostrFeed = null
-    }
-  }
-
-  // Retry Nostr binding setup if the early pre-publisher init failed.
-  if (personalIndex && identity && !nostrBindingStore) {
-    try {
-      const { NostrBindingStore } = require('./nostr-binding-store.cjs')
-      nostrBindingStore = await new NostrBindingStore({ identity, personalIndex }).ready()
-      console.log('NostrBindingStore ready')
-    } catch (err) {
-      console.error('NostrBindingStore init failed:', err && err.message)
-      nostrBindingStore = null
+      emitBootProgress('identity-binding-error', 'Search identity binding unavailable', { error: err && err.message })
     }
   }
 
@@ -2870,9 +3600,11 @@ async function boot () {
         getTrustRows: readLighthouseTrustRows,
       })
       console.log('QueryPlanner ready')
+      emitBootProgress('query-planner-ready', 'Federated search planner ready')
     } catch (err) {
       console.error('QueryPlanner init failed:', err && err.message)
       queryPlanner = null
+      emitBootProgress('query-planner-error', 'Federated search planner unavailable', { error: err && err.message })
     }
   }
 
@@ -2880,15 +3612,15 @@ async function boot () {
   // inited; the experimentalNaming flag only gates whether the resolver/
   // mutations are reachable, not whether the store opens.
   names = new Names(store)
-  try { await names.ready(); console.log('Names ready') }
-  catch (err) { console.error('Names init failed:', err && err.message); names = null }
+  try { await names.ready(); console.log('Names ready'); emitBootProgress('names-ready', 'Petname store ready') }
+  catch (err) { console.error('Names init failed:', err && err.message); names = null; emitBootProgress('names-error', 'Petname store unavailable', { error: err && err.message }) }
 
   // swarm.v1 — direct Hyperswarm access for hyper:// pages.
   // SwarmGrants persists Tier C topic-join grants across launches.
   // SwarmBridge multiplexes peer events into per-channel SSE streams.
   swarmGrants = new SwarmGrants(store, swarm)
-  try { await swarmGrants.ready(); console.log('SwarmGrants ready') }
-  catch (err) { console.error('SwarmGrants init failed:', err && err.message); swarmGrants = null }
+  try { await swarmGrants.ready(); console.log('SwarmGrants ready'); emitBootProgress('swarm-grants-ready', 'Swarm grants ready') }
+  catch (err) { console.error('SwarmGrants init failed:', err && err.message); swarmGrants = null; emitBootProgress('swarm-grants-error', 'Swarm grants unavailable', { error: err && err.message }) }
 
   swarmBridge = new SwarmBridge(swarm, {
     identity,
@@ -2896,7 +3628,7 @@ async function boot () {
     requestConsent: (args) => openSwarmConsent(args),
   })
 
-  rpc.event(C.EVT_BOOT_PROGRESS, { stage: 'managers-ready', message: 'Managers loaded' })
+  emitBootProgress('managers-ready', 'Managers loaded')
 
   // Restore persisted app/site state from disk
   const stateFile = storagePath + '/pearbrowser-state.json'
@@ -2922,6 +3654,7 @@ async function boot () {
     'https://relay-sg.p2phiverelay.xyz'
   ]
   const savedRelayConfig = persistedState.relayConfig || {}
+  emitBootProgress('relay-client-start', 'Loading relay configuration...')
   relayClient = new RelayClient({
     relays: Array.isArray(savedRelayConfig.relays) && savedRelayConfig.relays.length > 0
       ? savedRelayConfig.relays
@@ -2929,6 +3662,7 @@ async function boot () {
     enabled: savedRelayConfig.enabled !== false,
     timeout: 5000
   })
+  emitBootProgress('relay-client-ready', 'Relay configuration ready')
 
   // iroh adoption — bootstrap the relay directory + index rooms from
   // DHT-resolvable relay records (resolve each seed's pubkey over swarm.dht,
@@ -2992,7 +3726,7 @@ async function boot () {
     anongptBuyer,
     anongptDriveKey: C.ANONGPT_DRIVE_KEY,
     appSyncRegistry,
-    getAppDataIndexer: () => appDataIndexer,
+    getAppDataIndexer: () => ensureAppDataIndexer(),
     syncPinGroup: pinSyncGroup,
     lighthouseOutboxes: {
       publish: publishLighthouseOutbox,
@@ -3007,20 +3741,23 @@ async function boot () {
   proxy.setHttpBridge(httpBridge)
 
   console.log('Starting HTTP proxy...')
-  rpc.event(C.EVT_BOOT_PROGRESS, { stage: 'proxy-start', message: 'Starting HTTP proxy...' })
+  emitBootProgress('proxy-start', 'Starting HTTP proxy...')
   const port = await proxy.start()
   console.log('HTTP proxy started on port:', port)
-  rpc.event(C.EVT_BOOT_PROGRESS, { stage: 'proxy-ready', message: 'HTTP proxy ready on port ' + port })
+  emitBootProgress('proxy-ready', 'HTTP proxy ready on port ' + port)
 
   // Tab runtime: the "run in a tab" path. Serves the headless-app wrapper +
   // bridges each tab's WebSocket to a pear-request worker pipe. Best-effort —
   // a failure here just means the in-tab path is unavailable, not a boot block.
   try {
+    emitBootProgress('tab-runtime-start', 'Starting app tab runtime...')
     tabRuntime = new TabRuntime({ pearRun: (link) => require('pear-run')(link) })
     await tabRuntime.start()
+    emitBootProgress('tab-runtime-ready', 'App tab runtime ready')
   } catch (err) {
     console.error('[tab-runtime] failed to start:', err && err.message)
     tabRuntime = null
+    emitBootProgress('tab-runtime-unavailable', 'App tab runtime unavailable', { error: err && err.message })
   }
 
   // Start storage monitoring. Keep the handle so shutdown() can clear it —
@@ -3038,7 +3775,9 @@ async function boot () {
 
   // Notify React Native
   console.log('Sending READY event')
+  emitBootProgress('ready', 'Browser ready', { port })
   rpc.event(C.EVT_READY, { port })
+  scheduleStorageUsageSample({ force: true, delayMs: 1500 })
   bootResolve()
 }
 
@@ -3093,6 +3832,7 @@ async function ensureDevCatalogue () {
 
 async function shutdown () {
   if (storageTimer) { clearInterval(storageTimer); storageTimer = null }
+  if (storageSampleTimer) { clearTimeout(storageSampleTimer); storageSampleTimer = null }
   if (swarmBridge) { try { await swarmBridge.destroy() } catch {} swarmBridge = null }
   if (proxy) { try { await proxy.stop() } catch {} proxy = null }
   if (pearBridge) { try { await pearBridge.close() } catch {} pearBridge = null }
@@ -3100,7 +3840,15 @@ async function shutdown () {
   if (appManager) { try { await appManager.close() } catch {} appManager = null }
   if (catalogManager) { try { await catalogManager.close() } catch {} catalogManager = null }
   appDataIndexer = null
+  appDataReindexPromise = null
+  appDataReindexSummary = null
+  appDataReindexError = null
+  appDataReindexReason = null
   appSyncRegistry = null
+  nostrBindingStore = null
+  nostrBindingStoreOpening = null
+  federatedNameResolver = null
+  federatedNostrFeed = null
   if (personalIndex) { try { await personalIndex.close() } catch {} personalIndex = null }
   if (browserSync) { try { await browserSync.close() } catch {} browserSync = null }
   if (nameRegistry) { try { await nameRegistry.close() } catch {} nameRegistry = null }
@@ -3134,39 +3882,50 @@ async function pinDriveBestEffort (keyHex, discoveryKey) {
 
 async function checkStorageQuota () {
   try {
-    const stats = await getStorageSize(storagePath)
-    console.log(`Storage usage: ${formatBytes(stats)} / ${formatBytes(STORAGE_LIMIT)}`)
+    if (!storageUsageSampler) return
+    const sample = storageUsageSampler.snapshot({ refresh: true })
+    if (!Number.isFinite(sample.bytes)) {
+      console.log(sample.sampling ? 'Storage usage sampling in background...' : 'Storage usage unavailable')
+      return
+    }
+    if (!sample.fresh) {
+      console.log(`Storage usage sample is stale (${formatSampleAge(sample.sampleAgeMs)} old); refreshing in background...`)
+      return
+    }
+
+    const stats = sample.bytes
+    console.log(`Storage usage: ${formatBytes(stats)} / ${formatBytes(STORAGE_LIMIT)} sampled ${formatSampleAge(sample.sampleAgeMs)} ago`)
 
     if (shouldCleanupStorage(stats, { limit: STORAGE_LIMIT, threshold: EVICT_THRESHOLD })) {
       console.log('Storage above threshold, running cleanup...')
       await cleanupOldData()
+      storageUsageSampler.refresh({ force: true })
     }
   } catch (err) {
     console.error('Storage check failed:', err.message)
   }
 }
 
-async function getStorageSize (dir) {
-  const fs = require('bare-fs')
-  const path = require('bare-path')
-
-  let total = 0
-
-  async function calcSize (currentPath) {
-    const entries = await fs.promises.readdir(currentPath)
-    for (const entry of entries) {
-      const fullPath = path.join(currentPath, entry)
-      const stat = await fs.promises.stat(fullPath)
-      if (stat.isDirectory()) {
-        await calcSize(fullPath)
-      } else {
-        total += stat.size
-      }
+function scheduleStorageUsageSample (opts = {}) {
+  if (!storageUsageSampler || storageSampleTimer) return
+  const delayMs = Number.isFinite(opts.delayMs) && opts.delayMs > 0 ? opts.delayMs : 0
+  storageSampleTimer = setTimeout(() => {
+    storageSampleTimer = null
+    try {
+      storageUsageSampler?.refresh({ force: !!opts.force })
+    } catch (err) {
+      console.error('Storage sample scheduling failed:', err && err.message)
     }
-  }
+  }, delayMs)
+}
 
-  await calcSize(dir)
-  return total
+async function getStorageSize (dir, opts = {}) {
+  const path = require('bare-path')
+  return walkStorageUsage(dir, {
+    fs,
+    join: path.join,
+    onProgress: opts.onProgress
+  })
 }
 
 function formatBytes (bytes) {
@@ -3175,6 +3934,16 @@ function formatBytes (bytes) {
   const sizes = ['B', 'KB', 'MB', 'GB']
   const i = Math.floor(Math.log(bytes) / Math.log(k))
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
+}
+
+function formatSampleAge (ms) {
+  if (!Number.isFinite(ms)) return 'unknown'
+  if (ms < 1000) return 'just now'
+  const sec = Math.round(ms / 1000)
+  if (sec < 60) return `${sec}s`
+  const min = Math.round(sec / 60)
+  if (min < 60) return `${min}m`
+  return `${Math.round(min / 60)}h`
 }
 
 async function cleanupOldData () {
@@ -3218,7 +3987,7 @@ try { Bare.on?.('beforeExit', gracefulExit) } catch {}
 console.log('Starting boot...')
 boot().catch((err) => {
   console.error('Boot failed:', err)
-  rpc.event(C.EVT_BOOT_PROGRESS, { stage: 'error', message: err.message, error: err.stack })
+  emitBootProgress('error', err.message, { error: err.stack })
   rpc.event(C.EVT_ERROR, { type: 'boot-error', message: err.message, stack: err.stack })
   bootReject(err)
 })

@@ -4,6 +4,8 @@
  * source files from a fresh peer, then assert the metadata/text shape.
  *
  * Usage:
+ *   node scripts/verify-pear-bundle-contract.js peercord-linux
+ *   node scripts/verify-pear-bundle-contract.js peercord-windows
  *   node scripts/verify-pear-bundle-contract.js \
  *     --key <64-hex> --name peercord \
  *     --app-root by-arch/linux-x64/app/peercord/resources/app \
@@ -19,6 +21,7 @@ import b4a from 'b4a'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join, posix as posixPath } from 'node:path'
 import { tmpdir } from 'node:os'
+import { BUNDLE_CONTRACT_TARGETS, normalizeTargetName } from './lib/release-evidence-targets.mjs'
 
 function parseArgs (argv) {
   const args = {
@@ -29,7 +32,9 @@ function parseArgs (argv) {
     appRoot: '',
     contains: [],
     absent: [],
-    timeout: 90
+    timeout: null,
+    target: '',
+    listTargets: false
   }
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
@@ -41,7 +46,34 @@ function parseArgs (argv) {
     else if (arg === '--contains') args.contains.push(parseNeedle(argv[++i] || ''))
     else if (arg === '--absent') args.absent.push(parseNeedle(argv[++i] || ''))
     else if (arg === '--timeout') args.timeout = parseInt(argv[++i], 10)
+    else if (arg === '--target') args.target = argv[++i] || ''
+    else if (arg === '--list-targets') args.listTargets = true
+    else if (arg === '-h' || arg === '--help') failUsage('', 0)
+    else if (!arg.startsWith('-') && !args.target) args.target = arg
+    else failUsage(`unknown option: ${arg}`)
   }
+
+  if (args.listTargets) {
+    console.log(Object.keys(BUNDLE_CONTRACT_TARGETS).join('\n'))
+    process.exit(0)
+  }
+
+  const targetName = normalizeTargetName(args.target)
+  if (targetName) {
+    const preset = BUNDLE_CONTRACT_TARGETS[targetName]
+    if (!preset) failUsage(`unknown target: ${args.target}`)
+    args.key = args.key || preset.key
+    if (args.name === 'app') args.name = preset.name
+    args.appRoot = args.appRoot || preset.appRoot
+    args.expectType = args.expectType || preset.expectType
+    args.expectMain = args.expectMain || preset.expectMain
+    if (args.contains.length === 0) args.contains = preset.contains.map((item) => ({ ...item }))
+    if (args.absent.length === 0) args.absent = preset.absent.map((item) => ({ ...item }))
+    if (!Number.isFinite(args.timeout)) args.timeout = preset.timeout
+    args.target = targetName
+  }
+
+  if (!Number.isFinite(args.timeout)) args.timeout = 90
   return args
 }
 
@@ -51,10 +83,11 @@ function parseNeedle (spec) {
   return { file: spec.slice(0, i), text: spec.slice(i + 1) }
 }
 
-function failUsage (msg) {
+function failUsage (msg, code = 2) {
   if (msg) console.error('error:', msg)
-  console.error('usage: node scripts/verify-pear-bundle-contract.js --key <64-hex> [--app-root path] [--expect-type desktop] [--expect-main index.js] [--contains file:text] [--absent file:text]')
-  process.exit(2)
+  console.error('usage: node scripts/verify-pear-bundle-contract.js <peercord-linux|peercord-windows>')
+  console.error('   or: node scripts/verify-pear-bundle-contract.js --key <64-hex> [--app-root path] [--expect-type desktop] [--expect-main index.js] [--contains file:text] [--absent file:text]')
+  process.exit(code)
 }
 
 const args = parseArgs(process.argv.slice(2))
@@ -62,6 +95,7 @@ if (!/^[0-9a-f]{64}$/i.test(args.key || '')) failUsage('--key must be 64-char he
 if (!Number.isFinite(args.timeout) || args.timeout <= 0) failUsage('--timeout must be positive')
 
 const result = {
+  target: args.target || null,
   name: args.name,
   key: args.key,
   peers: 0,

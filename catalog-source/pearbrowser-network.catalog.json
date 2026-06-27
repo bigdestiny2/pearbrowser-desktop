@@ -58,7 +58,7 @@
       "name": "HiveRelay",
       "description": "Always-on relay infrastructure for the Pear and Hyperswarm ecosystem. Blind peering, NAT traversal, HTTP gateway. Apache-2.0.",
       "author": "bigdestiny2",
-      "version": "0.16.3",
+      "version": "0.20.2",
       "categories": [
         "infrastructure",
         "site"

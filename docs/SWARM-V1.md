@@ -1,6 +1,6 @@
 # `swarm.v1` — direct Hyperswarm access for `hyper://` pages
 
-> Status: design spec, targeting **PearBrowser Desktop v0.3.0**. Mobile parity tracked separately.
+> Status: implemented for PearBrowser Desktop. The page API is stable as `window.pear.swarm.v1`; the wire format uses Protomux sub-channels keyed by `(protocol, topic)`.
 >
 > Goal: same URL, same drive — pages that know how to ask for direct P2P get it; pages that don't keep working unchanged. The page-side API is `window.pear.swarm.v1`.
 
@@ -112,7 +112,7 @@ The streaming half uses **Server-Sent Events** rather than WebSockets. SSE is pl
 { type: 'closed' }
 ```
 
-Backpressure: the WS path is bounded; the worklet drops frames + emits an `error` of `'overflow'` rather than buffering unboundedly. Pages that need ordered guaranteed delivery wrap with their own ack protocol on top.
+Backpressure: the SSE path is bounded; the worklet closes hopelessly slow streams rather than buffering unboundedly. Pages that need ordered guaranteed delivery wrap with their own ack protocol on top.
 
 ---
 
@@ -128,7 +128,7 @@ A page can always join, without prompt:
 topic = sha256("pear.swarm.v1:" || driveKeyHex || subtopic)
 ```
 
-…where `driveKeyHex` is the key of the drive serving this page and `subtopic` is a UTF-8 string the page chooses. No consent needed because the topic is provably scoped to this drive's owner namespace — only pages served from this drive can address it.
+…where `driveKeyHex` is the key of the drive serving this page and `subtopic` is a UTF-8 string the page chooses. No consent is needed because the worklet derived the topic for the page's own drive. This is convenience scoping, not secrecy: drive keys are public, so peers that know the drive key can derive the same topic. Pages that need authenticated peers should run their own handshake on top.
 
 This covers ~90% of in-app realtime use cases (a chat app's rooms, a game's lobbies, a collab editor's documents).
 
@@ -219,8 +219,8 @@ The HTTP `/api/swarm/*` endpoints are similarly versioned in their request body:
 
 ## 9. Implementation order
 
-1. **`backend/swarm-bridge.js`** — manages page-scoped channels, multiplexes hyperswarm conns, enforces rate limits.
-2. **`backend/http-bridge.js`** — adds `/api/swarm/{join,leave,send}` REST + `/ws/swarm` WebSocket upgrade.
+1. **`backend/swarm-bridge.js`** — manages page-scoped channels, opens Protomux sub-channels over shared Hyperswarm conns, enforces rate limits.
+2. **`backend/http-bridge.js`** — adds `/api/swarm/{join,leave,send}` REST + `/api/swarm/events` SSE.
 3. **`backend/swarm-grants.js`** — Hyperbee for persisted Tier C grants (mirrors `profile.js` shape).
 4. **`backend/index.js`** — boots the bridge + grants store + handles `EVT_SWARM_REQUEST` / `CMD_SWARM_RESOLVE`.
 5. **`backend/pear-bridge.js`** — page-side injected shim adds `window.pear.swarm.v1`.

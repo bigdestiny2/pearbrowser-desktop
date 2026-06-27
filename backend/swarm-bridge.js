@@ -4,12 +4,12 @@
  * See docs/SWARM-V1.md for the full design. Short version:
  *
  *   Pages call:        page → POST /api/swarm/join { topicHex, protocol, ... }
- *                      page → ws://127.0.0.1:PORT/ws/swarm?token=…&channelId=…
+ *                      page → GET  /api/swarm/events?channelId=… (SSE stream)
  *                      page → POST /api/swarm/send { channelId, peerId, data }
  *
  *   Worklet does:      tracks one Channel per (token,channelId), multiplexes
- *                      Hyperswarm peer events back over the WS. Pages never
- *                      hold raw socket FDs or private keys.
+ *                      Hyperswarm peer events back over the SSE stream. Pages
+ *                      never hold raw socket FDs or private keys.
  *
  * Topic policy (mirrors §4 of the spec):
  *   Tier A — drive-derived `sha256("pear.swarm.v1:" + driveKey + subtopic)`:
@@ -27,8 +27,15 @@
 
 const crypto = require('hypercore-crypto')
 const b4a = require('b4a')
+const Protomux = require('protomux')
+const c = require('compact-encoding')
 
 const TIER_A_PREFIX = 'pear.swarm.v1:'
+// Protomux protocol namespace. Each page-chosen `protocol` is suffixed onto
+// this so two apps that pick the same user-facing protocol name still share
+// the swarm.v1 envelope, while the (protocol,id) pair Protomux pairs on stays
+// `('pear.swarm.v1/'+userProtocol, topicBuffer)`.
+const MUX_PROTOCOL_PREFIX = 'pear.swarm.v1/'
 const DEFAULT_LIMITS = {
   maxChannelsPerApp: 8,
   maxJoinsPerMinute: 10,
@@ -39,8 +46,14 @@ const DEFAULT_LIMITS = {
 
 /**
  * sha256(TIER_A_PREFIX || driveKeyHex || subtopic) — the Tier A topic
- * derivation. Pages can always join these without a consent prompt
- * because only their drive's owner can address this namespace.
+ * derivation. Pages can always join these without a consent prompt.
+ *
+ * NOTE: this is a *convenience* scoping, not a security boundary. Drive
+ * keys are public, so any peer who knows a drive key can re-derive this
+ * topic and join the same namespace. The no-consent policy just spares
+ * the page's own owner a prompt for their own drive's topics — it does
+ * NOT prove the topic is private to that drive. Pages that need
+ * authenticated peers must run their own handshake on top.
  */
 function deriveTierATopic (driveKeyHex, subtopic) {
   const h = require('crypto').createHash('sha256')
@@ -73,6 +86,27 @@ class SwarmBridge {
     this.topicRefs = new Map()
     /** Map<driveKeyHex, { joinsInWindow: number, windowStart: number, pending: number }> — per-app rate limits */
     this.appState = new Map()
+    /** Map<conn, { conn, mux, info }> — every live swarm connection the bridge sees. */
+    this._conns = new Map()
+
+    // ONE swarm-level 'connection' listener for the whole bridge. Each peer
+    // connection carries a single Protomux instance (Protomux.from is
+    // idempotent — it stashes itself on conn.userData and reuses it). Every
+    // local Channel opens its own muxed sub-channel on that connection, keyed
+    // by ('pear.swarm.v1/'+protocol, topicBuffer). Protomux only PAIRS the
+    // sub-channels the remote also opened with the exact same (protocol, id),
+    // so:
+    //   - the topic/protocol match (not info.topics) is what attributes a
+    //     peer to a channel — this fixes server-role peers (whose info.topics
+    //     is empty) and removes cross-delivery between channels on a shared
+    //     topic, since each channel only sees frames for its own sub-channel;
+    //   - two logical channels (different topics, same protocol) can share one
+    //     connection without crossing wires.
+    // Protomux also length-frames the byte stream for us, so no manual framing
+    // is needed on top of @hyperswarm/secret-stream. This mirrors how
+    // hypercore replication muxes over a single connection.
+    this._onConnection = (conn, info) => this._addConnection(conn, info)
+    this.swarm.on('connection', this._onConnection)
   }
 
   // ---- Public API (called by http-bridge.js) ----
@@ -96,8 +130,13 @@ class SwarmBridge {
     if (!/^[0-9a-f]{64}$/.test(driveKeyHex)) {
       throw new Error('SwarmBridge: invalid driveKeyHex')
     }
-    this._enforceJoinRate(driveKeyHex)
+    // Check both budgets BEFORE we touch anything, but do NOT reserve either
+    // yet. A denied consent prompt (or any throw below) must not permanently
+    // burn a channel slot — otherwise ~8 denials lock the app out of swarm —
+    // and must not silently eat the per-minute join budget either. Both are
+    // committed only once the Channel is actually live.
     this._enforceChannelCount(driveKeyHex)
+    this._enforceJoinRate(driveKeyHex)
 
     const { topicHex, tier } = await this._resolveTopic(driveKeyHex, args)
 
@@ -117,9 +156,21 @@ class SwarmBridge {
       client: args.client !== false
     })
 
+    // Commit the channel, then count both budgets. If joining the swarm
+    // throws, roll everything back so neither budget is leaked.
     this.channels.set(channelId, channel)
+    this._incrementChannelCount(driveKeyHex)
+    this._commitJoinRate(driveKeyHex)
     this._refTopic(topicHex, channelId)
-    await channel._joinSwarm()
+    try {
+      await channel._joinSwarm()
+    } catch (err) {
+      try { await channel._leaveSwarm() } catch {}
+      this.channels.delete(channelId)
+      this._unrefTopic(topicHex, channelId)
+      this._rollbackJoinRate(driveKeyHex)
+      throw err
+    }
 
     return {
       channelId,
@@ -169,12 +220,17 @@ class SwarmBridge {
 
   /** Tear down all channels — used by the global teardown path. */
   async destroy () {
+    if (this._onConnection) {
+      try { this.swarm.off('connection', this._onConnection) } catch {}
+      this._onConnection = null
+    }
     const all = [...this.channels.values()]
     this.channels.clear()
     this.topicRefs.clear()
     for (const ch of all) {
       try { await ch._leaveSwarm() } catch {}
     }
+    this._conns.clear()
   }
 
   // ---- Internal ----
@@ -233,9 +289,11 @@ class SwarmBridge {
   }
 
   _isTierATopic (driveKeyHex, topicHex) {
-    // We can't reverse the hash, but a page that says "topicHex" without a
-    // subtopic might still claim Tier A by accident — we only mark Tier A
-    // when the page passes `subtopic`. So return false here.
+    // We can't reverse the hash, and Tier A is only a convenience-scoping
+    // marker anyway (the derivation is from a *public* drive key, so it is
+    // not a security boundary). We only mark Tier A when the page passes a
+    // `subtopic` and we derive the topic ourselves. A raw topicHex without a
+    // subtopic is never assumed to be Tier A. So return false here.
     return false
   }
 
@@ -248,6 +306,9 @@ class SwarmBridge {
     return s
   }
 
+  // Pure check (also rolls the sliding window). Does NOT consume a token —
+  // a denied consent or a later failure shouldn't burn the join budget.
+  // The token is consumed via _commitJoinRate once the channel is live.
   _enforceJoinRate (driveKeyHex) {
     const s = this._appStateFor(driveKeyHex)
     const now = Date.now()
@@ -258,14 +319,30 @@ class SwarmBridge {
     if (s.joinsInWindow + 1 > this.limits.maxJoinsPerMinute) {
       throw new Error(`rate-limited: max ${this.limits.maxJoinsPerMinute} swarm joins per minute`)
     }
+  }
+
+  _commitJoinRate (driveKeyHex) {
+    const s = this._appStateFor(driveKeyHex)
     s.joinsInWindow += 1
   }
 
+  _rollbackJoinRate (driveKeyHex) {
+    const s = this.appState.get(driveKeyHex)
+    if (s) s.joinsInWindow = Math.max(0, s.joinsInWindow - 1)
+  }
+
+  // Pure check — does NOT reserve a slot. The slot is only committed via
+  // _incrementChannelCount once the Channel is actually created, so denied
+  // consent prompts and other throws can't permanently burn a slot.
   _enforceChannelCount (driveKeyHex) {
     const s = this._appStateFor(driveKeyHex)
     if (s.channelCount + 1 > this.limits.maxChannelsPerApp) {
       throw new Error(`rate-limited: max ${this.limits.maxChannelsPerApp} simultaneous swarm channels per app`)
     }
+  }
+
+  _incrementChannelCount (driveKeyHex) {
+    const s = this._appStateFor(driveKeyHex)
     s.channelCount += 1
   }
 
@@ -291,18 +368,50 @@ class SwarmBridge {
     const s = this.appState.get(driveKeyHex)
     if (s) s.channelCount = Math.max(0, s.channelCount - 1)
   }
+
+  /**
+   * A new swarm connection arrived. Build (or reuse) its Protomux, remember
+   * it, and have every live Channel open its muxed sub-channel on it. We do
+   * NOT inspect info.topics — Protomux pairing is the topic filter: only the
+   * sub-channels whose (protocol, id) the remote also opened will fire onopen.
+   * This is what makes server-role peers work (their info.topics is empty) and
+   * what lets two channels share one connection without cross-delivery.
+   */
+  _addConnection (conn, info) {
+    if (this._conns.has(conn)) return
+    const mux = Protomux.from(conn)
+    const entry = { conn, mux, info: info || null }
+    this._conns.set(conn, entry)
+
+    // Drop the connection from our live set when it closes, so new channels
+    // don't try to open sub-channels on a dead mux. (Protomux already closes
+    // its sub-channels on the conn 'close' event, which drives each Channel's
+    // onclose → peer-leave.)
+    const onClose = () => this._removeConnection(conn)
+    conn.once('close', onClose)
+    conn.once('error', onClose)
+
+    for (const ch of this.channels.values()) {
+      if (ch._destroyed) continue
+      ch._openOnConnection(entry)
+    }
+  }
+
+  _removeConnection (conn) {
+    this._conns.delete(conn)
+  }
 }
 
 /**
- * One Channel = one (page, topic, protocol) tuple. Owns the page-side WS
+ * One Channel = one (page, topic, protocol) tuple. Owns the page-side stream
  * and the worklet-side hyperswarm topic-discovery handle. Multiplexes
  * peer connections that arrive on the topic into JSON frames the page
  * can consume.
  *
- * Important: multiple Channels can share the same hyperswarm topic
- * (different protocols, or two pages from the same drive). The bridge's
- * topicRefs counts how many channels use a topic; only the last leaver
- * actually calls swarm.leave.
+ * Important: multiple Channels can share the same hyperswarm topic. Different
+ * protocols are isolated Protomux sub-channels; duplicate (protocol, topic)
+ * joins require the remote to open matching duplicate sessions. topicRefs is
+ * bridge bookkeeping, while each Channel owns its own discovery handle.
  */
 class Channel {
   constructor (opts) {
@@ -316,10 +425,14 @@ class Channel {
     this.serverRole = opts.server
     this.clientRole = opts.client
 
-    /** Map<peerId, { conn, lastSendBytes, lastSendWindowStart }> */
+    /** Map<peerId, { conn, ch, msg, lastSendBytes, lastSendWindowStart }> — one per paired remote. */
     this.peers = new Map()
+    /** Map<conn, mux Channel> — the muxed sub-channel this Channel opened on each live conn. */
+    this._muxChannels = new Map()
     this._peerSeq = 0
     this._topicBuffer = b4a.from(this.topicHex, 'hex')
+    // The Protomux protocol string both sides must agree on for pairing.
+    this._muxProtocol = MUX_PROTOCOL_PREFIX + this.protocol
     /** Belt-and-braces buffer: events emitted before the page attaches its stream. */
     this._eventBuffer = []
     this._stream = null
@@ -332,32 +445,36 @@ class Channel {
 
   async _joinSwarm () {
     if (this._destroyed) return
-    // Hyperswarm.join returns a discovery handle. We listen to swarm-level
-    // 'connection' events, filtered to those whose remoteTopic matches.
+    // Hyperswarm.join returns a discovery handle. Connections themselves are
+    // delivered through the bridge's SINGLE swarm-level 'connection' listener
+    // (see SwarmBridge constructor / _addConnection). Each connection carries a
+    // Protomux; this channel opens its own muxed sub-channel on every one.
     this._discovery = this.bridge.swarm.join(this._topicBuffer, {
       server: this.serverRole,
       client: this.clientRole
     })
-    // Listen at the swarm level rather than the discovery handle because
-    // the discovery API surface varies. We filter by topic in the handler.
-    this._onConnection = (conn, info) => this._handleConnection(conn, info)
-    this.bridge.swarm.on('connection', this._onConnection)
+    // A connection may already be live (joined before this channel, or shared
+    // with another channel on an overlapping topic). Open our muxed sub-channel
+    // on every existing connection now; brand-new connections get it via
+    // SwarmBridge._addConnection.
+    for (const entry of this.bridge._conns.values()) {
+      this._openOnConnection(entry)
+    }
     // Best-effort flush — Hyperswarm may already have peers on this topic.
     try { await this._discovery.flushed?.() } catch {}
   }
 
   async _leaveSwarm () {
     this._destroyed = true
-    if (this._onConnection) {
-      try { this.bridge.swarm.off('connection', this._onConnection) } catch {}
-      this._onConnection = null
+    // Close every muxed sub-channel this channel opened. ch.close() tears down
+    // only our (protocol, topic) sub-channel on the shared connection — it does
+    // NOT destroy the underlying socket, so other channels sharing the same
+    // hyperswarm conn (overlapping topics / other protocols) keep working.
+    // hyperswarm GCs the socket when no channel refs it.
+    for (const ch of this._muxChannels.values()) {
+      try { ch.close() } catch {}
     }
-    // Detach all peer conns owned by this channel (don't destroy them — the
-    // hyperswarm conn may be shared across multiple channels on overlapping
-    // topics; let hyperswarm GC it when no one refs it).
-    for (const [peerId, peer] of this.peers) {
-      try { peer.conn.removeListener?.('data', peer._onData) } catch {}
-    }
+    this._muxChannels.clear()
     this.peers.clear()
     if (this._discovery) {
       try { await this._discovery.destroy?.() } catch {}
@@ -371,52 +488,74 @@ class Channel {
     }
   }
 
-  _handleConnection (conn, info) {
+  // Open this channel's muxed sub-channel on one live connection. Called by
+  // the bridge for every (conn, channel) pair — both when a connection arrives
+  // (SwarmBridge._addConnection) and when this channel joins (over existing
+  // conns in _joinSwarm). Idempotent per conn.
+  //
+  // The sub-channel is keyed by (this._muxProtocol, this._topicBuffer).
+  // Protomux only pairs it with a remote sub-channel that opened the SAME
+  // (protocol, id) — that pairing (not info.topics) is what decides whether a
+  // peer belongs to this channel. A connection where the remote never opens a
+  // matching sub-channel simply never fires onopen here, so no peer is emitted.
+  _openOnConnection (entry) {
     if (this._destroyed) return
-    // Filter: hyperswarm fires 'connection' for every topic this swarm
-    // has joined. We only want connections whose info.topics include
-    // ours.
-    const topics = info && info.topics
-    if (!topics || !topics.some((t) => b4a.equals(t, this._topicBuffer))) return
+    const { conn, mux, info } = entry
+    if (this._muxChannels.has(conn)) return
+    if (conn.destroyed) return
+
+    // createChannel returns null if a sub-channel with this exact (protocol,id)
+    // already exists on the mux (e.g. two of our channels on the same topic AND
+    // protocol — Protomux can only pair one) or the remote already closed it.
+    // msg is declared before createChannel so the onopen closure never reads it
+    // in a temporal dead zone. Protomux fires onopen only ASYNCHRONOUSLY (after
+    // both ends open + pair), by which point msg is assigned — but we don't lean
+    // on that for correctness: msg starts null and is set below before open().
+    let msg = null
+    const ch = mux.createChannel({
+      protocol: this._muxProtocol,
+      id: this._topicBuffer,
+      unique: true,
+      onopen: () => this._onMuxOpen(conn, ch, msg, info),
+      onclose: () => this._onMuxClose(conn),
+      ondestroy: () => this._onMuxClose(conn)
+    })
+    if (ch === null) return
+
+    msg = ch.addMessage({
+      encoding: c.raw,
+      onmessage: (payload) => this._onMuxMessage(conn, payload)
+    })
+
+    this._muxChannels.set(conn, ch)
+    // Both sides createChannel + open; Protomux pairs them and fires onopen on
+    // both ends. Until then there is no peer for this conn on this channel.
+    try { ch.open() } catch {}
+  }
+
+  _onMuxOpen (conn, ch, msg, info) {
+    if (this._destroyed) return
 
     if (this.peers.size >= this.bridge.limits.maxPeersPerChannel) {
-      // newest-wins: drop the oldest peer
+      // newest-wins: drop the oldest peer (close its sub-channel, not the socket).
       const oldestId = this.peers.keys().next().value
       const oldest = this.peers.get(oldestId)
       if (oldest) {
-        try { oldest.conn.destroy?.() } catch {}
         this.peers.delete(oldestId)
+        if (oldest.conn !== conn) this._muxChannels.delete(oldest.conn)
+        try { oldest.ch.close() } catch {}
         this._emit({ type: 'peer-leave', peerId: oldestId })
       }
     }
 
     const peerId = 'peer-' + (++this._peerSeq) + '-' + crypto.randomBytes(4).toString('hex')
-    const peer = {
+    this.peers.set(peerId, {
       conn,
+      ch,
+      msg,
       lastSendBytes: 0,
-      lastSendWindowStart: Date.now(),
-      _onData: null
-    }
-    peer._onData = (data) => {
-      this._emit({
-        type: 'message',
-        peerId,
-        data: b4a.from(data).toString('base64')
-      })
-    }
-    conn.on('data', peer._onData)
-    conn.once('close', () => {
-      if (this.peers.delete(peerId)) {
-        this._emit({ type: 'peer-leave', peerId })
-      }
+      lastSendWindowStart: Date.now()
     })
-    conn.once('error', () => {
-      if (this.peers.delete(peerId)) {
-        this._emit({ type: 'peer-leave', peerId })
-      }
-    })
-
-    this.peers.set(peerId, peer)
     this._emit({
       type: 'peer',
       peerId,
@@ -425,6 +564,33 @@ class Channel {
       pubkey: null,
       info: { client: !!info?.client, server: !!info?.server }
     })
+  }
+
+  _onMuxMessage (conn, payload) {
+    if (this._destroyed) return
+    const peerId = this._peerIdForConn(conn)
+    if (!peerId) return
+    this._emit({
+      type: 'message',
+      peerId,
+      data: b4a.toString(b4a.from(payload), 'base64')
+    })
+  }
+
+  _onMuxClose (conn) {
+    this._muxChannels.delete(conn)
+    if (this._destroyed) return
+    const peerId = this._peerIdForConn(conn)
+    if (peerId && this.peers.delete(peerId)) {
+      this._emit({ type: 'peer-leave', peerId })
+    }
+  }
+
+  _peerIdForConn (conn) {
+    for (const [peerId, peer] of this.peers) {
+      if (peer.conn === conn) return peerId
+    }
+    return null
   }
 
   _attachStream (stream) {
@@ -476,7 +642,11 @@ class Channel {
       return
     }
     peer.lastSendBytes += buf.length
-    try { peer.conn.write(buf) } catch (err) {
+    // msg.send frames the payload over the muxed sub-channel; it returns false
+    // on backpressure (we don't pause the page here — the SSE/relay side owns
+    // page→worklet backpressure). Raw encoding sends the bytes verbatim, so the
+    // remote's onmessage payload equals `buf`.
+    try { peer.msg.send(buf) } catch (err) {
       this._emit({ type: 'error', message: 'send failed: ' + (err && err.message), peerId })
     }
   }

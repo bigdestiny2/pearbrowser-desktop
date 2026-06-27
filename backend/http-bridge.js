@@ -16,6 +16,13 @@
 // bare-crypto would throw `require.addon is not a function` under Node.
 const hypercoreCrypto = require('hypercore-crypto')
 const b4a = require('b4a')
+const { appSlugForDrive } = require('./app-sync-registry.cjs')
+
+const HEX64 = /^[0-9a-f]{64}$/i
+const OUTBOX_RECORD_TYPES = Object.freeze({
+  peerit: ['community', 'post', 'comment', 'profile'],
+  p2pbuilders: ['board', 'post', 'comment', 'profile']
+})
 
 class HttpBridge {
   constructor (pearBridge, swarm, getDriveFn, opts = {}) {
@@ -95,10 +102,39 @@ class HttpBridge {
         scopedAppId,
         appDriveKey: auth.driveKeyHex,
         rawAppId,
-        inviteKey
+        inviteKey,
+        appSlug: appSlugForDrive(auth.driveKeyHex),
+        authorPubkey: HEX64.test(rawAppId || '') ? rawAppId.toLowerCase() : null
       })
     } catch (err) {
       console.warn('[HttpBridge] sync registry remember failed:', err && err.message)
+      return null
+    }
+  }
+
+  async _publishOwnOutboxDescriptor ({ auth, rawAppId, inviteKey }) {
+    if (!this._lighthouseOutboxes || typeof this._lighthouseOutboxes.publish !== 'function') return null
+    if (!this._identity || !inviteKey || !HEX64.test(rawAppId || '')) return null
+    const appSlug = appSlugForDrive(auth.driveKeyHex)
+    const recordTypes = OUTBOX_RECORD_TYPES[appSlug]
+    if (!recordTypes) return null
+    let authorPubkey = null
+    try {
+      const kp = this._identity.getAppKeypair(auth.driveKeyHex)
+      authorPubkey = kp && kp.publicKey && kp.publicKey.toString('hex')
+    } catch (_) {}
+    if (!authorPubkey || authorPubkey.toLowerCase() !== rawAppId.toLowerCase()) return null
+    try {
+      return await this._lighthouseOutboxes.publish({
+        appSlug,
+        rawAppId,
+        inviteKey,
+        authorPubkey,
+        recordTypes,
+        updatedAt: Date.now()
+      }, { appDriveKey: auth.driveKeyHex, source: 'sync-create' })
+    } catch (err) {
+      console.warn('[HttpBridge] lighthouse outbox publish failed:', err && err.message)
       return null
     }
   }
@@ -116,6 +152,18 @@ class HttpBridge {
       })
     } catch (err) {
       console.warn('[HttpBridge] app data index failed:', err && err.message)
+    }
+  }
+
+  async _reindexAppSyncGroup (record) {
+    let indexer = null
+    try { indexer = this._getAppDataIndexer && this._getAppDataIndexer() } catch (_) {}
+    if (!indexer || typeof indexer.reindexGroup !== 'function' || !record) return null
+    try {
+      return await indexer.reindexGroup(this._bridge, record, { pageSize: 250, maxRows: 5000 })
+    } catch (err) {
+      console.warn('[HttpBridge] app data reindex failed:', err && err.message)
+      return null
     }
   }
 
@@ -188,6 +236,7 @@ class HttpBridge {
         const scopedAppId = this._scopeAppId(auth.driveKeyHex, body.appId)
         const result = await this._bridge.createSyncGroup(scopedAppId)
         this._rememberAppSyncGroup({ auth, rawAppId: body.appId, scopedAppId, inviteKey: result && result.inviteKey })
+        await this._publishOwnOutboxDescriptor({ auth, rawAppId: body.appId, inviteKey: result && result.inviteKey })
         return this._json(res, { ...result, appId: body.appId })
       }
 
@@ -203,7 +252,9 @@ class HttpBridge {
         }
         const scopedAppId = this._scopeAppId(auth.driveKeyHex, body.appId)
         const result = await this._bridge.joinSyncGroup(scopedAppId, body.inviteKey)
-        this._rememberAppSyncGroup({ auth, rawAppId: body.appId, scopedAppId, inviteKey: (result && result.inviteKey) || body.inviteKey })
+        const remembered = this._rememberAppSyncGroup({ auth, rawAppId: body.appId, scopedAppId, inviteKey: (result && result.inviteKey) || body.inviteKey })
+        await this._reindexAppSyncGroup(remembered)
+        await this._publishOwnOutboxDescriptor({ auth, rawAppId: body.appId, inviteKey: (result && result.inviteKey) || body.inviteKey })
         return this._json(res, { ...result, appId: body.appId })
       }
 

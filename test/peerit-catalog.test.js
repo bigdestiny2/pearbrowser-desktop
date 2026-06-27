@@ -44,10 +44,13 @@ test('shell.js opens PearBrowser landing first with peerit beside it', () => {
   assert.match(shell, /restoreStartupTabs\(savedTabs, \[DEFAULT_URL, P2PBUILDERS_URL, PEERIT_URL\]\)/)
 })
 
-test('shell.js pins peerit to the top of the Sites discovery grid', () => {
+test('Sites pins peerit to the top of the discovery grid', () => {
   const shell = readFileSync(new URL('../ui/shell.js', import.meta.url), 'utf8')
-  // The Sites ranker special-cases the peerit drive key as rank 0 (top).
-  assert.match(shell, /a\.driveKey === PEERIT_DRIVE_KEY \? 0/)
+  const sites = readFileSync(new URL('../ui/components/sites.js', import.meta.url), 'utf8')
+  // The shell passes the peerit drive key into Sites, and the Sites ranker
+  // special-cases that key as rank 0 (top).
+  assert.match(shell, /<\$\{Sites\}[^`]+peeritDriveKey=\$\{PEERIT_DRIVE_KEY\}/)
+  assert.match(sites, /a\.driveKey === peeritDriveKey \? 0/)
   // Featured sites rank above the rest.
-  assert.match(shell, /categories\.includes\('featured'\) \? 1 : 2/)
+  assert.match(sites, /categories\.includes\('featured'\) \? 1 : 2/)
 })

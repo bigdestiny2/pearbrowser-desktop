@@ -29,7 +29,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: bigdestiny2/P2P-Hiverelay
-          ref: v0.20.0
+          ref: v0.20.2
           path: pear-ecosystem/00-core/hiverelay
 
       - name: Setup Node
@@ -39,16 +39,16 @@ jobs:
           cache: npm
           cache-dependency-path: pear-ecosystem/01-browser/pearbrowser-desktop/package-lock.json
 
-      - name: Guard HiveRelay 0.20.0 workspace layout
+      - name: Guard HiveRelay 0.20.2 workspace layout
         run: |
           node <<'NODE'
           const { readFileSync } = require('node:fs')
           const { resolve } = require('node:path')
 
           const expected = [
-            ['p2p-hiverelay', '0.20.0', 'pear-ecosystem/00-core/hiverelay/packages/core/package.json'],
-            ['p2p-hiverelay-client', '0.20.0', 'pear-ecosystem/00-core/hiverelay/packages/client/package.json'],
-            ['p2p-hiverelay-verifier', '0.20.0', 'pear-ecosystem/00-core/hiverelay/packages/verifier/package.json']
+            ['p2p-hiverelay', '0.20.2', 'pear-ecosystem/00-core/hiverelay/packages/core/package.json'],
+            ['p2p-hiverelay-client', '0.20.2', 'pear-ecosystem/00-core/hiverelay/packages/client/package.json'],
+            ['p2p-hiverelay-verifier', '0.20.2', 'pear-ecosystem/00-core/hiverelay/packages/verifier/package.json']
           ]
 
           const errors = []
@@ -66,7 +66,7 @@ jobs:
           }
 
           if (errors.length) {
-            console.error('HiveRelay checkout no longer matches the documented 0.20.0 workspace layout.')
+            console.error('HiveRelay checkout no longer matches the documented 0.20.2 workspace layout.')
             console.error('Expected packages under pear-ecosystem/00-core/hiverelay/packages/{core,client,verifier}.')
             for (const error of errors) console.error(`- ${error}`)
             process.exit(1)
@@ -88,3 +88,7 @@ jobs:
       - name: Audit high severity dependencies
         working-directory: pear-ecosystem/01-browser/pearbrowser-desktop
         run: npm audit --audit-level=high
+
+      - name: Capture Desktop CI evidence
+        working-directory: pear-ecosystem/01-browser/pearbrowser-desktop
+        run: npm run evidence:desktop:ci

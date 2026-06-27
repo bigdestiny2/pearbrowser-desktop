@@ -85,6 +85,20 @@ async function main () {
   assert(JSON.stringify(finalA) === JSON.stringify(finalB), 'A and B must converge')
   assert(JSON.stringify(finalA) === JSON.stringify(['hyper://beta', 'hyper://gamma']), 'expected beta+gamma (alpha removed)')
 
+  // --- Compaction: checkpoint current state and prune local view history ---
+  const compactedA = await A.compact()
+  await until('B reads A\'s compacted checkpoint', async () => {
+    await A.update(); await B.update()
+    const b = await B.state()
+    return JSON.stringify(urls(b)) === JSON.stringify(finalA) &&
+      b.retentionAudit &&
+      b.retentionAudit.compactedOps >= 4
+  })
+  const compactedB = await B.state()
+  console.log('  · compacted retained ops:', compactedA.retentionAudit.retainedOps, '| checkpointed:', compactedA.retentionAudit.compactedOps)
+  assert(compactedA.retentionAudit.retainedOps <= 2, 'compaction should prune older local view operations')
+  assert(compactedB.retentionAudit.compactedOps >= 4, 'paired device must apply compact checkpoint evidence')
+
   // --- Device C has the bytes but NOT the key → cannot read --------------
   const storeC = await tmpStore()
   const C = await new BrowserStateSync(storeC, { bootstrap: A.key, encryptionKey: null }).ready()
@@ -104,18 +118,39 @@ async function main () {
   await storeA.close(); await storeB.close(); await storeC.close()
   const storeA2 = new Corestore(tmps[0])
   const A2 = await new BrowserStateSync(storeA2, { bootstrap: A.key, encryptionKey: ENC, namespace: 'devA' }).ready()
-  const reopened = urls(await A2.state())
+  const reopenedState = await A2.state()
+  const reopened = urls(reopenedState)
   console.log('  · A reopened from disk:', reopened.join(', '), '| writable:', A2.writable)
   assert(JSON.stringify(reopened) === JSON.stringify(finalA), 'reopened view must match (op log rebuilds same view)')
   assert(A2.writable, 'reopened owner must stay writable')
+  assert(reopenedState.storageAudit && reopenedState.storageAudit.ok, 'storage audit must be within sync snapshot bounds')
+  assert(reopenedState.retentionAudit && reopenedState.retentionAudit.compactedOps >= 4, 'retention audit must preserve compaction evidence after restart')
   await A2.close(); await storeA2.close()
 
-  console.log('\n✅ PASS — encrypted sync converges, key-gated, restart deterministic')
+  console.log('RESULT:', JSON.stringify({
+    ok: true,
+    devices: 3,
+    bookmarks: finalA.length,
+    writerPromotion: B.writable === true,
+    keylessReaderBlocked: leaked.length === 0,
+    restartDeterministic: JSON.stringify(reopened) === JSON.stringify(finalA),
+    storageAuditOk: reopenedState.storageAudit.ok,
+    storageLimits: reopenedState.storageAudit.limits,
+    retentionAuditOk: reopenedState.retentionAudit.ok,
+    retainedOps: reopenedState.retentionAudit.retainedOps,
+    compactedOps: reopenedState.retentionAudit.compactedOps
+  }))
+  console.log('\n✅ PASS — encrypted sync converges, key-gated, compacted, restart deterministic')
 }
 
 main()
   .then(async () => { await cleanup(); process.exit(0) })
-  .catch(async (err) => { console.error('\n❌ FAIL:', err && err.message); await cleanup(); process.exit(1) })
+  .catch(async (err) => {
+    console.error('RESULT:', JSON.stringify({ ok: false, error: err && err.message }))
+    console.error('\n❌ FAIL:', err && err.message)
+    await cleanup()
+    process.exit(1)
+  })
 
 async function cleanup () {
   for (const dir of tmps) { try { await rm(dir, { recursive: true, force: true }) } catch {} }

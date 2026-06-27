@@ -15,6 +15,12 @@ Use the manual GitHub Actions trigger:
 4. Confirm the `v0.5.0` GitHub release has the generated installers, per-file
    `.sha256` files, `SHA256SUMS-*`, and `manifest-*` files attached.
 
+The target GitHub release must already exist. The attach job verifies the
+downloaded bundle has one checksum index and one manifest for each desktop
+platform, then uploads the generated assets with `gh release upload --clobber`.
+If the release tag is mistyped or the release is missing, the workflow fails
+without creating a new release.
+
 The attach job uses `gh release upload --clobber`, so rerunning the workflow
 refreshes broken or stale assets for the same tag instead of creating duplicate
 release entries.

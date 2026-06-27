@@ -14,7 +14,7 @@ import Corestore from 'corestore'
 import Hyperbee from 'hyperbee'
 import b4a from 'b4a'
 import syncMod from '../backend/browser-state-sync.cjs'
-const { BrowserStateSync } = syncMod
+const { BrowserStateSync, DEFAULT_STORAGE_NAME, normalizeStorageName } = syncMod
 const ENC = b4a.toString(b4a.alloc(32, 0x5a), 'hex')
 
 async function newStore () {
@@ -59,5 +59,37 @@ test('BrowserStateSync mint→close→reopen on a shared store (the CMD_SYNC_CRE
     const st = await reg.state()
     assert.deepEqual(st.bookmarks.map((b) => b.url), ['hyper://beta'])
     await reg.close(); await bee.close()
+  } finally { await store.close(); await rm(dir, { recursive: true, force: true }) }
+})
+
+test('BrowserStateSync can rotate into a distinct local storage namespace', async () => {
+  const { store, dir } = await newStore()
+  const firstName = 'bss-browser-state-aaaaaaaaaaaaaaaa'
+  const rotatedName = 'bss-browser-state-bbbbbbbbbbbbbbbb'
+  try {
+    assert.equal(normalizeStorageName('not a sync store'), DEFAULT_STORAGE_NAME)
+    assert.equal(normalizeStorageName(rotatedName.toUpperCase()), rotatedName)
+
+    const firstMint = await new BrowserStateSync(store, { bootstrap: null, encryptionKey: ENC, storageName: firstName }).ready()
+    const firstKey = firstMint.key
+    await firstMint.close()
+    const first = await new BrowserStateSync(store, { bootstrap: firstKey, encryptionKey: ENC, storageName: firstName }).ready()
+    await first.addBookmark({ url: 'hyper://old-group', title: 'Old group', addedAt: 1 })
+    assert.deepEqual((await first.state()).bookmarks.map((b) => b.url), ['hyper://old-group'])
+    await first.close()
+
+    const rotatedMint = await new BrowserStateSync(store, { bootstrap: null, encryptionKey: ENC, storageName: rotatedName }).ready()
+    const rotatedKey = rotatedMint.key
+    assert.notEqual(rotatedKey, firstKey, 'fresh storage namespace must mint a fresh sync group')
+    await rotatedMint.close()
+    const rotated = await new BrowserStateSync(store, { bootstrap: rotatedKey, encryptionKey: ENC, storageName: rotatedName }).ready()
+    await rotated.addBookmark({ url: 'hyper://rotated-group', title: 'Rotated group', addedAt: 2 })
+    assert.deepEqual((await rotated.state()).bookmarks.map((b) => b.url), ['hyper://rotated-group'])
+    await rotated.close()
+
+    const reopenFirst = await new BrowserStateSync(store, { bootstrap: firstKey, encryptionKey: ENC, storageName: firstName }).ready()
+    assert.equal(reopenFirst.key, firstKey)
+    assert.deepEqual((await reopenFirst.state()).bookmarks.map((b) => b.url), ['hyper://old-group'])
+    await reopenFirst.close()
   } finally { await store.close(); await rm(dir, { recursive: true, force: true }) }
 })

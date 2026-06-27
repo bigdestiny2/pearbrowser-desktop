@@ -30,16 +30,17 @@ manual gate.
 | `npm test` | 455/455 pass | PASS | 2026-06-24 local run: `node --test 'test/*.test.js'`, pass `455/455` |
 | `git diff --check` | clean | PASS | 2026-06-24 local run exited 0 before evidence-log edits |
 | `npm audit --audit-level=high` | 0 high vulnerabilities | PASS | 2026-06-24 local run: `found 0 vulnerabilities` |
-| Desktop CI | install/test/audit success |  |  |
-| `node scripts/check-relays.js` | real-DHT relay reachable |  |  |
+| Desktop CI | install/test/audit success | PASS | PR #5 merged with Desktop CI evidence for install/test/audit; `.github/workflows/desktop-ci.yml` now emits `npm run evidence:desktop:ci` after successful `npm ci`, `npm test`, and `npm audit --audit-level=high`; CI URL recorded in Run Metadata |
+| `node scripts/browser-state-sync-smoke.js` | encrypted sync convergence, key gate, restart determinism |  |  |
+| `node scripts/check-relays.js` | real-DHT relay reachable | PASS | 2026-06-24 real-DHT run: 1 unique relay reachable, 8 live connections; release collector runs `node scripts/check-relays.js --require-relay --json` so zero relays fails |
 | `node scripts/verify-pin.js --expect 33841 --hiverelay` | length >= 33841, sampled blob present, HiveRelay proof captured when available | PASS | 2026-06-24 release-prod fresh-peer run: length `33841`, peers `3`, sampled `/backend/anongpt-buyer.js` `11652` bytes; HiveRelay storage-proof route not yet enabled on fleet |
 | `node scripts/verify-release-contents.js --expect 33841 --missing /.landing-seed.mjs --missing /pearbrowser-storage --missing /docs --missing /scripts --missing /examples --missing /test` | forbidden paths absent | PASS | 2026-06-24 fresh-peer scan: length `33841`, 10250 entries, forbidden paths absent |
 | `node scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --expect-app hiveworm` | signed catalogue, 14 apps, expected rows | PASS | 2026-06-24 real-network run: length `273`, peers `1`, 14 apps, Peercord `standalone`, source URL, `GPL-3.0` |
-| `node scripts/verify-app-full.js` homepage | sampled blobs present |  |  |
-| `node scripts/verify-app-full.js` Peercord | sampled blobs present, no execution |  |  |
-| `node scripts/verify-app-full.js` Keet | sampled blobs present, no execution |  |  |
-| Peercord Linux bundle contract | `type:"desktop"`, `BrowserWindow`, no `Pear.worker.pipe` |  |  |
-| Peercord Windows bundle contract | `type:"desktop"`, `BrowserWindow`, no `Pear.worker.pipe` |  |  |
+| `node scripts/verify-app-full.js homepage` | sampled blobs present | PASS | 2026-06-24 named-target fresh-peer run: peers `1`, entries `2`, sampled `2/2`, missing `0` |
+| `node scripts/verify-app-full.js peercord` | sampled blobs present, no execution | PASS | 2026-06-24 named-target fresh-peer run without execution: peers `1`, entries `14730`, sampled `12/12`, missing `0` |
+| `node scripts/verify-app-full.js keet` | sampled blobs present, no execution | PASS | 2026-06-24 named-target fresh-peer run without execution: peers `9`, entries `7449`, sampled `12/12`, missing `0` |
+| Peercord Linux bundle contract | `type:"desktop"`, `BrowserWindow`, no `Pear.worker.pipe` | PASS | 2026-06-24 `node scripts/verify-pear-bundle-contract.js peercord-linux`: `pear.json` type `desktop`, main `index.js`, `BrowserWindow` present, `Pear.worker.pipe` absent |
+| Peercord Windows bundle contract | `type:"desktop"`, `BrowserWindow`, no `Pear.worker.pipe` | PASS | 2026-06-24 `node scripts/verify-pear-bundle-contract.js peercord-windows`: `pear.json` type `desktop`, main `index.js`, `BrowserWindow` present, `Pear.worker.pipe` absent |
 
 ## Desktop GUI And User Stories
 

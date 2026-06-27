@@ -1,5 +1,6 @@
 const crypto = require('hypercore-crypto')
 const b4a = require('b4a')
+const { appSlugForDrive } = require('./app-sync-registry.cjs')
 
 let sodium = null
 try { sodium = require('sodium-universal') } catch (_) {}
@@ -11,6 +12,7 @@ const RECORD_TYPE = /^[a-z0-9_-]{1,64}$/
 const DEFAULT_NAMESPACE = 'app-outbox-v1'
 const META_KEY = 'appOutboxDescriptors'
 const DEFAULT_MAX_DESCRIPTORS = 512
+const AUTHOR_APP_SLUGS = new Set(['peerit', 'p2pbuilders'])
 
 function normalizeHex64 (value) {
   return typeof value === 'string' && HEX64.test(value) ? value.toLowerCase() : null
@@ -50,6 +52,12 @@ function normalizeDescriptor (input, opts = {}) {
   const authorPubkey = normalizeHex64(input.authorPubkey || input.pub || input.publicKey)
   const rawAppId = typeof input.rawAppId === 'string' ? input.rawAppId.trim() : ''
   if (!appDriveKey || !inviteKey || !authorPubkey || !RAW_APP_ID.test(rawAppId)) return null
+  const knownSlug = appSlugForDrive(appDriveKey)
+  if (knownSlug && knownSlug !== appSlug) return null
+  if (AUTHOR_APP_SLUGS.has(appSlug)) {
+    if (knownSlug !== appSlug) return null
+    if (rawAppId.toLowerCase() !== authorPubkey) return null
+  }
 
   const scopedAppId = scopedAppIdFor(appDriveKey, rawAppId)
   if (!scopedAppId) return null

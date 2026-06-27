@@ -21,6 +21,7 @@ const b4a = require('b4a')
 const MAX_HISTORY = 200
 const MAX_BOOKMARKS = 10_000
 const MAX_KEY_LENGTH = 2048
+const MAX_TITLE_LENGTH = 1024
 
 class UserData {
   /**
@@ -157,6 +158,37 @@ class UserData {
     }
     for (const key of keys) await this._bees.history.del(key)
     return keys.length
+  }
+
+  async replaceHistory (entries) {
+    this._requireReady()
+    const list = Array.isArray(entries) ? entries : []
+    const clean = []
+    const seen = new Set()
+    for (const entry of list) {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
+      const url = String(entry.url || '').trim()
+      if (!url || seen.has(url)) continue
+      try { this._validateKey(url) } catch { continue }
+      const visitedAt = Number.isFinite(entry.visitedAt)
+        ? Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.floor(entry.visitedAt)))
+        : Math.max(0, Date.now() - clean.length)
+      clean.push({
+        url,
+        title: String(entry.title || '').slice(0, MAX_TITLE_LENGTH),
+        visitedAt
+      })
+      seen.add(url)
+      if (clean.length >= MAX_HISTORY) break
+    }
+
+    await this.clearHistory()
+    for (let i = 0; i < clean.length; i++) {
+      const entry = clean[i]
+      const sortKey = String(Number.MAX_SAFE_INTEGER - entry.visitedAt).padStart(18, '0')
+      await this._bees.history.put(`h!${sortKey}!${String(i).padStart(4, '0')}!${entry.url}`, entry)
+    }
+    return clean.length
   }
 
   // --- Settings (key-value) ---

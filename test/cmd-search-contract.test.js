@@ -56,6 +56,7 @@ test('federated:true emits exactly one enriched event with the planner results +
   assert.deepEqual(events[0].results, fedRows)
   assert.equal(events[0].queryId, res.queryId)
   assert.equal(events[0].verifyBudgetExhausted, false)
+  assert.equal(events[0].federated, true)
   assert.equal(events[0].digestHit, true)
   assert.equal(events[0].fallbackPull, false)
   assert.equal(events[0].partial, true)

@@ -36,12 +36,16 @@ class SiteManager {
     await drive.put('/index.html', Buffer.from(this._defaultHtml(validatedName)))
     await drive.put('/style.css', Buffer.from(this._defaultCss()))
 
+    const now = Date.now()
     this.sites.set(siteId, {
       drive,
       keyHex,
       name: validatedName,
       published: false,
-      createdAt: Date.now()
+      pin: null,
+      createdAt: now,
+      updatedAt: now,
+      publishedAt: null
     })
 
     return { siteId, keyHex, name: validatedName }
@@ -80,8 +84,9 @@ class SiteManager {
       }
       await site.drive.put(file.path, Buffer.from(file.content))
     }
+    site.updatedAt = Date.now()
 
-    return { updated: files.length }
+    return { updated: files.length, updatedAt: site.updatedAt }
   }
 
   /**
@@ -110,6 +115,7 @@ class SiteManager {
     }
     const path = '/icon.' + ext
     await site.drive.put(path, buf)
+    site.updatedAt = Date.now()
     return { ok: true, path, keyHex: site.keyHex || (site.drive.key && site.drive.key.toString('hex')) }
   }
 
@@ -125,12 +131,17 @@ class SiteManager {
     // and stalls other RPC calls that need the swarm. Flush in background.
     this.swarm.flush().catch(() => {})
 
+    const now = Date.now()
     site.published = true
+    site.publishedAt = now
+    site.updatedAt = now
 
     return {
       siteId,
       keyHex: site.keyHex,
-      url: `hyper://${site.keyHex}`
+      url: `hyper://${site.keyHex}`,
+      publishedAt: site.publishedAt,
+      updatedAt: site.updatedAt
     }
   }
 
@@ -177,7 +188,10 @@ class SiteManager {
         keyHex: site.keyHex,
         name: site.name,
         published: site.published,
+        pin: site.pin || null,
         createdAt: site.createdAt,
+        updatedAt: site.updatedAt,
+        publishedAt: site.publishedAt || null,
         url: `hyper://${site.keyHex}`
       })
     }
@@ -193,8 +207,9 @@ class SiteManager {
 
     await site.drive.put('/index.html', Buffer.from(html))
     if (css) await site.drive.put('/style.css', Buffer.from(css))
+    site.updatedAt = Date.now()
 
-    return { siteId }
+    return { siteId, updatedAt: site.updatedAt }
   }
 
   /**
@@ -230,8 +245,9 @@ class SiteManager {
       }
       await site.drive.put(file.path, Buffer.from(file.content))
     }
+    site.updatedAt = Date.now()
 
-    return { siteId, filesWritten: files.length }
+    return { siteId, filesWritten: files.length, updatedAt: site.updatedAt }
   }
 
   /**
@@ -250,8 +266,9 @@ class SiteManager {
     // from the rendered site but inside the drive itself — travels with
     // the site key.
     await site.drive.put('/.blocks.json', Buffer.from(JSON.stringify({ blocks, theme: theme || null, name: site.name })))
+    site.updatedAt = Date.now()
 
-    return { siteId }
+    return { siteId, updatedAt: site.updatedAt }
   }
 
   async getSiteBlocks (siteId) {
@@ -403,7 +420,10 @@ blockquote { border-left: 3px solid var(--primary); padding-left: 16px; color: #
         keyHex: site.keyHex,
         name: site.name,
         published: site.published,
-        createdAt: site.createdAt
+        pin: site.pin || null,
+        createdAt: site.createdAt,
+        updatedAt: site.updatedAt,
+        publishedAt: site.publishedAt || null
       }
     }
     return out
@@ -433,7 +453,12 @@ blockquote { border-left: 3px solid var(--primary); padding-left: 16px; color: #
           keyHex,
           name: this._validateSiteName(info.name || 'My Site'),
           published,
-          createdAt: typeof info.createdAt === 'number' ? info.createdAt : Date.now()
+          pin: info.pin && typeof info.pin === 'object' && !Array.isArray(info.pin) ? info.pin : null,
+          createdAt: typeof info.createdAt === 'number' ? info.createdAt : Date.now(),
+          updatedAt: typeof info.updatedAt === 'number'
+            ? info.updatedAt
+            : (typeof info.createdAt === 'number' ? info.createdAt : Date.now()),
+          publishedAt: typeof info.publishedAt === 'number' ? info.publishedAt : null
         })
       } catch (err) {
         console.error('Failed to restore site:', siteId, err.message)
