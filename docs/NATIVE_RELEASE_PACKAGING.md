@@ -119,7 +119,9 @@ It resolves the recommended package for the current platform/architecture, or
 all supported desktop targets with `--all`, downloads each package plus its
 `.sha256` sidecar, streams the package through SHA-256, and fails on digest,
 sidecar-name, or byte-count mismatch. Use it after a release asset backfill and
-before publishing package-manager manifests:
+before publishing package-manager manifests. The public-trust native release
+workflow runs this check automatically after uploading and verifying attached
+release assets:
 
 ```sh
 npm run verify:native-downloads -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --all

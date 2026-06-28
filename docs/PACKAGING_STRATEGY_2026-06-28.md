@@ -15,7 +15,7 @@ Primary user promise: download one native package, launch it normally, and let P
 - `.github/workflows/desktop-native-release.yml` builds macOS, Windows, and Linux packages in CI.
 - The native workflow now has two modes:
   - `package-proof`: manual default, permits ad-hoc macOS signing and unsigned Windows packages.
-  - `public-trust`: required for announcement-ready assets, requires macOS Developer ID/notary credentials, Windows signing credentials, and a published GitHub release.
+  - `public-trust`: required for announcement-ready assets, requires macOS Developer ID/notary credentials, Windows signing credentials, a published GitHub release, and post-upload native download verification.
 - Source installs are standalone because the HiveRelay `0.20.0` packages are vendored under `vendor/hiverelay`.
 
 ## Distribution Model
