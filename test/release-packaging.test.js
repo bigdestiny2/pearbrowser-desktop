@@ -25,6 +25,8 @@ const applingArtifactCollector = readFileSync(new URL('../scripts/collect-applin
 const applingArtifactCollectorPath = fileURLToPath(new URL('../scripts/collect-appling-artifacts.mjs', import.meta.url))
 const nativeSigningCheck = readFileSync(new URL('../scripts/check-native-signing-credentials.mjs', import.meta.url), 'utf8')
 const nativeSigningCheckPath = fileURLToPath(new URL('../scripts/check-native-signing-credentials.mjs', import.meta.url))
+const nativeReleaseAssetCheck = readFileSync(new URL('../scripts/check-native-release-assets.mjs', import.meta.url), 'utf8')
+const nativeReleaseAssetCheckPath = fileURLToPath(new URL('../scripts/check-native-release-assets.mjs', import.meta.url))
 const macosNotarizeScript = readFileSync(new URL('../scripts/notarize-appling-macos.mjs', import.meta.url), 'utf8')
 const releaseScript = readFileSync(new URL('../scripts/release-prod.sh', import.meta.url), 'utf8')
 const sheetsBundleScript = readFileSync(new URL('../scripts/build-sheets-bundle.sh', import.meta.url), 'utf8')
@@ -83,6 +85,15 @@ test('native signing credential checker is exposed as an operator script', () =>
   assert.match(nativeSigningCheck, /--require-public-trust/)
   assert.match(nativeSigningCheck, /PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64/)
   assert.match(nativeSigningCheck, /PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64/)
+})
+
+test('native release asset checker is exposed as an operator script', () => {
+  assert.equal(pkg.scripts?.['check:native-release-assets'], 'node scripts/check-native-release-assets.mjs')
+  assert.match(nativeReleaseAssetCheck, /gh', \[\s*'release',\s*'view'/)
+  assert.match(nativeReleaseAssetCheck, /SHA256SUMS-\$\{escapeRegex\(platform\)\}/)
+  assert.match(nativeReleaseAssetCheck, /manifest-\$\{escapeRegex\(platform\)\}/)
+  assert.match(nativeReleaseAssetCheck, /missing SHA-256 sidecar/)
+  assert.match(nativeReleaseAssetCheck, /--require-published/)
 })
 
 test('appling release metadata stays in sync with the production Pear channel', () => {
@@ -151,6 +162,8 @@ test('native release workflow builds and attaches appling artifacts for every de
   assert.match(nativeReleaseWorkflow, /SHA256SUMS-\$\{platform\}-\*\.txt/)
   assert.match(nativeReleaseWorkflow, /Missing SHA-256 sidecar/)
   assert.match(nativeReleaseWorkflow, /gh release upload "\$RELEASE_TAG" "\$\{assets\[@\]\}"/)
+  assert.match(nativeReleaseWorkflow, /Checkout release verifier/)
+  assert.match(nativeReleaseWorkflow, /check-native-release-assets\.mjs/)
   assert.doesNotMatch(nativeReleaseWorkflow, /gh release create/)
   assert.match(nativeReleaseWorkflow, /contents: write/)
 })
@@ -307,6 +320,100 @@ test('appling artifact collector refuses unsafe output directories before cleari
     assert.notEqual(result.status, 0)
     assert.match(result.stderr, /refusing to clear unsafe output directory/)
     assert.equal(readFileSync(sentinel, 'utf8'), 'do not delete')
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
+})
+
+test('native release asset checker accepts complete attached asset fixtures', () => {
+  const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'pear-native-assets-')))
+  try {
+    const releasePath = join(fixture, 'release.json')
+    writeFileSync(releasePath, JSON.stringify({
+      tagName: 'v0.5.0',
+      isDraft: false,
+      isPrerelease: false,
+      assets: [
+        'PearBrowser-0.5.0-macos-arm64.app.zip',
+        'PearBrowser-0.5.0-macos-arm64.app.zip.sha256',
+        'SHA256SUMS-macos-arm64.txt',
+        'manifest-macos-arm64.json',
+        'PearBrowser-0.5.0-windows-x64.msix',
+        'PearBrowser-0.5.0-windows-x64.msix.sha256',
+        'PearBrowser-0.5.0-windows-x64-installer.exe',
+        'PearBrowser-0.5.0-windows-x64-installer.exe.sha256',
+        'SHA256SUMS-windows-x64.txt',
+        'manifest-windows-x64.json',
+        'PearBrowser-0.5.0-linux-x64.AppImage',
+        'PearBrowser-0.5.0-linux-x64.AppImage.sha256',
+        'SHA256SUMS-linux-x64.txt',
+        'manifest-linux-x64.json'
+      ].map((name, i) => ({ name, size: i + 1 }))
+    }, null, 2))
+
+    const result = spawnSync(process.execPath, [
+      nativeReleaseAssetCheckPath,
+      '--fixture',
+      releasePath,
+      '--tag',
+      'v0.5.0',
+      '--json'
+    ], {
+      cwd: fileURLToPath(new URL('..', import.meta.url)),
+      encoding: 'utf8'
+    })
+
+    assert.equal(result.status, 0, result.stderr || result.stdout)
+    const report = JSON.parse(result.stdout)
+    assert.equal(report.ok, true)
+    assert.equal(report.counts.assets, 14)
+    assert.equal(report.platforms.macos.artifacts.length, 1)
+    assert.equal(report.platforms.windows.artifacts.length, 2)
+    assert.equal(report.platforms.linux.artifacts.length, 1)
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
+})
+
+test('native release asset checker fails when an installer sidecar is missing', () => {
+  const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'pear-native-assets-')))
+  try {
+    const releasePath = join(fixture, 'release.json')
+    writeFileSync(releasePath, JSON.stringify({
+      tagName: 'v0.5.0',
+      isDraft: false,
+      isPrerelease: false,
+      assets: [
+        'PearBrowser-0.5.0-macos-arm64.app.zip',
+        'PearBrowser-0.5.0-macos-arm64.app.zip.sha256',
+        'SHA256SUMS-macos-arm64.txt',
+        'manifest-macos-arm64.json',
+        'PearBrowser-0.5.0-windows-x64.msix',
+        'SHA256SUMS-windows-x64.txt',
+        'manifest-windows-x64.json',
+        'PearBrowser-0.5.0-linux-x64.AppImage',
+        'PearBrowser-0.5.0-linux-x64.AppImage.sha256',
+        'SHA256SUMS-linux-x64.txt',
+        'manifest-linux-x64.json'
+      ].map((name, i) => ({ name, size: i + 1 }))
+    }, null, 2))
+
+    const result = spawnSync(process.execPath, [
+      nativeReleaseAssetCheckPath,
+      '--fixture',
+      releasePath,
+      '--tag',
+      'v0.5.0',
+      '--json'
+    ], {
+      cwd: fileURLToPath(new URL('..', import.meta.url)),
+      encoding: 'utf8'
+    })
+
+    assert.notEqual(result.status, 0)
+    const report = JSON.parse(result.stdout)
+    assert.equal(report.ok, false)
+    assert.ok(report.errors.some((error) => error.includes('missing SHA-256 sidecar for PearBrowser-0.5.0-windows-x64.msix')))
   } finally {
     rmSync(fixture, { recursive: true, force: true })
   }

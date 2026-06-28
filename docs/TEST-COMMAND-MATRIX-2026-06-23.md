@@ -17,10 +17,10 @@ Current local status from this loop:
 
 - `git diff --check` passed.
 - `npm audit --audit-level=high` passed with `found 0 vulnerabilities`.
-- `npm test` passed: 443 tests, 0 failed.
+- `npm test` passed: 446 tests, 0 failed.
 
 This supersedes older local counts in nearby docs for this checkout. The
-current release-readiness docs and latest rerun agree on 443/443.
+current release-readiness docs and latest rerun agree on 446/446.
 
 ## Fast Local Gates
 
@@ -28,7 +28,7 @@ current release-readiness docs and latest rerun agree on 443/443.
 | --- | --- | --- |
 | `git diff --check` | Whitespace/conflict-marker sanity | Passed |
 | `npm audit --audit-level=high` | High-severity dependency audit for desktop package | Passed, 0 vulnerabilities |
-| `npm test` | Full desktop Node test suite: `node --test 'test/*.test.js'` | Passed, 443/443 |
+| `npm test` | Full desktop Node test suite: `node --test 'test/*.test.js'` | Passed, 446/446 |
 | `npm run check:release-evidence` | Operator evidence-log completeness; fails until required rows are `PASS` or documented `DEFER` | Expected fail until manual gates are filled |
 
 The root package is the only package with test scripts relevant to this desktop
@@ -142,13 +142,18 @@ The release scripts are operational gates, not ordinary tests:
   wrapper for the current platform.
 - `npm run package:appling -- --tag v0.5.0` collects native artifacts,
   `.sha256` sidecars, `SHA256SUMS-*`, and `manifest-*` files.
+- `npm run check:native-release-assets -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop`
+  verifies the attached GitHub release asset set after upload: macOS, Windows,
+  and Linux native artifacts, one checksum index and manifest per platform, and
+  one `.sha256` sidecar per installer/package file.
 - `.github/workflows/desktop-native-release.yml` is the cross-platform release
   asset backfill path. It must be present on the default branch, and manual
   backfills should run with tag `v0.5.0` plus `source_ref` set to the branch or
   commit containing the packaging code. Latest proof: run
   `https://github.com/bigdestiny2/pearbrowser-desktop/actions/runs/28317333414`
   succeeded from `main` after the native signing credential preflight merge and
-  refreshed 16 `v0.5.0` assets.
+  refreshed 16 `v0.5.0` assets; the release asset checker now runs after upload
+  in the workflow.
 - Fresh-peer verification should be run off the publisher box when possible.
 - Desktop source install depends on sibling local HiveRelay packages:
   `../../00-core/hiverelay/packages/{core,client,verifier}`.

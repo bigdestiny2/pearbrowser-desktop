@@ -18,6 +18,8 @@ Use the manual GitHub Actions trigger:
 4. Wait for the macOS, Windows, and Linux jobs to finish.
 5. Confirm the `v0.5.0` GitHub release has the generated installers, per-file
    `.sha256` files, `SHA256SUMS-*`, and `manifest-*` files attached.
+6. Verify the attached asset set:
+   `npm run check:native-release-assets -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop`.
 
 The target GitHub release must already exist. The attach job verifies the
 downloaded bundle has one checksum index and one manifest for each desktop
@@ -40,6 +42,7 @@ npm run generate
 npm run build
 cd ..
 npm run package:appling -- --tag v0.5.0
+npm run check:native-release-assets -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
 ```
 
 The collector searches `appling/build` for platform-native outputs:
@@ -73,6 +76,16 @@ toolchain that was tested locally.
 
 This keeps the native wrappers pinned to the same release that was staged and
 verified with `scripts/release-prod.sh`.
+
+## Release Asset Contract
+
+`scripts/check-native-release-assets.mjs` is the post-upload guard for GitHub
+release attachments. It reads `gh release view --json tagName,isDraft,isPrerelease,assets`
+and fails unless the tag has macOS, Windows, and Linux native artifacts, one
+`SHA256SUMS-<platform>-<arch>.txt`, one `manifest-<platform>-<arch>.json`, and a
+per-artifact `.sha256` sidecar for every installer/package file. Use
+`--require-published` before announcement if draft releases should fail the
+gate.
 
 ## Signing
 
