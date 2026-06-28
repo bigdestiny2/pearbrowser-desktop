@@ -25,13 +25,6 @@ jobs:
           ref: de85d420c942d433905324c3e098acc34458a23a
           path: pear-ecosystem/01-browser/PearBrowser
 
-      - name: Checkout HiveRelay workspace packages
-        uses: actions/checkout@v4
-        with:
-          repository: bigdestiny2/P2P-Hiverelay
-          ref: v0.20.0
-          path: pear-ecosystem/00-core/hiverelay
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -39,7 +32,7 @@ jobs:
           cache: npm
           cache-dependency-path: pear-ecosystem/01-browser/pearbrowser-desktop/package-lock.json
 
-      - name: Verify HiveRelay layout
+      - name: Verify vendored HiveRelay packages
         working-directory: pear-ecosystem/01-browser/pearbrowser-desktop
         run: node scripts/check-hiverelay-layout.mjs
 

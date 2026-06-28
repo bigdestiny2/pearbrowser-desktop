@@ -17,7 +17,7 @@ This pass did not need a runtime code change. It adds the missing dated
 alignment map between the current threat/security claims and the maintained
 source boundaries. Public release risk remains mostly operational: manual GUI
 smoke, third-party trust prompts, real-DHT release proof, mobile production
-signing/store validation, and source-install dependency publication strategy.
+signing/store validation, and eventual HiveRelay dependency publication.
 
 ## Boundary Map
 
@@ -52,8 +52,9 @@ signing/store validation, and source-install dependency publication strategy.
   naming is contact/provenance aware, and the Nostr bridge is Pear-native rather
   than a general public relay client.
 - `docs/TEST-COMMAND-MATRIX-2026-06-23.md` supersedes older test-count claims.
-  The current release branch records `npm test` at 443/443 after the runtime
-  storage gate and release story smoke coverage landed.
+  The current release branch records `npm test` at 448/448 after the runtime
+  storage gate, release story smoke, native release asset checker, and vendored
+  HiveRelay source-install coverage landed.
 
 ## Known Security Residuals
 
@@ -79,8 +80,8 @@ signing/store validation, and source-install dependency publication strategy.
    prompt before executing standalone third-party code.
 6. **Release proof is environment-gated.** Real-DHT relay health, fresh-peer
    production drive verification, Peercord standalone smoke, mobile signing,
-   store validation, and source-install reproducibility all remain separate from
-   local unit-test proof.
+   store validation, and eventual HiveRelay package publication all remain
+   separate from local unit-test proof.
 
 ## Recommended Next Edge
 
