@@ -22,6 +22,7 @@ const DEFAULT_PORT_COUNT = 5
 const DEFAULT_TIMEOUT_MS = 15_000
 const DEFAULT_CONNECT_MS = 1_500
 const DEFAULT_REQUEST_MS = 3_000
+const DEFAULT_MAX_STORAGE_PERCENT = Infinity
 
 function parseArgs (argv) {
   const args = {
@@ -32,6 +33,7 @@ function parseArgs (argv) {
     connectTimeout: DEFAULT_CONNECT_MS,
     requestTimeout: DEFAULT_REQUEST_MS,
     minHiveRelays: 1,
+    maxStoragePercent: DEFAULT_MAX_STORAGE_PERCENT,
     json: false
   }
 
@@ -44,6 +46,7 @@ function parseArgs (argv) {
     else if (arg === '--connect-timeout') args.connectTimeout = parseDuration(argv[++i], '--connect-timeout')
     else if (arg === '--request-timeout') args.requestTimeout = parseDuration(argv[++i], '--request-timeout')
     else if (arg === '--min-hive-relays') args.minHiveRelays = parseNonNegativeInt(argv[++i], '--min-hive-relays')
+    else if (arg === '--max-storage-percent') args.maxStoragePercent = parseNonNegativeNumber(argv[++i], '--max-storage-percent')
     else if (arg === '--json') args.json = true
     else if (arg === '-h' || arg === '--help') usage(0)
     else usage(2, `unknown option: ${arg}`)
@@ -54,7 +57,7 @@ function parseArgs (argv) {
 
 function usage (code, msg = '') {
   if (msg) console.error('error:', msg)
-  console.error('usage: node scripts/runtime-rpc-smoke.mjs [--timeout 15000] [--port-base 9876] [--port-count 5] [--min-hive-relays 1] [--json]')
+  console.error('usage: node scripts/runtime-rpc-smoke.mjs [--timeout 15000] [--port-base 9876] [--port-count 5] [--min-hive-relays 1] [--max-storage-percent 100] [--json]')
   process.exit(code)
 }
 
@@ -73,6 +76,12 @@ function parsePositiveInt (value, label) {
 function parseNonNegativeInt (value, label) {
   const n = Number(value)
   if (!Number.isInteger(n) || n < 0) usage(2, `${label} must be a non-negative integer`)
+  return n
+}
+
+function parseNonNegativeNumber (value, label) {
+  const n = Number(value)
+  if (!Number.isFinite(n) || n < 0) usage(2, `${label} must be a non-negative number`)
   return n
 }
 
@@ -324,6 +333,9 @@ function validateStatus (status, args) {
   if (!Number.isFinite(status.storageUsed) || status.storageUsed < 0) errors.push('storageUsed is invalid')
   if (!Number.isFinite(status.storageLimit) || status.storageLimit <= 0) errors.push('storageLimit is invalid')
   if (!Number.isFinite(status.storagePercent) || status.storagePercent < 0) errors.push('storagePercent is invalid')
+  if (Number.isFinite(args.maxStoragePercent) && Number.isFinite(status.storagePercent) && status.storagePercent > args.maxStoragePercent) {
+    errors.push(`storagePercent exceeds ${args.maxStoragePercent}`)
+  }
   return errors
 }
 

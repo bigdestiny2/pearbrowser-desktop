@@ -63,7 +63,7 @@ covered by `npm test`.
 
 | Command | Classification |
 | --- | --- |
-| `node scripts/runtime-rpc-smoke.mjs --timeout 20000 --json` | Diagnostic WebSocket smoke against an already-running app. Requires PearBrowser to be launched first |
+| `node scripts/runtime-rpc-smoke.mjs --timeout 20000 --max-storage-percent 100 --json` | Diagnostic WebSocket smoke against an already-running app. Requires PearBrowser to be launched first; public smoke should fail if the profile is over quota |
 | `npm run start` | Interactive Pear dev launch: `pear run --dev .` |
 | `npm run run` | Interactive Pear launch: `pear run .` |
 | `pear run pear://tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty` | Production browser launch/manual smoke gate |
