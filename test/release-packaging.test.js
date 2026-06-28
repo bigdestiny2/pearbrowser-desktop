@@ -34,6 +34,8 @@ const nativeReleaseAssetResolver = readFileSync(new URL('../scripts/resolve-nati
 const nativeReleaseAssetResolverPath = fileURLToPath(new URL('../scripts/resolve-native-release-asset.mjs', import.meta.url))
 const nativeDownloadVerifier = readFileSync(new URL('../scripts/verify-native-downloads.mjs', import.meta.url), 'utf8')
 const nativeDownloadVerifierPath = fileURLToPath(new URL('../scripts/verify-native-downloads.mjs', import.meta.url))
+const nativeInstallSnippet = readFileSync(new URL('../scripts/generate-native-install-snippet.mjs', import.meta.url), 'utf8')
+const nativeInstallSnippetPath = fileURLToPath(new URL('../scripts/generate-native-install-snippet.mjs', import.meta.url))
 const macosDmgPackager = readFileSync(new URL('../scripts/create-macos-dmg.mjs', import.meta.url), 'utf8')
 const macosNotarizeScript = readFileSync(new URL('../scripts/notarize-appling-macos.mjs', import.meta.url), 'utf8')
 const releaseScript = readFileSync(new URL('../scripts/release-prod.sh', import.meta.url), 'utf8')
@@ -167,6 +169,14 @@ test('native download verifier is exposed for end-to-end checksum evidence', () 
   assert.match(nativeDownloadVerifier, /readUrlText/)
   assert.match(nativeDownloadVerifier, /hashUrl/)
   assert.match(nativeDownloadVerifier, /SHA-256 mismatch/)
+})
+
+test('native install snippet generator is exposed for release notes', () => {
+  assert.equal(pkg.scripts?.['generate:native-install-snippet'], 'node scripts/generate-native-install-snippet.mjs')
+  assert.match(nativeInstallSnippet, /SUPPORTED_TARGETS/)
+  assert.match(nativeInstallSnippet, /Native Installers/)
+  assert.match(nativeInstallSnippet, /artifactRank/)
+  assert.match(nativeInstallSnippet, /Trust Note/)
 })
 
 test('macOS DMG packager is exposed for public-trust native releases', () => {
@@ -639,6 +649,82 @@ test('native release asset resolver chooses the recommended package for each des
     assert.equal(resolve('macos', 'arm64').asset.name, 'PearBrowser-0.5.0-macos-arm64.dmg')
     assert.equal(resolve('windows', 'x64').asset.name, 'PearBrowser-0.5.0-windows-x64.exe')
     assert.equal(resolve('linux', 'x64').asset.name, 'PearBrowser-0.5.0-linux-x64.AppImage')
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
+})
+
+test('native install snippet generator emits release-note packages for every desktop target', () => {
+  const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'pear-native-install-snippet-')))
+  try {
+    const releasePath = join(fixture, 'release.json')
+    writeFileSync(releasePath, JSON.stringify({
+      tagName: 'v0.5.0',
+      isDraft: false,
+      isPrerelease: false,
+      assets: [
+        'PearBrowser-0.5.0-macos-arm64.dmg',
+        'PearBrowser-0.5.0-macos-arm64.dmg.sha256',
+        'PearBrowser-0.5.0-macos-arm64.app.zip',
+        'PearBrowser-0.5.0-macos-arm64.app.zip.sha256',
+        'PearBrowser-0.5.0-macos-x64.dmg',
+        'PearBrowser-0.5.0-macos-x64.dmg.sha256',
+        'PearBrowser-0.5.0-windows-x64.msix',
+        'PearBrowser-0.5.0-windows-x64.msix.sha256',
+        'PearBrowser-0.5.0-windows-x64.exe',
+        'PearBrowser-0.5.0-windows-x64.exe.sha256',
+        'PearBrowser-0.5.0-linux-x64.AppImage',
+        'PearBrowser-0.5.0-linux-x64.AppImage.sha256'
+      ].map((name, i) => ({
+        name,
+        size: i + 1,
+        url: `https://example.invalid/${name}`
+      }))
+    }, null, 2))
+
+    const json = spawnSync(process.execPath, [
+      nativeInstallSnippetPath,
+      '--fixture',
+      releasePath,
+      '--tag',
+      'v0.5.0',
+      '--trust-mode',
+      'public-trust',
+      '--json'
+    ], {
+      cwd: fileURLToPath(new URL('..', import.meta.url)),
+      encoding: 'utf8'
+    })
+
+    assert.equal(json.status, 0, json.stderr || json.stdout)
+    const report = JSON.parse(json.stdout)
+    assert.equal(report.ok, true)
+    assert.equal(report.targets.length, 4)
+    assert.equal(report.targets.find((target) => target.label === 'macOS Apple Silicon').asset.name, 'PearBrowser-0.5.0-macos-arm64.dmg')
+    assert.equal(report.targets.find((target) => target.label === 'macOS Intel').asset.name, 'PearBrowser-0.5.0-macos-x64.dmg')
+    assert.equal(report.targets.find((target) => target.label === 'Windows x64').asset.name, 'PearBrowser-0.5.0-windows-x64.exe')
+    assert.equal(report.targets.find((target) => target.label === 'Linux x64').asset.name, 'PearBrowser-0.5.0-linux-x64.AppImage')
+    assert.ok(report.targets.every((target) => target.checksum.name === `${target.asset.name}.sha256`))
+    assert.ok(report.targets.some((target) => target.install.includes('drag PearBrowser.app to /Applications')))
+
+    const markdown = spawnSync(process.execPath, [
+      nativeInstallSnippetPath,
+      '--fixture',
+      releasePath,
+      '--tag',
+      'v0.5.0',
+      '--trust-mode',
+      'public-trust'
+    ], {
+      cwd: fileURLToPath(new URL('..', import.meta.url)),
+      encoding: 'utf8'
+    })
+
+    assert.equal(markdown.status, 0, markdown.stderr || markdown.stdout)
+    assert.match(markdown.stdout, /## Native Installers/)
+    assert.match(markdown.stdout, /PearBrowser-0\.5\.0-macos-arm64\.dmg/)
+    assert.match(markdown.stdout, /PearBrowser-0\.5\.0-windows-x64\.exe/)
+    assert.match(markdown.stdout, /These assets are expected to be signed\/notarized/)
   } finally {
     rmSync(fixture, { recursive: true, force: true })
   }

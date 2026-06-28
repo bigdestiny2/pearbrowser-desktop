@@ -12,6 +12,9 @@ Primary user promise: download one native package, launch it normally, and let P
 - `scripts/resolve-native-release-asset.mjs` chooses the recommended release package for the current or requested platform and verifies the checksum sidecar exists.
 - `scripts/verify-native-downloads.mjs` downloads the recommended package set
   and verifies the bytes against the attached `.sha256` sidecars.
+- `scripts/generate-native-install-snippet.mjs` emits release-note/install-page
+  Markdown from those resolver choices, so user-facing links come from attached
+  assets instead of hand-maintained copy.
 - `.github/workflows/desktop-native-release.yml` builds macOS, Windows, and Linux packages in CI.
 - The native workflow now has two modes:
   - `package-proof`: manual default, permits ad-hoc macOS signing and unsigned Windows packages.
@@ -61,7 +64,9 @@ The stable Pear link is still the application-content update channel. Native pac
    `npm run verify:native-downloads -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --all`.
 7. Resolve and record the user-facing packages for macOS, Windows, and Linux:
    `npm run resolve:native-release -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --platform <platform> --arch <arch>`.
-8. Smoke install from a clean machine or VM per OS and record evidence in `docs/RELEASE_SMOKE_EVIDENCE_LOG_2026-06-23.md`.
+8. Generate the release-note/install-page block from the attached assets:
+   `npm run -s generate:native-install-snippet -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --trust-mode public-trust`.
+9. Smoke install from a clean machine or VM per OS and record evidence in `docs/RELEASE_SMOKE_EVIDENCE_LOG_2026-06-23.md`.
 
 Recommended OS-level checks:
 
@@ -72,7 +77,7 @@ Recommended OS-level checks:
 ## Channel Expansion Plan
 
 1. Keep GitHub Releases as the canonical asset host until public-trust desktop assets have at least one successful clean-machine install pass.
-2. Add a short install page or release-note block that points each OS to the resolver-selected package, its checksum sidecar, and the stable Pear link fallback.
+2. Use `npm run -s generate:native-install-snippet` for the short install page or release-note block that points each OS to the resolver-selected package and checksum sidecar, then keep the stable Pear link fallback in the surrounding install guide.
 3. Add Homebrew Cask only after macOS ships a notarized `.dmg`; Homebrew casks expect stable versioned URLs and checksums.
 4. Add WinGet only after Windows assets are signed and stable; WinGet manifests carry installer metadata and SHA-256 hashes.
 5. Add Linux distro packages only after AppImage feedback proves there is demand. Avoid maintaining `.deb`/`.rpm` until the support burden is justified.
