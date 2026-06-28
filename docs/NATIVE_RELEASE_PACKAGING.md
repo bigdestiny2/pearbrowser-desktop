@@ -114,6 +114,17 @@ installer formats when they exist: macOS `.dmg` before `.pkg` before
 packages. The resolver fails if the package or checksum sidecar is missing, so
 README install links cannot silently drift away from the release asset contract.
 
+`scripts/verify-native-downloads.mjs` is the stronger download-integrity check.
+It resolves the recommended package for the current platform/architecture, or
+all supported desktop targets with `--all`, downloads each package plus its
+`.sha256` sidecar, streams the package through SHA-256, and fails on digest,
+sidecar-name, or byte-count mismatch. Use it after a release asset backfill and
+before publishing package-manager manifests:
+
+```sh
+npm run verify:native-downloads -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --all
+```
+
 ## Signing
 
 The current macOS workflow produces ad-hoc signed `.app.zip` artifacts so local

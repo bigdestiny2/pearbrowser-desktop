@@ -12,6 +12,7 @@
     "check:native-signing": "node scripts/check-native-signing-credentials.mjs",
     "check:native-release-assets": "node scripts/check-native-release-assets.mjs",
     "resolve:native-release": "node scripts/resolve-native-release-asset.mjs",
+    "verify:native-downloads": "node scripts/verify-native-downloads.mjs",
     "package:appling": "node scripts/collect-appling-artifacts.mjs",
     "smoke:runtime": "node scripts/runtime-rpc-smoke.mjs",
     "smoke:release-stories": "node scripts/release-rpc-story-smoke.mjs",

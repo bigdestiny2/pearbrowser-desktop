@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { execFileSync, spawnSync } from 'node:child_process'
 import {
   copyFileSync,
@@ -13,7 +14,7 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
 const pearConfig = JSON.parse(readFileSync(new URL('../pear.json', import.meta.url), 'utf8'))
@@ -31,6 +32,8 @@ const nativeReleaseAssetCheck = readFileSync(new URL('../scripts/check-native-re
 const nativeReleaseAssetCheckPath = fileURLToPath(new URL('../scripts/check-native-release-assets.mjs', import.meta.url))
 const nativeReleaseAssetResolver = readFileSync(new URL('../scripts/resolve-native-release-asset.mjs', import.meta.url), 'utf8')
 const nativeReleaseAssetResolverPath = fileURLToPath(new URL('../scripts/resolve-native-release-asset.mjs', import.meta.url))
+const nativeDownloadVerifier = readFileSync(new URL('../scripts/verify-native-downloads.mjs', import.meta.url), 'utf8')
+const nativeDownloadVerifierPath = fileURLToPath(new URL('../scripts/verify-native-downloads.mjs', import.meta.url))
 const macosNotarizeScript = readFileSync(new URL('../scripts/notarize-appling-macos.mjs', import.meta.url), 'utf8')
 const releaseScript = readFileSync(new URL('../scripts/release-prod.sh', import.meta.url), 'utf8')
 const sheetsBundleScript = readFileSync(new URL('../scripts/build-sheets-bundle.sh', import.meta.url), 'utf8')
@@ -153,6 +156,14 @@ test('native release asset resolver is exposed for platform download guidance', 
   assert.match(nativeReleaseAssetResolver, /artifactRank/)
   assert.match(nativeReleaseAssetResolver, /githubReleaseAssetUrl/)
   assert.match(nativeReleaseAssetResolver, /missing SHA-256 sidecar/)
+})
+
+test('native download verifier is exposed for end-to-end checksum evidence', () => {
+  assert.equal(pkg.scripts?.['verify:native-downloads'], 'node scripts/verify-native-downloads.mjs')
+  assert.match(nativeDownloadVerifier, /SUPPORTED_TARGETS/)
+  assert.match(nativeDownloadVerifier, /readUrlText/)
+  assert.match(nativeDownloadVerifier, /hashUrl/)
+  assert.match(nativeDownloadVerifier, /SHA-256 mismatch/)
 })
 
 test('appling release metadata stays in sync with the production Pear channel', () => {
@@ -518,6 +529,84 @@ test('native release asset resolver chooses the recommended package for each des
     assert.equal(resolve('macos', 'arm64').asset.name, 'PearBrowser-0.5.0-macos-arm64.app.zip')
     assert.equal(resolve('windows', 'x64').asset.name, 'PearBrowser-0.5.0-windows-x64.exe')
     assert.equal(resolve('linux', 'x64').asset.name, 'PearBrowser-0.5.0-linux-x64.AppImage')
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
+})
+
+test('native download verifier checks package bytes against the SHA-256 sidecar', () => {
+  const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'pear-native-downloads-')))
+  try {
+    const assetName = 'PearBrowser-0.5.0-macos-arm64.app.zip'
+    const assetPath = join(fixture, assetName)
+    const sidecarPath = join(fixture, `${assetName}.sha256`)
+    writeFileSync(assetPath, 'native package bytes')
+    const sha256 = createHash('sha256').update(readFileSync(assetPath)).digest('hex')
+    writeFileSync(sidecarPath, `${sha256}  ${assetName}\n`)
+
+    const releasePath = join(fixture, 'release.json')
+    writeFileSync(releasePath, JSON.stringify({
+      tagName: 'v0.5.0',
+      isDraft: false,
+      isPrerelease: false,
+      assets: [
+        {
+          name: assetName,
+          size: readFileSync(assetPath).length,
+          url: pathToFileURL(assetPath).toString()
+        },
+        {
+          name: `${assetName}.sha256`,
+          size: readFileSync(sidecarPath).length,
+          url: pathToFileURL(sidecarPath).toString()
+        }
+      ]
+    }, null, 2))
+
+    const result = spawnSync(process.execPath, [
+      nativeDownloadVerifierPath,
+      '--fixture',
+      releasePath,
+      '--tag',
+      'v0.5.0',
+      '--platform',
+      'macos',
+      '--arch',
+      'arm64',
+      '--json'
+    ], {
+      cwd: fileURLToPath(new URL('..', import.meta.url)),
+      encoding: 'utf8'
+    })
+
+    assert.equal(result.status, 0, result.stderr || result.stdout)
+    const report = JSON.parse(result.stdout)
+    assert.equal(report.ok, true)
+    assert.equal(report.targets.length, 1)
+    assert.equal(report.targets[0].asset, assetName)
+    assert.equal(report.targets[0].sha256, sha256)
+
+    writeFileSync(sidecarPath, `${'0'.repeat(64)}  ${assetName}\n`)
+    const mismatch = spawnSync(process.execPath, [
+      nativeDownloadVerifierPath,
+      '--fixture',
+      releasePath,
+      '--tag',
+      'v0.5.0',
+      '--platform',
+      'macos',
+      '--arch',
+      'arm64',
+      '--json'
+    ], {
+      cwd: fileURLToPath(new URL('..', import.meta.url)),
+      encoding: 'utf8'
+    })
+
+    assert.notEqual(mismatch.status, 0)
+    const mismatchReport = JSON.parse(mismatch.stdout)
+    assert.equal(mismatchReport.ok, false)
+    assert.ok(mismatchReport.errors.some((error) => error.includes('SHA-256 mismatch')))
   } finally {
     rmSync(fixture, { recursive: true, force: true })
   }

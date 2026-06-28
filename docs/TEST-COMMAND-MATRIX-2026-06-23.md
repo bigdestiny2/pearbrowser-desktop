@@ -147,6 +147,9 @@ The release scripts are operational gates, not ordinary tests:
   and Linux native artifacts, one checksum index and manifest per
   platform/architecture pair, and one `.sha256` sidecar per installer/package
   file.
+- `npm run verify:native-downloads -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --all`
+  downloads the recommended native package for each supported desktop target and
+  verifies the streamed bytes against the attached `.sha256` sidecar.
 - `.github/workflows/desktop-native-release.yml` is the cross-platform release
   asset backfill path. It must be present on the default branch, and manual
   backfills should run with tag `v0.5.0` plus `source_ref` set to the branch or
