@@ -20,6 +20,9 @@ Use the manual GitHub Actions trigger:
    `.sha256` files, `SHA256SUMS-*`, and `manifest-*` files attached.
 6. Verify the attached asset set:
    `npm run check:native-release-assets -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop`.
+7. Confirm the user-facing asset selector resolves the expected package for the
+   current machine:
+   `npm run resolve:native-release -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop`.
 
 The target GitHub release must already exist. The attach job verifies the
 downloaded bundle has one checksum index and one manifest for each desktop
@@ -43,6 +46,7 @@ npm run build
 cd ..
 npm run package:appling -- --tag v0.5.0
 npm run check:native-release-assets -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
+npm run resolve:native-release -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
 ```
 
 The collector searches `appling/build` for platform-native outputs:
@@ -86,6 +90,15 @@ and fails unless the tag has macOS, Windows, and Linux native artifacts, one
 per-artifact `.sha256` sidecar for every installer/package file. Use
 `--require-published` before announcement if draft releases should fail the
 gate.
+
+`scripts/resolve-native-release-asset.mjs` is the user-facing selector for those
+same attachments. It detects the current OS/CPU by default, or accepts
+`--platform macos|windows|linux` and `--arch x64|arm64`, then prints the
+recommended package plus its `.sha256` sidecar. Selection prefers public
+installer formats when they exist: macOS `.dmg` before `.pkg` before
+`.app.zip`, Windows `.exe` before `.msix`, and Linux `.AppImage` before distro
+packages. The resolver fails if the package or checksum sidecar is missing, so
+README install links cannot silently drift away from the release asset contract.
 
 ## Signing
 

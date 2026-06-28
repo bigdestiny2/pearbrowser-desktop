@@ -29,6 +29,8 @@ const nativeSigningCheck = readFileSync(new URL('../scripts/check-native-signing
 const nativeSigningCheckPath = fileURLToPath(new URL('../scripts/check-native-signing-credentials.mjs', import.meta.url))
 const nativeReleaseAssetCheck = readFileSync(new URL('../scripts/check-native-release-assets.mjs', import.meta.url), 'utf8')
 const nativeReleaseAssetCheckPath = fileURLToPath(new URL('../scripts/check-native-release-assets.mjs', import.meta.url))
+const nativeReleaseAssetResolver = readFileSync(new URL('../scripts/resolve-native-release-asset.mjs', import.meta.url), 'utf8')
+const nativeReleaseAssetResolverPath = fileURLToPath(new URL('../scripts/resolve-native-release-asset.mjs', import.meta.url))
 const macosNotarizeScript = readFileSync(new URL('../scripts/notarize-appling-macos.mjs', import.meta.url), 'utf8')
 const releaseScript = readFileSync(new URL('../scripts/release-prod.sh', import.meta.url), 'utf8')
 const sheetsBundleScript = readFileSync(new URL('../scripts/build-sheets-bundle.sh', import.meta.url), 'utf8')
@@ -143,6 +145,14 @@ test('native release asset checker is exposed as an operator script', () => {
   assert.match(nativeReleaseAssetCheck, /manifest-\$\{escapeRegex\(platform\)\}/)
   assert.match(nativeReleaseAssetCheck, /missing SHA-256 sidecar/)
   assert.match(nativeReleaseAssetCheck, /--require-published/)
+})
+
+test('native release asset resolver is exposed for platform download guidance', () => {
+  assert.equal(pkg.scripts?.['resolve:native-release'], 'node scripts/resolve-native-release-asset.mjs')
+  assert.match(nativeReleaseAssetResolver, /normalizePlatform/)
+  assert.match(nativeReleaseAssetResolver, /artifactRank/)
+  assert.match(nativeReleaseAssetResolver, /githubReleaseAssetUrl/)
+  assert.match(nativeReleaseAssetResolver, /missing SHA-256 sidecar/)
 })
 
 test('appling release metadata stays in sync with the production Pear channel', () => {
@@ -419,6 +429,60 @@ test('native release asset checker accepts complete attached asset fixtures', ()
     assert.equal(report.platforms.macos.artifacts.length, 1)
     assert.equal(report.platforms.windows.artifacts.length, 2)
     assert.equal(report.platforms.linux.artifacts.length, 1)
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
+})
+
+test('native release asset resolver chooses the recommended package for each desktop platform', () => {
+  const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'pear-native-resolver-')))
+  try {
+    const releasePath = join(fixture, 'release.json')
+    writeFileSync(releasePath, JSON.stringify({
+      tagName: 'v0.5.0',
+      isDraft: false,
+      isPrerelease: false,
+      assets: [
+        'PearBrowser-0.5.0-macos-arm64.app.zip',
+        'PearBrowser-0.5.0-macos-arm64.app.zip.sha256',
+        'PearBrowser-0.5.0-windows-x64.msix',
+        'PearBrowser-0.5.0-windows-x64.msix.sha256',
+        'PearBrowser-0.5.0-windows-x64.exe',
+        'PearBrowser-0.5.0-windows-x64.exe.sha256',
+        'PearBrowser-0.5.0-linux-x64-PearBrowser.AppImage',
+        'PearBrowser-0.5.0-linux-x64-PearBrowser.AppImage.sha256',
+        'PearBrowser-0.5.0-linux-x64.AppImage',
+        'PearBrowser-0.5.0-linux-x64.AppImage.sha256'
+      ].map((name, i) => ({
+        name,
+        size: i + 1,
+        url: `https://example.invalid/${name}`
+      }))
+    }, null, 2))
+
+    const resolve = (platform, arch) => {
+      const result = spawnSync(process.execPath, [
+        nativeReleaseAssetResolverPath,
+        '--fixture',
+        releasePath,
+        '--tag',
+        'v0.5.0',
+        '--platform',
+        platform,
+        '--arch',
+        arch,
+        '--json'
+      ], {
+        cwd: fileURLToPath(new URL('..', import.meta.url)),
+        encoding: 'utf8'
+      })
+      assert.equal(result.status, 0, result.stderr || result.stdout)
+      return JSON.parse(result.stdout)
+    }
+
+    assert.equal(resolve('macos', 'arm64').asset.name, 'PearBrowser-0.5.0-macos-arm64.app.zip')
+    assert.equal(resolve('windows', 'x64').asset.name, 'PearBrowser-0.5.0-windows-x64.exe')
+    assert.equal(resolve('linux', 'x64').asset.name, 'PearBrowser-0.5.0-linux-x64.AppImage')
   } finally {
     rmSync(fixture, { recursive: true, force: true })
   }

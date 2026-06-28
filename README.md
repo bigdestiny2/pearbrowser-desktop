@@ -10,10 +10,20 @@ A local-first peer-to-peer browser, app store, search engine, naming layer, Nost
 
 ## Install it
 
-Primary desktop distribution is moving to native installers, but the current `v0.5.0` GitHub release has no attached installer assets yet. The first native package targets match the current `cmake-pear` appling toolchain:
+Primary desktop distribution is now native GitHub release packages. The current
+`v0.5.0` release has attached macOS, Windows, and Linux assets with SHA-256
+sidecars and platform manifests. Download from the
+[`v0.5.0` release](https://github.com/bigdestiny2/pearbrowser-desktop/releases/tag/v0.5.0),
+or resolve the recommended asset for your machine from a source checkout:
+
+```sh
+npm run resolve:native-release -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
+```
+
+The current package targets match the `cmake-pear` appling toolchain:
 
 - macOS: `PearBrowser-<version>-macos-<arch>.app.zip` now, signed/notarized `.dmg` once Developer ID credentials are wired in
-- Windows: `PearBrowser-<version>-windows-<arch>.msix` now, installer `.exe` later if we add a second packaging layer
+- Windows: `PearBrowser-<version>-windows-<arch>.exe` and `PearBrowser-<version>-windows-<arch>.msix` now
 - Linux: `PearBrowser-<version>-linux-<arch>.AppImage` now, distro packages such as `.deb` later if demand warrants them
 
 The stable Pear key remains available as the temporary legacy fallback for testers and recovery:
@@ -181,6 +191,7 @@ node scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --
 | `scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --expect-app hiveworm` | Fresh-peer Hyperbee catalogue check: proves the live app catalogue key is reachable and contains expected release rows and Peercord launch metadata. |
 | `scripts/runtime-rpc-smoke.mjs` | Runtime GUI smoke: after launching PearBrowser, checks the diagnostic RPC path reports DHT, proxy, relay, peer-count, and storage readiness without becoming the renderer. |
 | `scripts/check-hiverelay-layout.mjs` | Verifies the vendored HiveRelay `0.20.0` package tarballs used by standalone source installs; the sibling HiveRelay checkout is optional. |
+| `npm run resolve:native-release -- --tag <tag>` | Prints the recommended native release package and SHA-256 sidecar for the current or requested platform/architecture. |
 | `npm run check:release-evidence` | Reads the operator evidence log and fails until required gates are marked `PASS` or documented `DEFER`, with a final announcement decision. |
 | `scripts/verify-app-full.js --key <driveKey>` | Deeper fresh-peer blob sampling across a drive's file tree. |
 | `scripts/verify-pear-bundle-contract.js --key <driveKey>` | Metadata-only Pear bundle contract check: reads `pear.json` and selected files from a fresh peer without executing third-party code. |
@@ -188,12 +199,13 @@ node scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --
 
 ## Distribution
 
-The `appling/` directory contains the multi-architecture native shell — Bare + CMake builds for macOS / Windows / Linux. GitHub release assets are produced by `.github/workflows/desktop-native-release.yml`, which builds the appling on hosted macOS, Windows, and Linux runners, collects the native artifacts, writes SHA-256 sidecars, and attaches them to the matching release tag. Run the workflow manually with tag `v0.5.0` and `source_ref` set to the packaging branch or merged `main` to backfill the assetless release.
+The `appling/` directory contains the multi-architecture native shell — Bare + CMake builds for macOS / Windows / Linux. GitHub release assets are produced by `.github/workflows/desktop-native-release.yml`, which builds the appling on hosted macOS, Windows, and Linux runners, collects the native artifacts, writes SHA-256 sidecars, and attaches them to the matching release tag. Run the workflow manually with tag `v0.5.0` and `source_ref` set to merged `main` to produce or refresh the attached release assets.
 
 Current generated artifacts are `.app.zip` on macOS, `.msix` on Windows, and `.AppImage` on Linux. The workflow uses `npm ci --prefix appling`, so update `appling/package-lock.json` deliberately when the native wrapper toolchain changes.
 
 ```sh
 npm run check:appling-release -- --tag v0.5.0
+npm run resolve:native-release -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
 cd appling
 npm ci
 npm run generate
