@@ -104,6 +104,7 @@ test('native release workflow builds and attaches appling artifacts for every de
   assert.match(nativeReleaseWorkflow, /ubuntu-latest/)
   assert.match(nativeReleaseWorkflow, /libgtk-4-dev/)
   assert.match(nativeReleaseWorkflow, /core\.longpaths true/)
+  assert.match(nativeReleaseWorkflow, /MakeAppx\.exe/)
   assert.match(nativeReleaseWorkflow, /npm ci --prefix appling/)
   assert.doesNotMatch(nativeReleaseWorkflow, /npm install -g bare-make/)
   assert.match(nativeReleaseWorkflow, /PEARBROWSER_MACOS_SIGNING_IDENTITY/)
