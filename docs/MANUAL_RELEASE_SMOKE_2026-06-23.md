@@ -52,6 +52,11 @@ announcement.
     `npm run check:native-release-assets -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --require-published --require-public-trust`.
   - Verify the recommended package downloads against their sidecars:
     `npm run verify:native-downloads -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --all`.
+  - Generate user-facing install copy:
+    `npm run -s generate:native-install-snippet -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop`.
+  - Generate Homebrew/WinGet drafts after public-trust assets are attached:
+    `npm run generate:package-manager-manifests -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop`.
+    Use `--trust-mode package-proof` only for rehearsal output.
   - Record the Actions run URL and resulting release asset list in the evidence
     log.
 - [ ] After filling `docs/RELEASE_SMOKE_EVIDENCE_LOG_2026-06-23.md`, run

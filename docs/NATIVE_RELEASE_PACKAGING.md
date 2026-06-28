@@ -127,6 +127,19 @@ so user-facing copy is generated from the release assets that actually shipped:
 npm run -s generate:native-install-snippet -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
 ```
 
+`scripts/generate-package-manager-manifests.mjs` prepares the later channel
+expansion drafts from the attached release assets. It reads the macOS and
+Windows `.sha256` sidecars, writes a Homebrew Cask draft and a WinGet singleton
+manifest draft under `dist/package-manager-manifests/<tag>/`, and defaults to
+`--trust-mode public-trust`. In that default mode it refuses package-proof macOS
+`.app.zip` assets because Homebrew should not be submitted until the public
+release has notarized `.dmg` assets. Use `--trust-mode package-proof` only for
+rehearsing the output shape against the current package-proof release:
+
+```sh
+npm run generate:package-manager-manifests -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --trust-mode package-proof
+```
+
 `scripts/verify-native-downloads.mjs` is the stronger download-integrity check.
 It resolves the recommended package for the current platform/architecture, or
 all supported desktop targets with `--all`, downloads each package plus its
