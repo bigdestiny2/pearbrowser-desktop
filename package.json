@@ -2,6 +2,7 @@
   "name": "pearbrowser-desktop",
   "version": "0.5.0",
   "description": "P2P browser + decentralized app store + site builder, desktop Pear fork of PearBrowser (jj10133/Vinjari family)",
+  "license": "Apache-2.0 AND MIT",
   "type": "module",
   "scripts": {
     "preinstall": "node scripts/check-hiverelay-layout.mjs",
