@@ -29,8 +29,16 @@ env:
   RELEASE_TAG: ${{ github.event.release.tag_name || github.event.inputs.tag || github.ref_name }}
   SOURCE_REF: ${{ github.event.inputs.source_ref || github.event.release.tag_name || github.ref_name }}
   NODE_VERSION: 22
+  PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64 || '' }}
+  PEARBROWSER_MACOS_CERTIFICATE_PASSWORD: ${{ secrets.PEARBROWSER_MACOS_CERTIFICATE_PASSWORD || '' }}
+  PEARBROWSER_MACOS_KEYCHAIN_PASSWORD: ${{ secrets.PEARBROWSER_MACOS_KEYCHAIN_PASSWORD || github.run_id }}
   PEARBROWSER_MACOS_SIGNING_IDENTITY: ${{ secrets.PEARBROWSER_MACOS_SIGNING_IDENTITY || '-' }}
   PEARBROWSER_MACOS_SIGNING_KEYCHAIN: ${{ secrets.PEARBROWSER_MACOS_SIGNING_KEYCHAIN || '' }}
+  PEARBROWSER_MACOS_NOTARY_APPLE_ID: ${{ secrets.PEARBROWSER_MACOS_NOTARY_APPLE_ID || '' }}
+  PEARBROWSER_MACOS_NOTARY_PASSWORD: ${{ secrets.PEARBROWSER_MACOS_NOTARY_PASSWORD || '' }}
+  PEARBROWSER_MACOS_NOTARY_TEAM_ID: ${{ secrets.PEARBROWSER_MACOS_NOTARY_TEAM_ID || '' }}
+  PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64: ${{ secrets.PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64 || '' }}
+  PEARBROWSER_WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.PEARBROWSER_WINDOWS_CERTIFICATE_PASSWORD || '' }}
   PEARBROWSER_WINDOWS_SIGNING_SUBJECT: ${{ secrets.PEARBROWSER_WINDOWS_SIGNING_SUBJECT || 'CN=PearBrowser Desktop' }}
   PEARBROWSER_WINDOWS_SIGNING_THUMBPRINT: ${{ secrets.PEARBROWSER_WINDOWS_SIGNING_THUMBPRINT || '' }}
 
@@ -108,6 +116,91 @@ jobs:
           Add-Content -Path $env:GITHUB_PATH -Value $sdkBin
           Write-Host "Using Windows SDK tools from $sdkBin"
 
+      - name: Validate release signing configuration
+        run: |
+          set -euo pipefail
+
+          require_pair() {
+            local first_name="$1"
+            local first_value="$2"
+            local second_name="$3"
+            local second_value="$4"
+            if [[ -n "$first_value" && -z "$second_value" ]] || [[ -z "$first_value" && -n "$second_value" ]]; then
+              echo "::error::${first_name} and ${second_name} must be configured together"
+              exit 1
+            fi
+          }
+
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            require_pair \
+              PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64 "$PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64" \
+              PEARBROWSER_MACOS_CERTIFICATE_PASSWORD "$PEARBROWSER_MACOS_CERTIFICATE_PASSWORD"
+
+            if [[ -n "$PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64" && "$PEARBROWSER_MACOS_SIGNING_IDENTITY" == "-" ]]; then
+              echo "::error::A macOS certificate was provided, but PEARBROWSER_MACOS_SIGNING_IDENTITY is still ad-hoc '-'"
+              exit 1
+            fi
+
+            notary_count=0
+            [[ -n "$PEARBROWSER_MACOS_NOTARY_APPLE_ID" ]] && notary_count=$((notary_count + 1))
+            [[ -n "$PEARBROWSER_MACOS_NOTARY_PASSWORD" ]] && notary_count=$((notary_count + 1))
+            [[ -n "$PEARBROWSER_MACOS_NOTARY_TEAM_ID" ]] && notary_count=$((notary_count + 1))
+            if (( notary_count > 0 && notary_count < 3 )); then
+              echo "::error::macOS notarization requires PEARBROWSER_MACOS_NOTARY_APPLE_ID, PEARBROWSER_MACOS_NOTARY_PASSWORD, and PEARBROWSER_MACOS_NOTARY_TEAM_ID"
+              exit 1
+            fi
+            if (( notary_count == 3 )) && [[ "$PEARBROWSER_MACOS_SIGNING_IDENTITY" == "-" ]]; then
+              echo "::error::macOS notarization requires a real Developer ID signing identity"
+              exit 1
+            fi
+          fi
+
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            require_pair \
+              PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64 "$PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64" \
+              PEARBROWSER_WINDOWS_CERTIFICATE_PASSWORD "$PEARBROWSER_WINDOWS_CERTIFICATE_PASSWORD"
+          fi
+
+      - name: Import macOS signing certificate
+        if: runner.os == 'macOS' && env.PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64 != ''
+        run: |
+          set -euo pipefail
+          keychain="$RUNNER_TEMP/pearbrowser-signing.keychain-db"
+          cert="$RUNNER_TEMP/pearbrowser-signing.p12"
+
+          python - <<'PY'
+          import base64
+          import os
+          from pathlib import Path
+
+          cert = Path(os.environ["RUNNER_TEMP"]) / "pearbrowser-signing.p12"
+          cert.write_bytes(base64.b64decode(os.environ["PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64"]))
+          PY
+
+          security create-keychain -p "$PEARBROWSER_MACOS_KEYCHAIN_PASSWORD" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$PEARBROWSER_MACOS_KEYCHAIN_PASSWORD" "$keychain"
+          security import "$cert" -P "$PEARBROWSER_MACOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$PEARBROWSER_MACOS_KEYCHAIN_PASSWORD" "$keychain"
+          security find-identity -v -p codesigning "$keychain"
+          echo "PEARBROWSER_MACOS_SIGNING_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+
+      - name: Import Windows signing certificate
+        if: runner.os == 'Windows' && env.PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64 != ''
+        shell: pwsh
+        run: |
+          $pfxPath = Join-Path $env:RUNNER_TEMP 'pearbrowser-windows-signing.pfx'
+          [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64))
+          $securePassword = ConvertTo-SecureString -String $env:PEARBROWSER_WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+          $cert = Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation Cert:\CurrentUser\My -Password $securePassword
+          if (-not $cert) {
+            throw 'Failed to import Windows signing certificate'
+          }
+          if (-not $env:PEARBROWSER_WINDOWS_SIGNING_THUMBPRINT) {
+            Add-Content -Path $env:GITHUB_ENV -Value "PEARBROWSER_WINDOWS_SIGNING_THUMBPRINT=$($cert.Thumbprint)"
+          }
+          Write-Host "Imported Windows signing certificate $($cert.Subject) $($cert.Thumbprint)"
+
       - name: Install appling build tools
         run: npm ci --prefix appling
 
@@ -119,6 +212,51 @@ jobs:
 
       - name: Build native package
         run: npm run --prefix appling build
+
+      - name: Notarize macOS app
+        if: runner.os == 'macOS'
+        run: node scripts/notarize-appling-macos.mjs
+
+      - name: Sign additional Windows installer artifacts
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not $env:PEARBROWSER_WINDOWS_SIGNING_THUMBPRINT) {
+            Write-Host 'Skipping additional Windows installer signing; PEARBROWSER_WINDOWS_SIGNING_THUMBPRINT is empty.'
+            exit 0
+          }
+
+          $timestampUrl = 'http://timestamp.digicert.com'
+          $assets = Get-ChildItem -Path appling/build -Recurse -File -Include *.exe
+          foreach ($asset in $assets) {
+            Write-Host "Signing $($asset.FullName)"
+            & signtool sign /sha1 $env:PEARBROWSER_WINDOWS_SIGNING_THUMBPRINT /fd SHA256 /tr $timestampUrl /td SHA256 $asset.FullName
+            if ($LASTEXITCODE -ne 0) {
+              throw "SignTool failed for $($asset.FullName)"
+            }
+          }
+
+      - name: Verify Windows signatures when configured
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not $env:PEARBROWSER_WINDOWS_SIGNING_THUMBPRINT) {
+            Write-Host 'Skipping Windows signature verification; PEARBROWSER_WINDOWS_SIGNING_THUMBPRINT is empty.'
+            exit 0
+          }
+
+          $assets = Get-ChildItem -Path appling/build -Recurse -File -Include *.msix,*.exe
+          if (-not $assets) {
+            throw 'No Windows installer artifacts found for signature verification.'
+          }
+
+          foreach ($asset in $assets) {
+            Write-Host "Verifying $($asset.FullName)"
+            & signtool verify /pa /v $asset.FullName
+            if ($LASTEXITCODE -ne 0) {
+              throw "SignTool verification failed for $($asset.FullName)"
+            }
+          }
 
       - name: Collect release artifacts
         run: >
@@ -134,6 +272,10 @@ jobs:
           name: pearbrowser-desktop-${{ env.RELEASE_TAG }}-${{ matrix.release-platform }}-${{ runner.arch }}
           path: pear-ecosystem/01-browser/pearbrowser-desktop/dist/appling-release/${{ env.RELEASE_TAG }}/${{ matrix.release-platform }}/*
           if-no-files-found: error
+
+      - name: Delete macOS signing keychain
+        if: always() && runner.os == 'macOS' && env.PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64 != ''
+        run: security delete-keychain "$RUNNER_TEMP/pearbrowser-signing.keychain-db" || true
 
   attach-release:
     name: Attach assets to GitHub release

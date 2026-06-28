@@ -80,15 +80,26 @@ and CI builds verify without a private Apple certificate. The current Windows
 workflow can package unsigned `.msix` artifacts without a private certificate.
 Public trust signing is still a release-credential gate:
 
-- macOS: import a Developer ID certificate, configure
-  `PEARBROWSER_MACOS_SIGNING_IDENTITY` and optional
-  `PEARBROWSER_MACOS_SIGNING_KEYCHAIN` before `npm run --prefix appling build`,
-  then notarize before attaching public assets.
-- Windows: add certificate import and configure the MSIX signing subject /
-  thumbprint through `PEARBROWSER_WINDOWS_SIGNING_SUBJECT` and
-  `PEARBROWSER_WINDOWS_SIGNING_THUMBPRINT` before collection. If the thumbprint
-  is empty, the build intentionally skips SignTool and uploads an unsigned MSIX
-  package for packaging proof only.
+- macOS: add `PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64`,
+  `PEARBROWSER_MACOS_CERTIFICATE_PASSWORD`,
+  `PEARBROWSER_MACOS_SIGNING_IDENTITY`,
+  `PEARBROWSER_MACOS_NOTARY_APPLE_ID`,
+  `PEARBROWSER_MACOS_NOTARY_PASSWORD`, and
+  `PEARBROWSER_MACOS_NOTARY_TEAM_ID` as GitHub Actions secrets. The workflow
+  imports the Developer ID certificate into a temporary keychain, passes that
+  keychain to CMake signing, submits the built `.app` to notarytool, staples the
+  notarization ticket, re-verifies codesign, and only then collects the public
+  `.app.zip` asset. `PEARBROWSER_MACOS_KEYCHAIN_PASSWORD` is optional; the run
+  id is used when it is absent.
+- Windows: add `PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64` and
+  `PEARBROWSER_WINDOWS_CERTIFICATE_PASSWORD` as GitHub Actions secrets, plus
+  optional `PEARBROWSER_WINDOWS_SIGNING_THUMBPRINT` and
+  `PEARBROWSER_WINDOWS_SIGNING_SUBJECT`. If the thumbprint is empty, the
+  workflow uses the imported certificate thumbprint. If the thumbprint remains
+  empty, the build intentionally skips SignTool and uploads unsigned Windows
+  packages for packaging proof only. When signing is configured, the workflow
+  signs additional `.exe` installer artifacts and verifies Windows installer
+  signatures before collection.
 - Linux: attach package checksums; no signing is required for the current
   AppImage path.
 

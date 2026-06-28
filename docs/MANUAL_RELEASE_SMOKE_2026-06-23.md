@@ -33,7 +33,7 @@ announcement.
   - `cd .. && npm run package:appling -- --tag v0.5.0`
   - On macOS, verify the extracted `.app` with
     `codesign --verify --deep --strict --verbose=2`.
-- [ ] Backfill native GitHub release assets:
+- [x] Backfill native GitHub release assets:
   - Confirm `.github/workflows/desktop-native-release.yml` is present on the
     default branch.
   - Run **Desktop Native Release** with tag `v0.5.0` and `source_ref` set to the
