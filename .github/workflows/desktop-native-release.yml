@@ -92,6 +92,22 @@ jobs:
         if: runner.os == 'Windows'
         run: git config --global core.longpaths true
 
+      - name: Add Windows SDK packaging tools to PATH
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $sdkRoot = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin'
+          $sdkBin = Get-ChildItem $sdkRoot -Directory |
+            Sort-Object Name -Descending |
+            ForEach-Object { Join-Path $_.FullName 'x64' } |
+            Where-Object { Test-Path (Join-Path $_ 'MakeAppx.exe') } |
+            Select-Object -First 1
+          if (-not $sdkBin) {
+            throw 'MakeAppx.exe not found in Windows SDK'
+          }
+          Add-Content -Path $env:GITHUB_PATH -Value $sdkBin
+          Write-Host "Using Windows SDK tools from $sdkBin"
+
       - name: Install appling build tools
         run: npm ci --prefix appling
 
