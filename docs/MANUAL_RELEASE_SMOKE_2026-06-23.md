@@ -56,13 +56,14 @@ announcement.
     `proxyPort`, at least one configured HiveRelay, and a profile at or below
     its storage quota without becoming the renderer or closing the app.
   - Nonvisual preflight before screenshots:
-    `node scripts/release-rpc-story-smoke.mjs --timeout 45000 --request-timeout 30000 --local-stories --json`.
+    `node scripts/release-rpc-story-smoke.mjs --timeout 60000 --request-timeout 80000 --local-stories --site-story --json`.
   - Expected: homepage fetches through the local proxy, release catalogues load,
     featured rows include Keet, PearPass, anonGPT, Paste, and Peercord, and
     Peercord remains `standalone`/window-only. With `--local-stories`, the
     smoke also proves local search first-paint, curated/petname name resolution,
-    and bookmark/session round-trips. This does not launch Peercord, approve a
-    third-party trust prompt, publish a test site, or replace the human GUI
+    and bookmark/session round-trips. With `--site-story`, it creates, publishes,
+    fetches, deletes, and HiveRelay-unseeds a temporary test site. This does not
+    launch Peercord, approve a third-party trust prompt, or replace the human GUI
     checks below.
 - [ ] Browse user story:
   - Open `hyper://1868916a7a282ff0f211b536e9642828c32d3a817a254e1ef7e602709e25d/`.
@@ -120,6 +121,10 @@ announcement.
   - Expected: only events from attested contact keys show as trusted; revoked or
     forged bindings do not display as trusted.
 - [ ] Site publishing story:
+  - Automated coverage: the release RPC story smoke with `--site-story` creates
+    a temporary site, publishes it, fetches the copied `hyper://` URL through
+    the local proxy, verifies a unique token in the HTML, deletes the site, and
+    requests HiveRelay unseed cleanup.
   - Create or open a small test site, publish it, copy the `hyper://` URL, reload
     it in Browse, and verify the publish/pin status.
   - Expected: generated site loads from its Hyperdrive and the copied link works
