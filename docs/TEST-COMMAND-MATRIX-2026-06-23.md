@@ -126,6 +126,16 @@ failures remain the expected production credential/store-validation gates.
 The release scripts are operational gates, not ordinary tests:
 
 - `scripts/release-prod.sh` stages/releases/pins/verifies production desktop.
+- `npm run check:appling-release -- --tag v0.5.0` verifies native wrapper
+  metadata, lockfile-owned CMake tooling, signing defaults, and package assets.
+- `cd appling && npm ci && npm run generate && npm run build` builds the native
+  wrapper for the current platform.
+- `npm run package:appling -- --tag v0.5.0` collects native artifacts,
+  `.sha256` sidecars, `SHA256SUMS-*`, and `manifest-*` files.
+- `.github/workflows/desktop-native-release.yml` is the cross-platform release
+  asset backfill path. It must be present on the default branch, and manual
+  backfills should run with tag `v0.5.0` plus `source_ref` set to the branch or
+  commit containing the packaging code.
 - Fresh-peer verification should be run off the publisher box when possible.
 - Desktop source install depends on sibling local HiveRelay packages:
   `../../00-core/hiverelay/packages/{core,client,verifier}`.

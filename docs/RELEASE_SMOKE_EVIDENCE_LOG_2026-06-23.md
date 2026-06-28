@@ -31,6 +31,9 @@ manual gate.
 | `git diff --check` | clean | PASS | 2026-06-24 local run exited 0 before evidence-log edits |
 | `npm audit --audit-level=high` | 0 high vulnerabilities | PASS | 2026-06-24 local run: `found 0 vulnerabilities` |
 | Desktop CI | install/test/audit success |  |  |
+| `npm run check:appling-release -- --tag v0.5.0` | native wrapper metadata, lockfile, signing defaults, assets in sync | PASS | 2026-06-28 local run: `Appling release metadata ok: PearBrowser 0.5.0 -> pear://tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty` |
+| macOS native appling package | ad-hoc signed `.app.zip`, checksum, manifest produced locally | PASS | 2026-06-28 local run: `npm ci --prefix appling`, `npm run --prefix appling generate`, `npm run --prefix appling build`, `node scripts/collect-appling-artifacts.mjs --tag v0.5.0 --platform darwin --arch arm64`; produced `PearBrowser-0.5.0-macos-arm64.app.zip`, SHA-256 `5dcb5045f00b01f8dfb9f15fc4d505a53e04227ae9c35277e939e1aad67f7af6`; extracted app passed `codesign --verify --deep --strict` |
+| GitHub native release asset backfill | workflow visible on default branch; macOS, Windows, Linux assets attached to `v0.5.0` with sidecars/manifests |  |  |
 | `node scripts/check-relays.js` | real-DHT relay reachable |  |  |
 | `node scripts/verify-pin.js --expect 18640 --hiverelay` | length >= 18640, sampled blob present, HiveRelay proof captured when available | PASS | 2026-06-24 release-prod fresh-peer run: length `18640`, peers `1`, sampled `/backend/anongpt-buyer.js` `11652` bytes; HiveRelay storage-proof route not yet enabled on fleet |
 | `node scripts/verify-release-contents.js ...` | forbidden paths absent | PASS | 2026-06-24 fresh-peer scan: length `18640`, `10233` entries, forbidden paths absent |

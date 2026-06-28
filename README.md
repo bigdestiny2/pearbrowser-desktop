@@ -10,11 +10,11 @@ A local-first peer-to-peer browser, app store, search engine, naming layer, Nost
 
 ## Install it
 
-Primary desktop distribution is moving to native installers, but the current `v0.5.0` GitHub release has no attached installer assets yet. The target packages are:
+Primary desktop distribution is moving to native installers, but the current `v0.5.0` GitHub release has no attached installer assets yet. The first native package targets match the current `cmake-pear` appling toolchain:
 
-- macOS: `PearBrowser.app`
-- Windows: `PearBrowser Setup.exe`
-- Linux: `pearbrowser-desktop.deb`
+- macOS: `PearBrowser-<version>-macos-<arch>.app.zip` now, signed/notarized `.dmg` once Developer ID credentials are wired in
+- Windows: `PearBrowser-<version>-windows-<arch>.msix` now, installer `.exe` later if we add a second packaging layer
+- Linux: `PearBrowser-<version>-linux-<arch>.AppImage` now, distro packages such as `.deb` later if demand warrants them
 
 The stable Pear key remains available as the temporary legacy fallback for testers and recovery:
 
@@ -188,18 +188,27 @@ node scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --
 
 ## Distribution
 
-The `appling/` directory contains the multi-architecture native shell — Bare + CMake builds for macOS / Windows / Linux. Native installers are the target distribution path, but `v0.5.0` has no attached installer assets yet; the Pear CLI command is retained as a temporary legacy fallback while packaged and signed per-platform artifacts are attached to releases.
+The `appling/` directory contains the multi-architecture native shell — Bare + CMake builds for macOS / Windows / Linux. GitHub release assets are produced by `.github/workflows/desktop-native-release.yml`, which builds the appling on hosted macOS, Windows, and Linux runners, collects the native artifacts, writes SHA-256 sidecars, and attaches them to the matching release tag. Run the workflow manually with tag `v0.5.0` and `source_ref` set to the packaging branch or merged `main` to backfill the assetless release.
+
+Current generated artifacts are `.app.zip` on macOS, `.msix` on Windows, and `.AppImage` on Linux. The workflow uses `npm ci --prefix appling`, so update `appling/package-lock.json` deliberately when the native wrapper toolchain changes.
 
 ```sh
+npm run check:appling-release -- --tag v0.5.0
 cd appling
-npm i
-bare-make generate
-bare-make build                      # produces unsigned .app/.exe/.deb
+npm ci
+npm run generate
+npm run build
+cd ..
+npm run package:appling -- --tag v0.5.0
 ```
 
 Code signing is per-platform:
-- macOS: `MACOS_SIGNING_IDENTITY` in `appling/CMakeLists.txt`
-- Windows: `WINDOWS_SIGNING_SUBJECT` / `WINDOWS_SIGNING_THUMBPRINT`
+- macOS: ad-hoc signed by default; use `PEARBROWSER_MACOS_SIGNING_IDENTITY` /
+  `PEARBROWSER_MACOS_SIGNING_KEYCHAIN` plus notarization for public Developer ID releases
+- Windows: unsigned MSIX packaging by default; set
+  `PEARBROWSER_WINDOWS_SIGNING_SUBJECT` /
+  `PEARBROWSER_WINDOWS_SIGNING_THUMBPRINT` after importing a certificate for
+  public signed releases
 - Linux: no signing required
 
 ## Companion projects
