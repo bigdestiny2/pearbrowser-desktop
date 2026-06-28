@@ -36,6 +36,8 @@ const nativeDownloadVerifier = readFileSync(new URL('../scripts/verify-native-do
 const nativeDownloadVerifierPath = fileURLToPath(new URL('../scripts/verify-native-downloads.mjs', import.meta.url))
 const nativeInstallSnippet = readFileSync(new URL('../scripts/generate-native-install-snippet.mjs', import.meta.url), 'utf8')
 const nativeInstallSnippetPath = fileURLToPath(new URL('../scripts/generate-native-install-snippet.mjs', import.meta.url))
+const packageManagerManifests = readFileSync(new URL('../scripts/generate-package-manager-manifests.mjs', import.meta.url), 'utf8')
+const packageManagerManifestsPath = fileURLToPath(new URL('../scripts/generate-package-manager-manifests.mjs', import.meta.url))
 const macosDmgPackager = readFileSync(new URL('../scripts/create-macos-dmg.mjs', import.meta.url), 'utf8')
 const macosNotarizeScript = readFileSync(new URL('../scripts/notarize-appling-macos.mjs', import.meta.url), 'utf8')
 const releaseScript = readFileSync(new URL('../scripts/release-prod.sh', import.meta.url), 'utf8')
@@ -55,6 +57,44 @@ const vendoredHiveRelayPackages = [
   ['p2p-hiverelay-client', 'vendor/hiverelay/p2p-hiverelay-client-0.20.0.tgz'],
   ['p2p-hiverelay-verifier', 'vendor/hiverelay/p2p-hiverelay-verifier-0.20.0.tgz']
 ]
+
+function writePackageManagerReleaseFixture (fixture, names) {
+  const shaByName = new Map()
+  const assets = names.map((name, i) => {
+    if (name.endsWith('.sha256')) {
+      const assetName = name.slice(0, -'.sha256'.length)
+      const sha256 = shaByName.get(assetName) || createHash('sha256').update(assetName).digest('hex')
+      shaByName.set(assetName, sha256)
+      const sidecarPath = join(fixture, name)
+      const sidecar = `${sha256}  ${assetName}\n`
+      writeFileSync(sidecarPath, sidecar)
+      return {
+        name,
+        size: sidecar.length,
+        url: pathToFileURL(sidecarPath).toString()
+      }
+    }
+
+    const sha256 = createHash('sha256').update(name).digest('hex')
+    shaByName.set(name, sha256)
+    return {
+      name,
+      size: i + 100,
+      url: `https://example.invalid/${name}`
+    }
+  })
+  const releasePath = join(fixture, 'release.json')
+  writeFileSync(releasePath, JSON.stringify({
+    tagName: 'v0.5.0',
+    isDraft: false,
+    isPrerelease: false,
+    assets
+  }, null, 2))
+  return {
+    releasePath,
+    shaFor: (name) => shaByName.get(name)
+  }
+}
 
 test('Pear stage ignore excludes local release/operator scratch files', () => {
   const ignored = pkg.pear?.stage?.ignore || []
@@ -177,6 +217,14 @@ test('native install snippet generator is exposed for release notes', () => {
   assert.match(nativeInstallSnippet, /Native Installers/)
   assert.match(nativeInstallSnippet, /artifactRank/)
   assert.match(nativeInstallSnippet, /Trust Note/)
+})
+
+test('package-manager manifest generator is exposed for channel expansion drafts', () => {
+  assert.equal(pkg.scripts?.['generate:package-manager-manifests'], 'node scripts/generate-package-manager-manifests.mjs')
+  assert.match(packageManagerManifests, /generateHomebrewCask/)
+  assert.match(packageManagerManifests, /generateWingetSingleton/)
+  assert.match(packageManagerManifests, /InstallerSha256/)
+  assert.match(packageManagerManifests, /public-trust Homebrew Cask requires notarized macOS DMG/)
 })
 
 test('macOS DMG packager is exposed for public-trust native releases', () => {
@@ -725,6 +773,148 @@ test('native install snippet generator emits release-note packages for every des
     assert.match(markdown.stdout, /PearBrowser-0\.5\.0-macos-arm64\.dmg/)
     assert.match(markdown.stdout, /PearBrowser-0\.5\.0-windows-x64\.exe/)
     assert.match(markdown.stdout, /These assets are expected to be signed\/notarized/)
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
+})
+
+test('package-manager manifest generator emits Homebrew and WinGet drafts from public-trust assets', () => {
+  const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'pear-package-manifests-')))
+  try {
+    const { releasePath, shaFor } = writePackageManagerReleaseFixture(fixture, [
+      'PearBrowser-0.5.0-macos-arm64.dmg',
+      'PearBrowser-0.5.0-macos-arm64.dmg.sha256',
+      'PearBrowser-0.5.0-macos-x64.dmg',
+      'PearBrowser-0.5.0-macos-x64.dmg.sha256',
+      'PearBrowser-0.5.0-windows-x64.exe',
+      'PearBrowser-0.5.0-windows-x64.exe.sha256'
+    ])
+    const outDir = join(fixture, 'out')
+
+    const result = spawnSync(process.execPath, [
+      packageManagerManifestsPath,
+      '--fixture',
+      releasePath,
+      '--tag',
+      'v0.5.0',
+      '--out-dir',
+      outDir,
+      '--license',
+      'MPL-2.0',
+      '--json'
+    ], {
+      cwd: fileURLToPath(new URL('..', import.meta.url)),
+      encoding: 'utf8'
+    })
+
+    assert.equal(result.status, 0, result.stderr || result.stdout)
+    const report = JSON.parse(result.stdout)
+    assert.equal(report.ok, true)
+    assert.equal(report.trustMode, 'public-trust')
+    assert.equal(report.files.length, 2)
+    assert.deepEqual(report.warnings, [])
+
+    const caskPath = join(outDir, 'homebrew', 'pearbrowser.rb')
+    const cask = readFileSync(caskPath, 'utf8')
+    assert.match(cask, /cask "pearbrowser"/)
+    assert.match(cask, /arch arm: "arm64", intel: "x64"/)
+    assert.match(cask, new RegExp(shaFor('PearBrowser-0.5.0-macos-arm64.dmg')))
+    assert.match(cask, new RegExp(shaFor('PearBrowser-0.5.0-macos-x64.dmg')))
+    assert.match(cask, /PearBrowser-#\{version\}-macos-#\{arch\}\.dmg/)
+    assert.match(cask, /app "PearBrowser\.app"/)
+
+    const wingetPath = join(outDir, 'winget', 'manifests', 'p', 'PearBrowser', 'PearBrowser', '0.5.0', 'PearBrowser.PearBrowser.yaml')
+    const winget = readFileSync(wingetPath, 'utf8')
+    assert.match(winget, /PackageIdentifier: "PearBrowser\.PearBrowser"/)
+    assert.match(winget, /PackageVersion: "0\.5\.0"/)
+    assert.match(winget, /InstallerType: exe/)
+    assert.match(winget, new RegExp(`InstallerSha256: ${shaFor('PearBrowser-0.5.0-windows-x64.exe').toUpperCase()}`))
+    assert.match(winget, /ManifestType: singleton/)
+
+    const customOut = join(fixture, 'custom-out')
+    const custom = spawnSync(process.execPath, [
+      packageManagerManifestsPath,
+      '--fixture',
+      releasePath,
+      '--tag',
+      'v0.5.0',
+      '--out-dir',
+      customOut,
+      '--license',
+      'MPL-2.0',
+      '--package-identifier',
+      'PearBrowser.Experimental',
+      '--json'
+    ], {
+      cwd: fileURLToPath(new URL('..', import.meta.url)),
+      encoding: 'utf8'
+    })
+
+    assert.equal(custom.status, 0, custom.stderr || custom.stdout)
+    const customReport = JSON.parse(custom.stdout)
+    assert.ok(customReport.files.some((file) => {
+      return file.path.endsWith('winget/manifests/p/PearBrowser/Experimental/0.5.0/PearBrowser.Experimental.yaml')
+    }))
+    const customWinget = readFileSync(join(customOut, 'winget', 'manifests', 'p', 'PearBrowser', 'Experimental', '0.5.0', 'PearBrowser.Experimental.yaml'), 'utf8')
+    assert.match(customWinget, /PackageIdentifier: "PearBrowser\.Experimental"/)
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
+})
+
+test('package-manager manifest generator gates package-proof assets by default', () => {
+  const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'pear-package-proof-manifests-')))
+  try {
+    const { releasePath } = writePackageManagerReleaseFixture(fixture, [
+      'PearBrowser-0.5.0-macos-arm64.app.zip',
+      'PearBrowser-0.5.0-macos-arm64.app.zip.sha256',
+      'PearBrowser-0.5.0-macos-x64.app.zip',
+      'PearBrowser-0.5.0-macos-x64.app.zip.sha256',
+      'PearBrowser-0.5.0-windows-x64.exe',
+      'PearBrowser-0.5.0-windows-x64.exe.sha256'
+    ])
+
+    const blocked = spawnSync(process.execPath, [
+      packageManagerManifestsPath,
+      '--fixture',
+      releasePath,
+      '--tag',
+      'v0.5.0',
+      '--out-dir',
+      join(fixture, 'blocked'),
+      '--json'
+    ], {
+      cwd: fileURLToPath(new URL('..', import.meta.url)),
+      encoding: 'utf8'
+    })
+
+    assert.notEqual(blocked.status, 0)
+    const blockedReport = JSON.parse(blocked.stdout)
+    assert.equal(blockedReport.ok, false)
+    assert.ok(blockedReport.errors.some((error) => error.includes('public-trust Homebrew Cask requires notarized macOS DMG assets')))
+
+    const rehearsal = spawnSync(process.execPath, [
+      packageManagerManifestsPath,
+      '--fixture',
+      releasePath,
+      '--tag',
+      'v0.5.0',
+      '--trust-mode',
+      'package-proof',
+      '--out-dir',
+      join(fixture, 'rehearsal'),
+      '--json'
+    ], {
+      cwd: fileURLToPath(new URL('..', import.meta.url)),
+      encoding: 'utf8'
+    })
+
+    assert.equal(rehearsal.status, 0, rehearsal.stderr || rehearsal.stdout)
+    const rehearsalReport = JSON.parse(rehearsal.stdout)
+    assert.equal(rehearsalReport.ok, true)
+    assert.ok(rehearsalReport.warnings.some((warning) => warning.includes('package-proof manifests are rehearsal artifacts')))
+    const cask = readFileSync(join(fixture, 'rehearsal', 'homebrew', 'pearbrowser.rb'), 'utf8')
+    assert.match(cask, /PearBrowser-#\{version\}-macos-#\{arch\}\.app\.zip/)
   } finally {
     rmSync(fixture, { recursive: true, force: true })
   }
