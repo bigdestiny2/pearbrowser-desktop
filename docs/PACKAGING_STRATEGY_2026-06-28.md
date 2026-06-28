@@ -10,6 +10,8 @@ Primary user promise: download one native package, launch it normally, and let P
   Windows x64, and Linux x64, with SHA-256 sidecars, checksum indexes, and
   platform manifests.
 - `scripts/resolve-native-release-asset.mjs` chooses the recommended release package for the current or requested platform and verifies the checksum sidecar exists.
+- `scripts/verify-native-downloads.mjs` downloads the recommended package set
+  and verifies the bytes against the attached `.sha256` sidecars.
 - `.github/workflows/desktop-native-release.yml` builds macOS, Windows, and Linux packages in CI.
 - The native workflow now has two modes:
   - `package-proof`: manual default, permits ad-hoc macOS signing and unsigned Windows packages.
@@ -24,7 +26,7 @@ Use three lanes, with stricter gates as the audience widens:
 | --- | --- | --- | --- | --- |
 | Source checkout | contributors and debuggers | `npm install`, `pear`, local scripts | developer trust | `npm test`, vendored HiveRelay guard, high-severity audit |
 | Package proof | internal testers and packaging validation | GitHub release assets from manual workflow | checksum trust plus OS warnings where unsigned | native workflow `release_mode=package-proof`, asset checker, smoke evidence |
-| Public trust | public desktop users | GitHub release assets, then package managers | OS code-signing trust plus checksums | native workflow `release_mode=public-trust`, notarization/signing verification, published release check |
+| Public trust | public desktop users | GitHub release assets, then package managers | OS code-signing trust plus checksums | native workflow `release_mode=public-trust`, notarization/signing verification, published release check, download verification |
 
 The stable Pear link is still the application-content update channel. Native packages should change only when the wrapper, OS integration, permissions, icons, signing, or runtime shell changes.
 
@@ -55,9 +57,11 @@ The stable Pear link is still the application-content update channel. Native pac
 4. Run Desktop Native Release with `release_mode=public-trust` or publish/tag the release so the workflow defaults to public trust.
 5. Verify post-upload assets with:
    `npm run check:native-release-assets -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --require-published`.
-6. Resolve and record the user-facing packages for macOS, Windows, and Linux:
+6. Verify the recommended package downloads:
+   `npm run verify:native-downloads -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --all`.
+7. Resolve and record the user-facing packages for macOS, Windows, and Linux:
    `npm run resolve:native-release -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --platform <platform> --arch <arch>`.
-7. Smoke install from a clean machine or VM per OS and record evidence in `docs/RELEASE_SMOKE_EVIDENCE_LOG_2026-06-23.md`.
+8. Smoke install from a clean machine or VM per OS and record evidence in `docs/RELEASE_SMOKE_EVIDENCE_LOG_2026-06-23.md`.
 
 Recommended OS-level checks:
 

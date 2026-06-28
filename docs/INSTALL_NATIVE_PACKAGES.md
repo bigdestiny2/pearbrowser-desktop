@@ -36,6 +36,13 @@ Or specify a target:
 npm run resolve:native-release -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --platform macos --arch x64
 ```
 
+Release operators can verify every recommended package download and checksum
+sidecar in one pass:
+
+```sh
+npm run verify:native-downloads -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --all
+```
+
 ## Verify The Download
 
 macOS and Linux:
