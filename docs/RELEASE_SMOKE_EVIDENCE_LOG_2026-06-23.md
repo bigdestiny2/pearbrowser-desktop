@@ -16,7 +16,8 @@ manual gate.
 | Date/time started | 2026-06-23T16:36:00Z |
 | Desktop repo/branch/head | `bigdestiny2/pearbrowser-desktop`, `feat/p2p-infra-naming`, branch head containing this evidence log |
 | Desktop PR/CI URL | PR #4: `https://github.com/bigdestiny2/pearbrowser-desktop/pull/4`; latest pushed CI before this local checker change: Desktop CI #43 success on `1e484ae` |
-| Mobile repo/head | `bigdestiny2/PearBrowser`, `main`, `01eb8c7fbfada50672ddbb3ec79aec25621229bb` |
+| Mobile repo/head | `bigdestiny2/PearBrowser`, `main`, `9101200d8bb54ff31b21d6d90154cb2321756a6c` |
+| Mobile preflight CI URL | `https://github.com/bigdestiny2/PearBrowser/actions/runs/28316870344` (`mobile-release-preflight` artifact downloaded and verified locally) |
 | macOS machine | `Locals-Mac-Studio.local`, macOS 26.4.1 build 25E253 |
 | iOS simulator/device(s) | Prior simulator proof in `PearBrowser/ios-native/BUILD.md`: iPhone 17 simulator green `Connected`; not rerun in this loop |
 | Android emulator/device(s) | Prior emulator proof in `PearBrowser/android-native/BUILD.md`: headless `pp_avd` green `Connected`; not rerun in this loop |
@@ -77,10 +78,10 @@ decision. Do not automate approval.
 
 | Gate | Expected | Result | Evidence |
 | --- | --- | --- | --- |
-| `npm test` | 136/136 pass | PASS | 2026-06-23 local run in `PearBrowser`: pass `136/136` |
+| `npm test` | 139/139 pass | PASS | 2026-06-28 Mobile Release Preflight run `https://github.com/bigdestiny2/PearBrowser/actions/runs/28316870344` passed `npm test`; local PR validation for the workflow also passed `139/139` |
 | `git diff --check` | clean | PASS | 2026-06-23 local run in `PearBrowser` exited 0 |
-| `npm audit --audit-level=high` | exit 0 | PASS | 2026-06-23 local run exited 0; full audit still reports 15 moderate Expo/React Native toolchain advisories |
-| `npm run release:preflight -- --soft --json` | 14 pass / 0 warn / 4 expected production blockers before credentials | PASS | 2026-06-23 local JSON run: 14 pass, 0 warn, 4 fail for signing/store markers only |
+| `npm audit --audit-level=high` | exit 0 | PASS | 2026-06-28 Mobile Release Preflight run `https://github.com/bigdestiny2/PearBrowser/actions/runs/28316870344` passed the high-severity audit; full audit still reports 15 moderate Expo/React Native toolchain advisories |
+| `npm run release:preflight -- --soft --json` | 14 pass / 0 warn / 4 expected production blockers before credentials | PASS | 2026-06-28 Mobile Release Preflight run `https://github.com/bigdestiny2/PearBrowser/actions/runs/28316870344` uploaded `mobile-release-preflight`; downloaded report verified with `scripts/check-release-preflight-report.js --allow-production-blockers`: 14 pass, 0 warn, 4 expected blockers, 0 unexpected blockers/warnings |
 | Generated Expo iOS Debug simulator build | succeeds | PASS | Recorded in `docs/RELEASE_READINESS_2026-06-23.md`; generated Expo iOS Debug simulator build passes with `ExpoLinking` autolinked |
 | Generated Expo iOS Release simulator build | succeeds with Pods Hermes compiler path | PASS | Recorded in `docs/RELEASE_READINESS_2026-06-23.md`; Release simulator build passes with Pods `hermesc` path |
 | Tracked SwiftUI iOS shell | build/install/launch reaches green Connected | PASS | `PearBrowser/ios-native/BUILD.md` latest smoke: build/install/launch on iPhone 17 simulator reached green `Connected` |
