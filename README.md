@@ -197,6 +197,7 @@ node scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --
 | `npm run resolve:native-release -- --tag <tag>` | Prints the recommended native release package and SHA-256 sidecar for the current or requested platform/architecture. |
 | `npm run verify:native-downloads -- --tag <tag> --all` | Downloads the recommended native packages and verifies each package against its `.sha256` sidecar. |
 | `npm run -s generate:native-install-snippet -- --tag <tag>` | Emits release-note/install-page Markdown for the recommended desktop packages and checksum sidecars. |
+| `npm run -s generate:native-install-smoke-plan -- --tag <tag>` | Emits clean-host install smoke commands and evidence bullets for macOS, Windows, and Linux. |
 | `npm run generate:package-manager-manifests -- --tag <tag>` | Emits Homebrew Cask and WinGet manifest drafts from release assets; defaults to public-trust gates. |
 | `npm run check:release-evidence` | Reads the operator evidence log and fails until required gates are marked `PASS` or documented `DEFER`, with a final announcement decision. |
 | `scripts/verify-app-full.js --key <driveKey>` | Deeper fresh-peer blob sampling across a drive's file tree. |
@@ -213,6 +214,7 @@ Current generated artifacts are `.app.zip` on macOS, `.msix` on Windows, and `.A
 npm run check:appling-release -- --tag v0.5.0
 npm run resolve:native-release -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
 npm run -s generate:native-install-snippet -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
+npm run -s generate:native-install-smoke-plan -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
 npm run generate:package-manager-manifests -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --trust-mode package-proof
 cd appling
 npm ci

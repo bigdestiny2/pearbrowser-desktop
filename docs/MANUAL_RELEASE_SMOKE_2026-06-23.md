@@ -54,6 +54,8 @@ announcement.
     `npm run verify:native-downloads -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --all`.
   - Generate user-facing install copy:
     `npm run -s generate:native-install-snippet -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop`.
+  - Generate clean-host install smoke commands and evidence bullets:
+    `npm run -s generate:native-install-smoke-plan -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop`.
   - Generate Homebrew/WinGet drafts after public-trust assets are attached:
     `npm run generate:package-manager-manifests -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop`.
     Use `--trust-mode package-proof` only for rehearsal output.

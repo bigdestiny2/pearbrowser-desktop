@@ -52,10 +52,11 @@ signing/store validation, and eventual HiveRelay dependency publication.
   naming is contact/provenance aware, and the Nostr bridge is Pear-native rather
   than a general public relay client.
 - `docs/TEST-COMMAND-MATRIX-2026-06-23.md` supersedes older test-count claims.
-  The current release branch records `npm test` at 460/460 after the runtime
+  The current release branch records `npm test` at 462/462 after the runtime
   storage gate, release story smoke, native release asset checker/resolver,
-  native download verifier, native install snippet generator,
-  package-manager manifest draft generator, native public-trust workflow mode,
+  native download verifier, native install snippet generator, native install
+  smoke plan generator, package-manager manifest draft generator,
+  native public-trust workflow mode,
   macOS public-trust DMG gate, and vendored HiveRelay source-install coverage
   landed.
 

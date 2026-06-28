@@ -17,10 +17,10 @@ Current local status from this loop:
 
 - `git diff --check` passed.
 - `npm audit --audit-level=high` passed with `found 0 vulnerabilities`.
-- `npm test` passed: 460 tests, 0 failed.
+- `npm test` passed: 462 tests, 0 failed.
 
 This supersedes older local counts in nearby docs for this checkout. The
-current release-readiness docs and latest rerun agree on 460/460.
+current release-readiness docs and latest rerun agree on 462/462.
 
 ## Fast Local Gates
 
@@ -28,7 +28,7 @@ current release-readiness docs and latest rerun agree on 460/460.
 | --- | --- | --- |
 | `git diff --check` | Whitespace/conflict-marker sanity | Passed |
 | `npm audit --audit-level=high` | High-severity dependency audit for desktop package | Passed, 0 vulnerabilities |
-| `npm test` | Full desktop Node test suite: `node --test 'test/*.test.js'` | Passed, 460/460 |
+| `npm test` | Full desktop Node test suite: `node --test 'test/*.test.js'` | Passed, 462/462 |
 | `npm run check:release-evidence` | Operator evidence-log completeness; fails until required rows are `PASS` or documented `DEFER` | Expected fail until manual gates are filled |
 
 The root package is the only package with test scripts relevant to this desktop
@@ -158,6 +158,10 @@ The release scripts are operational gates, not ordinary tests:
   emits release-note/install-page Markdown for the recommended desktop packages
   and checksum sidecars, using the same artifact preference order as the
   resolver.
+- `npm run -s generate:native-install-smoke-plan -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop`
+  emits clean-host install smoke commands and evidence bullets for the
+  resolver-selected macOS, Windows, and Linux packages. Add
+  `--trust-mode public-trust` before announcement to require macOS DMGs.
 - `npm run generate:package-manager-manifests -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop`
   emits Homebrew Cask and WinGet manifest drafts from attached release assets
   and `.sha256` sidecars. It defaults to public-trust gates; use
