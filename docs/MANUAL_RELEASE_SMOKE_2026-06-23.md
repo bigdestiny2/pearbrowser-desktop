@@ -30,6 +30,8 @@ announcement.
 - [ ] Build and verify desktop native package metadata:
   - `npm run check:appling-release -- --tag v0.5.0`
   - `npm run check:native-signing`
+  - Before public announcement, rerun as
+    `npm run check:native-signing -- --require-public-trust`.
   - `cd appling && npm ci && npm run generate && npm run build`
   - `cd .. && npm run package:appling -- --tag v0.5.0`
   - On macOS, verify the extracted `.app` with
@@ -38,7 +40,10 @@ announcement.
   - Confirm `.github/workflows/desktop-native-release.yml` is present on the
     default branch.
   - Run **Desktop Native Release** with tag `v0.5.0` and `source_ref` set to the
-    packaging branch/commit, usually merged `main`.
+    packaging branch/commit, usually merged `main`. Use `release_mode:
+    package-proof` for unsigned/ad-hoc packaging proof and `release_mode:
+    public-trust` for announcement-ready native assets. Published release and
+    tag-triggered runs default to `public-trust`.
   - Expected: `v0.5.0` release gets macOS `.app.zip`, Windows `.msix`, Linux
     `.AppImage`, per-asset `.sha256`, `SHA256SUMS-*`, and `manifest-*` files.
   - Verify attachments after upload:
