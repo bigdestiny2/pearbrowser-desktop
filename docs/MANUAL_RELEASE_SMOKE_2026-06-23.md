@@ -34,6 +34,21 @@ announcement.
   - `node scripts/verify-pin.js --expect 18614 --hiverelay`
   - `node scripts/verify-release-contents.js --expect 18614 --missing /.landing-seed.mjs --missing /pearbrowser-storage --missing /docs --missing /scripts --missing /examples --missing /test`
   - `node scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --expect-app hiveworm`
+- [ ] Build and verify desktop native package metadata:
+  - `npm run check:appling-release -- --tag v0.5.0`
+  - `cd appling && npm ci && npm run generate && npm run build`
+  - `cd .. && npm run package:appling -- --tag v0.5.0`
+  - On macOS, verify the extracted `.app` with
+    `codesign --verify --deep --strict --verbose=2`.
+- [ ] Backfill native GitHub release assets:
+  - Confirm `.github/workflows/desktop-native-release.yml` is present on the
+    default branch.
+  - Run **Desktop Native Release** with tag `v0.5.0` and `source_ref` set to the
+    packaging branch/commit, usually merged `main`.
+  - Expected: `v0.5.0` release gets macOS `.app.zip`, Windows `.msix`, Linux
+    `.AppImage`, per-asset `.sha256`, `SHA256SUMS-*`, and `manifest-*` files.
+  - Record the Actions run URL and resulting release asset list in the evidence
+    log.
 - [ ] After filling `docs/RELEASE_SMOKE_EVIDENCE_LOG_2026-06-23.md`, run
   `npm run check:release-evidence`.
   - Expected before manual gates are filled: non-zero with blank/incomplete

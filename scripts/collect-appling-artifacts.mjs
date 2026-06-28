@@ -38,7 +38,7 @@ const appName = sanitizeName(args.appName || 'PearBrowser')
 
 const filePatterns = {
   darwin: [/\.dmg$/i, /\.pkg$/i, /\.zip$/i],
-  win32: [/\.exe$/i, /\.msi$/i, /\.zip$/i],
+  win32: [/\.exe$/i, /\.msi$/i, /\.msix$/i, /\.zip$/i],
   linux: [/\.AppImage$/i, /\.deb$/i, /\.rpm$/i, /\.snap$/i, /\.tar\.gz$/i, /\.tgz$/i, /\.tar\.xz$/i, /\.zip$/i]
 }
 

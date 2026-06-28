@@ -7,6 +7,10 @@ name: Desktop Native Release
         description: GitHub release tag to build and attach assets to
         required: true
         default: v0.5.0
+      source_ref:
+        description: Git ref to build the native wrapper from
+        required: true
+        default: main
   release:
     types:
       - published
@@ -23,7 +27,12 @@ concurrency:
 
 env:
   RELEASE_TAG: ${{ github.event.release.tag_name || github.event.inputs.tag || github.ref_name }}
+  SOURCE_REF: ${{ github.event.inputs.source_ref || github.event.release.tag_name || github.ref_name }}
   NODE_VERSION: 22
+  PEARBROWSER_MACOS_SIGNING_IDENTITY: ${{ secrets.PEARBROWSER_MACOS_SIGNING_IDENTITY || '-' }}
+  PEARBROWSER_MACOS_SIGNING_KEYCHAIN: ${{ secrets.PEARBROWSER_MACOS_SIGNING_KEYCHAIN || '' }}
+  PEARBROWSER_WINDOWS_SIGNING_SUBJECT: ${{ secrets.PEARBROWSER_WINDOWS_SIGNING_SUBJECT || 'CN=PearBrowser Desktop' }}
+  PEARBROWSER_WINDOWS_SIGNING_THUMBPRINT: ${{ secrets.PEARBROWSER_WINDOWS_SIGNING_THUMBPRINT || '' }}
 
 jobs:
   build-native:
@@ -55,7 +64,7 @@ jobs:
       - name: Checkout PearBrowser desktop
         uses: actions/checkout@v4
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ env.SOURCE_REF }}
           path: pear-ecosystem/01-browser/pearbrowser-desktop
 
       - name: Setup Node
@@ -74,9 +83,7 @@ jobs:
           cmake --version
 
       - name: Install appling build tools
-        run: |
-          npm install -g bare-make
-          npm install --prefix appling
+        run: npm ci --prefix appling
 
       - name: Verify appling release metadata
         run: node scripts/check-appling-release.mjs --tag "$RELEASE_TAG"

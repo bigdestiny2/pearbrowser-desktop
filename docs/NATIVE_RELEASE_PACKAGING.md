@@ -9,10 +9,14 @@ artifacts plus checksums.
 
 Use the manual GitHub Actions trigger:
 
-1. Open **Actions -> Desktop Native Release**.
-2. Run the workflow with tag `v0.5.0`.
-3. Wait for the macOS, Windows, and Linux jobs to finish.
-4. Confirm the `v0.5.0` GitHub release has the generated installers, per-file
+1. Make sure the branch containing `.github/workflows/desktop-native-release.yml`
+   has been merged to the default branch, otherwise GitHub will not expose the
+   manual workflow trigger.
+2. Open **Actions -> Desktop Native Release**.
+3. Run the workflow with tag `v0.5.0` and `source_ref` set to the branch or
+   commit that contains this packaging code, usually `main` after merge.
+4. Wait for the macOS, Windows, and Linux jobs to finish.
+5. Confirm the `v0.5.0` GitHub release has the generated installers, per-file
    `.sha256` files, `SHA256SUMS-*`, and `manifest-*` files attached.
 
 The target GitHub release must already exist. The attach job verifies the
@@ -29,9 +33,8 @@ release entries.
 
 ```sh
 npm run check:appling-release -- --tag v0.5.0
-npm install -g bare-make
 cd appling
-npm install
+npm ci
 npm run generate
 npm run build
 cd ..
@@ -40,12 +43,20 @@ npm run package:appling -- --tag v0.5.0
 
 The collector searches `appling/build` for platform-native outputs:
 
-- macOS: `.dmg`, `.pkg`, `.zip`, or a zipped `.app` bundle
-- Windows: `.exe`, `.msi`, or `.zip`
+- macOS: `.dmg`, `.pkg`, `.zip`, or a zipped `.app` bundle. The current
+  `cmake-pear` path emits a `.app` bundle that the collector zips as
+  `.app.zip`.
+- Windows: `.msix`, `.exe`, `.msi`, or `.zip`. The current `cmake-pear` path
+  emits `.msix`.
 - Linux: `.AppImage`, `.deb`, `.rpm`, `.snap`, `.tar.*`, or `.zip`
 
 Each copied asset is renamed to `PearBrowser-<version>-<platform>-<arch>.*` and
 gets a SHA-256 sidecar. The workflow uploads exactly those collected files.
+
+`appling/package-lock.json` is committed on purpose. The native wrapper pulls in
+`cmake-pear` plus platform packaging helpers; release CI must use
+`npm ci --prefix appling` so a rerun for the same tag builds with the same
+toolchain that was tested locally.
 
 ## Metadata Contract
 
@@ -55,19 +66,31 @@ gets a SHA-256 sidecar. The workflow uploads exactly those collected files.
 - `appling/CMakeLists.txt` does not match the production Pear key in `pear.json`
 - the appling CMake version is stale
 - the appling package no longer exposes `generate`, `build`, and `package`
+- the native wrapper toolchain lockfile, pinned Bare headers, macOS ICNS asset,
+  ad-hoc macOS signing default, or Windows unsigned-packaging fallback is
+  missing
 
 This keeps the native wrappers pinned to the same release that was staged and
 verified with `scripts/release-prod.sh`.
 
 ## Signing
 
-The current workflow produces unsigned artifacts. Signing can be layered in once
-the release credentials exist:
+The current macOS workflow produces ad-hoc signed `.app.zip` artifacts so local
+and CI builds verify without a private Apple certificate. The current Windows
+workflow can package unsigned `.msix` artifacts without a private certificate.
+Public trust signing is still a release-credential gate:
 
-- macOS: add Developer ID certificate import and configure CMake signing before
-  `npm run --prefix appling build`
-- Windows: add certificate import or signtool signing before collection
-- Linux: attach package checksums; no signing is required for the current path
+- macOS: import a Developer ID certificate, configure
+  `PEARBROWSER_MACOS_SIGNING_IDENTITY` and optional
+  `PEARBROWSER_MACOS_SIGNING_KEYCHAIN` before `npm run --prefix appling build`,
+  then notarize before attaching public assets.
+- Windows: add certificate import and configure the MSIX signing subject /
+  thumbprint through `PEARBROWSER_WINDOWS_SIGNING_SUBJECT` and
+  `PEARBROWSER_WINDOWS_SIGNING_THUMBPRINT` before collection. If the thumbprint
+  is empty, the build intentionally skips SignTool and uploads an unsigned MSIX
+  package for packaging proof only.
+- Linux: attach package checksums; no signing is required for the current
+  AppImage path.
 
 Do not attach hand-built local installers to a public release unless the
 corresponding workflow job cannot run and the manual build command plus checksum

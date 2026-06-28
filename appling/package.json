@@ -19,6 +19,8 @@
     "package": "node ../scripts/collect-appling-artifacts.mjs"
   },
   "devDependencies": {
+    "bare-headers": "1.28.7",
+    "bare-make": "1.8.0",
     "cmake-pear": "^3.0.2"
   }
 }

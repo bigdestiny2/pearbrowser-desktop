@@ -19,6 +19,7 @@ The release is in strong shape for a community launch. The core protocol tests a
 - Mobile release preflight is now machine-checkable with `npm run release:preflight`: local structural prerequisites pass (version/package IDs, native worklet bundles, iOS BareKit/addons, Android BareKit AAR, EAS identity), and the remaining failures are the expected external production gates: real Android signing env/keystore, Apple development team signing, TestFlight/App Store Connect validation, and Play/Firebase validation.
 - Desktop source-install reproducibility is now explicit: `npm install` runs `scripts/check-hiverelay-layout.mjs`, which verifies the required sibling HiveRelay workspace packages at `../../00-core/hiverelay/packages/{core,client,verifier}`. Those `0.20.2` packages are not published to npm, so a standalone `pearbrowser-desktop` clone is documented as insufficient until the relay packages are published.
 - Desktop GitHub Actions CI is now present: `.github/workflows/desktop-ci.yml` checks out PearBrowser desktop, `bigdestiny2/PearBrowser@de85d420c942d433905324c3e098acc34458a23a`, and `bigdestiny2/P2P-Hiverelay@v0.20.2`, verifies the local workspace layout, runs `npm ci`, runs the desktop test suite, and runs the high-severity dependency audit.
+- Desktop native packaging is now wired through `.github/workflows/desktop-native-release.yml`: macOS emits an ad-hoc signed `.app.zip`, Windows emits `.msix`, Linux emits `.AppImage`, and the collector attaches checksums plus manifests. Manual `v0.5.0` backfill must use `source_ref` pointing at the packaging branch or merged `main`, because the original release tag predates the native packaging fixes.
 - Desktop HiveRelay hybrid fetch is now bounded: `RelayClient` caps content
   responses separately from small control responses and destroys hanging relay
   requests on timeout, with `test/relay-client-http.test.js` covering the
@@ -151,6 +152,7 @@ The release script is in better shape after the recent verify-step fix:
 - `scripts/collect-desktop-release-evidence.mjs` runs the safe desktop evidence gates and can patch the automated rows in `docs/RELEASE_SMOKE_EVIDENCE_LOG_2026-06-23.md`; GitHub Actions runs `npm run evidence:desktop:ci` after install/test/audit to emit the Desktop CI evidence row.
 - `scripts/verify-release-contents.js` fresh-loads the production drive metadata and asserts ignored/operator paths are absent after purge staging.
 - `scripts/runtime-rpc-smoke.mjs` checks a launched desktop runtime through the diagnostic RPC path and fails if the backend has not reached DHT/proxy/relay readiness.
+- `scripts/check-appling-release.mjs` checks native wrapper metadata, lockfile-owned CMake tooling, pinned Bare headers, macOS ICNS/ad-hoc signing, and Windows unsigned-package fallback. `scripts/collect-appling-artifacts.mjs` normalizes `.app.zip`, `.msix`, and `.AppImage` outputs with SHA-256 sidecars and manifests.
 - The live DHT verifiers must run with real network access. In a restricted sandbox, peer discovery can time out even when the same checks pass outside the sandbox.
 
 Required external smoke before a public announcement:
@@ -182,6 +184,9 @@ npm run validate # publisher catalogue
 node scripts/gen-catalogue-seed.mjs
 node scripts/publish-catalog-bee.js catalog-source/pearbrowser-network.catalog.json --storage /Users/localllm/Projects/pear-ecosystem/03-sites/pearbrowser-publishers/catalog
 npm run evidence:desktop -- --write --ci-url <Desktop CI run URL> # runs relays/app-full/bundle-contract gates and patches automated evidence rows
+npm run check:appling-release -- --tag v0.5.0 # desktop native packaging metadata, latest run passed
+cd appling && npm ci && npm run generate && npm run build # desktop native local macOS build, latest run produced an ad-hoc signed PearBrowser.app
+npm run package:appling -- --tag v0.5.0 # desktop native local macOS collection, produced PearBrowser-0.5.0-macos-arm64.app.zip
 node scripts/check-relays.js --require-relay --json # latest rerun: 1 unique relay reachable, 8 live connections
 node scripts/verify-pin.js --expect 33841 --hiverelay # latest rerun: length 33841, peers 3, /backend/anongpt-buyer.js sampled; storage-proof evidence is captured when upgraded relays expose it
 node scripts/verify-release-contents.js --expect 33841 --missing /.landing-seed.mjs --missing /pearbrowser-storage --missing /docs --missing /scripts --missing /examples --missing /test # latest rerun: length 33841, 10250 entries, forbidden paths absent
