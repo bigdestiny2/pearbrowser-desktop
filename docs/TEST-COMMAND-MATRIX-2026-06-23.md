@@ -144,8 +144,9 @@ The release scripts are operational gates, not ordinary tests:
   `.sha256` sidecars, `SHA256SUMS-*`, and `manifest-*` files.
 - `npm run check:native-release-assets -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop`
   verifies the attached GitHub release asset set after upload: macOS, Windows,
-  and Linux native artifacts, one checksum index and manifest per platform, and
-  one `.sha256` sidecar per installer/package file.
+  and Linux native artifacts, one checksum index and manifest per
+  platform/architecture pair, and one `.sha256` sidecar per installer/package
+  file.
 - `.github/workflows/desktop-native-release.yml` is the cross-platform release
   asset backfill path. It must be present on the default branch, and manual
   backfills should run with tag `v0.5.0` plus `source_ref` set to the branch or
@@ -153,10 +154,10 @@ The release scripts are operational gates, not ordinary tests:
   unsigned/ad-hoc asset refreshes and `release_mode=public-trust` when the run
   must fail closed on missing macOS notarization or Windows signing credentials.
   Release-published and tag-triggered runs default to `public-trust`. Latest proof: run
-  `https://github.com/bigdestiny2/pearbrowser-desktop/actions/runs/28317333414`
-  succeeded from `main` after the native signing credential preflight merge and
-  refreshed 16 `v0.5.0` assets; the release asset checker now runs after upload
-  in the workflow.
+  `https://github.com/bigdestiny2/pearbrowser-desktop/actions/runs/28321639492`
+  succeeded from `main` after the macOS Intel release-target merge and refreshed
+  20 `v0.5.0` assets, including macOS arm64/x64; the release asset checker now
+  runs after upload in the workflow.
 - Fresh-peer verification should be run off the publisher box when possible.
 - Desktop source install depends on the committed HiveRelay `0.20.0` package
   tarballs in `vendor/hiverelay`, verified by
