@@ -116,10 +116,15 @@ as separate gates:
 - Android APK/AAB signing and verification.
 - broader real-device smoke before mobile distribution.
 
-Latest mobile evidence refresh: sibling repo `bigdestiny2/PearBrowser@01eb8c7`
-records `npm test` at 136/136, high-severity audit exit `0`, and release
-preflight `14 pass / 0 warn / 4 fail` at `2026-06-23T15:51:08.065Z`. The four
-failures remain the expected production credential/store-validation gates.
+Latest mobile evidence refresh: sibling repo
+`bigdestiny2/PearBrowser@9101200d8bb54ff31b21d6d90154cb2321756a6c` passed
+Mobile Release Preflight run
+`https://github.com/bigdestiny2/PearBrowser/actions/runs/28316870344` on `main`:
+`npm test` at 139/139, high-severity audit exit `0`, native bundle and BareKit
+mirror steps green, and the uploaded `mobile-release-preflight` artifact
+verified as 14 pass, 0 warn, 4 expected blockers, and 0 unexpected blockers or
+warnings. The four blockers remain the expected production
+credential/store-validation gates.
 
 ## Release Operations And Publish Gates
 
