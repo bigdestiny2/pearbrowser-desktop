@@ -209,4 +209,4 @@ prefer `git stash apply` over `pop`; build risky UI changes in a separate worktr
 | [`HIVERELAY-BACKBONE-HANDOVER.md`](./HIVERELAY-BACKBONE-HANDOVER.md) | Relay-operator handover (upstream dep) |
 | [`P2P-BROWSER-FEATURE-ROADMAP.md`](./P2P-BROWSER-FEATURE-ROADMAP.md) | Product roadmap |
 | [`AUTOBEE-RESEARCH.md`](./AUTOBEE-RESEARCH.md) | Autobase/Autobee notes (incl. the durability caveat the spikes test) |
-| [`../CHANGELOG.md`](../CHANGELOG.md) | Released version history (current: v0.4.5) |
+| [`../CHANGELOG.md`](../CHANGELOG.md) | Released version history (current: v0.5.0) |

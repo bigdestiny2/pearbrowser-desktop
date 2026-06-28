@@ -24,7 +24,7 @@ announcement.
   - `git diff --check`
   - `npm audit --audit-level=high`
   - `node scripts/check-relays.js`
-  - `node scripts/verify-pin.js --expect 18552 --hiverelay`
+  - `node scripts/verify-pin.js --expect 18640 --hiverelay`
   - `node scripts/verify-release-contents.js --expect 18640 --missing /.landing-seed.mjs --missing /pearbrowser-storage --missing /docs --missing /scripts --missing /examples --missing /test`
   - `node scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --expect-app hiveworm`
 - [ ] Build and verify desktop native package metadata:

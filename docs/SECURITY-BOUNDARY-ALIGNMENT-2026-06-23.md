@@ -51,9 +51,9 @@ signing/store validation, and source-install dependency publication strategy.
   current code shape: local search is live, trusted-peer federation is opt-in,
   naming is contact/provenance aware, and the Nostr bridge is Pear-native rather
   than a general public relay client.
-- `docs/TEST-COMMAND-MATRIX-2026-06-23.md` superseded older test-count claims at
-  427/427. This pass reran the same root command after later local changes and
-  observed `npm test` at 429/429.
+- `docs/TEST-COMMAND-MATRIX-2026-06-23.md` supersedes older test-count claims.
+  The current release branch records `npm test` at 443/443 after the runtime
+  storage gate and release story smoke coverage landed.
 
 ## Known Security Residuals
 

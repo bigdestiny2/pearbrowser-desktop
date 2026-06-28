@@ -6,7 +6,7 @@ and remaining operator gates before doing Level 1 or Level 2 work.
 
 ## Current Read
 
-PearBrowser Desktop is a mature v0.4.5 release candidate for a P2P-native
+PearBrowser Desktop is a mature v0.5.0 release candidate for a P2P-native
 browser, app catalogue, site publisher, local-first search engine, naming layer,
 trusted-contact Nostr bridge, and Pear app launcher.
 
@@ -17,10 +17,10 @@ federated search, safe target normalization, identity-backed login, swarm.v1,
 and operational scripts for pin, catalogue, relay, and bundle verification.
 
 The strongest current evidence is local and protocol-level. The release notes
-record `npm test` passing with 427/427 desktop tests, Desktop CI passing on the
+record `npm test` passing with 443/443 desktop tests, Desktop CI passing on the
 release branch, high-severity dependency audit passing, the live catalogue
 fresh-peer check passing at Hyperbee length 273 with 14 apps, and the production
-browser drive fresh-peer check passing at length 18552. The search handover
+browser drive fresh-peer check passing at length 18640. The search handover
 also records that local self-search is live and opt-in trusted-peer federation
 is wired through `QueryPlanner`.
 
@@ -32,7 +32,7 @@ validation, and broader real-device smoke.
 
 ## Source Evidence Read
 
-- `package.json` declares `pearbrowser-desktop` v0.4.5 and a compact local test
+- `package.json` declares `pearbrowser-desktop` v0.5.0 and a compact local test
   command: `node --test 'test/*.test.js'`.
 - `README.md` describes the current release key, HiveRelay pinning model,
   catalogue shape, app launch behavior, search, naming, Nostr, identity,
@@ -51,6 +51,9 @@ validation, and broader real-device smoke.
   the 2026-06-23 release recheck.
 - `docs/HIVERELAY-BACKBONE-HANDOVER.md` describes the schema-sheets relay-index
   design that future desktop relay discovery can consume.
+- `docs/PEERCORD_BUNDLE_REPAIR_2026-06-28.md` records why Peercord's public
+  bundle availability repair depends on the Peercord publisher/operator even
+  though the upstream source is reachable.
 
 ## Strong Evidence Completed
 
@@ -66,8 +69,8 @@ validation, and broader real-device smoke.
   `hyperbee://f5fb7500bccd60a976d2b1d24246108f4444a210b9ca591533114dffc089934d`
   with 14 apps, including Peercord, peerit, and HiveWorm.
 - Peercord is intentionally treated as `standalone`, not a headless tab app,
-  because the live bundle contract shows a desktop Pear app with `BrowserWindow`
-  and no `Pear.worker.pipe` entry.
+  because the historical bundle contract and latest source audit both show a
+  desktop Pear app with `BrowserWindow` and no `Pear.worker.pipe` entry.
 - Lighthouse search is live locally and federates through a trust graph when
   requested. The handover records deterministic ranking, bounded fanout,
   identity binding, digest checks, completeness primitives, and verify/drop
@@ -86,10 +89,10 @@ validation, and broader real-device smoke.
 
 - Promoted copy matched the draft with `cmp -s`.
 - `git diff --check` passed on the current dirty worktree.
-- `npm test` passed on the current dirty worktree.
-  - Node test runner: 427 tests passed, 0 failed.
-  - This supersedes the older 404/404 and 408-test counts recorded in the release notes
-    for purposes of this local loop.
+- `npm test` passed on the latest release branch.
+  - Node test runner: 443 tests passed, 0 failed.
+  - This supersedes the older 404/404, 408-test, and 427-test counts recorded in
+    older release notes for purposes of current release evidence.
 
 ## Open Loops
 
@@ -101,6 +104,10 @@ validation, and broader real-device smoke.
 - Do not automate Peercord's trust-prompt approval. It executes third-party code
   and creates a persistent Pear trust decision for
   `pear://wmir47w7mai3b1skj66mx7fzso6k6o91kipaney7gtt69npimouy`.
+- Do not run Peercord's `pear:stage`, `pear:seed`, or `release:*` scripts from
+  the PearBrowser release machine unless the Peercord publisher explicitly
+  grants authority to operate the canonical key. Current Peercord bundle repair
+  needs upstream/operator reseed or complete publisher storage.
 - Real-network checks can false-negative in restricted/sandboxed environments.
   `scripts/check-relays.js`, `scripts/verify-pin.js`, `scripts/verify-live-catalog.js`,
   and bundle sampling should be run with real DHT access before announcement.
@@ -135,8 +142,8 @@ Real-network release checks:
 
 ```bash
 node scripts/check-relays.js
-node scripts/verify-pin.js --expect 18552 --hiverelay
-node scripts/verify-release-contents.js --expect 18552 --missing /.landing-seed.mjs --missing /pearbrowser-storage --missing /docs --missing /scripts --missing /examples --missing /test
+node scripts/verify-pin.js --expect 18640 --hiverelay
+node scripts/verify-release-contents.js --expect 18640 --missing /.landing-seed.mjs --missing /pearbrowser-storage --missing /docs --missing /scripts --missing /examples --missing /test
 node scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --expect-app hiveworm
 node scripts/verify-app-full.js --key 1868916a7a282ff0f211b11b536e9642828c32d3a817a254e1ef7e602709e25d --name pearbrowser-homepage --samples 12 --timeout 90
 node scripts/verify-app-full.js --key a2ea4d769d5e2b90caca4fbcb7f4b7b43caf43f2555b81201d3463ef89b55c26 --name peercord --samples 12 --timeout 90
@@ -161,8 +168,9 @@ Run a PearBrowser Desktop release-evidence cleanup pass:
    or pre-existing local edits.
 2. Run real-network verifier scripts from a non-sandboxed environment and
    append exact results to the manual smoke checklist.
-3. Capture a human Peercord trust-prompt and standalone-window launch result
-   without automating the persistent trust decision.
+3. Coordinate Peercord upstream/operator reseed, then capture a human
+   trust-prompt and standalone-window launch result without automating the
+   persistent trust decision.
 4. Pick one bounded product clarity improvement: term-level search result
    explanations, naming ambiguity UI, fuller Nostr quarantine inspection, or
    schema-sheets Apps search.
