@@ -5,6 +5,10 @@ PearBrowser Desktop ships through the stable Pear production link, and the
 The GitHub release should not be assetless: every release tag needs native
 artifacts plus checksums.
 
+For the broader install/distribution plan, including package-proof versus
+public-trust release lanes and channel expansion, see
+[Packaging strategy](./PACKAGING_STRATEGY_2026-06-28.md).
+
 ## Backfill v0.5.0
 
 Use the manual GitHub Actions trigger:
