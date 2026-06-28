@@ -22,10 +22,13 @@ Primary user promise: download one native package, launch it normally, and let P
   WinGet singleton manifest drafts from attached assets and checksum sidecars;
   it defaults to public-trust gates and allows package-proof output only for
   rehearsal.
+- `scripts/check-linux-appimage-metadata.mjs` verifies Linux AppImage desktop
+  integration metadata: source icon/AppStream files locally, and generated
+  AppDir/AppImage desktop entry, icon, and metainfo during Linux native builds.
 - `scripts/check-public-trust-readiness.mjs` aggregates the public-trust
   signing, published release asset, byte-level download, clean-install smoke
-  plan, package-manager draft, and operator evidence-log gates into one
-  blocker report.
+  plan, Linux AppImage metadata, package-manager draft, and operator
+  evidence-log gates into one blocker report.
 - `.github/workflows/desktop-native-release.yml` builds macOS, Windows, and Linux packages in CI.
 - The native workflow now has two modes:
   - `package-proof`: manual default, permits ad-hoc macOS signing and unsigned Windows packages.
@@ -50,7 +53,7 @@ The stable Pear link is still the application-content update channel. Native pac
 | --- | --- | --- | --- |
 | macOS | ad-hoc signed `.app.zip` for arm64 and x64 | Developer ID signed and notarized `.dmg`, with stapled ticket and SHA-256 sidecar | Homebrew Cask after the `.dmg` URL and checksum are stable |
 | Windows | unsigned `.exe` and `.msix` package proof | Authenticode-signed `.exe` and `.msix`, timestamped and verified in CI | WinGet manifest after the signed installer URL and `InstallerSha256` are stable |
-| Linux | `.AppImage` plus checksums | `.AppImage` remains primary, with desktop file/icon/AppStream metadata checked | `.deb`/`.rpm` only if user demand or distro policy warrants it |
+| Linux | `.AppImage` plus checksums | `.AppImage` remains primary, with desktop file/icon/AppStream metadata checked by CI | `.deb`/`.rpm` only if user demand or distro policy warrants it |
 | iOS | simulator and native-shell evidence only | TestFlight/App Store validation after production Apple signing | App Store |
 | Android | emulator and disposable release signing evidence | production upload/release keystore plus Play/Firebase validation | Google Play or Firebase App Distribution |
 
@@ -77,15 +80,18 @@ The stable Pear link is still the application-content update channel. Native pac
    `npm run check:native-release-assets -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --require-published --require-public-trust`.
 7. Verify the recommended package downloads:
    `npm run verify:native-downloads -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --all`.
-8. Resolve and record the user-facing packages for macOS, Windows, and Linux:
+8. Verify Linux AppImage desktop integration metadata:
+   `npm run check:linux-appimage-metadata`; the native release workflow also
+   runs it with `--build-dir appling/build` on Linux before artifact collection.
+9. Resolve and record the user-facing packages for macOS, Windows, and Linux:
    `npm run resolve:native-release -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --platform <platform> --arch <arch>`.
-9. Generate the release-note/install-page block from the attached assets:
+10. Generate the release-note/install-page block from the attached assets:
    `npm run -s generate:native-install-snippet -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --trust-mode public-trust`.
-10. Generate the clean-machine smoke plan from the same assets:
+11. Generate the clean-machine smoke plan from the same assets:
    `npm run -s generate:native-install-smoke-plan -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --trust-mode public-trust`.
-11. Generate Homebrew/WinGet package-manager drafts from the same assets:
+12. Generate Homebrew/WinGet package-manager drafts from the same assets:
    `npm run generate:package-manager-manifests -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop`.
-12. Smoke install from a clean machine or VM per OS and record evidence in `docs/RELEASE_SMOKE_EVIDENCE_LOG_2026-06-23.md`.
+13. Smoke install from a clean machine or VM per OS and record evidence in `docs/RELEASE_SMOKE_EVIDENCE_LOG_2026-06-23.md`.
 
 Recommended OS-level checks:
 
@@ -100,8 +106,9 @@ Recommended OS-level checks:
 3. Use `npm run -s generate:native-install-smoke-plan` for the clean-host smoke checklist that must be executed before public-trust announcement or package-manager submission.
 4. Use `npm run check:public-trust-readiness` as the operator-facing summary
    gate before announcement; it should return `READY` only after signing
-   credentials, public-trust assets, byte verification, package-manager drafts,
-   clean-host evidence, and the announcement decision are all represented.
+   credentials, public-trust assets, byte verification, Linux metadata,
+   package-manager drafts, clean-host evidence, and the announcement decision
+   are all represented.
 5. Generate Homebrew/WinGet drafts with `npm run generate:package-manager-manifests`; submit them only after public-trust assets and clean-machine install evidence are green.
 6. Add Homebrew Cask only after macOS ships a notarized `.dmg`; Homebrew casks expect stable versioned URLs and checksums.
 7. Add WinGet only after Windows assets are signed and stable; WinGet manifests carry installer metadata and SHA-256 hashes, and the generated draft still needs publisher/license and silent-install behavior reviewed before submission.

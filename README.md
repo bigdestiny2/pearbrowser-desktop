@@ -196,6 +196,7 @@ node scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --
 | `scripts/check-hiverelay-layout.mjs` | Verifies the vendored HiveRelay `0.20.0` package tarballs used by standalone source installs; the sibling HiveRelay checkout is optional. |
 | `npm run resolve:native-release -- --tag <tag>` | Prints the recommended native release package and SHA-256 sidecar for the current or requested platform/architecture. |
 | `npm run verify:native-downloads -- --tag <tag> --all` | Downloads the recommended native packages and verifies each package against its `.sha256` sidecar. |
+| `npm run check:linux-appimage-metadata` | Verifies Linux AppImage desktop integration metadata source files, and can inspect a built AppDir/AppImage with `--build-dir`, `--appdir`, or `--appimage`. |
 | `npm run -s generate:native-install-snippet -- --tag <tag>` | Emits release-note/install-page Markdown for the recommended desktop packages and checksum sidecars. |
 | `npm run -s generate:native-install-smoke-plan -- --tag <tag>` | Emits clean-host install smoke commands and evidence bullets for macOS, Windows, and Linux. |
 | `npm run generate:package-manager-manifests -- --tag <tag>` | Emits Homebrew Cask and WinGet manifest drafts from release assets; defaults to public-trust gates. |
@@ -213,6 +214,7 @@ Current generated artifacts are `.app.zip` on macOS, `.msix` on Windows, and `.A
 
 ```sh
 npm run check:appling-release -- --tag v0.5.0
+npm run check:linux-appimage-metadata
 npm run resolve:native-release -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
 npm run -s generate:native-install-snippet -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
 npm run -s generate:native-install-smoke-plan -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop

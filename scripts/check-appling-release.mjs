@@ -7,6 +7,7 @@ const pearConfig = JSON.parse(readFileSync(new URL('../pear.json', import.meta.u
 const applingPackage = JSON.parse(readFileSync(new URL('../appling/package.json', import.meta.url), 'utf8'))
 const applingLock = JSON.parse(readFileSync(new URL('../appling/package-lock.json', import.meta.url), 'utf8'))
 const cmake = readFileSync(new URL('../appling/CMakeLists.txt', import.meta.url), 'utf8')
+const addPearApplingBlock = cmake.match(/add_pear_appling\([\s\S]*?\n\)/)?.[0] || ''
 
 const errors = []
 const args = parseArgs(process.argv.slice(2))
@@ -14,9 +15,9 @@ const expectedVersion = versionFromTag(args.tag) || rootPackage.version
 const productionLink = pearConfig.links?.production || ''
 const productionId = productionLink.replace(/^pear:\/\//, '')
 
-const cmakeId = matchValue(/\bID\s+"([^"]+)"/, 'ID')
-const cmakeName = matchValue(/\bNAME\s+"([^"]+)"/, 'NAME')
-const cmakeVersion = matchValue(/^\s+VERSION\s+([0-9]+(?:\.[0-9]+){1,3})/m, 'VERSION')
+const cmakeId = matchValue(/\bID\s+"([^"]+)"/, 'ID', addPearApplingBlock)
+const cmakeName = matchValue(/\bNAME\s+"([^"]+)"/, 'NAME', addPearApplingBlock)
+const cmakeVersion = matchValue(/^\s+VERSION\s+([0-9]+(?:\.[0-9]+){1,3})/m, 'VERSION', addPearApplingBlock)
 const bareHeadersCmakeVersion = matchValue(/\bPEARBROWSER_BARE_HEADERS_VERSION\s+"([^"]+)"/, 'PEARBROWSER_BARE_HEADERS_VERSION')
 const expectedBareHeadersVersion = '1.28.7'
 
@@ -107,11 +108,19 @@ for (const [label, path] of [
   ['macOS icon', '../appling/assets/darwin/icon.png'],
   ['macOS icns icon', '../appling/assets/darwin/icon.icns'],
   ['Windows icon', '../appling/assets/win32/icon.png'],
-  ['Linux icon', '../appling/assets/linux/icon.png']
+  ['Linux icon', '../appling/assets/linux/icon.png'],
+  ['Linux AppStream metainfo', '../appling/assets/linux/io.github.bigdestiny2.pearbrowser.metainfo.xml']
 ]) {
   const url = new URL(path, import.meta.url)
   if (!existsSync(url)) errors.push(`appling ${label} is missing: ${path.replace('../', '')}`)
   else if (statSync(url).size === 0) errors.push(`appling ${label} is empty: ${path.replace('../', '')}`)
+}
+
+if (!/PEARBROWSER_LINUX_METAINFO/.test(cmake)) {
+  errors.push('appling CMakeLists.txt must name the Linux AppStream metainfo source')
+}
+if (!/usr\/share\/metainfo\/io\.github\.bigdestiny2\.pearbrowser\.metainfo\.xml/.test(cmake)) {
+  errors.push('appling CMakeLists.txt must copy Linux AppStream metainfo into the AppDir')
 }
 
 if (errors.length) {
@@ -147,8 +156,8 @@ function versionFromTag (tag) {
   return normalized.slice(1)
 }
 
-function matchValue (regex, label) {
-  const match = cmake.match(regex)
+function matchValue (regex, label, source = cmake) {
+  const match = source.match(regex)
   if (!match) errors.push(`appling CMakeLists.txt is missing ${label}`)
   return match?.[1] || ''
 }
