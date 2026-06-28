@@ -340,6 +340,13 @@ test('runtime smoke asserts backend readiness fields', () => {
   assert.match(runtimeSmoke, /status\.hiveRelays/)
 })
 
+test('runtime smoke can enforce a clean release profile storage ceiling', () => {
+  assert.match(runtimeSmoke, /--max-storage-percent/)
+  assert.match(runtimeSmoke, /parseNonNegativeNumber/)
+  assert.match(runtimeSmoke, /storagePercent exceeds/)
+  assert.match(runtimeSmoke, /args\.maxStoragePercent/)
+})
+
 test('live catalogue verifier asserts Peercord provenance metadata', () => {
   assert.match(liveCatalogVerifier, /Peercord sourceUrl mismatch/)
   assert.match(liveCatalogVerifier, /https:\/\/git\.churchofmalware\.org\/mastercodeon\/Peercord/)
