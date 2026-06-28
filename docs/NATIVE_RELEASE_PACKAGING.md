@@ -117,6 +117,16 @@ installer formats when they exist: macOS `.dmg` before `.pkg` before
 packages. The resolver fails if the package or checksum sidecar is missing, so
 README install links cannot silently drift away from the release asset contract.
 
+`scripts/generate-native-install-snippet.mjs` uses the same resolver ordering for
+the four supported desktop targets and emits release-note/install-page Markdown
+with package links, `.sha256` sidecar links, install notes, and the package-proof
+or public-trust warning. Use it after the asset checker and download verifier,
+so user-facing copy is generated from the release assets that actually shipped:
+
+```sh
+npm run -s generate:native-install-snippet -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
+```
+
 `scripts/verify-native-downloads.mjs` is the stronger download-integrity check.
 It resolves the recommended package for the current platform/architecture, or
 all supported desktop targets with `--all`, downloads each package plus its

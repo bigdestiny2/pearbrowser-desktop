@@ -47,6 +47,13 @@ sidecar in one pass:
 npm run verify:native-downloads -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --all
 ```
 
+Release operators can generate a Markdown install block for release notes or an
+install page from the same resolver rules:
+
+```sh
+npm run -s generate:native-install-snippet -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
+```
+
 ## Verify The Download
 
 macOS and Linux:
