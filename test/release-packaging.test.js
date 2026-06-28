@@ -36,6 +36,8 @@ const nativeDownloadVerifier = readFileSync(new URL('../scripts/verify-native-do
 const nativeDownloadVerifierPath = fileURLToPath(new URL('../scripts/verify-native-downloads.mjs', import.meta.url))
 const nativeInstallSnippet = readFileSync(new URL('../scripts/generate-native-install-snippet.mjs', import.meta.url), 'utf8')
 const nativeInstallSnippetPath = fileURLToPath(new URL('../scripts/generate-native-install-snippet.mjs', import.meta.url))
+const nativeInstallSmokePlan = readFileSync(new URL('../scripts/generate-native-install-smoke-plan.mjs', import.meta.url), 'utf8')
+const nativeInstallSmokePlanPath = fileURLToPath(new URL('../scripts/generate-native-install-smoke-plan.mjs', import.meta.url))
 const packageManagerManifests = readFileSync(new URL('../scripts/generate-package-manager-manifests.mjs', import.meta.url), 'utf8')
 const packageManagerManifestsPath = fileURLToPath(new URL('../scripts/generate-package-manager-manifests.mjs', import.meta.url))
 const macosDmgPackager = readFileSync(new URL('../scripts/create-macos-dmg.mjs', import.meta.url), 'utf8')
@@ -217,6 +219,14 @@ test('native install snippet generator is exposed for release notes', () => {
   assert.match(nativeInstallSnippet, /Native Installers/)
   assert.match(nativeInstallSnippet, /artifactRank/)
   assert.match(nativeInstallSnippet, /Trust Note/)
+})
+
+test('native install smoke plan generator is exposed for clean-machine evidence', () => {
+  assert.equal(pkg.scripts?.['generate:native-install-smoke-plan'], 'node scripts/generate-native-install-smoke-plan.mjs')
+  assert.match(nativeInstallSmokePlan, /SUPPORTED_TARGETS/)
+  assert.match(nativeInstallSmokePlan, /Native Clean-Install Smoke Plan/)
+  assert.match(nativeInstallSmokePlan, /clean host or VM/)
+  assert.match(nativeInstallSmokePlan, /public-trust clean-install smoke requires notarized macOS DMG/)
 })
 
 test('package-manager manifest generator is exposed for channel expansion drafts', () => {
@@ -773,6 +783,119 @@ test('native install snippet generator emits release-note packages for every des
     assert.match(markdown.stdout, /PearBrowser-0\.5\.0-macos-arm64\.dmg/)
     assert.match(markdown.stdout, /PearBrowser-0\.5\.0-windows-x64\.exe/)
     assert.match(markdown.stdout, /These assets are expected to be signed\/notarized/)
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
+})
+
+test('native install smoke plan generator emits clean-machine commands for every desktop target', () => {
+  const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'pear-native-install-smoke-plan-')))
+  try {
+    const { releasePath } = writePackageManagerReleaseFixture(fixture, [
+      'PearBrowser-0.5.0-macos-arm64.app.zip',
+      'PearBrowser-0.5.0-macos-arm64.app.zip.sha256',
+      'PearBrowser-0.5.0-macos-x64.app.zip',
+      'PearBrowser-0.5.0-macos-x64.app.zip.sha256',
+      'PearBrowser-0.5.0-windows-x64.exe',
+      'PearBrowser-0.5.0-windows-x64.exe.sha256',
+      'PearBrowser-0.5.0-linux-x64.AppImage',
+      'PearBrowser-0.5.0-linux-x64.AppImage.sha256'
+    ])
+
+    const json = spawnSync(process.execPath, [
+      nativeInstallSmokePlanPath,
+      '--fixture',
+      releasePath,
+      '--tag',
+      'v0.5.0',
+      '--json'
+    ], {
+      cwd: fileURLToPath(new URL('..', import.meta.url)),
+      encoding: 'utf8'
+    })
+
+    assert.equal(json.status, 0, json.stderr || json.stdout)
+    const report = JSON.parse(json.stdout)
+    assert.equal(report.ok, true)
+    assert.equal(report.trustMode, 'package-proof')
+    assert.equal(report.targets.length, 4)
+    assert.ok(report.warnings.some((warning) => warning.includes('package-proof clean-install smoke')))
+    assert.ok(report.targets.find((target) => target.label === 'macOS Apple Silicon').commands.some((command) => command.includes('ditto -x -k')))
+    assert.ok(report.targets.find((target) => target.label === 'macOS Apple Silicon').commands.some((command) => command.includes('codesign --verify')))
+    assert.ok(report.targets.find((target) => target.label === 'Windows x64').commands.some((command) => command.includes('Get-AuthenticodeSignature')))
+    assert.ok(report.targets.find((target) => target.label === 'Windows x64').commands.some((command) => command.includes('Start menu')))
+    assert.ok(report.targets.find((target) => target.label === 'Linux x64').commands.some((command) => command.includes('chmod +x')))
+    assert.ok(report.targets.every((target) => target.evidence.some((item) => item.includes('source checkout'))))
+
+    const markdown = spawnSync(process.execPath, [
+      nativeInstallSmokePlanPath,
+      '--fixture',
+      releasePath,
+      '--tag',
+      'v0.5.0'
+    ], {
+      cwd: fileURLToPath(new URL('..', import.meta.url)),
+      encoding: 'utf8'
+    })
+
+    assert.equal(markdown.status, 0, markdown.stderr || markdown.stdout)
+    assert.match(markdown.stdout, /## Native Clean-Install Smoke Plan/)
+    assert.match(markdown.stdout, /### macOS Apple Silicon/)
+    assert.match(markdown.stdout, /```powershell/)
+    assert.match(markdown.stdout, /Evidence to record:/)
+
+    const blocked = spawnSync(process.execPath, [
+      nativeInstallSmokePlanPath,
+      '--fixture',
+      releasePath,
+      '--tag',
+      'v0.5.0',
+      '--trust-mode',
+      'public-trust',
+      '--json'
+    ], {
+      cwd: fileURLToPath(new URL('..', import.meta.url)),
+      encoding: 'utf8'
+    })
+
+    assert.notEqual(blocked.status, 0)
+    const blockedReport = JSON.parse(blocked.stdout)
+    assert.ok(blockedReport.errors.some((error) => error.includes('public-trust clean-install smoke requires notarized macOS DMG')))
+
+    const publicTrustDir = join(fixture, 'public-trust')
+    mkdirSync(publicTrustDir)
+    const { releasePath: publicTrustRelease } = writePackageManagerReleaseFixture(publicTrustDir, [
+      'PearBrowser-0.5.0-macos-arm64.dmg',
+      'PearBrowser-0.5.0-macos-arm64.dmg.sha256',
+      'PearBrowser-0.5.0-macos-x64.dmg',
+      'PearBrowser-0.5.0-macos-x64.dmg.sha256',
+      'PearBrowser-0.5.0-windows-x64.exe',
+      'PearBrowser-0.5.0-windows-x64.exe.sha256',
+      'PearBrowser-0.5.0-linux-x64.AppImage',
+      'PearBrowser-0.5.0-linux-x64.AppImage.sha256'
+    ])
+    const publicTrust = spawnSync(process.execPath, [
+      nativeInstallSmokePlanPath,
+      '--fixture',
+      publicTrustRelease,
+      '--tag',
+      'v0.5.0',
+      '--trust-mode',
+      'public-trust',
+      '--json'
+    ], {
+      cwd: fileURLToPath(new URL('..', import.meta.url)),
+      encoding: 'utf8'
+    })
+
+    assert.equal(publicTrust.status, 0, publicTrust.stderr || publicTrust.stdout)
+    const publicTrustReport = JSON.parse(publicTrust.stdout)
+    assert.equal(publicTrustReport.ok, true)
+    assert.deepEqual(publicTrustReport.warnings, [])
+    const macos = publicTrustReport.targets.find((target) => target.label === 'macOS Apple Silicon')
+    assert.ok(macos.commands.some((command) => command.includes('hdiutil attach')))
+    assert.ok(macos.commands.some((command) => command.includes('xcrun stapler validate')))
+    assert.ok(macos.commands.some((command) => command.includes('spctl --assess')))
   } finally {
     rmSync(fixture, { recursive: true, force: true })
   }

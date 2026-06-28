@@ -127,6 +127,17 @@ so user-facing copy is generated from the release assets that actually shipped:
 npm run -s generate:native-install-snippet -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
 ```
 
+`scripts/generate-native-install-smoke-plan.mjs` turns those same resolver
+choices into clean-host smoke instructions. It emits per-target download,
+checksum, OS trust, install, launch, and evidence-capture steps for macOS,
+Windows, and Linux. The default `package-proof` mode records expected trust
+prompts; `--trust-mode public-trust` refuses macOS assets unless the release has
+notarized DMGs:
+
+```sh
+npm run -s generate:native-install-smoke-plan -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
+```
+
 `scripts/generate-package-manager-manifests.mjs` prepares the later channel
 expansion drafts from the attached release assets. It reads the macOS and
 Windows `.sha256` sidecars, writes a Homebrew Cask draft and a WinGet singleton
