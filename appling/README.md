@@ -33,6 +33,11 @@ Run `npm run check:appling-release -- --tag v0.5.0` before cutting a release.
 It verifies that `CMakeLists.txt` uses the same version as the desktop package
 and the same Pear key as `pear.json`.
 
+Run `npm run check:native-signing -- --require-public-trust` from the repo root
+before publishing public desktop assets. It validates that the macOS Developer
+ID/notary and Windows PFX secret sets are complete before CI spends a release
+run.
+
 See `../docs/NATIVE_RELEASE_PACKAGING.md` for the release workflow and asset
 upload contract.
 

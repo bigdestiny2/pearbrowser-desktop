@@ -23,6 +23,8 @@ const nativeReleaseWorkflow = readFileSync(new URL('../.github/workflows/desktop
 const applingReleaseCheck = readFileSync(new URL('../scripts/check-appling-release.mjs', import.meta.url), 'utf8')
 const applingArtifactCollector = readFileSync(new URL('../scripts/collect-appling-artifacts.mjs', import.meta.url), 'utf8')
 const applingArtifactCollectorPath = fileURLToPath(new URL('../scripts/collect-appling-artifacts.mjs', import.meta.url))
+const nativeSigningCheck = readFileSync(new URL('../scripts/check-native-signing-credentials.mjs', import.meta.url), 'utf8')
+const nativeSigningCheckPath = fileURLToPath(new URL('../scripts/check-native-signing-credentials.mjs', import.meta.url))
 const macosNotarizeScript = readFileSync(new URL('../scripts/notarize-appling-macos.mjs', import.meta.url), 'utf8')
 const releaseScript = readFileSync(new URL('../scripts/release-prod.sh', import.meta.url), 'utf8')
 const sheetsBundleScript = readFileSync(new URL('../scripts/build-sheets-bundle.sh', import.meta.url), 'utf8')
@@ -62,6 +64,13 @@ test('HiveRelay workspace pin is v0.20.0 trustless verification release', () => 
 
 test('release evidence checker is exposed as an operator script', () => {
   assert.equal(pkg.scripts?.['check:release-evidence'], 'node scripts/check-release-evidence.mjs')
+})
+
+test('native signing credential checker is exposed as an operator script', () => {
+  assert.equal(pkg.scripts?.['check:native-signing'], 'node scripts/check-native-signing-credentials.mjs')
+  assert.match(nativeSigningCheck, /--require-public-trust/)
+  assert.match(nativeSigningCheck, /PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64/)
+  assert.match(nativeSigningCheck, /PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64/)
 })
 
 test('appling release metadata stays in sync with the production Pear channel', () => {
@@ -109,6 +118,7 @@ test('native release workflow builds and attaches appling artifacts for every de
   assert.match(nativeReleaseWorkflow, /npm ci --prefix appling/)
   assert.doesNotMatch(nativeReleaseWorkflow, /npm install -g bare-make/)
   assert.match(nativeReleaseWorkflow, /PEARBROWSER_MACOS_SIGNING_IDENTITY/)
+  assert.match(nativeReleaseWorkflow, /node scripts\/check-native-signing-credentials\.mjs --platform "\$RUNNER_OS"/)
   assert.match(nativeReleaseWorkflow, /PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64/)
   assert.match(nativeReleaseWorkflow, /PEARBROWSER_MACOS_NOTARY_APPLE_ID/)
   assert.match(nativeReleaseWorkflow, /Import macOS signing certificate/)
@@ -131,6 +141,61 @@ test('native release workflow builds and attaches appling artifacts for every de
   assert.match(nativeReleaseWorkflow, /gh release upload "\$RELEASE_TAG" "\$\{assets\[@\]\}"/)
   assert.doesNotMatch(nativeReleaseWorkflow, /gh release create/)
   assert.match(nativeReleaseWorkflow, /contents: write/)
+})
+
+test('native signing credential checker separates package proof from public trust gates', () => {
+  const run = (env, args = []) => {
+    const result = spawnSync(process.execPath, [
+      nativeSigningCheckPath,
+      '--json',
+      ...args
+    ], {
+      cwd: fileURLToPath(new URL('..', import.meta.url)),
+      encoding: 'utf8',
+      env
+    })
+    return {
+      ...result,
+      report: result.stdout ? JSON.parse(result.stdout) : null
+    }
+  }
+
+  const proof = run({})
+  assert.equal(proof.status, 0)
+  assert.equal(proof.report.mode, 'package-proof')
+  assert.equal(proof.report.counts.fail, 0)
+  assert.ok(proof.report.counts.warn >= 3)
+
+  const publicTrustMissing = run({}, ['--require-public-trust'])
+  assert.notEqual(publicTrustMissing.status, 0)
+  assert.equal(publicTrustMissing.report.mode, 'public-trust')
+  assert.ok(publicTrustMissing.report.checks.some((check) => check.id === 'macos-certificate' && check.status === 'fail'))
+  assert.ok(publicTrustMissing.report.checks.some((check) => check.id === 'macos-notary' && check.status === 'fail'))
+  assert.ok(publicTrustMissing.report.checks.some((check) => check.id === 'windows-certificate' && check.status === 'fail'))
+
+  const macosComplete = run({
+    PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64: Buffer.from('dummy p12').toString('base64'),
+    PEARBROWSER_MACOS_CERTIFICATE_PASSWORD: 'secret',
+    PEARBROWSER_MACOS_SIGNING_IDENTITY: 'Developer ID Application: PearBrowser Desktop (TEAMID)',
+    PEARBROWSER_MACOS_NOTARY_APPLE_ID: 'release@example.com',
+    PEARBROWSER_MACOS_NOTARY_PASSWORD: 'secret',
+    PEARBROWSER_MACOS_NOTARY_TEAM_ID: 'TEAMID'
+  }, ['--platform', 'macos', '--require-public-trust'])
+  assert.equal(macosComplete.status, 0)
+  assert.equal(macosComplete.report.counts.fail, 0)
+
+  const windowsComplete = run({
+    PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64: Buffer.from('dummy pfx').toString('base64'),
+    PEARBROWSER_WINDOWS_CERTIFICATE_PASSWORD: 'secret'
+  }, ['--platform', 'windows', '--require-public-trust'])
+  assert.equal(windowsComplete.status, 0)
+  assert.equal(windowsComplete.report.counts.fail, 0)
+
+  const partialWindows = run({
+    PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64: Buffer.from('dummy pfx').toString('base64')
+  }, ['--platform', 'windows'])
+  assert.notEqual(partialWindows.status, 0)
+  assert.ok(partialWindows.report.checks.some((check) => check.id === 'windows-certificate' && check.status === 'fail'))
 })
 
 test('macOS notarization helper submits, staples, and verifies app bundles', () => {

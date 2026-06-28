@@ -33,6 +33,7 @@ release entries.
 
 ```sh
 npm run check:appling-release -- --tag v0.5.0
+npm run check:native-signing
 cd appling
 npm ci
 npm run generate
@@ -102,6 +103,19 @@ Public trust signing is still a release-credential gate:
   signatures before collection.
 - Linux: attach package checksums; no signing is required for the current
   AppImage path.
+
+Before spending a native release run on public distribution, validate the
+credential payload set:
+
+```sh
+npm run check:native-signing -- --require-public-trust
+```
+
+Without `--require-public-trust`, the command accepts the packaging-proof path:
+macOS can remain ad-hoc signed, Windows can remain unsigned, and Linux relies on
+checksums. With `--require-public-trust`, macOS must have the Developer ID
+certificate pair, a real signing identity, and the notary credential trio;
+Windows must have the PFX certificate pair; Linux remains checksum-only.
 
 Do not attach hand-built local installers to a public release unless the
 corresponding workflow job cannot run and the manual build command plus checksum
