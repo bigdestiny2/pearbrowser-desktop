@@ -244,6 +244,8 @@ test('native release workflow builds and attaches appling artifacts for every de
   assert.match(nativeReleaseWorkflow, /gh release upload "\$RELEASE_TAG" "\$\{assets\[@\]\}"/)
   assert.match(nativeReleaseWorkflow, /Checkout release verifier/)
   assert.match(nativeReleaseWorkflow, /check-native-release-assets\.mjs/)
+  assert.match(nativeReleaseWorkflow, /Verify public-trust release downloads/)
+  assert.match(nativeReleaseWorkflow, /verify-native-downloads\.mjs/)
   assert.match(nativeReleaseWorkflow, /--require-published/)
   assert.doesNotMatch(nativeReleaseWorkflow, /gh release create/)
   assert.match(nativeReleaseWorkflow, /contents: write/)
@@ -263,6 +265,11 @@ test('native release workflow defaults manual runs to package proof and public r
     nativeReleaseWorkflow.indexOf('args+=(--require-published)') <
       nativeReleaseWorkflow.indexOf('check-native-release-assets.mjs "${args[@]}"'),
     'public-trust mode must require a published release in the post-upload asset check'
+  )
+  assert.ok(
+    nativeReleaseWorkflow.indexOf("if: env.RELEASE_MODE == 'public-trust'") <
+      nativeReleaseWorkflow.indexOf('verify-native-downloads.mjs'),
+    'public-trust mode must run byte-level native download verification after upload'
   )
 })
 

@@ -361,3 +361,14 @@ jobs:
             args+=(--require-published)
           fi
           node pear-ecosystem/01-browser/pearbrowser-desktop/scripts/check-native-release-assets.mjs "${args[@]}"
+
+      - name: Verify public-trust release downloads
+        if: env.RELEASE_MODE == 'public-trust'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: >
+          node pear-ecosystem/01-browser/pearbrowser-desktop/scripts/verify-native-downloads.mjs
+          --tag "$RELEASE_TAG"
+          --repo "$GH_REPO"
+          --all
