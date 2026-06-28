@@ -14,8 +14,8 @@ manual gate.
 | --- | --- |
 | Operator | Codex local release audit |
 | Date/time started | 2026-06-23T16:36:00Z |
-| Desktop repo/branch/head | `bigdestiny2/pearbrowser-desktop`, `feat/p2p-infra-naming`, branch head containing this evidence log |
-| Desktop PR/CI URL | PR #4: `https://github.com/bigdestiny2/pearbrowser-desktop/pull/4`; latest pushed CI before this local checker change: Desktop CI #43 success on `1e484ae` |
+| Desktop repo/branch/head | `bigdestiny2/pearbrowser-desktop`, `main`, `f06a2d3dabc79dd5f73f17cd0d14f6505c7c5242` |
+| Desktop PR/CI URL | PR #21: `https://github.com/bigdestiny2/pearbrowser-desktop/pull/21`; Desktop CI run `https://github.com/bigdestiny2/pearbrowser-desktop/actions/runs/28318700535`, job `83896585709`, passed |
 | Mobile repo/head | `bigdestiny2/PearBrowser`, `main`, `9101200d8bb54ff31b21d6d90154cb2321756a6c` |
 | Mobile preflight CI URL | `https://github.com/bigdestiny2/PearBrowser/actions/runs/28316870344` (`mobile-release-preflight` artifact downloaded and verified locally) |
 | macOS machine | `Locals-Mac-Studio.local`, macOS 26.4.1 build 25E253 |
@@ -28,10 +28,10 @@ manual gate.
 
 | Gate | Expected | Result | Evidence |
 | --- | --- | --- | --- |
-| `npm test` | 441/441 pass | PASS | 2026-06-28 local run: `node --test 'test/*.test.js'`, pass `441/441` |
+| `npm test` | 442/442 pass | PASS | 2026-06-28 local run after the runtime smoke storage gate: `node --test 'test/*.test.js'`, pass `442/442` |
 | `git diff --check` | clean | PASS | 2026-06-24 local run exited 0 before evidence-log edits |
 | `npm audit --audit-level=high` | 0 high vulnerabilities | PASS | 2026-06-24 local run: `found 0 vulnerabilities` |
-| Desktop CI | install/test/audit success | PASS | 2026-06-28 GitHub Actions run `https://github.com/bigdestiny2/pearbrowser-desktop/actions/runs/28317806501`, PR #16 job `83894239601`, passed checkout, HiveRelay layout guard, install, test, and high-severity audit |
+| Desktop CI | install/test/audit success | PASS | 2026-06-28 GitHub Actions run `https://github.com/bigdestiny2/pearbrowser-desktop/actions/runs/28318700535`, PR #21 job `83896585709`, passed checkout, HiveRelay layout guard, install, test, and high-severity audit |
 | `npm run check:appling-release -- --tag v0.5.0` | native wrapper metadata, lockfile, signing defaults, assets in sync | PASS | 2026-06-28 local run: `Appling release metadata ok: PearBrowser 0.5.0 -> pear://tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty` |
 | macOS native appling package | ad-hoc signed `.app.zip`, checksum, manifest produced locally | PASS | 2026-06-28 local run: `npm ci --prefix appling`, `npm run --prefix appling generate`, `npm run --prefix appling build`, `node scripts/collect-appling-artifacts.mjs --tag v0.5.0 --platform darwin --arch arm64`; produced `PearBrowser-0.5.0-macos-arm64.app.zip`, SHA-256 `5dcb5045f00b01f8dfb9f15fc4d505a53e04227ae9c35277e939e1aad67f7af6`; extracted app passed `codesign --verify --deep --strict` |
 | GitHub native release asset backfill | workflow visible on default branch; macOS, Windows, Linux assets attached to `v0.5.0` with sidecars/manifests | PASS | 2026-06-28 GitHub Actions run `https://github.com/bigdestiny2/pearbrowser-desktop/actions/runs/28317333414` succeeded from `main` with `tag=v0.5.0` and `source_ref=main` after the native signing credential preflight merge; macOS, Windows, and Linux all passed `Validate release signing configuration`, build, collection, and artifact upload; attach job verified the release asset bundle and refreshed 16 `v0.5.0` assets at about `2026-06-28T09:21Z` |
@@ -50,7 +50,7 @@ manual gate.
 | Gate | Expected | Result | Evidence |
 | --- | --- | --- | --- |
 | Production browser launch | stable `pear://tco5k7...` opens and backend connects | PASS | 2026-06-28 local `pear run pear://tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty` launched PearBrowser, emitted `Sending READY event`, connected the renderer, opened RPC `:9876`, started HTTP proxy `18788`, and connected HiveRelay peers; no Peercord or other third-party app was launched |
-| Runtime RPC smoke | `/status-smoke` reports DHT/proxy/relay readiness | PASS | 2026-06-28 local run while production PearBrowser was launched: `node scripts/runtime-rpc-smoke.mjs --timeout 20000 --json` returned `ok:true`, `port:9876`, `dhtConnected:true`, `peerCount:7`, `proxyPort:18788`, `hiveRelays:7`, `storagePercent:114`; local profile storage was over quota but the diagnostic readiness fields passed |
+| Runtime RPC smoke | `/status-smoke` reports DHT/proxy/relay readiness | PASS | 2026-06-28 local run while production PearBrowser was launched: `node scripts/runtime-rpc-smoke.mjs --timeout 20000 --json` returned `ok:true`, `port:9876`, `dhtConnected:true`, `peerCount:7`, `proxyPort:18788`, `hiveRelays:7`, `storagePercent:114`; the strict public demo gate `node scripts/runtime-rpc-smoke.mjs --timeout 20000 --max-storage-percent 100 --json` correctly failed this over-quota local profile with `storagePercent:113` and `storagePercent exceeds 100`, proving clean-profile demo runs now fail closed |
 | Browse story | homepage `hyper://186891...` renders, reloads, site info correct |  |  |
 | Fresh-launch landing story | PearBrowser landing front tab, `peerit` second tab |  |  |
 | Catalogue story | Apps auto-loads, featured cards visible, search works |  |  |
