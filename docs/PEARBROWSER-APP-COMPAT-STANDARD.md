@@ -529,7 +529,7 @@ Run before release. Grouped by tier; **Tier A items are the universal floor**.
 - [ ] Published from a **clean `pear touch` key** (no multi-GB dev history), or a stable production key with a persistent seeder (PB-RELEASE-1/6/9).
 - [ ] Staged **lean** (`--compact`) with **all** entrypoints declared (incl. path-spawned workers) and HTML-referenced assets patched back in (PB-RELEASE-2/3/4).
 - [ ] **Test-run** of the staged key boots clean; `hyperbee`/`hypercore`/`corestore`/`autobase` majors aligned (PB-RELEASE-5).
-- [ ] **Durably pinned** (`pin-app-on-hiverelay.js`, `maxStorage` sized to the current checkout) **and** **fresh-peer verified with all local sources stopped** (`verify-app-full.js`) before listing (PB-RELEASE-7/8/10).
+- [ ] **Durably pinned** (`pin-app-on-hiverelay.js`, `maxStorage` sized to the current checkout, non-empty checkout confirmed) **and** **fresh-peer verified with all local sources stopped** (`verify-app-full.js`) before listing (PB-RELEASE-7/8/10).
 - [ ] Catalogue row carries `type` + icon + `description`/`author`/`version`/`categories`; unified-bee re-published with the persistent `--storage` (PB-RELEASE-11).
 
 ### Tier A — Universal static Hyperdrive (in-tab, both platforms)
@@ -597,13 +597,13 @@ Run before release. Grouped by tier; **Tier A items are the universal floor**.
 
 ### 13.2 Pin durably on HiveRelay
 
-- **PB-RELEASE-7 (MUST).** Apps **are** durably HiveRelay-pinnable by **anyone** — not just the author — via a **read-only foreign-key seed**: `HiveRelayClient.seed()` signs the seed-request with the seeder's own swarm keypair, not the drive author's. Tool: `scripts/pin-app-on-hiverelay.js <pear://|hex> --name <x> --maxStorage <MB> --hold <s>` opens the drive, pre-fetches the current checkout (becoming a complete source), broadcasts an archive-tier seed-request, and holds online while relays replicate.
+- **PB-RELEASE-7 (MUST).** Apps **are** durably HiveRelay-pinnable by **anyone** — not just the author — via a **read-only foreign-key seed**: `HiveRelayClient.seed()` signs the seed-request with the seeder's own swarm keypair, not the drive author's. Tool: `scripts/pin-app-on-hiverelay.js <pear://|hex> --name <x> --maxStorage <MB> --hold <s>` opens the drive, pre-fetches the current checkout (becoming a complete source), broadcasts an archive-tier seed-request, and holds online while relays replicate. The tool MUST refuse a zero-file current checkout before broadcasting a seed request; a reachable but empty checkout is availability failure, not a successful pin.
 - **PB-RELEASE-8 (MUST).** Size `maxStorage` to the **current checkout + metadata**, never the (bloated) blob-core byteLength — relays reject multi-GB reservations (256–600 MB requests accepted; 11 GB/140 GB rejected). Relay **acceptances arrive *after*** the initial broadcast window, so confirm over a `--hold` of a few minutes, not the first 15 s.
 - **PB-RELEASE-9 (MUST, large / history-heavy production keys).** If relays accept the pin but each replicates only **part** of a heavy drive (no complete per-relay copy → a fresh peer gets 0 useful peers), the publisher MUST run a **persistent seeder** so the app stays reachable 24/7. Template: `scripts/durable-seed.sh` driven by a launchd/systemd agent with run-at-login + restart-on-crash (`~/Library/LaunchAgents/com.pearbrowser.seed.plist`). For true off-machine durability, run it on an always-on host.
 
 ### 13.3 Verify from a fresh peer, then register
 
-- **PB-RELEASE-10 (MUST).** **Prove durability from a fresh peer with every local source stopped** before listing: `scripts/verify-app-full.js --key <hex>` opens the drive from a clean corestore, joins the swarm, and fetches a spread of blobs across the whole tree. 0 peers or any missing blob = not durable — do not list it. (This is the teeth behind PB-AVAIL-2's cold-node check.)
+- **PB-RELEASE-10 (MUST).** **Prove durability from a fresh peer with every local source stopped** before listing: `scripts/verify-app-full.js --key <hex>` opens the drive from a clean corestore, joins the swarm, and fetches a spread of blobs across the whole tree. 0 peers, 0 file entries, or any missing blob = not durable — do not list it. (This is the teeth behind PB-AVAIL-2's cold-node check.)
 - **PB-RELEASE-11 (MUST).** Only after a passing fresh-peer verify, publish the catalogue row (§9) and, for the unified Hyperbee, regenerate + re-publish with the persistent `--storage` (PB-DISCOVERYCATALOGUE-18). Cards surface the app's **size and live peer count** from `CMD_GET_DRIVE_INFO`; a row whose drive shows **0 peers** reads as dead.
 
 ### 13.4 What a complete catalogue submission carries

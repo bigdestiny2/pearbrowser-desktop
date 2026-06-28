@@ -24,6 +24,11 @@
  *   4. Stays online (--hold), logging every relay acceptance as it lands
  *      (acceptances often arrive after the initial 15s broadcast window).
  *
+ * If the current checkout resolves to zero file entries, this refuses to seed.
+ * A zero-entry checkout usually means the bundle is unavailable or unresolved,
+ * and asking relays to hold it can create misleading "reachable but empty"
+ * evidence instead of repairing availability.
+ *
  * Confirm durability afterwards (local `pear seed` for the key STOPPED):
  *   node scripts/verify-app-full.js --key <64-hex>
  *
@@ -135,6 +140,12 @@ try {
 } catch (e) { console.log('  · list incomplete (' + e.message + '), counted', fileCount, 'so far') }
 const metaBytes = (drive.db?.core?.byteLength) || (drive.core?.byteLength) || 0
 console.log('  · current checkout:', fileCount, 'files,', (currentBytes / MB).toFixed(2), 'MB live blobs · metadata core', (metaBytes / MB).toFixed(1), 'MB')
+if (fileCount === 0) {
+  console.error('  ✗ current checkout has 0 file entries — refusing to seed an empty/unresolved drive.')
+  console.error('    Find a full-content source, run relay/operator cleanup if needed, then rerun and verify with scripts/verify-app-full.js.')
+  try { await client.destroy() } catch {}
+  process.exit(4)
+}
 
 console.log('  · pre-fetching current content (best-effort, ' + dlTimeoutS + 's cap)…')
 try {

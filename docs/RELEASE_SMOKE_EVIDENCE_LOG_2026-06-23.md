@@ -28,7 +28,7 @@ manual gate.
 
 | Gate | Expected | Result | Evidence |
 | --- | --- | --- | --- |
-| `npm test` | 432/432 pass | PASS | 2026-06-24 local run: `node --test 'test/*.test.js'`, pass `432/432` |
+| `npm test` | 441/441 pass | PASS | 2026-06-28 local run: `node --test 'test/*.test.js'`, pass `441/441` |
 | `git diff --check` | clean | PASS | 2026-06-24 local run exited 0 before evidence-log edits |
 | `npm audit --audit-level=high` | 0 high vulnerabilities | PASS | 2026-06-24 local run: `found 0 vulnerabilities` |
 | Desktop CI | install/test/audit success | PASS | 2026-06-28 GitHub Actions run `https://github.com/bigdestiny2/pearbrowser-desktop/actions/runs/28317806501`, PR #16 job `83894239601`, passed checkout, HiveRelay layout guard, install, test, and high-severity audit |

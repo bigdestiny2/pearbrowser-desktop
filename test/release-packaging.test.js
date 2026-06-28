@@ -35,6 +35,7 @@ const runtimeSmoke = readFileSync(new URL('../scripts/runtime-rpc-smoke.mjs', im
 const liveCatalogVerifier = readFileSync(new URL('../scripts/verify-live-catalog.js', import.meta.url), 'utf8')
 const hiveRelayLayout = readFileSync(new URL('../scripts/check-hiverelay-layout.mjs', import.meta.url), 'utf8')
 const verifyPin = readFileSync(new URL('../scripts/verify-pin.js', import.meta.url), 'utf8')
+const pinAppOnHiveRelay = readFileSync(new URL('../scripts/pin-app-on-hiverelay.js', import.meta.url), 'utf8')
 
 test('Pear stage ignore excludes local release/operator scratch files', () => {
   const ignored = pkg.pear?.stage?.ignore || []
@@ -54,6 +55,16 @@ test('release verification asks HiveRelay for signed seed proof evidence', () =>
   assert.match(verifyPin, /HiveRelayClient/)
   assert.match(verifyPin, /proveSeeded/)
   assert.match(verifyPin, /verifySeededFallback/)
+})
+
+test('foreign-key app pin refuses empty checkouts before broadcasting seed', () => {
+  assert.match(pinAppOnHiveRelay, /current checkout has 0 file entries/)
+  assert.match(pinAppOnHiveRelay, /refusing to seed an empty\/unresolved drive/)
+  assert.match(pinAppOnHiveRelay, /process\.exit\(4\)/)
+  assert.ok(
+    pinAppOnHiveRelay.indexOf('if (fileCount === 0)') < pinAppOnHiveRelay.indexOf('client.seed(drive.key'),
+    'empty-checkout guard must run before HiveRelay seed broadcast'
+  )
 })
 
 test('HiveRelay workspace pin is v0.20.0 trustless verification release', () => {

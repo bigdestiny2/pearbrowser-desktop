@@ -647,8 +647,9 @@ catalogue.
   confirmed `/.landing-seed.mjs`, `/pearbrowser-storage`, `/docs`, `/scripts`,
   `/examples`, and `/test` are absent from the production drive.
 - Deep bundle checks: PearBrowser homepage, Peercord, and Keet all returned
-  peers and had zero missing sampled blobs. Latest samples: PearBrowser
-  homepage `2/2`, Peercord `12/12`, Keet `12/12`.
+  peers and had zero missing sampled blobs in the 2026-06-23 pass. Current
+  2026-06-28 evidence keeps homepage and Keet green, but defers Peercord bundle
+  availability because the fresh-peer refresh resolves an empty checkout.
 
 Restricted/sandboxed network runs can false-negative DHT discovery. The release
 gate should use real DHT access, as the verifier scripts do when run from the

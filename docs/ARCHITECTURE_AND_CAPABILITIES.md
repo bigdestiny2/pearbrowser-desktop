@@ -153,13 +153,13 @@ flows, and native shell source-contract parity.
 
 The current 2026-06-23 release audit verified:
 
-- Desktop automated tests: `npm test` passing, 432 tests. The PR Desktop CI
+- Desktop automated tests: `npm test` passing, 441 tests. The PR Desktop CI
   workflow also passes source checkouts, HiveRelay layout guard, install, tests,
   and high-severity audit on the release branch.
 - Mobile automated tests: `npm test` passing, 136 tests.
 - Live PearBrowser Network catalogue: `hyperbee://f5fb7500bccd60a976d2b1d24246108f4444a210b9ca591533114dffc089934d` reachable from a fresh peer, signed, and carrying 14 apps including Peercord, peerit, and HiveWorm.
 - Production PearBrowser drive: reachable from a fresh peer at length 18640, with blob sampling proving content blocks replicate and a metadata scan proving ignored operator paths are absent.
-- Featured app bundles: Peercord and Keet fresh-peer sampled with zero missing sampled blobs.
+- Featured app bundles: Keet fresh-peer sampled with zero missing sampled blobs on the latest pass. Peercord's catalogue row remains reachable and correctly marked `standalone`, but the 2026-06-28 full-bundle refresh is deferred: the drive currently resolves to an empty checkout from a fresh peer and needs a full-content source or relay/operator cleanup plus reseed before it is current-pass evidence.
 - Focused automated coverage includes catalogue safety, signed Hyperbee
   catalogues, Peercord catalogue wiring, name resolution, search planning and
   verification, Nostr binding/events/feed diagnostics, command-surface mirrors,
