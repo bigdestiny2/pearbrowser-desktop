@@ -11,6 +11,10 @@
  * and session round-trips, cleaning up the temporary bookmark/petname and
  * restoring the previous naming flag/session where possible. It still does not
  * launch third-party apps, approve trust, or publish a test site.
+ *
+ * With --site-story it creates, publishes, verifies, and deletes a temporary
+ * PearBrowser site. That path intentionally exercises publishing and HiveRelay
+ * pin/unseed cleanup, so it is opt-in and separate from --local-stories.
  */
 
 import { EventEmitter } from 'node:events'
@@ -49,6 +53,7 @@ function parseArgs (argv) {
     homepageUrl: DEFAULT_HOMEPAGE_URL,
     catalogs: [...DEFAULT_CATALOGS],
     localStories: false,
+    siteStory: false,
     json: false
   }
 
@@ -65,6 +70,7 @@ function parseArgs (argv) {
     else if (arg === '--catalog') args.catalogs.push(parseHexKey(argv[++i], '--catalog'))
     else if (arg === '--only-catalog') args.catalogs = [parseHexKey(argv[++i], '--only-catalog')]
     else if (arg === '--local-stories') args.localStories = true
+    else if (arg === '--site-story') args.siteStory = true
     else if (arg === '--json') args.json = true
     else if (arg === '-h' || arg === '--help') usage(0)
     else usage(2, `unknown option: ${arg}`)
@@ -75,7 +81,7 @@ function parseArgs (argv) {
 
 function usage (code, msg = '') {
   if (msg) console.error('error:', msg)
-  console.error('usage: node scripts/release-rpc-story-smoke.mjs [--timeout 30000] [--port-base 9876] [--catalog <64-hex>] [--homepage-url hyper://...] [--local-stories] [--json]')
+  console.error('usage: node scripts/release-rpc-story-smoke.mjs [--timeout 30000] [--port-base 9876] [--catalog <64-hex>] [--homepage-url hyper://...] [--local-stories] [--site-story] [--json]')
   process.exit(code)
 }
 
@@ -604,6 +610,81 @@ async function runLocalStories (ws, args) {
   return { token, search, naming, library }
 }
 
+async function runSiteStory (ws, args) {
+  const token = makeToken()
+  const siteName = `Release Smoke ${token.slice(-8)}`
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>${siteName}</title>
+</head>
+<body>
+  <main>
+    <h1>${siteName}</h1>
+    <p id="release-smoke-token">${token}</p>
+  </main>
+</body>
+</html>`
+  let siteId = null
+  let publish = null
+
+  try {
+    const created = await requestRpc(ws, C.CMD_CREATE_SITE, { name: siteName }, args.requestTimeout)
+    siteId = created?.siteId
+    if (!siteId || !/^[0-9a-f]{16}$/i.test(siteId)) throw new Error('site story did not create a valid site id')
+    if (!/^[0-9a-f]{64}$/i.test(created?.keyHex || '')) throw new Error('site story did not create a valid site key')
+
+    const updated = await requestRpc(ws, C.CMD_UPDATE_SITE, {
+      siteId,
+      files: [
+        { path: '/index.html', content: html },
+        { path: '/style.css', content: 'body { font-family: sans-serif; }' }
+      ]
+    }, args.requestTimeout)
+    if (!updated || (updated.updated !== 2 && updated.siteId !== siteId)) throw new Error('site story update failed')
+
+    publish = await requestRpc(ws, C.CMD_PUBLISH_SITE, { siteId }, Math.max(args.requestTimeout, 70_000))
+    if (publish?.siteId !== siteId) throw new Error('site story publish returned the wrong site id')
+    if (!/^hyper:\/\/[0-9a-f]{64}$/i.test(publish?.url || '')) throw new Error(`site story publish returned invalid URL: ${publish?.url || '(missing)'}`)
+
+    const sites = await requestRpc(ws, C.CMD_LIST_SITES, {}, args.requestTimeout)
+    const listed = Array.isArray(sites) ? sites : []
+    const row = listed.find((site) => site?.siteId === siteId)
+    if (!row || row.published !== true) throw new Error('site story published site was not listed as published')
+
+    const nav = await requestRpc(ws, C.CMD_NAVIGATE, { url: publish.url + '/' }, args.requestTimeout)
+    const fetched = await fetchLocalUrl(nav.localUrl, args.fetchTimeout)
+    if (!Number.isInteger(fetched.statusCode) || fetched.statusCode < 200 || fetched.statusCode >= 300) {
+      throw new Error(`site story fetch returned HTTP ${fetched.statusCode}`)
+    }
+    if (!fetched.body.includes(token)) throw new Error('site story fetched page did not contain the release token')
+
+    const deleted = await requestRpc(ws, C.CMD_DELETE_SITE, { siteId }, Math.max(args.requestTimeout, 30_000))
+    siteId = null
+    if (deleted?.ok !== true) throw new Error('site story cleanup did not delete the site')
+
+    return {
+      token,
+      siteId: publish.siteId,
+      keyHex: publish.keyHex || null,
+      url: publish.url,
+      localUrl: nav.localUrl,
+      statusCode: fetched.statusCode,
+      bytes: Buffer.byteLength(fetched.body),
+      pin: publish.pin || null,
+      cleanup: {
+        deleted: true,
+        unseed: deleted.unseed || null
+      }
+    }
+  } finally {
+    if (siteId) {
+      try { await requestRpc(ws, C.CMD_DELETE_SITE, { siteId }, Math.max(args.requestTimeout, 30_000)) } catch {}
+    }
+  }
+}
+
 async function run (args) {
   const conn = await connectReady(args)
   const ws = conn.ws
@@ -621,6 +702,7 @@ async function run (args) {
     const catalogResult = await requestRpc(ws, C.CMD_GET_CATALOG_APPS, {}, args.requestTimeout)
     const catalog = assertCatalogues(catalogResult)
     const localStories = args.localStories ? await runLocalStories(ws, args) : null
+    const siteStory = args.siteStory ? await runSiteStory(ws, args) : null
 
     return {
       ok: true,
@@ -635,7 +717,8 @@ async function run (args) {
       },
       loadedCatalogues: loaded,
       catalog,
-      localStories
+      localStories,
+      siteStory
     }
   } finally {
     try { ws.close() } catch {}
@@ -654,6 +737,9 @@ function printHuman (result) {
     console.log(`  local search: ${result.localStories.search.results} result(s), doc ${result.localStories.search.docId}`)
     console.log(`  naming: ${result.localStories.naming.curated.name} curated + ${result.localStories.naming.petname.name} petname`)
     console.log(`  library: bookmark/session round-trip passed`)
+  }
+  if (result.siteStory) {
+    console.log(`  site publish: ${result.siteStory.url}, HTTP ${result.siteStory.statusCode}, cleanup deleted`)
   }
 }
 
