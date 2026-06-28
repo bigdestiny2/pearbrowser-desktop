@@ -23,7 +23,7 @@ npm run resolve:native-release -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-de
 
 The current package targets match the `cmake-pear` appling toolchain:
 
-- macOS: `PearBrowser-<version>-macos-arm64.app.zip` and `PearBrowser-<version>-macos-x64.app.zip` now, signed/notarized `.dmg` once Developer ID credentials are wired in
+- macOS: `PearBrowser-<version>-macos-arm64.app.zip` and `PearBrowser-<version>-macos-x64.app.zip` now; public-trust runs create signed/notarized `.dmg` assets once Developer ID credentials are wired in
 - Windows: `PearBrowser-<version>-windows-x64.exe` and `PearBrowser-<version>-windows-x64.msix` now
 - Linux: `PearBrowser-<version>-linux-x64.AppImage` now, distro packages such as `.deb` later if demand warrants them
 

@@ -62,7 +62,9 @@ The collector searches `appling/build` for platform-native outputs:
 
 - macOS: `.dmg`, `.pkg`, `.zip`, or a zipped `.app` bundle. The current
   `cmake-pear` path emits a `.app` bundle that the collector zips as
-  `.app.zip`.
+  `.app.zip`. Public-trust macOS workflow runs also create a notarized `.dmg`
+  before collection, so the same collector attaches both the user-facing DMG and
+  the `.app.zip` fallback.
 - Windows: `.msix`, `.exe`, `.msi`, or `.zip`. The current `cmake-pear` path
   emits `.msix`.
 - Linux: `.AppImage`, `.deb`, `.rpm`, `.snap`, `.tar.*`, or `.zip`
@@ -98,7 +100,8 @@ and fails unless the tag has macOS, Windows, and Linux native artifacts, one
 `SHA256SUMS-<platform>-<arch>.txt`, one `manifest-<platform>-<arch>.json`, and a
 per-artifact `.sha256` sidecar for every installer/package file. Use
 `--require-published` before announcement if draft releases should fail the
-gate.
+gate. Use `--require-public-trust` for public-trust release checks; it requires
+each macOS architecture to include a `.dmg` artifact.
 
 The checker accepts multiple architecture bundles for one platform. Each
 platform/architecture pair must have its own checksum index and manifest, so a
@@ -142,9 +145,11 @@ Public trust signing is still a release-credential gate:
   `PEARBROWSER_MACOS_NOTARY_TEAM_ID` as GitHub Actions secrets. The workflow
   imports the Developer ID certificate into a temporary keychain, passes that
   keychain to CMake signing, submits the built `.app` to notarytool, staples the
-  notarization ticket, re-verifies codesign, and only then collects the public
-  `.app.zip` asset. `PEARBROWSER_MACOS_KEYCHAIN_PASSWORD` is optional; the run
-  id is used when it is absent.
+  notarization ticket, re-verifies codesign, creates a drag-to-Applications
+  `.dmg`, submits and staples the DMG when notary credentials are present, and
+  only then collects the public `.dmg` plus `.app.zip` fallback assets.
+  `PEARBROWSER_MACOS_KEYCHAIN_PASSWORD` is optional; the run id is used when it
+  is absent.
 - Windows: add `PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64` and
   `PEARBROWSER_WINDOWS_CERTIFICATE_PASSWORD` as GitHub Actions secrets, plus
   optional `PEARBROWSER_WINDOWS_SIGNING_THUMBPRINT` and
@@ -176,7 +181,8 @@ without private credentials. Release-published and tag-triggered runs default to
 `release_mode=public-trust`, and manual runs can select `public-trust`
 explicitly. In public-trust mode, the workflow adds
 `--require-public-trust` to `scripts/check-native-signing-credentials.mjs` and
-adds `--require-published` to the post-upload release asset check.
+adds `--require-published --require-public-trust` to the post-upload release
+asset check.
 
 Do not attach hand-built local installers to a public release unless the
 corresponding workflow job cannot run and the manual build command plus checksum
