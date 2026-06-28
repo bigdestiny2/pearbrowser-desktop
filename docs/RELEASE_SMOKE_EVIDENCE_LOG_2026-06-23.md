@@ -31,19 +31,19 @@ manual gate.
 | `npm test` | 432/432 pass | PASS | 2026-06-24 local run: `node --test 'test/*.test.js'`, pass `432/432` |
 | `git diff --check` | clean | PASS | 2026-06-24 local run exited 0 before evidence-log edits |
 | `npm audit --audit-level=high` | 0 high vulnerabilities | PASS | 2026-06-24 local run: `found 0 vulnerabilities` |
-| Desktop CI | install/test/audit success |  |  |
+| Desktop CI | install/test/audit success | PASS | 2026-06-28 GitHub Actions run `https://github.com/bigdestiny2/pearbrowser-desktop/actions/runs/28317806501`, PR #16 job `83894239601`, passed checkout, HiveRelay layout guard, install, test, and high-severity audit |
 | `npm run check:appling-release -- --tag v0.5.0` | native wrapper metadata, lockfile, signing defaults, assets in sync | PASS | 2026-06-28 local run: `Appling release metadata ok: PearBrowser 0.5.0 -> pear://tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty` |
 | macOS native appling package | ad-hoc signed `.app.zip`, checksum, manifest produced locally | PASS | 2026-06-28 local run: `npm ci --prefix appling`, `npm run --prefix appling generate`, `npm run --prefix appling build`, `node scripts/collect-appling-artifacts.mjs --tag v0.5.0 --platform darwin --arch arm64`; produced `PearBrowser-0.5.0-macos-arm64.app.zip`, SHA-256 `5dcb5045f00b01f8dfb9f15fc4d505a53e04227ae9c35277e939e1aad67f7af6`; extracted app passed `codesign --verify --deep --strict` |
 | GitHub native release asset backfill | workflow visible on default branch; macOS, Windows, Linux assets attached to `v0.5.0` with sidecars/manifests | PASS | 2026-06-28 GitHub Actions run `https://github.com/bigdestiny2/pearbrowser-desktop/actions/runs/28317333414` succeeded from `main` with `tag=v0.5.0` and `source_ref=main` after the native signing credential preflight merge; macOS, Windows, and Linux all passed `Validate release signing configuration`, build, collection, and artifact upload; attach job verified the release asset bundle and refreshed 16 `v0.5.0` assets at about `2026-06-28T09:21Z` |
-| `node scripts/check-relays.js` | real-DHT relay reachable |  |  |
+| `node scripts/check-relays.js` | real-DHT relay reachable | PASS | 2026-06-28 real-network rerun: `1` unique HiveRelay reachable via DHT and `8` live connections in `client.relays` |
 | `node scripts/verify-pin.js --expect 18640 --hiverelay` | length >= 18640, sampled blob present, HiveRelay proof captured when available | PASS | 2026-06-24 release-prod fresh-peer run: length `18640`, peers `1`, sampled `/backend/anongpt-buyer.js` `11652` bytes; HiveRelay storage-proof route not yet enabled on fleet |
 | `node scripts/verify-release-contents.js ...` | forbidden paths absent | PASS | 2026-06-24 fresh-peer scan: length `18640`, `10233` entries, forbidden paths absent |
-| `node scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --expect-app hiveworm` | signed catalogue, 14 apps, expected rows | PASS | 2026-06-23 real-network run: length `273`, peers `1`, 14 apps, Peercord `standalone`, source URL, `GPL-3.0` |
-| `node scripts/verify-app-full.js` homepage | sampled blobs present |  |  |
-| `node scripts/verify-app-full.js` Peercord | sampled blobs present, no execution |  |  |
-| `node scripts/verify-app-full.js` Keet | sampled blobs present, no execution |  |  |
-| Peercord Linux bundle contract | `type:"desktop"`, `BrowserWindow`, no `Pear.worker.pipe` |  |  |
-| Peercord Windows bundle contract | `type:"desktop"`, `BrowserWindow`, no `Pear.worker.pipe` |  |  |
+| `node scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --expect-app hiveworm` | signed catalogue, 14 apps, expected rows | PASS | 2026-06-28 real-network rerun: length `273`, peers `2`, 14 apps, Peercord `standalone`, source URL, `GPL-3.0`, expected apps present |
+| `node scripts/verify-app-full.js` homepage | sampled blobs present | PASS | 2026-06-28 fresh-peer rerun: peers `2`, meta length `9`, entries `3`, sampled `3/3`, missing `0`, bytes `155917` |
+| `node scripts/verify-app-full.js` Peercord | sampled blobs present, no execution | DEFER | 2026-06-23 real-network proof in `docs/RELEASE_READINESS_2026-06-23.md` passed with peers `1`, entries `14730`, sampled `12/12`, missing `0`; 2026-06-28 fresh-peer rerun timed out twice with `0` peers, so Peercord bundle availability must be repinned or revalidated before treating this as current PASS evidence |
+| `node scripts/verify-app-full.js` Keet | sampled blobs present, no execution | PASS | 2026-06-28 fresh-peer rerun: peers `9`, meta length `54244`, entries `7449`, sampled `12/12`, missing `0`, bytes `179225` |
+| Peercord Linux bundle contract | `type:"desktop"`, `BrowserWindow`, no `Pear.worker.pipe` | DEFER | 2026-06-23 real-network proof in `docs/RELEASE_READINESS_2026-06-23.md` passed for `by-arch/linux-x64/app/peercord/resources/app`; 2026-06-28 fresh-peer contract rerun timed out with `0` peers, so this proof remains historical until the Peercord bundle drive is reachable again |
+| Peercord Windows bundle contract | `type:"desktop"`, `BrowserWindow`, no `Pear.worker.pipe` | DEFER | 2026-06-23 real-network proof in `docs/RELEASE_READINESS_2026-06-23.md` passed for `by-arch/win32-x64/app/peercord/resources/app`; 2026-06-28 fresh-peer contract rerun timed out with `0` peers, so this proof remains historical until the Peercord bundle drive is reachable again |
 
 ## Desktop GUI And User Stories
 
