@@ -28,8 +28,8 @@ manual gate.
 
 | Gate | Expected | Result | Evidence |
 | --- | --- | --- | --- |
-| `npm test` | 443/443 pass | PASS | 2026-06-28 local run after the release story smoke tooling: `node --test 'test/*.test.js'`, pass `443/443` |
-| `git diff --check` | clean | PASS | 2026-06-28 local run on `docs/peercord-upstream-source-gate` exited 0 after the Peercord source-gate docs refresh |
+| `npm test` | 443/443 pass | PASS | 2026-06-28 local run after the `--local-stories` release smoke update: `node --test 'test/*.test.js'`, pass `443/443` |
+| `git diff --check` | clean | PASS | 2026-06-28 local run on `feat/release-local-story-smoke` exited 0 after the local-story smoke docs refresh |
 | `npm audit --audit-level=high` | 0 high vulnerabilities | PASS | 2026-06-24 local run: `found 0 vulnerabilities` |
 | Desktop CI | install/test/audit success | PASS | 2026-06-28 GitHub Actions run `https://github.com/bigdestiny2/pearbrowser-desktop/actions/runs/28319109847`, PR #23 job `83897696771`, passed checkout, HiveRelay layout guard, install, test, and high-severity audit |
 | `npm run check:appling-release -- --tag v0.5.0` | native wrapper metadata, lockfile, signing defaults, assets in sync | PASS | 2026-06-28 local run: `Appling release metadata ok: PearBrowser 0.5.0 -> pear://tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty` |
@@ -51,14 +51,14 @@ manual gate.
 | --- | --- | --- | --- |
 | Production browser launch | stable `pear://tco5k7...` opens and backend connects | PASS | 2026-06-28 local `pear run pear://tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty` launched PearBrowser, emitted `Sending READY event`, connected the renderer, opened RPC `:9876`, started HTTP proxy `18788`, and connected HiveRelay peers; no Peercord or other third-party app was launched |
 | Runtime RPC smoke | `/status-smoke` reports DHT/proxy/relay readiness | PASS | 2026-06-28 local run while production PearBrowser was launched: `node scripts/runtime-rpc-smoke.mjs --timeout 20000 --json` returned `ok:true`, `port:9876`, `dhtConnected:true`, `peerCount:7`, `proxyPort:18788`, `hiveRelays:7`, `storagePercent:114`; the strict public demo gate `node scripts/runtime-rpc-smoke.mjs --timeout 20000 --max-storage-percent 100 --json` correctly failed this over-quota local profile with `storagePercent:113` and `storagePercent exceeds 100`, proving clean-profile demo runs now fail closed |
-| Release RPC story smoke | nonvisual homepage/catalogue preflight, no third-party app launch | PASS | 2026-06-28 local run while production PearBrowser was launched: `node scripts/release-rpc-story-smoke.mjs --timeout 45000 --request-timeout 30000 --json` returned `ok:true`, RPC `9876`, proxy `18788`, homepage HTTP `200`, `90770` bytes, title `PearBrowser — the desktop for the peer-to-peer web`, catalogues `2`, apps `14`, featured rows Keet, PearPass, anonGPT, Paste, Peercord, and Peercord `standalone`/window-only with GPL-3.0 source metadata; no `CMD_LAUNCH_PEAR_LINK` or `CMD_RUN_APP_IN_TAB` was invoked |
+| Release RPC story smoke | nonvisual homepage/catalogue/local-story preflight, no third-party app launch | PASS | 2026-06-28 local run while production PearBrowser was launched: `node scripts/release-rpc-story-smoke.mjs --timeout 45000 --request-timeout 30000 --local-stories --json` returned `ok:true`, RPC `9876`, proxy `18788`, peerCount `8`, HiveRelays `8`, storage `115%`, homepage HTTP `200`, `90770` bytes, title `PearBrowser — the desktop for the peer-to-peer web`, catalogues `2`, apps `14`, featured rows Keet, PearPass, anonGPT, Paste, Peercord, Peercord `standalone`/window-only with GPL-3.0 source metadata, local search doc `8fe6dffaa7ca2f97` at `phase:"first-paint"` with `federating:false`, curated `peerit` naming plus temporary petname provenance, and bookmark/session round-trips; no `CMD_LAUNCH_PEAR_LINK`, `CMD_RUN_APP_IN_TAB`, trust approval, or site publish was invoked |
 | Browse story | homepage `hyper://186891...` renders, reloads, site info correct |  |  |
 | Fresh-launch landing story | PearBrowser landing front tab, `peerit` second tab |  |  |
 | Catalogue story | Apps auto-loads, featured cards visible, search works |  |  |
 | Latest-app-without-download story | app launches from catalogue row without project page/download/manual update |  |  |
 | Existing featured app regression | Keet or equivalent standalone app still opens |  |  |
-| Search story | local results immediate, no stale federation overwrite |  |  |
-| Naming story | curated alias and/or petname resolves with provenance |  |  |
+| Search story | local results immediate, no stale federation overwrite | PASS | 2026-06-28 release RPC local-story smoke indexed unique token `releaseprobemqxnpr8a5dd648`, then `CMD_SEARCH` returned doc `8fe6dffaa7ca2f97` as `phase:"first-paint"` with `federating:false`; focused search contract coverage includes stale federation suppression in `test/cmd-search-contract.test.js` |
+| Naming story | curated alias and/or petname resolves with provenance | PASS | 2026-06-28 release RPC local-story smoke temporarily enabled naming, resolved curated `peerit` to `hyper://ec6e2d6d9d22b9d6b40e11a9ca3042be3197e4bdca9e9a7f079be6ee830761b4/`, created temporary petname `smokepr8a5dd648` to the PearBrowser homepage, verified `petname` provenance, removed it, and restored the naming flag |
 | Nostr trusted-contact story | only attested contact events render as trusted |  |  |
 | Site publishing story | test site publishes, reloads from copied `hyper://` link |  |  |
 | Library/session story | bookmark/tab/session survives relaunch |  |  |

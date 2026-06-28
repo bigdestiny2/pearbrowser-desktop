@@ -64,7 +64,7 @@ covered by `npm test`.
 | Command | Classification |
 | --- | --- |
 | `node scripts/runtime-rpc-smoke.mjs --timeout 20000 --max-storage-percent 100 --json` | Diagnostic WebSocket smoke against an already-running app. Requires PearBrowser to be launched first; public smoke should fail if the profile is over quota |
-| `node scripts/release-rpc-story-smoke.mjs --timeout 45000 --request-timeout 30000 --json` | Nonvisual story preflight against an already-running app. Loads the release catalogues, fetches the PearBrowser homepage through the local proxy, validates featured catalogue rows, and confirms Peercord remains window-only without launching any third-party app |
+| `node scripts/release-rpc-story-smoke.mjs --timeout 45000 --request-timeout 30000 --local-stories --json` | Nonvisual story preflight against an already-running app. Loads the release catalogues, fetches the PearBrowser homepage through the local proxy, validates featured catalogue rows, confirms Peercord remains window-only, and with `--local-stories` proves local search first-paint, curated/petname naming, and bookmark/session round-trips without launching third-party apps, approving trust prompts, or publishing a test site |
 | `npm run start` | Interactive Pear dev launch: `pear run --dev .` |
 | `npm run run` | Interactive Pear launch: `pear run .` |
 | `pear run pear://tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty` | Production browser launch/manual smoke gate |

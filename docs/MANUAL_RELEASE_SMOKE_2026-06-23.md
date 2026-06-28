@@ -56,11 +56,14 @@ announcement.
     `proxyPort`, at least one configured HiveRelay, and a profile at or below
     its storage quota without becoming the renderer or closing the app.
   - Nonvisual preflight before screenshots:
-    `node scripts/release-rpc-story-smoke.mjs --timeout 45000 --request-timeout 30000 --json`.
+    `node scripts/release-rpc-story-smoke.mjs --timeout 45000 --request-timeout 30000 --local-stories --json`.
   - Expected: homepage fetches through the local proxy, release catalogues load,
     featured rows include Keet, PearPass, anonGPT, Paste, and Peercord, and
-    Peercord remains `standalone`/window-only. This does not launch Peercord or
-    replace the human GUI/trust checks below.
+    Peercord remains `standalone`/window-only. With `--local-stories`, the
+    smoke also proves local search first-paint, curated/petname name resolution,
+    and bookmark/session round-trips. This does not launch Peercord, approve a
+    third-party trust prompt, publish a test site, or replace the human GUI
+    checks below.
 - [ ] Browse user story:
   - Open `hyper://1868916a7a282ff0f211b536e9642828c32d3a817a254e1ef7e602709e25d/`.
   - Expected: page renders, About-this-site shows the drive key, reload works.
@@ -96,11 +99,18 @@ announcement.
   - Launch Keet or another already-known featured Pear app.
   - Expected: standalone launch still works after the Peercord catalogue change.
 - [ ] Search user story:
+  - Automated coverage: the release RPC story smoke with `--local-stories`
+    indexes a unique local document and verifies `CMD_SEARCH` returns it as
+    `phase:"first-paint"` with `federating:false`.
   - Use local search with a common term and an empty/non-string edge via UI where
     possible.
   - Expected: immediate local results, no UI lockup, no stale federation result
     overwrites.
 - [ ] Naming user story:
+  - Automated coverage: the release RPC story smoke with `--local-stories`
+    temporarily enables naming if needed, resolves the curated `peerit` alias,
+    creates a temporary homepage petname, verifies petname provenance, and then
+    removes it/restores the naming flag.
   - Resolve a curated alias and a local petname if one exists on the test
     profile.
   - Expected: URL bar resolves through the typed-name path and shows provenance

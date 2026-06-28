@@ -6,6 +6,11 @@
  * the production runtime can browse the release homepage through its local
  * proxy and can load the live release catalogues with the expected featured
  * rows. It never launches third-party apps or approves Pear trust prompts.
+ *
+ * With --local-stories it also performs local-only search, naming, bookmark,
+ * and session round-trips, cleaning up the temporary bookmark/petname and
+ * restoring the previous naming flag/session where possible. It still does not
+ * launch third-party apps, approve trust, or publish a test site.
  */
 
 import { EventEmitter } from 'node:events'
@@ -43,6 +48,7 @@ function parseArgs (argv) {
     fetchTimeout: DEFAULT_FETCH_MS,
     homepageUrl: DEFAULT_HOMEPAGE_URL,
     catalogs: [...DEFAULT_CATALOGS],
+    localStories: false,
     json: false
   }
 
@@ -58,6 +64,7 @@ function parseArgs (argv) {
     else if (arg === '--homepage-url') args.homepageUrl = parseHyperUrl(argv[++i], '--homepage-url')
     else if (arg === '--catalog') args.catalogs.push(parseHexKey(argv[++i], '--catalog'))
     else if (arg === '--only-catalog') args.catalogs = [parseHexKey(argv[++i], '--only-catalog')]
+    else if (arg === '--local-stories') args.localStories = true
     else if (arg === '--json') args.json = true
     else if (arg === '-h' || arg === '--help') usage(0)
     else usage(2, `unknown option: ${arg}`)
@@ -68,7 +75,7 @@ function parseArgs (argv) {
 
 function usage (code, msg = '') {
   if (msg) console.error('error:', msg)
-  console.error('usage: node scripts/release-rpc-story-smoke.mjs [--timeout 30000] [--port-base 9876] [--catalog <64-hex>] [--homepage-url hyper://...] [--json]')
+  console.error('usage: node scripts/release-rpc-story-smoke.mjs [--timeout 30000] [--port-base 9876] [--catalog <64-hex>] [--homepage-url hyper://...] [--local-stories] [--json]')
   process.exit(code)
 }
 
@@ -456,6 +463,147 @@ function assertCatalogues (catalogResult) {
   }
 }
 
+function makeToken () {
+  return `releaseprobe${Date.now().toString(36)}${randomBytes(3).toString('hex')}`
+}
+
+async function runSearchStory (ws, args, token) {
+  const path = `/release-smoke/${token}.html`
+  const title = `Release Smoke Search ${token}`
+  const body = `PearBrowser release smoke local search probe ${token}`
+  const driveKey = new URL(args.homepageUrl).hostname.toLowerCase()
+  const indexed = await requestRpc(ws, C.CMD_SEARCH_INDEX, {
+    driveKey,
+    path,
+    title,
+    body,
+    publishedAt: Date.now()
+  }, args.requestTimeout)
+
+  if (!indexed?.ok || typeof indexed.docId !== 'string') {
+    throw new Error('search story failed to index a local document')
+  }
+
+  const found = await requestRpc(ws, C.CMD_SEARCH, { query: token, limit: 5 }, args.requestTimeout)
+  const results = Array.isArray(found?.results) ? found.results : []
+  const hit = results.find((row) => row?.docId === indexed.docId || row?.path === path)
+  if (found?.phase !== 'first-paint') throw new Error(`search story phase mismatch: ${found?.phase || '(missing)'}`)
+  if (found?.federating !== false) throw new Error('search story unexpectedly entered federated mode')
+  if (!hit) throw new Error('search story did not return the indexed local document')
+
+  return {
+    token,
+    docId: indexed.docId,
+    phase: found.phase,
+    federating: found.federating,
+    results: results.length,
+    hitTitle: hit.title || null
+  }
+}
+
+async function runNamingStory (ws, args, token) {
+  const before = await requestRpc(ws, C.CMD_USERDATA_GET_SETTINGS, {}, args.requestTimeout)
+  const previousSettings = before?.settings && typeof before.settings === 'object' ? before.settings : {}
+  const previousNaming = previousSettings.experimentalNaming === true
+  const petname = `smoke${token.slice(-10)}`
+  let petnameCreated = false
+
+  try {
+    if (!previousNaming) {
+      await requestRpc(ws, C.CMD_USERDATA_SET_SETTINGS, { updates: { experimentalNaming: true } }, args.requestTimeout)
+    }
+
+    const curated = await requestRpc(ws, C.CMD_NAME_RESOLVE, { name: 'peerit' }, args.requestTimeout)
+    if (curated?.enabled === false) throw new Error('naming story did not enable naming')
+    if (curated?.resolved?.provenance !== 'curated') {
+      throw new Error(`naming story expected curated peerit alias, got ${curated?.resolved?.provenance || '(missing)'}`)
+    }
+    if (!String(curated.resolved.link || '').startsWith('hyper://')) throw new Error('naming story peerit alias did not resolve to a hyper:// link')
+
+    await requestRpc(ws, C.CMD_NAME_PETNAME_SET, {
+      name: petname,
+      link: args.homepageUrl,
+      label: 'Release Smoke Home'
+    }, args.requestTimeout)
+    petnameCreated = true
+
+    const pet = await requestRpc(ws, C.CMD_NAME_RESOLVE, { name: petname }, args.requestTimeout)
+    if (pet?.resolved?.provenance !== 'petname') throw new Error('naming story petname did not resolve as petname provenance')
+    if (pet.resolved.link !== args.homepageUrl) throw new Error('naming story petname link mismatch')
+
+    return {
+      curated: { name: curated.resolved.name, provenance: curated.resolved.provenance, link: curated.resolved.link },
+      petname: { name: petname, provenance: pet.resolved.provenance, link: pet.resolved.link },
+      restoredExperimentalNaming: !previousNaming
+    }
+  } finally {
+    if (petnameCreated) {
+      try { await requestRpc(ws, C.CMD_NAME_PETNAME_REMOVE, { name: petname }, args.requestTimeout) } catch {}
+    }
+    if (!previousNaming) {
+      try { await requestRpc(ws, C.CMD_USERDATA_SET_SETTINGS, { updates: { experimentalNaming: false } }, args.requestTimeout) } catch {}
+    }
+  }
+}
+
+async function runLibraryStory (ws, args, token) {
+  const bookmarkUrl = `${args.homepageUrl}?release-smoke=${token}`
+  const bookmarkTitle = `Release Smoke Bookmark ${token}`
+  const beforeSession = await requestRpc(ws, C.CMD_USERDATA_GET_SESSION, {}, args.requestTimeout)
+  const previousSession = beforeSession?.session ?? null
+  let bookmarkCreated = false
+  let sessionTouched = false
+
+  try {
+    const add = await requestRpc(ws, C.CMD_USERDATA_ADD_BOOKMARK, { url: bookmarkUrl, title: bookmarkTitle }, args.requestTimeout)
+    if (add?.bookmark?.url !== bookmarkUrl) throw new Error('library story bookmark add failed')
+    bookmarkCreated = true
+
+    const listed = await requestRpc(ws, C.CMD_USERDATA_LIST_BOOKMARKS, {}, args.requestTimeout)
+    const bookmarks = Array.isArray(listed?.bookmarks) ? listed.bookmarks : []
+    if (!bookmarks.some((b) => b?.url === bookmarkUrl && b?.title === bookmarkTitle)) {
+      throw new Error('library story bookmark was not listed after add')
+    }
+
+    const smokeSession = {
+      releaseSmoke: token,
+      activeTabId: 'release-smoke',
+      tabs: [{ id: 'release-smoke', url: args.homepageUrl, title: 'Release Smoke Home' }]
+    }
+    await requestRpc(ws, C.CMD_USERDATA_SAVE_SESSION, { state: smokeSession }, args.requestTimeout)
+    sessionTouched = true
+    const afterSession = await requestRpc(ws, C.CMD_USERDATA_GET_SESSION, {}, args.requestTimeout)
+    if (afterSession?.session?.releaseSmoke !== token) throw new Error('library story session round-trip failed')
+
+    await requestRpc(ws, C.CMD_USERDATA_REMOVE_BOOKMARK, { url: bookmarkUrl }, args.requestTimeout)
+    bookmarkCreated = false
+    const afterRemove = await requestRpc(ws, C.CMD_USERDATA_LIST_BOOKMARKS, {}, args.requestTimeout)
+    const remaining = Array.isArray(afterRemove?.bookmarks) ? afterRemove.bookmarks : []
+    if (remaining.some((b) => b?.url === bookmarkUrl)) throw new Error('library story bookmark cleanup failed')
+
+    return {
+      bookmarkRoundTrip: true,
+      sessionRoundTrip: true,
+      restoredPreviousSession: previousSession !== null
+    }
+  } finally {
+    if (bookmarkCreated) {
+      try { await requestRpc(ws, C.CMD_USERDATA_REMOVE_BOOKMARK, { url: bookmarkUrl }, args.requestTimeout) } catch {}
+    }
+    if (sessionTouched) {
+      try { await requestRpc(ws, C.CMD_USERDATA_SAVE_SESSION, { state: previousSession || {} }, args.requestTimeout) } catch {}
+    }
+  }
+}
+
+async function runLocalStories (ws, args) {
+  const token = makeToken()
+  const search = await runSearchStory(ws, args, token)
+  const naming = await runNamingStory(ws, args, token)
+  const library = await runLibraryStory(ws, args, token)
+  return { token, search, naming, library }
+}
+
 async function run (args) {
   const conn = await connectReady(args)
   const ws = conn.ws
@@ -472,6 +620,7 @@ async function run (args) {
 
     const catalogResult = await requestRpc(ws, C.CMD_GET_CATALOG_APPS, {}, args.requestTimeout)
     const catalog = assertCatalogues(catalogResult)
+    const localStories = args.localStories ? await runLocalStories(ws, args) : null
 
     return {
       ok: true,
@@ -485,7 +634,8 @@ async function run (args) {
         title: titleOf(fetched.body)
       },
       loadedCatalogues: loaded,
-      catalog
+      catalog,
+      localStories
     }
   } finally {
     try { ws.close() } catch {}
@@ -500,6 +650,11 @@ function printHuman (result) {
   console.log(`  catalogues: ${result.catalog.catalogs} loaded, ${result.catalog.apps} aggregated apps`)
   console.log(`  featured: ${result.catalog.featured.map((app) => app.name).join(', ')}`)
   console.log(`  Peercord: ${result.catalog.peercord.type}, ${result.catalog.peercord.runMode}, ${result.catalog.peercord.link}`)
+  if (result.localStories) {
+    console.log(`  local search: ${result.localStories.search.results} result(s), doc ${result.localStories.search.docId}`)
+    console.log(`  naming: ${result.localStories.naming.curated.name} curated + ${result.localStories.naming.petname.name} petname`)
+    console.log(`  library: bookmark/session round-trip passed`)
+  }
 }
 
 async function main () {
