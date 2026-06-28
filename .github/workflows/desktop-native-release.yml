@@ -11,6 +11,14 @@ name: Desktop Native Release
         description: Git ref to build the native wrapper from
         required: true
         default: main
+      release_mode:
+        description: package-proof allows ad-hoc/unsigned assets; public-trust requires macOS notarization and Windows signing credentials
+        required: true
+        type: choice
+        default: package-proof
+        options:
+          - package-proof
+          - public-trust
   release:
     types:
       - published
@@ -28,6 +36,7 @@ concurrency:
 env:
   RELEASE_TAG: ${{ github.event.release.tag_name || github.event.inputs.tag || github.ref_name }}
   SOURCE_REF: ${{ github.event.inputs.source_ref || github.event.release.tag_name || github.ref_name }}
+  RELEASE_MODE: ${{ github.event.inputs.release_mode || 'public-trust' }}
   NODE_VERSION: 22
   PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64 || '' }}
   PEARBROWSER_MACOS_CERTIFICATE_PASSWORD: ${{ secrets.PEARBROWSER_MACOS_CERTIFICATE_PASSWORD || '' }}
@@ -80,6 +89,18 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
+      - name: Validate release mode
+        run: |
+          case "$RELEASE_MODE" in
+            package-proof|public-trust)
+              echo "release_mode=$RELEASE_MODE"
+              ;;
+            *)
+              echo "::error::Unknown RELEASE_MODE: $RELEASE_MODE"
+              exit 1
+              ;;
+          esac
+
       - name: Setup Python for CMake
         uses: actions/setup-python@v5
         with:
@@ -117,7 +138,13 @@ jobs:
           Write-Host "Using Windows SDK tools from $sdkBin"
 
       - name: Validate release signing configuration
-        run: node scripts/check-native-signing-credentials.mjs --platform "$RUNNER_OS"
+        run: |
+          set -euo pipefail
+          args=(--platform "$RUNNER_OS")
+          if [[ "$RELEASE_MODE" == "public-trust" ]]; then
+            args+=(--require-public-trust)
+          fi
+          node scripts/check-native-signing-credentials.mjs "${args[@]}"
 
       - name: Import macOS signing certificate
         if: runner.os == 'macOS' && env.PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64 != ''
@@ -251,6 +278,18 @@ jobs:
           ref: ${{ env.SOURCE_REF }}
           path: pear-ecosystem/01-browser/pearbrowser-desktop
 
+      - name: Validate release mode
+        run: |
+          case "$RELEASE_MODE" in
+            package-proof|public-trust)
+              echo "release_mode=$RELEASE_MODE"
+              ;;
+            *)
+              echo "::error::Unknown RELEASE_MODE: $RELEASE_MODE"
+              exit 1
+              ;;
+          esac
+
       - name: Download native artifacts
         uses: actions/download-artifact@v4
         with:
@@ -311,7 +350,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: >
-          node pear-ecosystem/01-browser/pearbrowser-desktop/scripts/check-native-release-assets.mjs
-          --tag "$RELEASE_TAG"
-          --repo "$GH_REPO"
+        run: |
+          set -euo pipefail
+          args=(--tag "$RELEASE_TAG" --repo "$GH_REPO")
+          if [[ "$RELEASE_MODE" == "public-trust" ]]; then
+            args+=(--require-published)
+          fi
+          node pear-ecosystem/01-browser/pearbrowser-desktop/scripts/check-native-release-assets.mjs "${args[@]}"

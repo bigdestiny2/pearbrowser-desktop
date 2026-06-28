@@ -223,6 +223,12 @@ Code signing is per-platform:
   public signed releases
 - Linux: no signing required
 
+The native release workflow has two modes. Manual runs default to
+`release_mode=package-proof` for ad-hoc/unsigned packaging validation. Use
+`release_mode=public-trust` for announcement-ready assets; release-published and
+tag-triggered runs default to that mode and fail closed unless macOS Developer
+ID/notary and Windows signing credentials are configured.
+
 ## Companion projects
 
 | Repo | What |

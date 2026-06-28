@@ -187,7 +187,11 @@ test('native release workflow builds and attaches appling artifacts for every de
   assert.match(nativeReleaseWorkflow, /name: Desktop Native Release/)
   assert.match(nativeReleaseWorkflow, /workflow_dispatch:/)
   assert.match(nativeReleaseWorkflow, /source_ref:/)
+  assert.match(nativeReleaseWorkflow, /release_mode:/)
+  assert.match(nativeReleaseWorkflow, /package-proof/)
+  assert.match(nativeReleaseWorkflow, /public-trust/)
   assert.match(nativeReleaseWorkflow, /SOURCE_REF:/)
+  assert.match(nativeReleaseWorkflow, /RELEASE_MODE:/)
   assert.match(nativeReleaseWorkflow, /ref: \$\{\{ env\.SOURCE_REF \}\}/)
   assert.match(nativeReleaseWorkflow, /release:/)
   assert.match(nativeReleaseWorkflow, /push:\n\s+tags:/)
@@ -200,7 +204,9 @@ test('native release workflow builds and attaches appling artifacts for every de
   assert.match(nativeReleaseWorkflow, /npm ci --prefix appling/)
   assert.doesNotMatch(nativeReleaseWorkflow, /npm install -g bare-make/)
   assert.match(nativeReleaseWorkflow, /PEARBROWSER_MACOS_SIGNING_IDENTITY/)
-  assert.match(nativeReleaseWorkflow, /node scripts\/check-native-signing-credentials\.mjs --platform "\$RUNNER_OS"/)
+  assert.match(nativeReleaseWorkflow, /args=\(--platform "\$RUNNER_OS"\)/)
+  assert.match(nativeReleaseWorkflow, /--require-public-trust/)
+  assert.match(nativeReleaseWorkflow, /node scripts\/check-native-signing-credentials\.mjs "\$\{args\[@\]\}"/)
   assert.match(nativeReleaseWorkflow, /PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64/)
   assert.match(nativeReleaseWorkflow, /PEARBROWSER_MACOS_NOTARY_APPLE_ID/)
   assert.match(nativeReleaseWorkflow, /Import macOS signing certificate/)
@@ -223,8 +229,26 @@ test('native release workflow builds and attaches appling artifacts for every de
   assert.match(nativeReleaseWorkflow, /gh release upload "\$RELEASE_TAG" "\$\{assets\[@\]\}"/)
   assert.match(nativeReleaseWorkflow, /Checkout release verifier/)
   assert.match(nativeReleaseWorkflow, /check-native-release-assets\.mjs/)
+  assert.match(nativeReleaseWorkflow, /--require-published/)
   assert.doesNotMatch(nativeReleaseWorkflow, /gh release create/)
   assert.match(nativeReleaseWorkflow, /contents: write/)
+})
+
+test('native release workflow defaults manual runs to package proof and public release events to public trust', () => {
+  assert.match(nativeReleaseWorkflow, /default: package-proof/)
+  assert.match(nativeReleaseWorkflow, /RELEASE_MODE: \$\{\{ github\.event\.inputs\.release_mode \|\| 'public-trust' \}\}/)
+  assert.match(nativeReleaseWorkflow, /case "\$RELEASE_MODE" in/)
+  assert.match(nativeReleaseWorkflow, /if \[\[ "\$RELEASE_MODE" == "public-trust" \]\]; then/)
+  assert.ok(
+    nativeReleaseWorkflow.indexOf('args+=(--require-public-trust)') <
+      nativeReleaseWorkflow.indexOf('node scripts/check-native-signing-credentials.mjs "${args[@]}"'),
+    'public-trust mode must add the native signing hard gate before running the checker'
+  )
+  assert.ok(
+    nativeReleaseWorkflow.indexOf('args+=(--require-published)') <
+      nativeReleaseWorkflow.indexOf('check-native-release-assets.mjs "${args[@]}"'),
+    'public-trust mode must require a published release in the post-upload asset check'
+  )
 })
 
 test('native signing credential checker separates package proof from public trust gates', () => {

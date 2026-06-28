@@ -13,8 +13,12 @@ Use the manual GitHub Actions trigger:
    has been merged to the default branch, otherwise GitHub will not expose the
    manual workflow trigger.
 2. Open **Actions -> Desktop Native Release**.
-3. Run the workflow with tag `v0.5.0` and `source_ref` set to the branch or
-   commit that contains this packaging code, usually `main` after merge.
+3. Run the workflow with tag `v0.5.0`, `source_ref` set to the branch or commit
+   that contains this packaging code, usually `main` after merge, and
+   `release_mode` set for the intended trust level:
+   - `package-proof`: permits ad-hoc macOS signing and unsigned Windows assets.
+   - `public-trust`: requires macOS Developer ID/notary credentials and Windows
+     signing credentials before assets are uploaded for announcement.
 4. Wait for the macOS, Windows, and Linux jobs to finish.
 5. Confirm the `v0.5.0` GitHub release has the generated installers, per-file
    `.sha256` files, `SHA256SUMS-*`, and `manifest-*` files attached.
@@ -142,6 +146,14 @@ macOS can remain ad-hoc signed, Windows can remain unsigned, and Linux relies on
 checksums. With `--require-public-trust`, macOS must have the Developer ID
 certificate pair, a real signing identity, and the notary credential trio;
 Windows must have the PFX certificate pair; Linux remains checksum-only.
+
+The GitHub workflow mirrors this split. Manual `workflow_dispatch` runs default
+to `release_mode=package-proof` so maintainers can refresh packaging assets
+without private credentials. Release-published and tag-triggered runs default to
+`release_mode=public-trust`, and manual runs can select `public-trust`
+explicitly. In public-trust mode, the workflow adds
+`--require-public-trust` to `scripts/check-native-signing-credentials.mjs` and
+adds `--require-published` to the post-upload release asset check.
 
 Do not attach hand-built local installers to a public release unless the
 corresponding workflow job cannot run and the manual build command plus checksum

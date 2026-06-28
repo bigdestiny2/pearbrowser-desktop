@@ -149,7 +149,10 @@ The release scripts are operational gates, not ordinary tests:
 - `.github/workflows/desktop-native-release.yml` is the cross-platform release
   asset backfill path. It must be present on the default branch, and manual
   backfills should run with tag `v0.5.0` plus `source_ref` set to the branch or
-  commit containing the packaging code. Latest proof: run
+  commit containing the packaging code. Use `release_mode=package-proof` for
+  unsigned/ad-hoc asset refreshes and `release_mode=public-trust` when the run
+  must fail closed on missing macOS notarization or Windows signing credentials.
+  Release-published and tag-triggered runs default to `public-trust`. Latest proof: run
   `https://github.com/bigdestiny2/pearbrowser-desktop/actions/runs/28317333414`
   succeeded from `main` after the native signing credential preflight merge and
   refreshed 16 `v0.5.0` assets; the release asset checker now runs after upload
