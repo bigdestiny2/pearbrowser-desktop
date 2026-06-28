@@ -117,49 +117,7 @@ jobs:
           Write-Host "Using Windows SDK tools from $sdkBin"
 
       - name: Validate release signing configuration
-        run: |
-          set -euo pipefail
-
-          require_pair() {
-            local first_name="$1"
-            local first_value="$2"
-            local second_name="$3"
-            local second_value="$4"
-            if [[ -n "$first_value" && -z "$second_value" ]] || [[ -z "$first_value" && -n "$second_value" ]]; then
-              echo "::error::${first_name} and ${second_name} must be configured together"
-              exit 1
-            fi
-          }
-
-          if [[ "$RUNNER_OS" == "macOS" ]]; then
-            require_pair \
-              PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64 "$PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64" \
-              PEARBROWSER_MACOS_CERTIFICATE_PASSWORD "$PEARBROWSER_MACOS_CERTIFICATE_PASSWORD"
-
-            if [[ -n "$PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64" && "$PEARBROWSER_MACOS_SIGNING_IDENTITY" == "-" ]]; then
-              echo "::error::A macOS certificate was provided, but PEARBROWSER_MACOS_SIGNING_IDENTITY is still ad-hoc '-'"
-              exit 1
-            fi
-
-            notary_count=0
-            [[ -n "$PEARBROWSER_MACOS_NOTARY_APPLE_ID" ]] && notary_count=$((notary_count + 1))
-            [[ -n "$PEARBROWSER_MACOS_NOTARY_PASSWORD" ]] && notary_count=$((notary_count + 1))
-            [[ -n "$PEARBROWSER_MACOS_NOTARY_TEAM_ID" ]] && notary_count=$((notary_count + 1))
-            if (( notary_count > 0 && notary_count < 3 )); then
-              echo "::error::macOS notarization requires PEARBROWSER_MACOS_NOTARY_APPLE_ID, PEARBROWSER_MACOS_NOTARY_PASSWORD, and PEARBROWSER_MACOS_NOTARY_TEAM_ID"
-              exit 1
-            fi
-            if (( notary_count == 3 )) && [[ "$PEARBROWSER_MACOS_SIGNING_IDENTITY" == "-" ]]; then
-              echo "::error::macOS notarization requires a real Developer ID signing identity"
-              exit 1
-            fi
-          fi
-
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            require_pair \
-              PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64 "$PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64" \
-              PEARBROWSER_WINDOWS_CERTIFICATE_PASSWORD "$PEARBROWSER_WINDOWS_CERTIFICATE_PASSWORD"
-          fi
+        run: node scripts/check-native-signing-credentials.mjs --platform "$RUNNER_OS"
 
       - name: Import macOS signing certificate
         if: runner.os == 'macOS' && env.PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64 != ''
