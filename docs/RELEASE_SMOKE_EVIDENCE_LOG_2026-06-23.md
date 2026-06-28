@@ -49,8 +49,8 @@ manual gate.
 
 | Gate | Expected | Result | Evidence |
 | --- | --- | --- | --- |
-| Production browser launch | stable `pear://tco5k7...` opens and backend connects |  |  |
-| Runtime RPC smoke | `/status-smoke` reports DHT/proxy/relay readiness |  |  |
+| Production browser launch | stable `pear://tco5k7...` opens and backend connects | PASS | 2026-06-28 local `pear run pear://tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty` launched PearBrowser, emitted `Sending READY event`, connected the renderer, opened RPC `:9876`, started HTTP proxy `18788`, and connected HiveRelay peers; no Peercord or other third-party app was launched |
+| Runtime RPC smoke | `/status-smoke` reports DHT/proxy/relay readiness | PASS | 2026-06-28 local run while production PearBrowser was launched: `node scripts/runtime-rpc-smoke.mjs --timeout 20000 --json` returned `ok:true`, `port:9876`, `dhtConnected:true`, `peerCount:7`, `proxyPort:18788`, `hiveRelays:7`, `storagePercent:114`; local profile storage was over quota but the diagnostic readiness fields passed |
 | Browse story | homepage `hyper://186891...` renders, reloads, site info correct |  |  |
 | Fresh-launch landing story | PearBrowser landing front tab, `peerit` second tab |  |  |
 | Catalogue story | Apps auto-loads, featured cards visible, search works |  |  |
