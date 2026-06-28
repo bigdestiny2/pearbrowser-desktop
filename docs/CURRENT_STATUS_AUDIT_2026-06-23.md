@@ -111,9 +111,11 @@ validation, and broader real-device smoke.
 - Real-network checks can false-negative in restricted/sandboxed environments.
   `scripts/check-relays.js`, `scripts/verify-pin.js`, `scripts/verify-live-catalog.js`,
   and bundle sampling should be run with real DHT access before announcement.
-- Desktop source install still depends on sibling local HiveRelay packages at
-  `../../00-core/hiverelay/packages/{core,client,verifier}`. A standalone clone
-  is not enough until those packages are published or vendored differently.
+- Desktop source install now uses vendored HiveRelay `0.20.0` package tarballs
+  in `vendor/hiverelay`, verified by `scripts/check-hiverelay-layout.mjs`.
+  A standalone clone can run `npm install`; the sibling
+  `../../00-core/hiverelay` checkout is optional development context until
+  compatible packages are published to npm.
 - Search's next product improvement is term-level result explanation inside
   result rows, beyond batch-level digest/fallback/partial provenance.
 - Naming's next product improvement is clearer ambiguity and candidate

@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync, spawnSync } from 'node:child_process'
 import {
+  copyFileSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -20,6 +21,7 @@ const applingPkg = JSON.parse(readFileSync(new URL('../appling/package.json', im
 const applingLock = JSON.parse(readFileSync(new URL('../appling/package-lock.json', import.meta.url), 'utf8'))
 const applingCmake = readFileSync(new URL('../appling/CMakeLists.txt', import.meta.url), 'utf8')
 const nativeReleaseWorkflow = readFileSync(new URL('../.github/workflows/desktop-native-release.yml', import.meta.url), 'utf8')
+const desktopCiWorkflow = readFileSync(new URL('../.github/workflows/desktop-ci.yml', import.meta.url), 'utf8')
 const applingReleaseCheck = readFileSync(new URL('../scripts/check-appling-release.mjs', import.meta.url), 'utf8')
 const applingArtifactCollector = readFileSync(new URL('../scripts/collect-appling-artifacts.mjs', import.meta.url), 'utf8')
 const applingArtifactCollectorPath = fileURLToPath(new URL('../scripts/collect-appling-artifacts.mjs', import.meta.url))
@@ -37,8 +39,14 @@ const runtimeSmoke = readFileSync(new URL('../scripts/runtime-rpc-smoke.mjs', im
 const releaseStorySmoke = readFileSync(new URL('../scripts/release-rpc-story-smoke.mjs', import.meta.url), 'utf8')
 const liveCatalogVerifier = readFileSync(new URL('../scripts/verify-live-catalog.js', import.meta.url), 'utf8')
 const hiveRelayLayout = readFileSync(new URL('../scripts/check-hiverelay-layout.mjs', import.meta.url), 'utf8')
+const hiveRelayCheckPath = fileURLToPath(new URL('../scripts/check-hiverelay-layout.mjs', import.meta.url))
 const verifyPin = readFileSync(new URL('../scripts/verify-pin.js', import.meta.url), 'utf8')
 const pinAppOnHiveRelay = readFileSync(new URL('../scripts/pin-app-on-hiverelay.js', import.meta.url), 'utf8')
+const vendoredHiveRelayPackages = [
+  ['p2p-hiverelay', 'vendor/hiverelay/p2p-hiverelay-0.20.0.tgz'],
+  ['p2p-hiverelay-client', 'vendor/hiverelay/p2p-hiverelay-client-0.20.0.tgz'],
+  ['p2p-hiverelay-verifier', 'vendor/hiverelay/p2p-hiverelay-verifier-0.20.0.tgz']
+]
 
 test('Pear stage ignore excludes local release/operator scratch files', () => {
   const ignored = pkg.pear?.stage?.ignore || []
@@ -70,10 +78,51 @@ test('foreign-key app pin refuses empty checkouts before broadcasting seed', () 
   )
 })
 
-test('HiveRelay workspace pin is v0.20.0 trustless verification release', () => {
-  assert.match(hiveRelayLayout, /p2p-hiverelay', '0\.20\.0/)
-  assert.match(hiveRelayLayout, /p2p-hiverelay-client', '0\.20\.0/)
-  assert.match(hiveRelayLayout, /p2p-hiverelay-verifier', '0\.20\.0/)
+test('HiveRelay source install uses vendored v0.20.0 packages', () => {
+  for (const [name, tarball] of vendoredHiveRelayPackages) {
+    assert.equal(pkg.dependencies?.[name], `file:${tarball}`)
+    assert.match(hiveRelayLayout, new RegExp(`${name}', '0\\.20\\.0', '${tarball}`))
+  }
+
+  assert.match(hiveRelayLayout, /readPackedPackageJson/)
+  assert.match(hiveRelayLayout, /package\.json -> file:vendor\/hiverelay\/\*\.tgz/)
+  assert.match(hiveRelayLayout, /The sibling \.\.\/\.\.\/00-core\/hiverelay checkout is optional/)
+})
+
+test('HiveRelay vendored package guard passes for standalone source installs', () => {
+  const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'pear-hiverelay-vendor-')))
+  try {
+    const vendorDir = join(fixture, 'vendor', 'hiverelay')
+    mkdirSync(vendorDir, { recursive: true })
+
+    const dependencies = {}
+    for (const [name, tarball] of vendoredHiveRelayPackages) {
+      dependencies[name] = `file:${tarball}`
+      copyFileSync(
+        fileURLToPath(new URL(`../${tarball}`, import.meta.url)),
+        join(fixture, tarball)
+      )
+    }
+
+    writeFileSync(join(fixture, 'package.json'), JSON.stringify({ dependencies }, null, 2))
+
+    const result = spawnSync(process.execPath, [hiveRelayCheckPath], {
+      cwd: fixture,
+      encoding: 'utf8'
+    })
+
+    assert.equal(result.status, 0, result.stderr || result.stdout)
+    assert.match(result.stderr, /optional local HiveRelay checkout missing/)
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
+})
+
+test('desktop CI verifies vendored HiveRelay source install without sibling checkout', () => {
+  assert.match(desktopCiWorkflow, /Verify vendored HiveRelay packages/)
+  assert.match(desktopCiWorkflow, /npm ci/)
+  assert.doesNotMatch(desktopCiWorkflow, /P2P-Hiverelay/)
+  assert.doesNotMatch(desktopCiWorkflow, /Checkout HiveRelay workspace packages/)
 })
 
 test('release evidence checker is exposed as an operator script', () => {
