@@ -15,7 +15,7 @@ Primary user promise: download one native package, launch it normally, and let P
 - `.github/workflows/desktop-native-release.yml` builds macOS, Windows, and Linux packages in CI.
 - The native workflow now has two modes:
   - `package-proof`: manual default, permits ad-hoc macOS signing and unsigned Windows packages.
-  - `public-trust`: required for announcement-ready assets, requires macOS Developer ID/notary credentials, Windows signing credentials, a published GitHub release, and post-upload native download verification.
+  - `public-trust`: required for announcement-ready assets, requires macOS Developer ID/notary credentials, notarized macOS DMG assets, Windows signing credentials, a published GitHub release, and post-upload native download verification.
 - Source installs are standalone because the HiveRelay `0.20.0` packages are vendored under `vendor/hiverelay`.
 
 ## Distribution Model
@@ -26,7 +26,7 @@ Use three lanes, with stricter gates as the audience widens:
 | --- | --- | --- | --- | --- |
 | Source checkout | contributors and debuggers | `npm install`, `pear`, local scripts | developer trust | `npm test`, vendored HiveRelay guard, high-severity audit |
 | Package proof | internal testers and packaging validation | GitHub release assets from manual workflow | checksum trust plus OS warnings where unsigned | native workflow `release_mode=package-proof`, asset checker, smoke evidence |
-| Public trust | public desktop users | GitHub release assets, then package managers | OS code-signing trust plus checksums | native workflow `release_mode=public-trust`, notarization/signing verification, published release check, download verification |
+| Public trust | public desktop users | GitHub release assets, then package managers | OS code-signing trust plus checksums | native workflow `release_mode=public-trust`, notarized macOS DMG, Windows signing verification, published release check, download verification |
 
 The stable Pear link is still the application-content update channel. Native packages should change only when the wrapper, OS integration, permissions, icons, signing, or runtime shell changes.
 
@@ -56,7 +56,7 @@ The stable Pear link is still the application-content update channel. Native pac
 3. Run `npm run check:native-signing -- --require-public-trust` before spending CI minutes.
 4. Run Desktop Native Release with `release_mode=public-trust` or publish/tag the release so the workflow defaults to public trust.
 5. Verify post-upload assets with:
-   `npm run check:native-release-assets -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --require-published`.
+   `npm run check:native-release-assets -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --require-published --require-public-trust`.
 6. Verify the recommended package downloads:
    `npm run verify:native-downloads -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --all`.
 7. Resolve and record the user-facing packages for macOS, Windows, and Linux:

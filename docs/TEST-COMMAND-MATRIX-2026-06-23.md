@@ -142,11 +142,15 @@ The release scripts are operational gates, not ordinary tests:
   wrapper for the current platform.
 - `npm run package:appling -- --tag v0.5.0` collects native artifacts,
   `.sha256` sidecars, `SHA256SUMS-*`, and `manifest-*` files.
+- `npm run package:macos-dmg -- --tag v0.5.0` creates the public-trust macOS
+  drag-to-Applications DMG from the built `.app`; in CI it runs after app
+  notarization and before artifact collection.
 - `npm run check:native-release-assets -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop`
   verifies the attached GitHub release asset set after upload: macOS, Windows,
   and Linux native artifacts, one checksum index and manifest per
   platform/architecture pair, and one `.sha256` sidecar per installer/package
-  file.
+  file. Add `--require-public-trust` to require a macOS DMG for each macOS
+  architecture before announcement.
 - `npm run verify:native-downloads -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --all`
   downloads the recommended native package for each supported desktop target and
   verifies the streamed bytes against the attached `.sha256` sidecar.

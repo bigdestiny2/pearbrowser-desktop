@@ -206,6 +206,10 @@ jobs:
         if: runner.os == 'macOS'
         run: node scripts/notarize-appling-macos.mjs
 
+      - name: Create public-trust macOS DMG
+        if: runner.os == 'macOS' && env.RELEASE_MODE == 'public-trust'
+        run: npm run package:macos-dmg -- --tag "$RELEASE_TAG"
+
       - name: Sign additional Windows installer artifacts
         if: runner.os == 'Windows'
         shell: pwsh
@@ -358,7 +362,7 @@ jobs:
           set -euo pipefail
           args=(--tag "$RELEASE_TAG" --repo "$GH_REPO")
           if [[ "$RELEASE_MODE" == "public-trust" ]]; then
-            args+=(--require-published)
+            args+=(--require-published --require-public-trust)
           fi
           node pear-ecosystem/01-browser/pearbrowser-desktop/scripts/check-native-release-assets.mjs "${args[@]}"
 

@@ -48,6 +48,8 @@ announcement.
     `.AppImage`, per-asset `.sha256`, `SHA256SUMS-*`, and `manifest-*` files.
   - Verify attachments after upload:
     `npm run check:native-release-assets -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop`.
+  - For public-trust runs, require published release assets and macOS DMGs:
+    `npm run check:native-release-assets -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --require-published --require-public-trust`.
   - Verify the recommended package downloads against their sidecars:
     `npm run verify:native-downloads -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --all`.
   - Record the Actions run URL and resulting release asset list in the evidence

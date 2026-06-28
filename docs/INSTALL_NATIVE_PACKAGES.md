@@ -24,6 +24,10 @@ The Windows `.msix` and extra Linux AppImage artifact remain attached for
 package validation, but the resolver selects the `.exe` and normalized
 `.AppImage` as the user-facing defaults.
 
+For the future public-trust macOS lane, the resolver will prefer notarized
+`.dmg` assets over `.app.zip` once those assets are attached by the signed
+native release workflow.
+
 From a source checkout, ask the resolver for the current machine:
 
 ```sh

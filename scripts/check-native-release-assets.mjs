@@ -34,7 +34,8 @@ const report = verifyRelease(release, {
   repo,
   tag,
   version,
-  requirePublished: args.requirePublished
+  requirePublished: args.requirePublished,
+  requirePublicTrust: args.requirePublicTrust
 })
 
 if (args.json) printJson(report)
@@ -48,7 +49,8 @@ function parseArgs (argv) {
     repo: '',
     fixture: '',
     json: false,
-    requirePublished: false
+    requirePublished: false,
+    requirePublicTrust: false
   }
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
@@ -57,6 +59,7 @@ function parseArgs (argv) {
     else if (arg === '--fixture') parsed.fixture = requireValue(argv, ++i, arg)
     else if (arg === '--json') parsed.json = true
     else if (arg === '--require-published') parsed.requirePublished = true
+    else if (arg === '--require-public-trust') parsed.requirePublicTrust = true
     else if (arg === '-h' || arg === '--help') usage(0)
     else usage(2, `unknown argument: ${arg}`)
   }
@@ -71,8 +74,8 @@ function requireValue (argv, index, flag) {
 
 function usage (code, message = '') {
   if (message) console.error(`error: ${message}`)
-  console.error('usage: node scripts/check-native-release-assets.mjs [--tag v0.5.0] [--repo owner/repo] [--require-published] [--json]')
-  console.error('       node scripts/check-native-release-assets.mjs --fixture release.json [--tag v0.5.0] [--json]')
+  console.error('usage: node scripts/check-native-release-assets.mjs [--tag v0.5.0] [--repo owner/repo] [--require-published] [--require-public-trust] [--json]')
+  console.error('       node scripts/check-native-release-assets.mjs --fixture release.json [--tag v0.5.0] [--require-public-trust] [--json]')
   process.exit(code)
 }
 
@@ -140,7 +143,7 @@ function verifyRelease (release, options) {
 
   const platforms = {}
   for (const platform of ['macos', 'windows', 'linux']) {
-    platforms[platform] = verifyPlatform(platform, assets, names, options.version, errors)
+    platforms[platform] = verifyPlatform(platform, assets, names, options.version, errors, options)
   }
 
   const classified = new Set()
@@ -187,7 +190,7 @@ function normalizeAssets (assets) {
     .filter((asset) => asset.name)
 }
 
-function verifyPlatform (platform, assets, names, version, errors) {
+function verifyPlatform (platform, assets, names, version, errors, options = {}) {
   const sums = assets.filter((asset) => asset.name.match(new RegExp(`^SHA256SUMS-${escapeRegex(platform)}-[A-Za-z0-9._-]+\\.txt$`)))
   const manifests = assets.filter((asset) => asset.name.match(new RegExp(`^manifest-${escapeRegex(platform)}-[A-Za-z0-9._-]+\\.json$`)))
   const sumsByArch = assetsByArch(sums, new RegExp(`^SHA256SUMS-${escapeRegex(platform)}-([A-Za-z0-9._-]+)\\.txt$`), `${platform} SHA256SUMS`, errors)
@@ -226,6 +229,12 @@ function verifyPlatform (platform, assets, names, version, errors) {
     if (!manifestsByArch.has(arch)) errors.push(`missing manifest file for ${platform}/${arch}`)
     if (!artifactsByArch.has(arch)) {
       errors.push(`expected at least one primary ${platform}/${arch} native artifact named ${primaryPrefix}${arch}...`)
+    }
+    if (platform === 'macos' && options.requirePublicTrust) {
+      const archArtifacts = artifactsByArch.get(arch) || []
+      if (!archArtifacts.some((asset) => /\.dmg$/i.test(asset.name))) {
+        errors.push(`missing public-trust macOS DMG for ${platform}/${arch}`)
+      }
     }
   }
 

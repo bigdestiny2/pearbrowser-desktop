@@ -34,6 +34,7 @@ const nativeReleaseAssetResolver = readFileSync(new URL('../scripts/resolve-nati
 const nativeReleaseAssetResolverPath = fileURLToPath(new URL('../scripts/resolve-native-release-asset.mjs', import.meta.url))
 const nativeDownloadVerifier = readFileSync(new URL('../scripts/verify-native-downloads.mjs', import.meta.url), 'utf8')
 const nativeDownloadVerifierPath = fileURLToPath(new URL('../scripts/verify-native-downloads.mjs', import.meta.url))
+const macosDmgPackager = readFileSync(new URL('../scripts/create-macos-dmg.mjs', import.meta.url), 'utf8')
 const macosNotarizeScript = readFileSync(new URL('../scripts/notarize-appling-macos.mjs', import.meta.url), 'utf8')
 const releaseScript = readFileSync(new URL('../scripts/release-prod.sh', import.meta.url), 'utf8')
 const sheetsBundleScript = readFileSync(new URL('../scripts/build-sheets-bundle.sh', import.meta.url), 'utf8')
@@ -148,6 +149,8 @@ test('native release asset checker is exposed as an operator script', () => {
   assert.match(nativeReleaseAssetCheck, /manifest-\$\{escapeRegex\(platform\)\}/)
   assert.match(nativeReleaseAssetCheck, /missing SHA-256 sidecar/)
   assert.match(nativeReleaseAssetCheck, /--require-published/)
+  assert.match(nativeReleaseAssetCheck, /--require-public-trust/)
+  assert.match(nativeReleaseAssetCheck, /missing public-trust macOS DMG/)
 })
 
 test('native release asset resolver is exposed for platform download guidance', () => {
@@ -166,6 +169,14 @@ test('native download verifier is exposed for end-to-end checksum evidence', () 
   assert.match(nativeDownloadVerifier, /SHA-256 mismatch/)
 })
 
+test('macOS DMG packager is exposed for public-trust native releases', () => {
+  assert.equal(pkg.scripts?.['package:macos-dmg'], 'node scripts/create-macos-dmg.mjs')
+  assert.match(macosDmgPackager, /hdiutil/)
+  assert.match(macosDmgPackager, /notarytool/)
+  assert.match(macosDmgPackager, /stapler/)
+  assert.match(macosDmgPackager, /Applications/)
+})
+
 test('appling release metadata stays in sync with the production Pear channel', () => {
   const productionId = pearConfig.links.production.replace(/^pear:\/\//, '')
   assert.match(applingCmake, new RegExp(`ID "${productionId}"`))
@@ -179,6 +190,7 @@ test('appling release metadata stays in sync with the production Pear channel', 
   assert.equal(applingPkg.scripts.build, 'bare-make build')
   assert.equal(pkg.scripts?.['check:appling-release'], 'node scripts/check-appling-release.mjs')
   assert.equal(pkg.scripts?.['package:appling'], 'node scripts/collect-appling-artifacts.mjs')
+  assert.equal(pkg.scripts?.['package:macos-dmg'], 'node scripts/create-macos-dmg.mjs')
   assert.match(applingReleaseCheck, /appling CMake ID/)
   assert.match(applingReleaseCheck, /release tag must look like vX\.Y\.Z/)
   assert.match(applingReleaseCheck, /\['macOS icon', '\.\.\/appling\/assets\/darwin\/icon\.png'\]/)
@@ -225,6 +237,8 @@ test('native release workflow builds and attaches appling artifacts for every de
   assert.match(nativeReleaseWorkflow, /PEARBROWSER_MACOS_NOTARY_APPLE_ID/)
   assert.match(nativeReleaseWorkflow, /Import macOS signing certificate/)
   assert.match(nativeReleaseWorkflow, /node scripts\/notarize-appling-macos\.mjs/)
+  assert.match(nativeReleaseWorkflow, /Create public-trust macOS DMG/)
+  assert.match(nativeReleaseWorkflow, /npm run package:macos-dmg -- --tag "\$RELEASE_TAG"/)
   assert.match(nativeReleaseWorkflow, /security set-key-partition-list/)
   assert.match(nativeReleaseWorkflow, /security delete-keychain/)
   assert.match(nativeReleaseWorkflow, /PEARBROWSER_WINDOWS_SIGNING_THUMBPRINT/)
@@ -247,6 +261,7 @@ test('native release workflow builds and attaches appling artifacts for every de
   assert.match(nativeReleaseWorkflow, /Verify public-trust release downloads/)
   assert.match(nativeReleaseWorkflow, /verify-native-downloads\.mjs/)
   assert.match(nativeReleaseWorkflow, /--require-published/)
+  assert.match(nativeReleaseWorkflow, /--require-public-trust/)
   assert.doesNotMatch(nativeReleaseWorkflow, /gh release create/)
   assert.match(nativeReleaseWorkflow, /contents: write/)
 })
@@ -265,6 +280,11 @@ test('native release workflow defaults manual runs to package proof and public r
     nativeReleaseWorkflow.indexOf('args+=(--require-published)') <
       nativeReleaseWorkflow.indexOf('check-native-release-assets.mjs "${args[@]}"'),
     'public-trust mode must require a published release in the post-upload asset check'
+  )
+  assert.ok(
+    nativeReleaseWorkflow.indexOf('Create public-trust macOS DMG') <
+      nativeReleaseWorkflow.indexOf('node scripts/collect-appling-artifacts.mjs'),
+    'public-trust macOS DMG must be created before release artifact collection'
   )
   assert.ok(
     nativeReleaseWorkflow.indexOf("if: env.RELEASE_MODE == 'public-trust'") <
@@ -487,6 +507,87 @@ test('native release asset checker accepts complete attached asset fixtures', ()
   }
 })
 
+test('native release asset checker requires macOS DMGs for public-trust assets', () => {
+  const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'pear-native-public-trust-')))
+  try {
+    const releasePath = join(fixture, 'release.json')
+    const publicTrustAssets = [
+      'PearBrowser-0.5.0-macos-arm64.dmg',
+      'PearBrowser-0.5.0-macos-arm64.dmg.sha256',
+      'PearBrowser-0.5.0-macos-arm64.app.zip',
+      'PearBrowser-0.5.0-macos-arm64.app.zip.sha256',
+      'SHA256SUMS-macos-arm64.txt',
+      'manifest-macos-arm64.json',
+      'PearBrowser-0.5.0-macos-x64.dmg',
+      'PearBrowser-0.5.0-macos-x64.dmg.sha256',
+      'PearBrowser-0.5.0-macos-x64.app.zip',
+      'PearBrowser-0.5.0-macos-x64.app.zip.sha256',
+      'SHA256SUMS-macos-x64.txt',
+      'manifest-macos-x64.json',
+      'PearBrowser-0.5.0-windows-x64.exe',
+      'PearBrowser-0.5.0-windows-x64.exe.sha256',
+      'SHA256SUMS-windows-x64.txt',
+      'manifest-windows-x64.json',
+      'PearBrowser-0.5.0-linux-x64.AppImage',
+      'PearBrowser-0.5.0-linux-x64.AppImage.sha256',
+      'SHA256SUMS-linux-x64.txt',
+      'manifest-linux-x64.json'
+    ]
+    writeFileSync(releasePath, JSON.stringify({
+      tagName: 'v0.5.0',
+      isDraft: false,
+      isPrerelease: false,
+      assets: publicTrustAssets.map((name, i) => ({ name, size: i + 1 }))
+    }, null, 2))
+
+    const ok = spawnSync(process.execPath, [
+      nativeReleaseAssetCheckPath,
+      '--fixture',
+      releasePath,
+      '--tag',
+      'v0.5.0',
+      '--require-public-trust',
+      '--json'
+    ], {
+      cwd: fileURLToPath(new URL('..', import.meta.url)),
+      encoding: 'utf8'
+    })
+
+    assert.equal(ok.status, 0, ok.stderr || ok.stdout)
+    const okReport = JSON.parse(ok.stdout)
+    assert.equal(okReport.ok, true)
+    assert.equal(okReport.platforms.macos.artifacts.filter((name) => name.endsWith('.dmg')).length, 2)
+
+    writeFileSync(releasePath, JSON.stringify({
+      tagName: 'v0.5.0',
+      isDraft: false,
+      isPrerelease: false,
+      assets: publicTrustAssets
+        .filter((name) => !name.includes('macos-x64.dmg'))
+        .map((name, i) => ({ name, size: i + 1 }))
+    }, null, 2))
+
+    const missing = spawnSync(process.execPath, [
+      nativeReleaseAssetCheckPath,
+      '--fixture',
+      releasePath,
+      '--tag',
+      'v0.5.0',
+      '--require-public-trust',
+      '--json'
+    ], {
+      cwd: fileURLToPath(new URL('..', import.meta.url)),
+      encoding: 'utf8'
+    })
+
+    assert.notEqual(missing.status, 0)
+    const missingReport = JSON.parse(missing.stdout)
+    assert.ok(missingReport.errors.some((error) => error.includes('missing public-trust macOS DMG for macos/x64')))
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
+})
+
 test('native release asset resolver chooses the recommended package for each desktop platform', () => {
   const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'pear-native-resolver-')))
   try {
@@ -496,6 +597,8 @@ test('native release asset resolver chooses the recommended package for each des
       isDraft: false,
       isPrerelease: false,
       assets: [
+        'PearBrowser-0.5.0-macos-arm64.dmg',
+        'PearBrowser-0.5.0-macos-arm64.dmg.sha256',
         'PearBrowser-0.5.0-macos-arm64.app.zip',
         'PearBrowser-0.5.0-macos-arm64.app.zip.sha256',
         'PearBrowser-0.5.0-windows-x64.msix',
@@ -533,7 +636,7 @@ test('native release asset resolver chooses the recommended package for each des
       return JSON.parse(result.stdout)
     }
 
-    assert.equal(resolve('macos', 'arm64').asset.name, 'PearBrowser-0.5.0-macos-arm64.app.zip')
+    assert.equal(resolve('macos', 'arm64').asset.name, 'PearBrowser-0.5.0-macos-arm64.dmg')
     assert.equal(resolve('windows', 'x64').asset.name, 'PearBrowser-0.5.0-windows-x64.exe')
     assert.equal(resolve('linux', 'x64').asset.name, 'PearBrowser-0.5.0-linux-x64.AppImage')
   } finally {
