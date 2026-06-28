@@ -7,6 +7,7 @@ project(pear_appling C CXX ASM)
 set(PEARBROWSER_APPLING_DIR "${CMAKE_CURRENT_LIST_DIR}")
 set(PEARBROWSER_BARE_HEADERS_VERSION "1.28.7" CACHE STRING "Bare headers version compatible with cmake-pear's pinned Bare runtime")
 set(PEARBROWSER_MACOS_ICNS "${PEARBROWSER_APPLING_DIR}/assets/darwin/icon.icns")
+set(PEARBROWSER_LINUX_METAINFO "${PEARBROWSER_APPLING_DIR}/assets/linux/io.github.bigdestiny2.pearbrowser.metainfo.xml")
 
 if(NOT DEFINED PEARBROWSER_MACOS_SIGNING_IDENTITY)
   if(DEFINED ENV{PEARBROWSER_MACOS_SIGNING_IDENTITY} AND NOT "$ENV{PEARBROWSER_MACOS_SIGNING_IDENTITY}" STREQUAL "")
@@ -278,6 +279,52 @@ function(code_sign_windows target)
     ALL
     COMMAND ${sign_tool} sign ${args} "${ARGV_PATH}"
     DEPENDS ${ARGV_DEPENDS}
+  )
+endfunction()
+
+# cmake-pear delegates Linux packaging to cmake-app-image, which generates the
+# desktop entry from CMake arguments. Add PearBrowser's AppStream metainfo to the
+# generated AppDir so Linux release artifacts can be metadata-checked before
+# upload.
+function(configure_pear_appling_linux target)
+  set(one_value_keywords
+    NAME
+    DESCRIPTION
+    ICON
+    CATEGORY
+    SPLASH
+  )
+
+  cmake_parse_arguments(
+    PARSE_ARGV 1 ARGV "" "${one_value_keywords}" ""
+  )
+
+  if(NOT ARGV_ICON)
+    set(ARGV_ICON "assets/linux/icon.png")
+  endif()
+
+  string(TOLOWER "${ARGV_NAME}" ARGV_OUTPUT_NAME)
+
+  set_target_properties(
+    ${target}
+    PROPERTIES
+    OUTPUT_NAME "${ARGV_OUTPUT_NAME}"
+  )
+
+  if(NOT EXISTS "${PEARBROWSER_LINUX_METAINFO}")
+    message(FATAL_ERROR "PearBrowser Linux AppStream metadata is missing: ${PEARBROWSER_LINUX_METAINFO}")
+  endif()
+
+  add_app_image(
+    ${target}_app_image
+    NAME "${ARGV_NAME}"
+    DESCRIPTION "${ARGV_DESCRIPTION}"
+    ICON "${ARGV_ICON}"
+    CATEGORY "${ARGV_CATEGORY}"
+    TARGET ${target}
+    RESOURCES
+      FILE "${ARGV_SPLASH}" "splash.png"
+      FILE "${PEARBROWSER_LINUX_METAINFO}" "usr/share/metainfo/io.github.bigdestiny2.pearbrowser.metainfo.xml"
   )
 endfunction()
 

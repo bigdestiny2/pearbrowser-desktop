@@ -41,6 +41,12 @@ const checks = [
     args: [...sharedReleaseArgs, '--all', '--json']
   }),
   runNodeCheck({
+    id: 'linux-appimage-metadata',
+    label: 'Linux AppImage desktop metadata',
+    script: 'scripts/check-linux-appimage-metadata.mjs',
+    args: ['--json']
+  }),
+  runNodeCheck({
     id: 'native-install-smoke-plan',
     label: 'Clean-machine install smoke plan',
     script: 'scripts/generate-native-install-smoke-plan.mjs',
@@ -138,6 +144,9 @@ function summaryFor (id, report, result) {
   if (id === 'native-downloads') {
     const verified = Array.isArray(report.targets) ? report.targets.filter((target) => target.ok).length : 0
     return `verified=${verified}; errors=${Array.isArray(report.errors) ? report.errors.length : 0}`
+  }
+  if (id === 'linux-appimage-metadata') {
+    return `inspections=${Array.isArray(report.inspections) ? report.inspections.length : 0}; errors=${Array.isArray(report.errors) ? report.errors.length : 0}`
   }
   if (id === 'native-install-smoke-plan') {
     return `targets=${Array.isArray(report.targets) ? report.targets.length : 0}; errors=${Array.isArray(report.errors) ? report.errors.length : 0}`

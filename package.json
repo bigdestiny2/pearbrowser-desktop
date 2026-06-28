@@ -11,6 +11,7 @@
     "check:appling-release": "node scripts/check-appling-release.mjs",
     "check:native-signing": "node scripts/check-native-signing-credentials.mjs",
     "check:native-release-assets": "node scripts/check-native-release-assets.mjs",
+    "check:linux-appimage-metadata": "node scripts/check-linux-appimage-metadata.mjs",
     "resolve:native-release": "node scripts/resolve-native-release-asset.mjs",
     "verify:native-downloads": "node scripts/verify-native-downloads.mjs",
     "generate:native-install-snippet": "node scripts/generate-native-install-snippet.mjs",

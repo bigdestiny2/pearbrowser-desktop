@@ -202,6 +202,10 @@ jobs:
       - name: Build native package
         run: npm run --prefix appling build
 
+      - name: Verify Linux AppImage metadata
+        if: runner.os == 'Linux'
+        run: npm run check:linux-appimage-metadata -- --build-dir appling/build
+
       - name: Notarize macOS app
         if: runner.os == 'macOS'
         run: node scripts/notarize-appling-macos.mjs

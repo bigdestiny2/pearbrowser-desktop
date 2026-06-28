@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.bigdestiny2.pearbrowser</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>Apache-2.0</project_license>
+  <name>PearBrowser</name>
+  <summary>Peer-to-peer browser and app store</summary>
+  <description>
+    <p>
+      PearBrowser is a local-first browser, app catalogue, and publishing
+      surface for Pear and Hyperdrive applications.
+    </p>
+  </description>
+  <launchable type="desktop-id">PearBrowser.desktop</launchable>
+  <provides>
+    <binary>pearbrowser</binary>
+  </provides>
+  <categories>
+    <category>Network</category>
+  </categories>
+  <url type="homepage">https://github.com/bigdestiny2/pearbrowser-desktop</url>
+  <releases>
+    <release version="0.5.0" date="2026-06-28"/>
+  </releases>
+</component>

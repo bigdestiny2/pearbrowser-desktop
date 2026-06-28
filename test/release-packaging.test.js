@@ -42,6 +42,9 @@ const packageManagerManifests = readFileSync(new URL('../scripts/generate-packag
 const packageManagerManifestsPath = fileURLToPath(new URL('../scripts/generate-package-manager-manifests.mjs', import.meta.url))
 const publicTrustReadiness = readFileSync(new URL('../scripts/check-public-trust-readiness.mjs', import.meta.url), 'utf8')
 const publicTrustReadinessPath = fileURLToPath(new URL('../scripts/check-public-trust-readiness.mjs', import.meta.url))
+const linuxAppImageMetadata = readFileSync(new URL('../scripts/check-linux-appimage-metadata.mjs', import.meta.url), 'utf8')
+const linuxAppImageMetadataPath = fileURLToPath(new URL('../scripts/check-linux-appimage-metadata.mjs', import.meta.url))
+const linuxMetainfo = readFileSync(new URL('../appling/assets/linux/io.github.bigdestiny2.pearbrowser.metainfo.xml', import.meta.url), 'utf8')
 const macosDmgPackager = readFileSync(new URL('../scripts/create-macos-dmg.mjs', import.meta.url), 'utf8')
 const macosNotarizeScript = readFileSync(new URL('../scripts/notarize-appling-macos.mjs', import.meta.url), 'utf8')
 const releaseScript = readFileSync(new URL('../scripts/release-prod.sh', import.meta.url), 'utf8')
@@ -144,6 +147,29 @@ function publicTrustSigningEnv () {
     PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64: Buffer.from('dummy pfx').toString('base64'),
     PEARBROWSER_WINDOWS_CERTIFICATE_PASSWORD: 'secret'
   }
+}
+
+function writeLinuxAppDirFixture (fixture, options = {}) {
+  const appDir = join(fixture, 'PearBrowser.AppDir')
+  const metainfoDir = join(appDir, 'usr', 'share', 'metainfo')
+  mkdirSync(metainfoDir, { recursive: true })
+  writeFileSync(join(appDir, 'AppRun'), '#!/bin/sh\nexec usr/bin/pearbrowser "$@"\n')
+  writeFileSync(join(appDir, 'PearBrowser.desktop'), [
+    '[Desktop Entry]',
+    'Version=1.0',
+    'Name=PearBrowser',
+    'Comment=P2P browser, app store, and publishing platform',
+    'Exec=pearbrowser',
+    `Icon=${options.badIcon ? 'wrong-icon' : 'icon'}`,
+    'Type=Application',
+    'Categories=Network;',
+    ''
+  ].join('\n'))
+  writeFileSync(join(appDir, 'icon.png'), 'png bytes')
+  if (!options.missingMetainfo) {
+    writeFileSync(join(metainfoDir, 'io.github.bigdestiny2.pearbrowser.metainfo.xml'), linuxMetainfo)
+  }
+  return appDir
 }
 
 test('Pear stage ignore excludes local release/operator scratch files', () => {
@@ -261,6 +287,17 @@ test('native download verifier is exposed for end-to-end checksum evidence', () 
   assert.match(nativeDownloadVerifier, /SHA-256 mismatch/)
 })
 
+test('Linux AppImage metadata checker is exposed for desktop integration gates', () => {
+  assert.equal(pkg.scripts?.['check:linux-appimage-metadata'], 'node scripts/check-linux-appimage-metadata.mjs')
+  assert.match(linuxAppImageMetadata, /PearBrowser\.desktop/)
+  assert.match(linuxAppImageMetadata, /io\.github\.bigdestiny2\.pearbrowser\.metainfo\.xml/)
+  assert.match(linuxAppImageMetadata, /metadata_license/)
+  assert.match(linuxAppImageMetadata, /--build-dir/)
+  assert.match(linuxMetainfo, /<component type="desktop-application">/)
+  assert.match(linuxMetainfo, /<launchable type="desktop-id">PearBrowser\.desktop<\/launchable>/)
+  assert.match(linuxMetainfo, /<binary>pearbrowser<\/binary>/)
+})
+
 test('native install snippet generator is exposed for release notes', () => {
   assert.equal(pkg.scripts?.['generate:native-install-snippet'], 'node scripts/generate-native-install-snippet.mjs')
   assert.match(nativeInstallSnippet, /SUPPORTED_TARGETS/)
@@ -290,6 +327,7 @@ test('public-trust readiness checker is exposed as the announcement gate', () =>
   assert.match(publicTrustReadiness, /check-native-signing-credentials\.mjs/)
   assert.match(publicTrustReadiness, /check-native-release-assets\.mjs/)
   assert.match(publicTrustReadiness, /verify-native-downloads\.mjs/)
+  assert.match(publicTrustReadiness, /check-linux-appimage-metadata\.mjs/)
   assert.match(publicTrustReadiness, /generate-native-install-smoke-plan\.mjs/)
   assert.match(publicTrustReadiness, /generate-package-manager-manifests\.mjs/)
   assert.match(publicTrustReadiness, /check-release-evidence\.mjs/)
@@ -324,7 +362,11 @@ test('appling release metadata stays in sync with the production Pear channel', 
   assert.match(applingReleaseCheck, /release tag must look like vX\.Y\.Z/)
   assert.match(applingReleaseCheck, /\['macOS icon', '\.\.\/appling\/assets\/darwin\/icon\.png'\]/)
   assert.match(applingReleaseCheck, /\['macOS icns icon', '\.\.\/appling\/assets\/darwin\/icon\.icns'\]/)
+  assert.match(applingReleaseCheck, /Linux AppStream metainfo/)
   assert.match(applingCmake, /PEARBROWSER_BARE_HEADERS_VERSION "1\.28\.7"/)
+  assert.match(applingCmake, /PEARBROWSER_LINUX_METAINFO/)
+  assert.match(applingCmake, /function\(configure_pear_appling_linux target\)/)
+  assert.match(applingCmake, /usr\/share\/metainfo\/io\.github\.bigdestiny2\.pearbrowser\.metainfo\.xml/)
   assert.match(applingCmake, /PEARBROWSER_MACOS_SIGNING_IDENTITY\s+"-"\s+CACHE/)
   assert.match(applingCmake, /PEARBROWSER_WINDOWS_SIGNING_SUBJECT\s+"CN=PearBrowser Desktop"\s+CACHE/)
   assert.match(applingCmake, /WINDOWS_SIGNING_SUBJECT "\$\{PEARBROWSER_WINDOWS_SIGNING_SUBJECT\}"/)
@@ -377,6 +419,8 @@ test('native release workflow builds and attaches appling artifacts for every de
   assert.match(nativeReleaseWorkflow, /signtool verify/)
   assert.match(nativeReleaseWorkflow, /npm run --prefix appling generate/)
   assert.match(nativeReleaseWorkflow, /npm run --prefix appling build/)
+  assert.match(nativeReleaseWorkflow, /Verify Linux AppImage metadata/)
+  assert.match(nativeReleaseWorkflow, /check:linux-appimage-metadata -- --build-dir appling\/build/)
   assert.match(nativeReleaseWorkflow, /actions\/upload-artifact@v4/)
   assert.match(nativeReleaseWorkflow, /actions\/download-artifact@v4/)
   assert.match(nativeReleaseWorkflow, /release-platform: macos/)
@@ -962,6 +1006,83 @@ test('native install smoke plan generator emits clean-machine commands for every
   }
 })
 
+test('Linux AppImage metadata checker validates source metadata and AppDir contents', () => {
+  const source = spawnSync(process.execPath, [
+    linuxAppImageMetadataPath,
+    '--json'
+  ], {
+    cwd: fileURLToPath(new URL('..', import.meta.url)),
+    encoding: 'utf8'
+  })
+
+  assert.equal(source.status, 0, source.stderr || source.stdout)
+  const sourceReport = JSON.parse(source.stdout)
+  assert.equal(sourceReport.ok, true)
+  assert.equal(sourceReport.inspections[0].kind, 'source')
+
+  const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'pear-linux-appdir-')))
+  try {
+    const appDir = writeLinuxAppDirFixture(fixture)
+    const appdir = spawnSync(process.execPath, [
+      linuxAppImageMetadataPath,
+      '--appdir',
+      appDir,
+      '--json'
+    ], {
+      cwd: fileURLToPath(new URL('..', import.meta.url)),
+      encoding: 'utf8'
+    })
+
+    assert.equal(appdir.status, 0, appdir.stderr || appdir.stdout)
+    const appdirReport = JSON.parse(appdir.stdout)
+    assert.equal(appdirReport.ok, true)
+    assert.ok(appdirReport.inspections.some((inspection) => inspection.kind === 'appdir'))
+
+    const buildDir = join(fixture, 'build')
+    mkdirSync(buildDir)
+    const buildAppDir = writeLinuxAppDirFixture(buildDir)
+    const build = spawnSync(process.execPath, [
+      linuxAppImageMetadataPath,
+      '--build-dir',
+      buildDir,
+      '--json'
+    ], {
+      cwd: fileURLToPath(new URL('..', import.meta.url)),
+      encoding: 'utf8'
+    })
+
+    assert.equal(build.status, 0, build.stderr || build.stdout)
+    const buildReport = JSON.parse(build.stdout)
+    assert.equal(buildReport.ok, true)
+    assert.ok(buildReport.inspections.some((inspection) => inspection.appDir === buildAppDir))
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
+})
+
+test('Linux AppImage metadata checker blocks AppDirs without AppStream metainfo', () => {
+  const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'pear-linux-appdir-missing-meta-')))
+  try {
+    const appDir = writeLinuxAppDirFixture(fixture, { missingMetainfo: true })
+    const result = spawnSync(process.execPath, [
+      linuxAppImageMetadataPath,
+      '--appdir',
+      appDir,
+      '--json'
+    ], {
+      cwd: fileURLToPath(new URL('..', import.meta.url)),
+      encoding: 'utf8'
+    })
+
+    assert.notEqual(result.status, 0)
+    const report = JSON.parse(result.stdout)
+    assert.equal(report.ok, false)
+    assert.ok(report.errors.some((error) => error.includes('AppStream metainfo')))
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
+})
+
 test('package-manager manifest generator emits Homebrew and WinGet drafts from public-trust assets', () => {
   const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'pear-package-manifests-')))
   try {
@@ -1147,9 +1268,10 @@ test('public-trust readiness checker passes when all release gates are represent
     const report = JSON.parse(result.stdout)
     assert.equal(report.ok, true)
     assert.equal(report.mode, 'public-trust')
-    assert.equal(report.checks.length, 6)
+    assert.equal(report.checks.length, 7)
     assert.deepEqual(report.blockers, [])
     assert.ok(report.checks.every((check) => check.ok))
+    assert.equal(report.checks.find((check) => check.id === 'linux-appimage-metadata').status, 'pass')
     assert.ok(report.checks.some((check) => check.id === 'native-downloads' && check.summary.includes('verified=4')))
     assert.ok(report.warnings.some((warning) => {
       return warning.check === 'package-manager-manifests' && warning.message.includes('License defaults to Unknown')
@@ -1203,6 +1325,7 @@ test('public-trust readiness checker aggregates package-proof blockers', () => {
     assert.equal(report.ok, false)
     assert.equal(report.checks.find((check) => check.id === 'native-signing').status, 'pass')
     assert.equal(report.checks.find((check) => check.id === 'native-downloads').status, 'pass')
+    assert.equal(report.checks.find((check) => check.id === 'linux-appimage-metadata').status, 'pass')
     assert.equal(report.checks.find((check) => check.id === 'native-release-assets').status, 'block')
     assert.equal(report.checks.find((check) => check.id === 'native-install-smoke-plan').status, 'block')
     assert.equal(report.checks.find((check) => check.id === 'package-manager-manifests').status, 'block')

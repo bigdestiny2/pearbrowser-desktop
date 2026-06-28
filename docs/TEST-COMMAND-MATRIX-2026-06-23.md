@@ -17,10 +17,10 @@ Current local status from this loop:
 
 - `git diff --check` passed.
 - `npm audit --audit-level=high` passed with `found 0 vulnerabilities`.
-- `npm test` passed: 465 tests, 0 failed.
+- `npm test` passed: 468 tests, 0 failed.
 
 This supersedes older local counts in nearby docs for this checkout. The
-current release-readiness docs and latest rerun agree on 465/465.
+current release-readiness docs and latest rerun agree on 468/468.
 
 ## Fast Local Gates
 
@@ -28,7 +28,7 @@ current release-readiness docs and latest rerun agree on 465/465.
 | --- | --- | --- |
 | `git diff --check` | Whitespace/conflict-marker sanity | Passed |
 | `npm audit --audit-level=high` | High-severity dependency audit for desktop package | Passed, 0 vulnerabilities |
-| `npm test` | Full desktop Node test suite: `node --test 'test/*.test.js'` | Passed, 465/465 |
+| `npm test` | Full desktop Node test suite: `node --test 'test/*.test.js'` | Passed, 468/468 |
 | `npm run check:release-evidence` | Operator evidence-log completeness; fails until required rows are `PASS` or documented `DEFER` | Expected fail until manual gates are filled |
 
 The root package is the only package with test scripts relevant to this desktop
@@ -154,6 +154,11 @@ The release scripts are operational gates, not ordinary tests:
 - `npm run verify:native-downloads -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --all`
   downloads the recommended native package for each supported desktop target and
   verifies the streamed bytes against the attached `.sha256` sidecar.
+- `npm run check:linux-appimage-metadata`
+  verifies the committed Linux icon and AppStream metainfo source. The native
+  release workflow also runs it with `--build-dir appling/build` on Linux before
+  artifact collection so the generated AppDir must carry `PearBrowser.desktop`,
+  `icon.png`, and AppStream metainfo.
 - `npm run -s generate:native-install-snippet -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop`
   emits release-note/install-page Markdown for the recommended desktop packages
   and checksum sidecars, using the same artifact preference order as the
@@ -169,10 +174,10 @@ The release scripts are operational gates, not ordinary tests:
   package-proof assets.
 - `npm run check:public-trust-readiness -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop`
   aggregates the public-trust signing preflight, published asset check,
-  byte-level download verifier, clean-install smoke-plan generator,
-  package-manager draft dry-run, and release evidence checker. It should exit
-  non-zero until public-trust credentials/assets and operator evidence are
-  complete.
+  byte-level download verifier, Linux AppImage metadata checker,
+  clean-install smoke-plan generator, package-manager draft dry-run, and release
+  evidence checker. It should exit non-zero until public-trust
+  credentials/assets and operator evidence are complete.
 - `.github/workflows/desktop-native-release.yml` is the cross-platform release
   asset backfill path. It must be present on the default branch, and manual
   backfills should run with tag `v0.5.0` plus `source_ref` set to the branch or

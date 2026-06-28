@@ -48,6 +48,7 @@ release entries.
 ```sh
 npm run check:appling-release -- --tag v0.5.0
 npm run check:native-signing
+npm run check:linux-appimage-metadata
 cd appling
 npm ci
 npm run generate
@@ -87,8 +88,8 @@ toolchain that was tested locally.
 - the appling CMake version is stale
 - the appling package no longer exposes `generate`, `build`, and `package`
 - the native wrapper toolchain lockfile, pinned Bare headers, macOS ICNS asset,
-  ad-hoc macOS signing default, or Windows unsigned-packaging fallback is
-  missing
+  Linux AppStream metainfo source, ad-hoc macOS signing default, or Windows
+  unsigned-packaging fallback is missing
 
 This keeps the native wrappers pinned to the same release that was staged and
 verified with `scripts/release-prod.sh`.
@@ -165,12 +166,27 @@ release assets:
 npm run verify:native-downloads -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --all
 ```
 
+`scripts/check-linux-appimage-metadata.mjs` verifies the Linux desktop
+integration metadata required before treating the AppImage as the long-term
+public Linux package. Without arguments it validates the committed Linux icon
+and AppStream metainfo source. The native release workflow runs it on Linux with
+`--build-dir appling/build` after `npm run --prefix appling build`, so the
+generated AppDir must contain `AppRun`, `PearBrowser.desktop`, `icon.png`, and
+`usr/share/metainfo/io.github.bigdestiny2.pearbrowser.metainfo.xml` before
+artifact collection:
+
+```sh
+npm run check:linux-appimage-metadata
+npm run check:linux-appimage-metadata -- --build-dir appling/build
+```
+
 `scripts/check-public-trust-readiness.mjs` is the operator-facing summary gate
 for announcement readiness. It runs the public-trust signing preflight, the
 published public-trust release asset checker, byte-level download verification,
-the public-trust clean-install smoke-plan generator, the package-manager draft
-generator in dry-run mode, and the operator evidence-log checker, then reports
-all blockers in one JSON or human-readable result:
+the Linux AppImage metadata checker, the public-trust clean-install smoke-plan
+generator, the package-manager draft generator in dry-run mode, and the operator
+evidence-log checker, then reports all blockers in one JSON or human-readable
+result:
 
 ```sh
 npm run check:public-trust-readiness -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
