@@ -18,14 +18,16 @@ cd ..
 npm run package:appling -- --tag v0.5.0
 ```
 
-macOS local builds are ad-hoc signed by default. Public macOS distribution still
-needs a Developer ID identity, notarization, and the matching CMake signing
-cache values wired into CI.
+macOS local builds are ad-hoc signed by default. Public macOS distribution needs
+the GitHub Actions Developer ID and notary secrets documented in
+`../docs/NATIVE_RELEASE_PACKAGING.md`; when they are present, CI imports the
+certificate, signs, notarizes, staples, and re-verifies before collecting the
+`.app.zip`.
 
 Windows builds skip SignTool unless `PEARBROWSER_WINDOWS_SIGNING_THUMBPRINT` is
-set. The default unsigned MSIX is useful as packaging proof; public Windows
-distribution still needs a certificate whose subject matches
-`PEARBROWSER_WINDOWS_SIGNING_SUBJECT`.
+set or a PFX certificate is imported by CI. The default unsigned MSIX/EXE assets
+are useful as packaging proof; public Windows distribution needs a certificate
+whose subject matches `PEARBROWSER_WINDOWS_SIGNING_SUBJECT`.
 
 Run `npm run check:appling-release -- --tag v0.5.0` before cutting a release.
 It verifies that `CMakeLists.txt` uses the same version as the desktop package
