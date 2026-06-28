@@ -12,7 +12,8 @@ const EXPECTED = {
   category: 'Network',
   desktopId: 'PearBrowser.desktop',
   appstreamId: 'io.github.bigdestiny2.pearbrowser',
-  metainfoName: 'io.github.bigdestiny2.pearbrowser.metainfo.xml'
+  metainfoName: 'io.github.bigdestiny2.pearbrowser.metainfo.xml',
+  projectLicense: 'Apache-2.0 AND MIT'
 }
 
 const ROOT = new URL('..', import.meta.url)
@@ -191,7 +192,7 @@ function validateMetainfo (xml, label) {
   }
   requireXmlText(text, 'id', EXPECTED.appstreamId, label)
   requireXmlText(text, 'metadata_license', 'CC0-1.0', label)
-  requireXmlText(text, 'project_license', 'Apache-2.0', label)
+  requireXmlText(text, 'project_license', EXPECTED.projectLicense, label)
   requireXmlText(text, 'name', EXPECTED.name, label)
   requireXmlText(text, 'summary', 'Peer-to-peer browser and app store', label)
   requireXmlText(text, 'binary', EXPECTED.binary, label)

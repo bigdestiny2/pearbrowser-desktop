@@ -14,7 +14,8 @@ const DEFAULT_REPO = 'bigdestiny2/pearbrowser-desktop'
 const DEFAULT_IDENTIFIER = 'PearBrowser.PearBrowser'
 const DEFAULT_PUBLISHER = 'PearBrowser'
 const DEFAULT_PACKAGE_NAME = 'PearBrowser'
-const DEFAULT_LICENSE = 'Unknown'
+const UNKNOWN_LICENSE = 'Unknown'
+const DEFAULT_LICENSE = projectLicenseFromPackage(pkg) || UNKNOWN_LICENSE
 const DEFAULT_DESCRIPTION = 'Peer-to-peer browser and app store'
 
 const args = parseArgs(process.argv.slice(2))
@@ -177,7 +178,7 @@ async function buildReport (release, options) {
   } else {
     warnings.push('package-proof manifests are rehearsal artifacts; do not submit them to Homebrew or WinGet until public-trust signing/notarization gates pass')
   }
-  if (options.metadata.license === DEFAULT_LICENSE) {
+  if (options.metadata.license === UNKNOWN_LICENSE) {
     warnings.push('WinGet License defaults to Unknown; confirm the project license before package-manager submission')
   }
 
@@ -444,6 +445,12 @@ function rubyString (value) {
 
 function yamlString (value) {
   return `"${String(value || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
+}
+
+function projectLicenseFromPackage (pkg) {
+  if (typeof pkg?.license === 'string') return pkg.license.trim()
+  if (typeof pkg?.license?.type === 'string') return pkg.license.type.trim()
+  return ''
 }
 
 function summarizeAssets (resolved) {

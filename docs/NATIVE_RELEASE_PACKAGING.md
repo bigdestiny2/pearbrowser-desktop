@@ -146,8 +146,10 @@ Windows `.sha256` sidecars, writes a Homebrew Cask draft and a WinGet singleton
 manifest draft under `dist/package-manager-manifests/<tag>/`, and defaults to
 `--trust-mode public-trust`. In that default mode it refuses package-proof macOS
 `.app.zip` assets because Homebrew should not be submitted until the public
-release has notarized `.dmg` assets. Use `--trust-mode package-proof` only for
-rehearsing the output shape against the current package-proof release:
+release has notarized `.dmg` assets. The WinGet `License` value defaults to the
+root `package.json` SPDX expression (`Apache-2.0 AND MIT`) unless `--license`
+is supplied. Use `--trust-mode package-proof` only for rehearsing the output
+shape against the current package-proof release:
 
 ```sh
 npm run generate:package-manager-manifests -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --trust-mode package-proof

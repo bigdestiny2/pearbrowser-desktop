@@ -18,6 +18,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
 const pearConfig = JSON.parse(readFileSync(new URL('../pear.json', import.meta.url), 'utf8'))
+const rootLicense = readFileSync(new URL('../LICENSE', import.meta.url), 'utf8')
 const applingPkg = JSON.parse(readFileSync(new URL('../appling/package.json', import.meta.url), 'utf8'))
 const applingLock = JSON.parse(readFileSync(new URL('../appling/package-lock.json', import.meta.url), 'utf8'))
 const applingCmake = readFileSync(new URL('../appling/CMakeLists.txt', import.meta.url), 'utf8')
@@ -318,8 +319,17 @@ test('package-manager manifest generator is exposed for channel expansion drafts
   assert.equal(pkg.scripts?.['generate:package-manager-manifests'], 'node scripts/generate-package-manager-manifests.mjs')
   assert.match(packageManagerManifests, /generateHomebrewCask/)
   assert.match(packageManagerManifests, /generateWingetSingleton/)
+  assert.match(packageManagerManifests, /projectLicenseFromPackage/)
   assert.match(packageManagerManifests, /InstallerSha256/)
   assert.match(packageManagerManifests, /public-trust Homebrew Cask requires notarized macOS DMG/)
+})
+
+test('project license metadata is explicit for public package-manager drafts', () => {
+  assert.equal(pkg.license, 'Apache-2.0 AND MIT')
+  assert.match(rootLicense, /SPDX-License-Identifier: Apache-2\.0 AND MIT/)
+  assert.match(rootLicense, /appling\/LICENSE/)
+  assert.match(rootLicense, /MIT License/)
+  assert.match(linuxMetainfo, /<project_license>Apache-2\.0 AND MIT<\/project_license>/)
 })
 
 test('public-trust readiness checker is exposed as the announcement gate', () => {
@@ -1104,8 +1114,6 @@ test('package-manager manifest generator emits Homebrew and WinGet drafts from p
       'v0.5.0',
       '--out-dir',
       outDir,
-      '--license',
-      'MPL-2.0',
       '--json'
     ], {
       cwd: fileURLToPath(new URL('..', import.meta.url)),
@@ -1132,6 +1140,7 @@ test('package-manager manifest generator emits Homebrew and WinGet drafts from p
     const winget = readFileSync(wingetPath, 'utf8')
     assert.match(winget, /PackageIdentifier: "PearBrowser\.PearBrowser"/)
     assert.match(winget, /PackageVersion: "0\.5\.0"/)
+    assert.match(winget, /License: "Apache-2\.0 AND MIT"/)
     assert.match(winget, /InstallerType: exe/)
     assert.match(winget, new RegExp(`InstallerSha256: ${shaFor('PearBrowser-0.5.0-windows-x64.exe').toUpperCase()}`))
     assert.match(winget, /ManifestType: singleton/)
@@ -1162,6 +1171,7 @@ test('package-manager manifest generator emits Homebrew and WinGet drafts from p
     }))
     const customWinget = readFileSync(join(customOut, 'winget', 'manifests', 'p', 'PearBrowser', 'Experimental', '0.5.0', 'PearBrowser.Experimental.yaml'), 'utf8')
     assert.match(customWinget, /PackageIdentifier: "PearBrowser\.Experimental"/)
+    assert.match(customWinget, /License: "MPL-2\.0"/)
   } finally {
     rmSync(fixture, { recursive: true, force: true })
   }
@@ -1273,9 +1283,7 @@ test('public-trust readiness checker passes when all release gates are represent
     assert.ok(report.checks.every((check) => check.ok))
     assert.equal(report.checks.find((check) => check.id === 'linux-appimage-metadata').status, 'pass')
     assert.ok(report.checks.some((check) => check.id === 'native-downloads' && check.summary.includes('verified=4')))
-    assert.ok(report.warnings.some((warning) => {
-      return warning.check === 'package-manager-manifests' && warning.message.includes('License defaults to Unknown')
-    }))
+    assert.deepEqual(report.warnings, [])
   } finally {
     rmSync(fixture, { recursive: true, force: true })
   }

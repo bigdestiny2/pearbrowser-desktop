@@ -20,14 +20,14 @@ Primary user promise: download one native package, launch it normally, and let P
   macOS/Windows/Linux manual smoke runs do not drift from attached assets.
 - `scripts/generate-package-manager-manifests.mjs` emits Homebrew Cask and
   WinGet singleton manifest drafts from attached assets and checksum sidecars;
-  it defaults to public-trust gates and allows package-proof output only for
-  rehearsal.
+  it defaults to public-trust gates, uses the root package SPDX license by
+  default, and allows package-proof output only for rehearsal.
 - `scripts/check-linux-appimage-metadata.mjs` verifies Linux AppImage desktop
   integration metadata: source icon/AppStream files locally, and generated
   AppDir/AppImage desktop entry, icon, and metainfo during Linux native builds.
 - `scripts/check-public-trust-readiness.mjs` aggregates the public-trust
-  signing, published release asset, byte-level download, clean-install smoke
-  plan, Linux AppImage metadata, package-manager draft, and operator
+  signing, published release asset, byte-level download, Linux AppImage
+  metadata, clean-install smoke plan, package-manager draft, and operator
   evidence-log gates into one blocker report.
 - `.github/workflows/desktop-native-release.yml` builds macOS, Windows, and Linux packages in CI.
 - The native workflow now has two modes:
@@ -111,7 +111,7 @@ Recommended OS-level checks:
    are all represented.
 5. Generate Homebrew/WinGet drafts with `npm run generate:package-manager-manifests`; submit them only after public-trust assets and clean-machine install evidence are green.
 6. Add Homebrew Cask only after macOS ships a notarized `.dmg`; Homebrew casks expect stable versioned URLs and checksums.
-7. Add WinGet only after Windows assets are signed and stable; WinGet manifests carry installer metadata and SHA-256 hashes, and the generated draft still needs publisher/license and silent-install behavior reviewed before submission.
+7. Add WinGet only after Windows assets are signed and stable; WinGet manifests carry installer metadata and SHA-256 hashes, and the generated draft still needs publisher and silent-install behavior reviewed before submission.
 8. Add Linux distro packages only after AppImage feedback proves there is demand. Avoid maintaining `.deb`/`.rpm` until the support burden is justified.
 9. Keep mobile out of the desktop announcement unless `npm run release:preflight` passes without `--soft` and real device/store evidence is recorded.
 
