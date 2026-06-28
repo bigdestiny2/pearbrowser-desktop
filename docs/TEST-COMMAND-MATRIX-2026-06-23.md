@@ -17,10 +17,10 @@ Current local status from this loop:
 
 - `git diff --check` passed.
 - `npm audit --audit-level=high` passed with `found 0 vulnerabilities`.
-- `npm test` passed: 462 tests, 0 failed.
+- `npm test` passed: 465 tests, 0 failed.
 
 This supersedes older local counts in nearby docs for this checkout. The
-current release-readiness docs and latest rerun agree on 462/462.
+current release-readiness docs and latest rerun agree on 465/465.
 
 ## Fast Local Gates
 
@@ -28,7 +28,7 @@ current release-readiness docs and latest rerun agree on 462/462.
 | --- | --- | --- |
 | `git diff --check` | Whitespace/conflict-marker sanity | Passed |
 | `npm audit --audit-level=high` | High-severity dependency audit for desktop package | Passed, 0 vulnerabilities |
-| `npm test` | Full desktop Node test suite: `node --test 'test/*.test.js'` | Passed, 462/462 |
+| `npm test` | Full desktop Node test suite: `node --test 'test/*.test.js'` | Passed, 465/465 |
 | `npm run check:release-evidence` | Operator evidence-log completeness; fails until required rows are `PASS` or documented `DEFER` | Expected fail until manual gates are filled |
 
 The root package is the only package with test scripts relevant to this desktop
@@ -167,6 +167,12 @@ The release scripts are operational gates, not ordinary tests:
   and `.sha256` sidecars. It defaults to public-trust gates; use
   `--trust-mode package-proof` only to rehearse draft generation against
   package-proof assets.
+- `npm run check:public-trust-readiness -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop`
+  aggregates the public-trust signing preflight, published asset check,
+  byte-level download verifier, clean-install smoke-plan generator,
+  package-manager draft dry-run, and release evidence checker. It should exit
+  non-zero until public-trust credentials/assets and operator evidence are
+  complete.
 - `.github/workflows/desktop-native-release.yml` is the cross-platform release
   asset backfill path. It must be present on the default branch, and manual
   backfills should run with tag `v0.5.0` plus `source_ref` set to the branch or

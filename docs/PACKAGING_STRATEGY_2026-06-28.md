@@ -22,6 +22,10 @@ Primary user promise: download one native package, launch it normally, and let P
   WinGet singleton manifest drafts from attached assets and checksum sidecars;
   it defaults to public-trust gates and allows package-proof output only for
   rehearsal.
+- `scripts/check-public-trust-readiness.mjs` aggregates the public-trust
+  signing, published release asset, byte-level download, clean-install smoke
+  plan, package-manager draft, and operator evidence-log gates into one
+  blocker report.
 - `.github/workflows/desktop-native-release.yml` builds macOS, Windows, and Linux packages in CI.
 - The native workflow now has two modes:
   - `package-proof`: manual default, permits ad-hoc macOS signing and unsigned Windows packages.
@@ -65,19 +69,23 @@ The stable Pear link is still the application-content update channel. Native pac
    `PEARBROWSER_WINDOWS_SIGNING_THUMBPRINT`.
 3. Run `npm run check:native-signing -- --require-public-trust` before spending CI minutes.
 4. Run Desktop Native Release with `release_mode=public-trust` or publish/tag the release so the workflow defaults to public trust.
-5. Verify post-upload assets with:
+5. Run the public-trust readiness aggregator after the workflow completes:
+   `npm run check:public-trust-readiness -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop`.
+   It should be treated as blocked until the subchecks below and the operator
+   evidence log are green.
+6. Verify post-upload assets with:
    `npm run check:native-release-assets -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --require-published --require-public-trust`.
-6. Verify the recommended package downloads:
+7. Verify the recommended package downloads:
    `npm run verify:native-downloads -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --all`.
-7. Resolve and record the user-facing packages for macOS, Windows, and Linux:
+8. Resolve and record the user-facing packages for macOS, Windows, and Linux:
    `npm run resolve:native-release -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --platform <platform> --arch <arch>`.
-8. Generate the release-note/install-page block from the attached assets:
+9. Generate the release-note/install-page block from the attached assets:
    `npm run -s generate:native-install-snippet -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --trust-mode public-trust`.
-9. Generate the clean-machine smoke plan from the same assets:
+10. Generate the clean-machine smoke plan from the same assets:
    `npm run -s generate:native-install-smoke-plan -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --trust-mode public-trust`.
-10. Generate Homebrew/WinGet package-manager drafts from the same assets:
+11. Generate Homebrew/WinGet package-manager drafts from the same assets:
    `npm run generate:package-manager-manifests -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop`.
-11. Smoke install from a clean machine or VM per OS and record evidence in `docs/RELEASE_SMOKE_EVIDENCE_LOG_2026-06-23.md`.
+12. Smoke install from a clean machine or VM per OS and record evidence in `docs/RELEASE_SMOKE_EVIDENCE_LOG_2026-06-23.md`.
 
 Recommended OS-level checks:
 
@@ -90,11 +98,15 @@ Recommended OS-level checks:
 1. Keep GitHub Releases as the canonical asset host until public-trust desktop assets have at least one successful clean-machine install pass.
 2. Use `npm run -s generate:native-install-snippet` for the short install page or release-note block that points each OS to the resolver-selected package and checksum sidecar, then keep the stable Pear link fallback in the surrounding install guide.
 3. Use `npm run -s generate:native-install-smoke-plan` for the clean-host smoke checklist that must be executed before public-trust announcement or package-manager submission.
-4. Generate Homebrew/WinGet drafts with `npm run generate:package-manager-manifests`; submit them only after public-trust assets and clean-machine install evidence are green.
-5. Add Homebrew Cask only after macOS ships a notarized `.dmg`; Homebrew casks expect stable versioned URLs and checksums.
-6. Add WinGet only after Windows assets are signed and stable; WinGet manifests carry installer metadata and SHA-256 hashes, and the generated draft still needs publisher/license and silent-install behavior reviewed before submission.
-7. Add Linux distro packages only after AppImage feedback proves there is demand. Avoid maintaining `.deb`/`.rpm` until the support burden is justified.
-8. Keep mobile out of the desktop announcement unless `npm run release:preflight` passes without `--soft` and real device/store evidence is recorded.
+4. Use `npm run check:public-trust-readiness` as the operator-facing summary
+   gate before announcement; it should return `READY` only after signing
+   credentials, public-trust assets, byte verification, package-manager drafts,
+   clean-host evidence, and the announcement decision are all represented.
+5. Generate Homebrew/WinGet drafts with `npm run generate:package-manager-manifests`; submit them only after public-trust assets and clean-machine install evidence are green.
+6. Add Homebrew Cask only after macOS ships a notarized `.dmg`; Homebrew casks expect stable versioned URLs and checksums.
+7. Add WinGet only after Windows assets are signed and stable; WinGet manifests carry installer metadata and SHA-256 hashes, and the generated draft still needs publisher/license and silent-install behavior reviewed before submission.
+8. Add Linux distro packages only after AppImage feedback proves there is demand. Avoid maintaining `.deb`/`.rpm` until the support burden is justified.
+9. Keep mobile out of the desktop announcement unless `npm run release:preflight` passes without `--soft` and real device/store evidence is recorded.
 
 ## Release Decision Rule
 
