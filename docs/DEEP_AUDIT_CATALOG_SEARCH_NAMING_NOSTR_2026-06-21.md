@@ -642,14 +642,18 @@ catalogue.
   14 apps, Peercord, peerit, and HiveWorm rows present, Peercord marked
   `standalone` with upstream source/licence metadata, and peerit marked
   `hypersite`.
-- Production drive check: fresh peer reached length 18552 and fetched 11652
+- Production drive check: fresh peer reached length 18640 and fetched 11652
   bytes from `/backend/anongpt-buyer.js`; a fresh-peer metadata scan also
   confirmed `/.landing-seed.mjs`, `/pearbrowser-storage`, `/docs`, `/scripts`,
   `/examples`, and `/test` are absent from the production drive.
 - Deep bundle checks: PearBrowser homepage, Peercord, and Keet all returned
   peers and had zero missing sampled blobs in the 2026-06-23 pass. Current
   2026-06-28 evidence keeps homepage and Keet green, but defers Peercord bundle
-  availability because the fresh-peer refresh resolves an empty checkout.
+  availability because the fresh-peer refresh resolves an empty checkout. The
+  latest Peercord source audit found upstream commit
+  `ea260a3bfba279769acfbfe0a436140c87a0fa15` reachable and still desktop/window
+  shaped, but restoring the canonical public Pear key requires Peercord
+  publisher/operator reseed or complete publisher storage.
 
 Restricted/sandboxed network runs can false-negative DHT discovery. The release
 gate should use real DHT access, as the verifier scripts do when run from the
