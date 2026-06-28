@@ -56,6 +56,7 @@ cd ..
 npm run package:appling -- --tag v0.5.0
 npm run check:native-release-assets -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
 npm run resolve:native-release -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
+npm run check:public-trust-readiness -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
 ```
 
 The collector searches `appling/build` for platform-native outputs:
@@ -163,6 +164,22 @@ release assets:
 ```sh
 npm run verify:native-downloads -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --all
 ```
+
+`scripts/check-public-trust-readiness.mjs` is the operator-facing summary gate
+for announcement readiness. It runs the public-trust signing preflight, the
+published public-trust release asset checker, byte-level download verification,
+the public-trust clean-install smoke-plan generator, the package-manager draft
+generator in dry-run mode, and the operator evidence-log checker, then reports
+all blockers in one JSON or human-readable result:
+
+```sh
+npm run check:public-trust-readiness -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
+```
+
+This command should remain blocked for the current package-proof `v0.5.0`
+assets until Developer ID/notary credentials, Windows signing credentials,
+notarized macOS DMGs, clean-machine install evidence, and the final announcement
+decision are all present.
 
 ## Signing
 

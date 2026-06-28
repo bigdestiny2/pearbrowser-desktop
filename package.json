@@ -16,6 +16,7 @@
     "generate:native-install-snippet": "node scripts/generate-native-install-snippet.mjs",
     "generate:native-install-smoke-plan": "node scripts/generate-native-install-smoke-plan.mjs",
     "generate:package-manager-manifests": "node scripts/generate-package-manager-manifests.mjs",
+    "check:public-trust-readiness": "node scripts/check-public-trust-readiness.mjs",
     "package:appling": "node scripts/collect-appling-artifacts.mjs",
     "package:macos-dmg": "node scripts/create-macos-dmg.mjs",
     "smoke:runtime": "node scripts/runtime-rpc-smoke.mjs",

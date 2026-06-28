@@ -199,6 +199,7 @@ node scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --
 | `npm run -s generate:native-install-snippet -- --tag <tag>` | Emits release-note/install-page Markdown for the recommended desktop packages and checksum sidecars. |
 | `npm run -s generate:native-install-smoke-plan -- --tag <tag>` | Emits clean-host install smoke commands and evidence bullets for macOS, Windows, and Linux. |
 | `npm run generate:package-manager-manifests -- --tag <tag>` | Emits Homebrew Cask and WinGet manifest drafts from release assets; defaults to public-trust gates. |
+| `npm run check:public-trust-readiness -- --tag <tag>` | Aggregates the public-trust signing, published asset, download, clean-install smoke-plan, package-manager draft, and evidence-log gates. |
 | `npm run check:release-evidence` | Reads the operator evidence log and fails until required gates are marked `PASS` or documented `DEFER`, with a final announcement decision. |
 | `scripts/verify-app-full.js --key <driveKey>` | Deeper fresh-peer blob sampling across a drive's file tree. |
 | `scripts/verify-pear-bundle-contract.js --key <driveKey>` | Metadata-only Pear bundle contract check: reads `pear.json` and selected files from a fresh peer without executing third-party code. |
@@ -216,6 +217,7 @@ npm run resolve:native-release -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-de
 npm run -s generate:native-install-snippet -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
 npm run -s generate:native-install-smoke-plan -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
 npm run generate:package-manager-manifests -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --trust-mode package-proof
+npm run check:public-trust-readiness -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
 cd appling
 npm ci
 npm run generate

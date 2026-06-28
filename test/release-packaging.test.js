@@ -40,6 +40,8 @@ const nativeInstallSmokePlan = readFileSync(new URL('../scripts/generate-native-
 const nativeInstallSmokePlanPath = fileURLToPath(new URL('../scripts/generate-native-install-smoke-plan.mjs', import.meta.url))
 const packageManagerManifests = readFileSync(new URL('../scripts/generate-package-manager-manifests.mjs', import.meta.url), 'utf8')
 const packageManagerManifestsPath = fileURLToPath(new URL('../scripts/generate-package-manager-manifests.mjs', import.meta.url))
+const publicTrustReadiness = readFileSync(new URL('../scripts/check-public-trust-readiness.mjs', import.meta.url), 'utf8')
+const publicTrustReadinessPath = fileURLToPath(new URL('../scripts/check-public-trust-readiness.mjs', import.meta.url))
 const macosDmgPackager = readFileSync(new URL('../scripts/create-macos-dmg.mjs', import.meta.url), 'utf8')
 const macosNotarizeScript = readFileSync(new URL('../scripts/notarize-appling-macos.mjs', import.meta.url), 'utf8')
 const releaseScript = readFileSync(new URL('../scripts/release-prod.sh', import.meta.url), 'utf8')
@@ -77,12 +79,14 @@ function writePackageManagerReleaseFixture (fixture, names) {
       }
     }
 
+    const assetPath = join(fixture, name)
+    writeFileSync(assetPath, name)
     const sha256 = createHash('sha256').update(name).digest('hex')
     shaByName.set(name, sha256)
     return {
       name,
-      size: i + 100,
-      url: `https://example.invalid/${name}`
+      size: readFileSync(assetPath).length,
+      url: pathToFileURL(assetPath).toString()
     }
   })
   const releasePath = join(fixture, 'release.json')
@@ -95,6 +99,50 @@ function writePackageManagerReleaseFixture (fixture, names) {
   return {
     releasePath,
     shaFor: (name) => shaByName.get(name)
+  }
+}
+
+function writeCompleteReleaseEvidenceFixture (path) {
+  writeFileSync(path, `
+# Release Smoke Evidence Log
+
+## Run Metadata
+
+| Field | Value |
+| --- | --- |
+| Operator | Fixture |
+| Desktop repo/branch/head | fixture@abc123 |
+
+## Desktop Automated Baseline
+
+| Gate | Expected | Result | Evidence |
+| --- | --- | --- | --- |
+| Public-trust readiness | all machine gates represented | PASS | fixture command output |
+
+## Announcement Decision
+
+| Question | Answer |
+| --- | --- |
+| Are all required desktop automated gates PASS? | YES |
+| Are all required desktop GUI/user-story gates PASS? | YES |
+| Was Peercord trust approved manually and did the standalone window open? | OUT OF SCOPE |
+| Are all required mobile automated gates PASS? | OUT OF SCOPE |
+| Are production mobile signing/store gates PASS, or explicitly out of announcement scope? | OUT OF SCOPE |
+| Are residual risks documented in release notes? | YES |
+| Final decision (GO, NO-GO, or GO desktop only) | GO desktop only |
+`)
+}
+
+function publicTrustSigningEnv () {
+  return {
+    PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64: Buffer.from('dummy p12').toString('base64'),
+    PEARBROWSER_MACOS_CERTIFICATE_PASSWORD: 'secret',
+    PEARBROWSER_MACOS_SIGNING_IDENTITY: 'Developer ID Application: PearBrowser Desktop (TEAMID)',
+    PEARBROWSER_MACOS_NOTARY_APPLE_ID: 'release@example.com',
+    PEARBROWSER_MACOS_NOTARY_PASSWORD: 'secret',
+    PEARBROWSER_MACOS_NOTARY_TEAM_ID: 'TEAMID',
+    PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64: Buffer.from('dummy pfx').toString('base64'),
+    PEARBROWSER_WINDOWS_CERTIFICATE_PASSWORD: 'secret'
   }
 }
 
@@ -235,6 +283,19 @@ test('package-manager manifest generator is exposed for channel expansion drafts
   assert.match(packageManagerManifests, /generateWingetSingleton/)
   assert.match(packageManagerManifests, /InstallerSha256/)
   assert.match(packageManagerManifests, /public-trust Homebrew Cask requires notarized macOS DMG/)
+})
+
+test('public-trust readiness checker is exposed as the announcement gate', () => {
+  assert.equal(pkg.scripts?.['check:public-trust-readiness'], 'node scripts/check-public-trust-readiness.mjs')
+  assert.match(publicTrustReadiness, /check-native-signing-credentials\.mjs/)
+  assert.match(publicTrustReadiness, /check-native-release-assets\.mjs/)
+  assert.match(publicTrustReadiness, /verify-native-downloads\.mjs/)
+  assert.match(publicTrustReadiness, /generate-native-install-smoke-plan\.mjs/)
+  assert.match(publicTrustReadiness, /generate-package-manager-manifests\.mjs/)
+  assert.match(publicTrustReadiness, /check-release-evidence\.mjs/)
+  assert.match(publicTrustReadiness, /--require-public-trust/)
+  assert.match(publicTrustReadiness, /--require-published/)
+  assert.match(publicTrustReadiness, /--dry-run/)
 })
 
 test('macOS DMG packager is exposed for public-trust native releases', () => {
@@ -1038,6 +1099,116 @@ test('package-manager manifest generator gates package-proof assets by default',
     assert.ok(rehearsalReport.warnings.some((warning) => warning.includes('package-proof manifests are rehearsal artifacts')))
     const cask = readFileSync(join(fixture, 'rehearsal', 'homebrew', 'pearbrowser.rb'), 'utf8')
     assert.match(cask, /PearBrowser-#\{version\}-macos-#\{arch\}\.app\.zip/)
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
+})
+
+test('public-trust readiness checker passes when all release gates are represented', () => {
+  const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'pear-public-trust-readiness-')))
+  try {
+    const { releasePath } = writePackageManagerReleaseFixture(fixture, [
+      'PearBrowser-0.5.0-macos-arm64.dmg',
+      'PearBrowser-0.5.0-macos-arm64.dmg.sha256',
+      'SHA256SUMS-macos-arm64.txt',
+      'manifest-macos-arm64.json',
+      'PearBrowser-0.5.0-macos-x64.dmg',
+      'PearBrowser-0.5.0-macos-x64.dmg.sha256',
+      'SHA256SUMS-macos-x64.txt',
+      'manifest-macos-x64.json',
+      'PearBrowser-0.5.0-windows-x64.exe',
+      'PearBrowser-0.5.0-windows-x64.exe.sha256',
+      'SHA256SUMS-windows-x64.txt',
+      'manifest-windows-x64.json',
+      'PearBrowser-0.5.0-linux-x64.AppImage',
+      'PearBrowser-0.5.0-linux-x64.AppImage.sha256',
+      'SHA256SUMS-linux-x64.txt',
+      'manifest-linux-x64.json'
+    ])
+    const evidencePath = join(fixture, 'evidence.md')
+    writeCompleteReleaseEvidenceFixture(evidencePath)
+
+    const result = spawnSync(process.execPath, [
+      publicTrustReadinessPath,
+      '--fixture',
+      releasePath,
+      '--tag',
+      'v0.5.0',
+      '--evidence-file',
+      evidencePath,
+      '--json'
+    ], {
+      cwd: fileURLToPath(new URL('..', import.meta.url)),
+      encoding: 'utf8',
+      env: publicTrustSigningEnv()
+    })
+
+    assert.equal(result.status, 0, result.stderr || result.stdout)
+    const report = JSON.parse(result.stdout)
+    assert.equal(report.ok, true)
+    assert.equal(report.mode, 'public-trust')
+    assert.equal(report.checks.length, 6)
+    assert.deepEqual(report.blockers, [])
+    assert.ok(report.checks.every((check) => check.ok))
+    assert.ok(report.checks.some((check) => check.id === 'native-downloads' && check.summary.includes('verified=4')))
+    assert.ok(report.warnings.some((warning) => {
+      return warning.check === 'package-manager-manifests' && warning.message.includes('License defaults to Unknown')
+    }))
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
+})
+
+test('public-trust readiness checker aggregates package-proof blockers', () => {
+  const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'pear-public-trust-blocked-')))
+  try {
+    const { releasePath } = writePackageManagerReleaseFixture(fixture, [
+      'PearBrowser-0.5.0-macos-arm64.app.zip',
+      'PearBrowser-0.5.0-macos-arm64.app.zip.sha256',
+      'SHA256SUMS-macos-arm64.txt',
+      'manifest-macos-arm64.json',
+      'PearBrowser-0.5.0-macos-x64.app.zip',
+      'PearBrowser-0.5.0-macos-x64.app.zip.sha256',
+      'SHA256SUMS-macos-x64.txt',
+      'manifest-macos-x64.json',
+      'PearBrowser-0.5.0-windows-x64.exe',
+      'PearBrowser-0.5.0-windows-x64.exe.sha256',
+      'SHA256SUMS-windows-x64.txt',
+      'manifest-windows-x64.json',
+      'PearBrowser-0.5.0-linux-x64.AppImage',
+      'PearBrowser-0.5.0-linux-x64.AppImage.sha256',
+      'SHA256SUMS-linux-x64.txt',
+      'manifest-linux-x64.json'
+    ])
+    const evidencePath = join(fixture, 'evidence.md')
+    writeCompleteReleaseEvidenceFixture(evidencePath)
+
+    const result = spawnSync(process.execPath, [
+      publicTrustReadinessPath,
+      '--fixture',
+      releasePath,
+      '--tag',
+      'v0.5.0',
+      '--evidence-file',
+      evidencePath,
+      '--json'
+    ], {
+      cwd: fileURLToPath(new URL('..', import.meta.url)),
+      encoding: 'utf8',
+      env: publicTrustSigningEnv()
+    })
+
+    assert.notEqual(result.status, 0)
+    const report = JSON.parse(result.stdout)
+    assert.equal(report.ok, false)
+    assert.equal(report.checks.find((check) => check.id === 'native-signing').status, 'pass')
+    assert.equal(report.checks.find((check) => check.id === 'native-downloads').status, 'pass')
+    assert.equal(report.checks.find((check) => check.id === 'native-release-assets').status, 'block')
+    assert.equal(report.checks.find((check) => check.id === 'native-install-smoke-plan').status, 'block')
+    assert.equal(report.checks.find((check) => check.id === 'package-manager-manifests').status, 'block')
+    assert.ok(report.blockers.some((blocker) => blocker.message.includes('missing public-trust macOS DMG for macos/arm64')))
+    assert.ok(report.blockers.some((blocker) => blocker.message.includes('public-trust clean-install smoke requires notarized macOS DMG')))
+    assert.ok(report.blockers.some((blocker) => blocker.message.includes('public-trust Homebrew Cask requires notarized macOS DMG assets')))
   } finally {
     rmSync(fixture, { recursive: true, force: true })
   }
