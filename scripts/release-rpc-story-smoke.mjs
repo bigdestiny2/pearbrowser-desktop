@@ -1,0 +1,526 @@
+#!/usr/bin/env node
+/**
+ * Nonvisual release story smoke for a launched PearBrowser process.
+ *
+ * This complements, but does not replace, the manual GUI checklist. It proves
+ * the production runtime can browse the release homepage through its local
+ * proxy and can load the live release catalogues with the expected featured
+ * rows. It never launches third-party apps or approves Pear trust prompts.
+ */
+
+import { EventEmitter } from 'node:events'
+import { createRequire } from 'node:module'
+import http from 'node:http'
+import net from 'node:net'
+import { randomBytes } from 'node:crypto'
+
+const require = createRequire(import.meta.url)
+const C = require('../backend/constants.js')
+
+const DEFAULT_HOST = '127.0.0.1'
+const DEFAULT_PORT_BASE = 9876
+const DEFAULT_PORT_COUNT = 5
+const DEFAULT_TIMEOUT_MS = 30_000
+const DEFAULT_CONNECT_MS = 1_500
+const DEFAULT_REQUEST_MS = 20_000
+const DEFAULT_FETCH_MS = 20_000
+const DEFAULT_HOMEPAGE_URL = 'hyper://1868916a7a282ff0f211b11b536e9642828c32d3a817a254e1ef7e602709e25d/'
+const DEFAULT_CATALOGS = [
+  'f5fb7500bccd60a976d2b1d24246108f4444a210b9ca591533114dffc089934d',
+  '5d961fdc2f56215463e5d4656dd4a3f22bb5e15b93f9bfc8439a63a18f974d75'
+]
+const REQUIRED_FEATURED = ['Keet', 'PearPass', 'anonGPT', 'Paste', 'Peercord']
+const PEERCORD_LINK = 'pear://wmir47w7mai3b1skj66mx7fzso6k6o91kipaney7gtt69npimouy'
+
+function parseArgs (argv) {
+  const args = {
+    host: DEFAULT_HOST,
+    portBase: DEFAULT_PORT_BASE,
+    portCount: DEFAULT_PORT_COUNT,
+    timeout: DEFAULT_TIMEOUT_MS,
+    connectTimeout: DEFAULT_CONNECT_MS,
+    requestTimeout: DEFAULT_REQUEST_MS,
+    fetchTimeout: DEFAULT_FETCH_MS,
+    homepageUrl: DEFAULT_HOMEPAGE_URL,
+    catalogs: [...DEFAULT_CATALOGS],
+    json: false
+  }
+
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]
+    if (arg === '--host') args.host = argv[++i] || args.host
+    else if (arg === '--port-base') args.portBase = parsePositiveInt(argv[++i], '--port-base')
+    else if (arg === '--port-count') args.portCount = parsePositiveInt(argv[++i], '--port-count')
+    else if (arg === '--timeout') args.timeout = parseDuration(argv[++i], '--timeout')
+    else if (arg === '--connect-timeout') args.connectTimeout = parseDuration(argv[++i], '--connect-timeout')
+    else if (arg === '--request-timeout') args.requestTimeout = parseDuration(argv[++i], '--request-timeout')
+    else if (arg === '--fetch-timeout') args.fetchTimeout = parseDuration(argv[++i], '--fetch-timeout')
+    else if (arg === '--homepage-url') args.homepageUrl = parseHyperUrl(argv[++i], '--homepage-url')
+    else if (arg === '--catalog') args.catalogs.push(parseHexKey(argv[++i], '--catalog'))
+    else if (arg === '--only-catalog') args.catalogs = [parseHexKey(argv[++i], '--only-catalog')]
+    else if (arg === '--json') args.json = true
+    else if (arg === '-h' || arg === '--help') usage(0)
+    else usage(2, `unknown option: ${arg}`)
+  }
+
+  return args
+}
+
+function usage (code, msg = '') {
+  if (msg) console.error('error:', msg)
+  console.error('usage: node scripts/release-rpc-story-smoke.mjs [--timeout 30000] [--port-base 9876] [--catalog <64-hex>] [--homepage-url hyper://...] [--json]')
+  process.exit(code)
+}
+
+function parseDuration (value, label) {
+  const n = Number(value)
+  if (!Number.isFinite(n) || n <= 0) usage(2, `${label} must be a positive number of milliseconds`)
+  return Math.floor(n)
+}
+
+function parsePositiveInt (value, label) {
+  const n = Number(value)
+  if (!Number.isInteger(n) || n <= 0) usage(2, `${label} must be a positive integer`)
+  return n
+}
+
+function parseHexKey (value, label) {
+  const key = String(value || '').trim().toLowerCase()
+  if (!/^[0-9a-f]{64}$/.test(key)) usage(2, `${label} must be a 64-hex key`)
+  return key
+}
+
+function parseHyperUrl (value, label) {
+  const url = String(value || '').trim()
+  if (!/^hyper:\/\/[0-9a-f]{64}(?:\/|$)/i.test(url)) usage(2, `${label} must be a hyper:// URL with a 64-hex drive key`)
+  return url
+}
+
+function frame (msg) {
+  const json = JSON.stringify(msg)
+  return json.length.toString(16).padStart(8, '0') + json
+}
+
+function parseFrames (state, data) {
+  state.buffer += Buffer.isBuffer(data) ? data.toString('utf8') : String(data)
+  const out = []
+  while (state.buffer.length >= 8) {
+    const len = parseInt(state.buffer.slice(0, 8), 16)
+    if (!Number.isFinite(len) || len <= 0 || len > 10_000_000) {
+      throw new Error(`invalid RPC frame length: ${state.buffer.slice(0, 8)}`)
+    }
+    if (state.buffer.length < 8 + len) break
+    const json = state.buffer.slice(8, 8 + len)
+    state.buffer = state.buffer.slice(8 + len)
+    out.push(JSON.parse(json))
+  }
+  return out
+}
+
+class RawWebSocket extends EventEmitter {
+  constructor (socket, initial = Buffer.alloc(0)) {
+    super()
+    this.socket = socket
+    this.buffer = initial
+    this.closed = false
+
+    socket.on('data', (chunk) => this._onData(chunk))
+    socket.on('close', () => {
+      if (this.closed) return
+      this.closed = true
+      this.emit('close')
+    })
+    socket.on('error', (err) => this.emit('error', err))
+    if (initial.length) queueMicrotask(() => this._drain())
+  }
+
+  send (text) {
+    if (this.closed) return
+    const payload = Buffer.from(String(text))
+    const mask = randomBytes(4)
+    let header
+    if (payload.length < 126) {
+      header = Buffer.alloc(2)
+      header[0] = 0x81
+      header[1] = 0x80 | payload.length
+    } else if (payload.length <= 0xffff) {
+      header = Buffer.alloc(4)
+      header[0] = 0x81
+      header[1] = 0x80 | 126
+      header.writeUInt16BE(payload.length, 2)
+    } else {
+      header = Buffer.alloc(10)
+      header[0] = 0x81
+      header[1] = 0x80 | 127
+      header.writeBigUInt64BE(BigInt(payload.length), 2)
+    }
+
+    const masked = Buffer.alloc(payload.length)
+    for (let i = 0; i < payload.length; i++) masked[i] = payload[i] ^ mask[i % 4]
+    this.socket.write(Buffer.concat([header, mask, masked]))
+  }
+
+  close () {
+    this.closed = true
+    try { this.socket.end() } catch {}
+  }
+
+  _onData (chunk) {
+    this.buffer = Buffer.concat([this.buffer, chunk])
+    this._drain()
+  }
+
+  _drain () {
+    while (this.buffer.length >= 2) {
+      const b0 = this.buffer[0]
+      const b1 = this.buffer[1]
+      const opcode = b0 & 0x0f
+      const masked = (b1 & 0x80) !== 0
+      let len = b1 & 0x7f
+      let offset = 2
+
+      if (len === 126) {
+        if (this.buffer.length < offset + 2) return
+        len = this.buffer.readUInt16BE(offset)
+        offset += 2
+      } else if (len === 127) {
+        if (this.buffer.length < offset + 8) return
+        len = Number(this.buffer.readBigUInt64BE(offset))
+        offset += 8
+      }
+
+      const maskOffset = offset
+      if (masked) offset += 4
+      if (this.buffer.length < offset + len) return
+
+      let payload = this.buffer.subarray(offset, offset + len)
+      if (masked) {
+        const mask = this.buffer.subarray(maskOffset, maskOffset + 4)
+        const unmasked = Buffer.alloc(payload.length)
+        for (let i = 0; i < payload.length; i++) unmasked[i] = payload[i] ^ mask[i % 4]
+        payload = unmasked
+      }
+      this.buffer = this.buffer.subarray(offset + len)
+
+      if (opcode === 0x8) {
+        this.close()
+        this.emit('close')
+        return
+      }
+      if (opcode === 0x1 || opcode === 0x2) this.emit('message', payload)
+    }
+  }
+}
+
+async function connect (url, timeout) {
+  return await new Promise((resolve, reject) => {
+    const u = new URL(url)
+    const socket = net.createConnection({ host: u.hostname, port: Number(u.port) })
+    const key = randomBytes(16).toString('base64')
+    let settled = false
+    let buffer = Buffer.alloc(0)
+    const timer = setTimeout(() => done(new Error(`connect timeout: ${url}`)), timeout)
+
+    function done (err, ws = null) {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      socket.removeListener('connect', onConnect)
+      socket.removeListener('data', onData)
+      socket.removeListener('error', onError)
+      socket.removeListener('close', onClose)
+      if (err) {
+        try { socket.destroy() } catch {}
+        reject(err)
+      } else {
+        resolve(ws)
+      }
+    }
+
+    function onConnect () {
+      const path = (u.pathname || '/') + (u.search || '')
+      socket.write([
+        `GET ${path} HTTP/1.1`,
+        `Host: ${u.hostname}:${u.port}`,
+        'Upgrade: websocket',
+        'Connection: Upgrade',
+        `Sec-WebSocket-Key: ${key}`,
+        'Sec-WebSocket-Version: 13',
+        '',
+        ''
+      ].join('\r\n'))
+    }
+
+    function onData (chunk) {
+      buffer = Buffer.concat([buffer, chunk])
+      const end = buffer.indexOf('\r\n\r\n')
+      if (end === -1) return
+
+      const head = buffer.subarray(0, end).toString('latin1')
+      const rest = buffer.subarray(end + 4)
+      if (!/^HTTP\/1\.1 101\b/i.test(head)) {
+        done(new Error(`websocket handshake rejected: ${head.split('\r\n')[0] || 'no status'}`))
+        return
+      }
+      done(null, new RawWebSocket(socket, rest))
+    }
+
+    function onError () { done(new Error(`connect failed: ${url}`)) }
+    function onClose () { done(new Error(`socket closed before handshake: ${url}`)) }
+
+    socket.once('connect', onConnect)
+    socket.on('data', onData)
+    socket.once('error', onError)
+    socket.once('close', onClose)
+  })
+}
+
+function requestRpc (ws, cmd, data, timeout) {
+  const id = 910_000_000 + Math.floor(Math.random() * 10_000_000)
+  const state = { buffer: '' }
+
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const timer = setTimeout(() => done(new Error(`RPC timeout: cmd ${cmd}`)), timeout)
+
+    function done (err, value) {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      ws.off('message', onMessage)
+      ws.off('close', onClose)
+      ws.off('error', onError)
+      err ? reject(err) : resolve(value)
+    }
+
+    function onClose () { done(new Error(`diagnostic socket closed before cmd ${cmd} reply`)) }
+    function onError () { done(new Error(`diagnostic socket error before cmd ${cmd} reply`)) }
+
+    function onMessage (chunk) {
+      let messages
+      try {
+        messages = parseFrames(state, chunk)
+      } catch (err) {
+        done(err)
+        return
+      }
+
+      for (const msg of messages) {
+        if (msg?.event === 'backend-boot-failed') {
+          done(new Error(`backend boot failed: ${msg.data?.message || 'unknown error'}`))
+          return
+        }
+        if (msg?.id !== id) continue
+        if (msg.error) done(new Error(msg.error))
+        else done(null, msg.result)
+        return
+      }
+    }
+
+    ws.on('message', onMessage)
+    ws.on('close', onClose)
+    ws.on('error', onError)
+    ws.send(frame({ id, cmd, data: data || {} }))
+  })
+}
+
+function validateStatus (status) {
+  const errors = []
+  if (!status || typeof status !== 'object') return ['status reply is not an object']
+  if (status.dhtConnected !== true) errors.push('DHT is not connected')
+  if (!Number.isInteger(status.proxyPort) || status.proxyPort <= 0) errors.push('HTTP proxy is not ready')
+  if (!Number.isInteger(status.hiveRelays) || status.hiveRelays < 1) errors.push('no HiveRelay connections reported')
+  if (!Number.isFinite(status.storageUsed) || status.storageUsed < 0) errors.push('storageUsed is invalid')
+  if (!Number.isFinite(status.storageLimit) || status.storageLimit <= 0) errors.push('storageLimit is invalid')
+  return errors
+}
+
+async function connectReady (args) {
+  const deadline = Date.now() + args.timeout
+  let last = null
+
+  while (Date.now() < deadline) {
+    for (let i = 0; i < args.portCount; i++) {
+      const port = args.portBase + i
+      const remain = Math.max(1, deadline - Date.now())
+      const url = `ws://${args.host}:${port}/status-smoke`
+      let ws = null
+      try {
+        ws = await connect(url, Math.min(args.connectTimeout, remain))
+        const status = await requestRpc(ws, C.CMD_GET_STATUS, {}, Math.min(args.requestTimeout, remain))
+        const errors = validateStatus(status)
+        if (errors.length === 0) return { ws, port, url, status }
+        last = { port, url, status, errors }
+        ws.close()
+      } catch (err) {
+        last = { port, url, error: err.message }
+        try { ws?.close() } catch {}
+      }
+    }
+    await sleep(500)
+  }
+
+  const error = new Error('no ready diagnostic RPC socket answered')
+  error.last = last
+  throw error
+}
+
+function sleep (ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function fetchLocalUrl (localUrl, timeout) {
+  const u = new URL(localUrl)
+  if (!['127.0.0.1', 'localhost'].includes(u.hostname)) {
+    throw new Error(`refusing to fetch non-local proxy URL: ${localUrl}`)
+  }
+
+  return await new Promise((resolve, reject) => {
+    let settled = false
+    const req = http.get({
+      hostname: u.hostname,
+      port: u.port,
+      path: `${u.pathname}${u.search || ''}`,
+      timeout
+    }, (res) => {
+      const chunks = []
+      res.on('data', (chunk) => chunks.push(chunk))
+      res.on('end', () => {
+        done(null, {
+          statusCode: res.statusCode,
+          headers: res.headers,
+          body: Buffer.concat(chunks).toString('utf8')
+        })
+      })
+    })
+
+    req.on('timeout', () => done(new Error(`HTTP fetch timeout: ${localUrl}`)))
+    req.on('error', done)
+
+    function done (err, value) {
+      if (settled) return
+      settled = true
+      try { req.destroy() } catch {}
+      err ? reject(err) : resolve(value)
+    }
+  })
+}
+
+function titleOf (html) {
+  const match = String(html || '').match(/<title[^>]*>([\s\S]*?)<\/title>/i)
+  return match ? match[1].replace(/\s+/g, ' ').trim() : ''
+}
+
+function assertHomepage (nav, fetched, expectedUrl) {
+  if (!nav || typeof nav.localUrl !== 'string') throw new Error('CMD_NAVIGATE did not return a localUrl')
+  const expectedKey = new URL(expectedUrl).hostname.toLowerCase()
+  if (nav.key !== expectedKey) throw new Error(`homepage key mismatch: expected ${expectedKey}, got ${nav.key || '(none)'}`)
+  if (!Number.isInteger(fetched.statusCode) || fetched.statusCode < 200 || fetched.statusCode >= 300) {
+    throw new Error(`homepage proxy fetch returned HTTP ${fetched.statusCode}`)
+  }
+  if (fetched.body.length < 1000) throw new Error(`homepage proxy fetch is unexpectedly small (${fetched.body.length} bytes)`)
+  if (!/PearBrowser|Pear Browser/i.test(fetched.body)) throw new Error('homepage fetch did not contain PearBrowser text')
+}
+
+function assertCatalogues (catalogResult) {
+  const apps = Array.isArray(catalogResult?.apps) ? catalogResult.apps : []
+  const catalogs = Array.isArray(catalogResult?.catalogs) ? catalogResult.catalogs : []
+  if (catalogs.length < 1) throw new Error('no loaded catalogues reported')
+  if (apps.length < REQUIRED_FEATURED.length) throw new Error(`catalogue returned too few apps: ${apps.length}`)
+
+  const byName = new Map(apps.map((app) => [String(app?.name || '').toLowerCase(), app]))
+  const featured = []
+  for (const name of REQUIRED_FEATURED) {
+    const app = byName.get(name.toLowerCase())
+    if (!app) throw new Error(`featured app missing from catalogue: ${name}`)
+    featured.push({ name: app.name, type: app.type || 'standalone', link: app.link || null, driveKey: app.driveKey || null })
+  }
+
+  const peercord = byName.get('peercord')
+  if (!peercord) throw new Error('Peercord missing from catalogue')
+  if (peercord.type !== 'standalone') throw new Error(`Peercord type mismatch: expected standalone, got ${peercord.type || '(missing)'}`)
+  if (peercord.link !== PEERCORD_LINK) throw new Error(`Peercord link mismatch: ${peercord.link || '(missing)'}`)
+  if (peercord.driveKey) throw new Error('Peercord unexpectedly has a driveKey; standalone pear:// apps should launch in a window')
+
+  return {
+    catalogs: catalogs.length,
+    apps: apps.length,
+    featured,
+    peercord: {
+      type: peercord.type,
+      link: peercord.link,
+      sourceUrl: peercord.sourceUrl || null,
+      license: peercord.license || null,
+      runMode: 'window'
+    }
+  }
+}
+
+async function run (args) {
+  const conn = await connectReady(args)
+  const ws = conn.ws
+  try {
+    const nav = await requestRpc(ws, C.CMD_NAVIGATE, { url: args.homepageUrl }, args.requestTimeout)
+    const fetched = await fetchLocalUrl(nav.localUrl, args.fetchTimeout)
+    assertHomepage(nav, fetched, args.homepageUrl)
+
+    const loaded = []
+    for (const keyHex of args.catalogs) {
+      const data = await requestRpc(ws, C.CMD_LOAD_CATALOG_BEE, { keyHex }, args.requestTimeout)
+      loaded.push({ keyHex, name: data?.name || null, apps: Array.isArray(data?.apps) ? data.apps.length : 0 })
+    }
+
+    const catalogResult = await requestRpc(ws, C.CMD_GET_CATALOG_APPS, {}, args.requestTimeout)
+    const catalog = assertCatalogues(catalogResult)
+
+    return {
+      ok: true,
+      port: conn.port,
+      status: conn.status,
+      homepage: {
+        url: args.homepageUrl,
+        localUrl: nav.localUrl,
+        statusCode: fetched.statusCode,
+        bytes: Buffer.byteLength(fetched.body),
+        title: titleOf(fetched.body)
+      },
+      loadedCatalogues: loaded,
+      catalog
+    }
+  } finally {
+    try { ws.close() } catch {}
+  }
+}
+
+function printHuman (result) {
+  console.log('Release RPC story smoke passed')
+  console.log(`  rpcPort: ${result.port}`)
+  console.log(`  proxyPort: ${result.status.proxyPort}`)
+  console.log(`  homepage: HTTP ${result.homepage.statusCode}, ${result.homepage.bytes} bytes${result.homepage.title ? `, "${result.homepage.title}"` : ''}`)
+  console.log(`  catalogues: ${result.catalog.catalogs} loaded, ${result.catalog.apps} aggregated apps`)
+  console.log(`  featured: ${result.catalog.featured.map((app) => app.name).join(', ')}`)
+  console.log(`  Peercord: ${result.catalog.peercord.type}, ${result.catalog.peercord.runMode}, ${result.catalog.peercord.link}`)
+}
+
+async function main () {
+  const args = parseArgs(process.argv.slice(2))
+  try {
+    const result = await run(args)
+    if (args.json) console.log(JSON.stringify(result))
+    else printHuman(result)
+  } catch (err) {
+    const output = { ok: false, error: err.message, last: err.last || null }
+    if (args.json) console.log(JSON.stringify(output))
+    else {
+      console.error('Release RPC story smoke failed')
+      console.error(`  ${err.message}`)
+      if (err.last) console.error(`  last: ${JSON.stringify(err.last)}`)
+    }
+    process.exit(1)
+  }
+}
+
+main().catch((err) => {
+  console.error(err.stack || err.message)
+  process.exit(1)
+})

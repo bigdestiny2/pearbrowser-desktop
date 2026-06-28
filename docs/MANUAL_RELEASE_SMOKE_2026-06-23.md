@@ -55,6 +55,12 @@ announcement.
   - Expected: diagnostic RPC reports `dhtConnected: true`, a non-zero
     `proxyPort`, at least one configured HiveRelay, and a profile at or below
     its storage quota without becoming the renderer or closing the app.
+  - Nonvisual preflight before screenshots:
+    `node scripts/release-rpc-story-smoke.mjs --timeout 45000 --request-timeout 30000 --json`.
+  - Expected: homepage fetches through the local proxy, release catalogues load,
+    featured rows include Keet, PearPass, anonGPT, Paste, and Peercord, and
+    Peercord remains `standalone`/window-only. This does not launch Peercord or
+    replace the human GUI/trust checks below.
 - [ ] Browse user story:
   - Open `hyper://1868916a7a282ff0f211b536e9642828c32d3a817a254e1ef7e602709e25d/`.
   - Expected: page renders, About-this-site shows the drive key, reload works.
