@@ -6,7 +6,9 @@ Primary user promise: download one native package, launch it normally, and let P
 
 ## Current State
 
-- GitHub release `v0.5.0` has native desktop assets, SHA-256 sidecars, checksum indexes, and platform manifests.
+- GitHub release `v0.5.0` has native desktop assets for macOS arm64/x64,
+  Windows x64, and Linux x64, with SHA-256 sidecars, checksum indexes, and
+  platform manifests.
 - `scripts/resolve-native-release-asset.mjs` chooses the recommended release package for the current or requested platform and verifies the checksum sidecar exists.
 - `.github/workflows/desktop-native-release.yml` builds macOS, Windows, and Linux packages in CI.
 - The native workflow now has two modes:
@@ -30,7 +32,7 @@ The stable Pear link is still the application-content update channel. Native pac
 
 | Platform | Now | Public-trust target | Later channel |
 | --- | --- | --- | --- |
-| macOS | ad-hoc signed `.app.zip` | Developer ID signed and notarized `.dmg`, with stapled ticket and SHA-256 sidecar | Homebrew Cask after the `.dmg` URL and checksum are stable |
+| macOS | ad-hoc signed `.app.zip` for arm64 and x64 | Developer ID signed and notarized `.dmg`, with stapled ticket and SHA-256 sidecar | Homebrew Cask after the `.dmg` URL and checksum are stable |
 | Windows | unsigned `.exe` and `.msix` package proof | Authenticode-signed `.exe` and `.msix`, timestamped and verified in CI | WinGet manifest after the signed installer URL and `InstallerSha256` are stable |
 | Linux | `.AppImage` plus checksums | `.AppImage` remains primary, with desktop file/icon/AppStream metadata checked | `.deb`/`.rpm` only if user demand or distro policy warrants it |
 | iOS | simulator and native-shell evidence only | TestFlight/App Store validation after production Apple signing | App Store |

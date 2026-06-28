@@ -14,7 +14,8 @@ Primary desktop distribution is now native GitHub release packages. The current
 `v0.5.0` release has attached macOS, Windows, and Linux assets with SHA-256
 sidecars and platform manifests. Download from the
 [`v0.5.0` release](https://github.com/bigdestiny2/pearbrowser-desktop/releases/tag/v0.5.0),
-or resolve the recommended asset for your machine from a source checkout:
+follow the [native install guide](./docs/INSTALL_NATIVE_PACKAGES.md), or resolve
+the recommended asset for your machine from a source checkout:
 
 ```sh
 npm run resolve:native-release -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
@@ -22,9 +23,9 @@ npm run resolve:native-release -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-de
 
 The current package targets match the `cmake-pear` appling toolchain:
 
-- macOS: `PearBrowser-<version>-macos-<arch>.app.zip` now, signed/notarized `.dmg` once Developer ID credentials are wired in
-- Windows: `PearBrowser-<version>-windows-<arch>.exe` and `PearBrowser-<version>-windows-<arch>.msix` now
-- Linux: `PearBrowser-<version>-linux-<arch>.AppImage` now, distro packages such as `.deb` later if demand warrants them
+- macOS: `PearBrowser-<version>-macos-arm64.app.zip` and `PearBrowser-<version>-macos-x64.app.zip` now, signed/notarized `.dmg` once Developer ID credentials are wired in
+- Windows: `PearBrowser-<version>-windows-x64.exe` and `PearBrowser-<version>-windows-x64.msix` now
+- Linux: `PearBrowser-<version>-linux-x64.AppImage` now, distro packages such as `.deb` later if demand warrants them
 
 The stable Pear key remains available as the temporary legacy fallback for testers and recovery:
 
@@ -136,6 +137,7 @@ Three independent keypairs — BIP-39 identity, HiveRelay publisher key, Coresto
 | [Architecture and capabilities](./docs/ARCHITECTURE_AND_CAPABILITIES.md) | Current system map for browser surfaces, runtime layers, catalogue, search, naming, Nostr, APIs, and validation. |
 | [Deep audit](./docs/DEEP_AUDIT_CATALOG_SEARCH_NAMING_NOSTR_2026-06-21.md) | Detailed catalogue/search/naming/Nostr audit, issue list, fixes, and test evidence. |
 | [Manual release smoke](./docs/MANUAL_RELEASE_SMOKE_2026-06-23.md) | Final human-run release checklist for UI flows, Peercord trust approval, mobile device smoke, and signing/store gates. |
+| [Native install guide](./docs/INSTALL_NATIVE_PACKAGES.md) | User-facing package selection, checksum verification, and OS-specific install steps for the current native assets. |
 | [Packaging strategy](./docs/PACKAGING_STRATEGY_2026-06-28.md) | Desktop packaging lanes, public-trust signing/notarization gates, and channel expansion plan. |
 | [Release evidence log](./docs/RELEASE_SMOKE_EVIDENCE_LOG_2026-06-23.md) | Operator-fillable proof table for final PASS/FAIL/DEFER release evidence and announcement decision. |
 | [Test command matrix](./docs/TEST-COMMAND-MATRIX-2026-06-23.md) | Separates deterministic local checks from GUI, real-DHT, third-party trust, release-drive, and mobile/native gates. |
