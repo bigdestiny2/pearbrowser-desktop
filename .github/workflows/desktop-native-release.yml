@@ -1,0 +1,176 @@
+name: Desktop Native Release
+
+"on":
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: GitHub release tag to build and attach assets to
+        required: true
+        default: v0.5.0
+      source_ref:
+        description: Git ref to build the native wrapper from
+        required: true
+        default: main
+  release:
+    types:
+      - published
+  push:
+    tags:
+      - v*
+
+permissions:
+  contents: write
+
+concurrency:
+  group: desktop-native-release-${{ github.event.release.tag_name || github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ github.event.release.tag_name || github.event.inputs.tag || github.ref_name }}
+  SOURCE_REF: ${{ github.event.inputs.source_ref || github.event.release.tag_name || github.ref_name }}
+  NODE_VERSION: 22
+  PEARBROWSER_MACOS_SIGNING_IDENTITY: ${{ secrets.PEARBROWSER_MACOS_SIGNING_IDENTITY || '-' }}
+  PEARBROWSER_MACOS_SIGNING_KEYCHAIN: ${{ secrets.PEARBROWSER_MACOS_SIGNING_KEYCHAIN || '' }}
+  PEARBROWSER_WINDOWS_SIGNING_SUBJECT: ${{ secrets.PEARBROWSER_WINDOWS_SIGNING_SUBJECT || 'CN=PearBrowser Desktop' }}
+  PEARBROWSER_WINDOWS_SIGNING_THUMBPRINT: ${{ secrets.PEARBROWSER_WINDOWS_SIGNING_THUMBPRINT || '' }}
+
+jobs:
+  build-native:
+    name: Build ${{ matrix.name }} appling
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            os: macos-latest
+            platform: darwin
+            release-platform: macos
+          - name: Windows
+            os: windows-latest
+            platform: win32
+            release-platform: windows
+          - name: Linux
+            os: ubuntu-latest
+            platform: linux
+            release-platform: linux
+
+    defaults:
+      run:
+        shell: bash
+        working-directory: pear-ecosystem/01-browser/pearbrowser-desktop
+
+    steps:
+      - name: Checkout PearBrowser desktop
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_REF }}
+          path: pear-ecosystem/01-browser/pearbrowser-desktop
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup Python for CMake
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install CMake 4 toolchain
+        run: |
+          python -m pip install --upgrade cmake
+          cmake --version
+
+      - name: Install appling build tools
+        run: npm ci --prefix appling
+
+      - name: Verify appling release metadata
+        run: node scripts/check-appling-release.mjs --tag "$RELEASE_TAG"
+
+      - name: Generate native project
+        run: npm run --prefix appling generate
+
+      - name: Build native package
+        run: npm run --prefix appling build
+
+      - name: Collect release artifacts
+        run: >
+          node scripts/collect-appling-artifacts.mjs
+          --tag "$RELEASE_TAG"
+          --platform "${{ matrix.platform }}"
+          --arch "${{ runner.arch }}"
+          --out-dir "dist/appling-release/$RELEASE_TAG/${{ matrix.release-platform }}"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pearbrowser-desktop-${{ env.RELEASE_TAG }}-${{ matrix.release-platform }}-${{ runner.arch }}
+          path: pear-ecosystem/01-browser/pearbrowser-desktop/dist/appling-release/${{ env.RELEASE_TAG }}/${{ matrix.release-platform }}/*
+          if-no-files-found: error
+
+  attach-release:
+    name: Attach assets to GitHub release
+    needs: build-native
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Download native artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          pattern: pearbrowser-desktop-${{ env.RELEASE_TAG }}-*
+          merge-multiple: true
+
+      - name: Verify release asset bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          ls -la release-assets
+          gh release view "$RELEASE_TAG" --repo "$GH_REPO" >/dev/null
+
+          shopt -s nullglob
+          assets=(release-assets/*)
+          if (( ${#assets[@]} == 0 )); then
+            echo "::error::No native release assets were downloaded"
+            exit 1
+          fi
+
+          for platform in macos windows linux; do
+            sums=(release-assets/SHA256SUMS-${platform}-*.txt)
+            manifests=(release-assets/manifest-${platform}-*.json)
+            if (( ${#sums[@]} != 1 )); then
+              echo "::error::Expected exactly one SHA256SUMS file for ${platform}, found ${#sums[@]}"
+              exit 1
+            fi
+            if (( ${#manifests[@]} != 1 )); then
+              echo "::error::Expected exactly one manifest file for ${platform}, found ${#manifests[@]}"
+              exit 1
+            fi
+          done
+
+          for asset in "${assets[@]}"; do
+            case "$(basename "$asset")" in
+              *.sha256|SHA256SUMS-*|manifest-*) continue ;;
+            esac
+            if [[ ! -f "${asset}.sha256" ]]; then
+              echo "::error::Missing SHA-256 sidecar for ${asset}"
+              exit 1
+            fi
+          done
+
+      - name: Attach assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          assets=(release-assets/*)
+          gh release upload "$RELEASE_TAG" "${assets[@]}" --repo "$GH_REPO" --clobber
