@@ -17,10 +17,10 @@ Current local status from this loop:
 
 - `git diff --check` passed.
 - `npm audit --audit-level=high` passed with `found 0 vulnerabilities`.
-- `npm test` passed: 441 tests, 0 failed.
+- `npm test` passed: 443 tests, 0 failed.
 
 This supersedes older local counts in nearby docs for this checkout. The
-current release-readiness docs and latest rerun agree on 441/441.
+current release-readiness docs and latest rerun agree on 443/443.
 
 ## Fast Local Gates
 
@@ -28,7 +28,7 @@ current release-readiness docs and latest rerun agree on 441/441.
 | --- | --- | --- |
 | `git diff --check` | Whitespace/conflict-marker sanity | Passed |
 | `npm audit --audit-level=high` | High-severity dependency audit for desktop package | Passed, 0 vulnerabilities |
-| `npm test` | Full desktop Node test suite: `node --test 'test/*.test.js'` | Passed, 441/441 |
+| `npm test` | Full desktop Node test suite: `node --test 'test/*.test.js'` | Passed, 443/443 |
 | `npm run check:release-evidence` | Operator evidence-log completeness; fails until required rows are `PASS` or documented `DEFER` | Expected fail until manual gates are filled |
 
 The root package is the only package with test scripts relevant to this desktop
@@ -64,6 +64,7 @@ covered by `npm test`.
 | Command | Classification |
 | --- | --- |
 | `node scripts/runtime-rpc-smoke.mjs --timeout 20000 --max-storage-percent 100 --json` | Diagnostic WebSocket smoke against an already-running app. Requires PearBrowser to be launched first; public smoke should fail if the profile is over quota |
+| `node scripts/release-rpc-story-smoke.mjs --timeout 45000 --request-timeout 30000 --json` | Nonvisual story preflight against an already-running app. Loads the release catalogues, fetches the PearBrowser homepage through the local proxy, validates featured catalogue rows, and confirms Peercord remains window-only without launching any third-party app |
 | `npm run start` | Interactive Pear dev launch: `pear run --dev .` |
 | `npm run run` | Interactive Pear launch: `pear run .` |
 | `pear run pear://tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty` | Production browser launch/manual smoke gate |

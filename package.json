@@ -12,6 +12,7 @@
     "check:native-signing": "node scripts/check-native-signing-credentials.mjs",
     "package:appling": "node scripts/collect-appling-artifacts.mjs",
     "smoke:runtime": "node scripts/runtime-rpc-smoke.mjs",
+    "smoke:release-stories": "node scripts/release-rpc-story-smoke.mjs",
     "test": "node --test 'test/*.test.js'"
   },
   "pear": {

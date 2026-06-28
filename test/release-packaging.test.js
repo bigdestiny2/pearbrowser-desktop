@@ -32,6 +32,7 @@ const mainEntry = readFileSync(new URL('../index.js', import.meta.url), 'utf8')
 const bootEntry = readFileSync(new URL('../ui/boot.js', import.meta.url), 'utf8')
 const tabRuntime = readFileSync(new URL('../backend/tab-runtime.js', import.meta.url), 'utf8')
 const runtimeSmoke = readFileSync(new URL('../scripts/runtime-rpc-smoke.mjs', import.meta.url), 'utf8')
+const releaseStorySmoke = readFileSync(new URL('../scripts/release-rpc-story-smoke.mjs', import.meta.url), 'utf8')
 const liveCatalogVerifier = readFileSync(new URL('../scripts/verify-live-catalog.js', import.meta.url), 'utf8')
 const hiveRelayLayout = readFileSync(new URL('../scripts/check-hiverelay-layout.mjs', import.meta.url), 'utf8')
 const verifyPin = readFileSync(new URL('../scripts/verify-pin.js', import.meta.url), 'utf8')
@@ -345,6 +346,19 @@ test('runtime smoke can enforce a clean release profile storage ceiling', () => 
   assert.match(runtimeSmoke, /parseNonNegativeNumber/)
   assert.match(runtimeSmoke, /storagePercent exceeds/)
   assert.match(runtimeSmoke, /args\.maxStoragePercent/)
+})
+
+test('release story smoke covers browse and catalogue without launching third-party apps', () => {
+  assert.equal(pkg.scripts?.['smoke:release-stories'], 'node scripts/release-rpc-story-smoke.mjs')
+  assert.match(releaseStorySmoke, /CMD_NAVIGATE/)
+  assert.match(releaseStorySmoke, /CMD_LOAD_CATALOG_BEE/)
+  assert.match(releaseStorySmoke, /CMD_GET_CATALOG_APPS/)
+  assert.match(releaseStorySmoke, /PearBrowser\|Pear Browser/)
+  assert.match(releaseStorySmoke, /REQUIRED_FEATURED = \['Keet', 'PearPass', 'anonGPT', 'Paste', 'Peercord'\]/)
+  assert.match(releaseStorySmoke, /PEERCORD_LINK/)
+  assert.match(releaseStorySmoke, /runMode: 'window'/)
+  assert.doesNotMatch(releaseStorySmoke, /CMD_LAUNCH_PEAR_LINK/)
+  assert.doesNotMatch(releaseStorySmoke, /CMD_RUN_APP_IN_TAB/)
 })
 
 test('live catalogue verifier asserts Peercord provenance metadata', () => {
