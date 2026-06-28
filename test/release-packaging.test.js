@@ -348,17 +348,24 @@ test('runtime smoke can enforce a clean release profile storage ceiling', () => 
   assert.match(runtimeSmoke, /args\.maxStoragePercent/)
 })
 
-test('release story smoke covers browse and catalogue without launching third-party apps', () => {
+test('release story smoke covers browse, catalogue, and local stories without launching third-party apps', () => {
   assert.equal(pkg.scripts?.['smoke:release-stories'], 'node scripts/release-rpc-story-smoke.mjs')
   assert.match(releaseStorySmoke, /CMD_NAVIGATE/)
   assert.match(releaseStorySmoke, /CMD_LOAD_CATALOG_BEE/)
   assert.match(releaseStorySmoke, /CMD_GET_CATALOG_APPS/)
+  assert.match(releaseStorySmoke, /--local-stories/)
+  assert.match(releaseStorySmoke, /CMD_SEARCH_INDEX/)
+  assert.match(releaseStorySmoke, /CMD_SEARCH/)
+  assert.match(releaseStorySmoke, /CMD_NAME_RESOLVE/)
+  assert.match(releaseStorySmoke, /CMD_USERDATA_ADD_BOOKMARK/)
+  assert.match(releaseStorySmoke, /CMD_USERDATA_SAVE_SESSION/)
   assert.match(releaseStorySmoke, /PearBrowser\|Pear Browser/)
   assert.match(releaseStorySmoke, /REQUIRED_FEATURED = \['Keet', 'PearPass', 'anonGPT', 'Paste', 'Peercord'\]/)
   assert.match(releaseStorySmoke, /PEERCORD_LINK/)
   assert.match(releaseStorySmoke, /runMode: 'window'/)
   assert.doesNotMatch(releaseStorySmoke, /CMD_LAUNCH_PEAR_LINK/)
   assert.doesNotMatch(releaseStorySmoke, /CMD_RUN_APP_IN_TAB/)
+  assert.doesNotMatch(releaseStorySmoke, /CMD_PUBLISH_SITE/)
 })
 
 test('live catalogue verifier asserts Peercord provenance metadata', () => {
