@@ -59,8 +59,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: macOS
-            os: macos-latest
+          - name: macOS Apple Silicon
+            os: macos-15
+            platform: darwin
+            release-platform: macos
+          - name: macOS Intel
+            os: macos-15-intel
             platform: darwin
             release-platform: macos
           - name: Windows
@@ -316,12 +320,12 @@ jobs:
           for platform in macos windows linux; do
             sums=(release-assets/SHA256SUMS-${platform}-*.txt)
             manifests=(release-assets/manifest-${platform}-*.json)
-            if (( ${#sums[@]} != 1 )); then
-              echo "::error::Expected exactly one SHA256SUMS file for ${platform}, found ${#sums[@]}"
+            if (( ${#sums[@]} == 0 )); then
+              echo "::error::Expected at least one SHA256SUMS file for ${platform}"
               exit 1
             fi
-            if (( ${#manifests[@]} != 1 )); then
-              echo "::error::Expected exactly one manifest file for ${platform}, found ${#manifests[@]}"
+            if (( ${#manifests[@]} == 0 )); then
+              echo "::error::Expected at least one manifest file for ${platform}"
               exit 1
             fi
           done

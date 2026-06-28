@@ -195,7 +195,10 @@ test('native release workflow builds and attaches appling artifacts for every de
   assert.match(nativeReleaseWorkflow, /ref: \$\{\{ env\.SOURCE_REF \}\}/)
   assert.match(nativeReleaseWorkflow, /release:/)
   assert.match(nativeReleaseWorkflow, /push:\n\s+tags:/)
-  assert.match(nativeReleaseWorkflow, /macos-latest/)
+  assert.match(nativeReleaseWorkflow, /macOS Apple Silicon/)
+  assert.match(nativeReleaseWorkflow, /macos-15/)
+  assert.match(nativeReleaseWorkflow, /macOS Intel/)
+  assert.match(nativeReleaseWorkflow, /macos-15-intel/)
   assert.match(nativeReleaseWorkflow, /windows-latest/)
   assert.match(nativeReleaseWorkflow, /ubuntu-latest/)
   assert.match(nativeReleaseWorkflow, /libgtk-4-dev/)
@@ -225,6 +228,7 @@ test('native release workflow builds and attaches appling artifacts for every de
   assert.match(nativeReleaseWorkflow, /release-platform: macos/)
   assert.match(nativeReleaseWorkflow, /gh release view "\$RELEASE_TAG"/)
   assert.match(nativeReleaseWorkflow, /SHA256SUMS-\$\{platform\}-\*\.txt/)
+  assert.match(nativeReleaseWorkflow, /Expected at least one SHA256SUMS file/)
   assert.match(nativeReleaseWorkflow, /Missing SHA-256 sidecar/)
   assert.match(nativeReleaseWorkflow, /gh release upload "\$RELEASE_TAG" "\$\{assets\[@\]\}"/)
   assert.match(nativeReleaseWorkflow, /Checkout release verifier/)
@@ -421,6 +425,10 @@ test('native release asset checker accepts complete attached asset fixtures', ()
         'PearBrowser-0.5.0-macos-arm64.app.zip.sha256',
         'SHA256SUMS-macos-arm64.txt',
         'manifest-macos-arm64.json',
+        'PearBrowser-0.5.0-macos-x64.app.zip',
+        'PearBrowser-0.5.0-macos-x64.app.zip.sha256',
+        'SHA256SUMS-macos-x64.txt',
+        'manifest-macos-x64.json',
         'PearBrowser-0.5.0-windows-x64.msix',
         'PearBrowser-0.5.0-windows-x64.msix.sha256',
         'PearBrowser-0.5.0-windows-x64-installer.exe',
@@ -449,8 +457,11 @@ test('native release asset checker accepts complete attached asset fixtures', ()
     assert.equal(result.status, 0, result.stderr || result.stdout)
     const report = JSON.parse(result.stdout)
     assert.equal(report.ok, true)
-    assert.equal(report.counts.assets, 14)
-    assert.equal(report.platforms.macos.artifacts.length, 1)
+    assert.equal(report.counts.assets, 18)
+    assert.deepEqual(report.platforms.macos.arches, ['arm64', 'x64'])
+    assert.equal(report.platforms.macos.artifacts.length, 2)
+    assert.equal(report.platforms.macos.sums.length, 2)
+    assert.equal(report.platforms.macos.manifests.length, 2)
     assert.equal(report.platforms.windows.artifacts.length, 2)
     assert.equal(report.platforms.linux.artifacts.length, 1)
   } finally {

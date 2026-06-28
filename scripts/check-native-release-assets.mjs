@@ -147,8 +147,8 @@ function verifyRelease (release, options) {
   for (const platform of Object.values(platforms)) {
     for (const name of platform.artifacts) classified.add(name)
     for (const name of platform.sidecars) classified.add(name)
-    if (platform.sums) classified.add(platform.sums)
-    if (platform.manifest) classified.add(platform.manifest)
+    for (const name of platform.sums) classified.add(name)
+    for (const name of platform.manifests) classified.add(name)
   }
   const extras = assets
     .map((asset) => asset.name)
@@ -190,26 +190,43 @@ function normalizeAssets (assets) {
 function verifyPlatform (platform, assets, names, version, errors) {
   const sums = assets.filter((asset) => asset.name.match(new RegExp(`^SHA256SUMS-${escapeRegex(platform)}-[A-Za-z0-9._-]+\\.txt$`)))
   const manifests = assets.filter((asset) => asset.name.match(new RegExp(`^manifest-${escapeRegex(platform)}-[A-Za-z0-9._-]+\\.json$`)))
-  const archFromSums = sums[0]?.name.match(new RegExp(`^SHA256SUMS-${escapeRegex(platform)}-([A-Za-z0-9._-]+)\\.txt$`))?.[1] || ''
-  const archFromManifest = manifests[0]?.name.match(new RegExp(`^manifest-${escapeRegex(platform)}-([A-Za-z0-9._-]+)\\.json$`))?.[1] || ''
-  const arch = archFromSums || archFromManifest
+  const sumsByArch = assetsByArch(sums, new RegExp(`^SHA256SUMS-${escapeRegex(platform)}-([A-Za-z0-9._-]+)\\.txt$`), `${platform} SHA256SUMS`, errors)
+  const manifestsByArch = assetsByArch(manifests, new RegExp(`^manifest-${escapeRegex(platform)}-([A-Za-z0-9._-]+)\\.json$`), `${platform} manifest`, errors)
   const primaryPrefix = `PearBrowser-${version}-${platform}-`
   const artifacts = assets
     .filter((asset) => asset.name.startsWith(primaryPrefix))
     .filter((asset) => !asset.name.endsWith('.sha256'))
-    .filter((asset) => isPrimaryArtifact(platform, asset.name, version, arch))
+    .filter((asset) => isPrimaryArtifact(platform, asset.name, version))
+  const artifactsByArch = assetsGroupedByArch(
+    artifacts,
+    new RegExp(`^PearBrowser-${escapeRegex(version)}-${escapeRegex(platform)}-([A-Za-z0-9._-]+?)(?:[-.].*)?$`),
+    `${platform} artifact`,
+    errors
+  )
 
-  if (sums.length !== 1) {
-    errors.push(`expected exactly one SHA256SUMS file for ${platform}, found ${sums.length}`)
+  if (sums.length === 0) {
+    errors.push(`expected at least one SHA256SUMS file for ${platform}`)
   }
-  if (manifests.length !== 1) {
-    errors.push(`expected exactly one manifest file for ${platform}, found ${manifests.length}`)
+  if (manifests.length === 0) {
+    errors.push(`expected at least one manifest file for ${platform}`)
   }
-  if (archFromSums && archFromManifest && archFromSums !== archFromManifest) {
-    errors.push(`${platform} SHA256SUMS arch ${archFromSums} does not match manifest arch ${archFromManifest}`)
+
+  const arches = [...new Set([
+    ...sumsByArch.keys(),
+    ...manifestsByArch.keys(),
+    ...artifactsByArch.keys()
+  ])].sort()
+
+  if (arches.length === 0) {
+    errors.push(`expected at least one ${platform} native architecture`)
   }
-  if (artifacts.length === 0) {
-    errors.push(`expected at least one primary ${platform} native artifact named ${primaryPrefix}<arch>...`)
+
+  for (const arch of arches) {
+    if (!sumsByArch.has(arch)) errors.push(`missing SHA256SUMS file for ${platform}/${arch}`)
+    if (!manifestsByArch.has(arch)) errors.push(`missing manifest file for ${platform}/${arch}`)
+    if (!artifactsByArch.has(arch)) {
+      errors.push(`expected at least one primary ${platform}/${arch} native artifact named ${primaryPrefix}${arch}...`)
+    }
   }
 
   const sidecars = []
@@ -225,16 +242,51 @@ function verifyPlatform (platform, assets, names, version, errors) {
   }
 
   return {
-    arch: arch || null,
+    arch: arches.length === 1 ? arches[0] : null,
+    arches,
     artifacts: artifacts.map((asset) => asset.name).sort(),
     sidecars: sidecars.sort(),
-    sums: sums[0]?.name || null,
-    manifest: manifests[0]?.name || null
+    sums: sums.map((asset) => asset.name).sort(),
+    manifests: manifests.map((asset) => asset.name).sort()
   }
 }
 
-function isPrimaryArtifact (platform, name, version, arch) {
-  if (arch && !name.startsWith(`PearBrowser-${version}-${platform}-${arch}`)) return false
+function assetsByArch (assets, pattern, label, errors) {
+  const byArch = new Map()
+  for (const asset of assets) {
+    const arch = asset.name.match(pattern)?.[1] || ''
+    if (!arch) {
+      errors.push(`${label} ${asset.name} does not include an architecture`)
+      continue
+    }
+    const normalized = arch.toLowerCase()
+    if (byArch.has(normalized)) {
+      errors.push(`duplicate ${label} for ${normalized}: ${byArch.get(normalized).name}, ${asset.name}`)
+    } else {
+      byArch.set(normalized, asset)
+    }
+  }
+  return byArch
+}
+
+function assetsGroupedByArch (assets, pattern, label, errors) {
+  const byArch = new Map()
+  for (const asset of assets) {
+    const arch = asset.name.match(pattern)?.[1] || ''
+    if (!arch) {
+      errors.push(`${label} ${asset.name} does not include an architecture`)
+      continue
+    }
+    const normalized = arch.toLowerCase()
+    const group = byArch.get(normalized) || []
+    group.push(asset)
+    byArch.set(normalized, group)
+  }
+  return byArch
+}
+
+function isPrimaryArtifact (platform, name, version) {
+  if (!name.startsWith(`PearBrowser-${version}-${platform}-`)) return false
   if (platform === 'macos') return /\.(?:app\.zip|dmg|pkg|zip)$/i.test(name)
   if (platform === 'windows') return /\.(?:msix|exe|msi|zip)$/i.test(name)
   if (platform === 'linux') return /\.(?:AppImage|deb|rpm|snap|tar\.gz|tgz|tar\.xz|zip)$/i.test(name)
@@ -254,7 +306,7 @@ function printHuman (report) {
   else console.error(`Native release asset check failed: ${report.repo}@${report.tag}`)
 
   for (const [platform, data] of Object.entries(report.platforms)) {
-    const arch = data.arch || 'unknown-arch'
+    const arch = data.arches.length ? data.arches.join(',') : 'unknown-arch'
     const artifacts = data.artifacts.length ? data.artifacts.join(', ') : 'none'
     console.log(`- ${platform}/${arch}: ${artifacts}`)
   }

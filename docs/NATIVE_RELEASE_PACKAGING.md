@@ -23,7 +23,8 @@ Use the manual GitHub Actions trigger:
    - `package-proof`: permits ad-hoc macOS signing and unsigned Windows assets.
    - `public-trust`: requires macOS Developer ID/notary credentials and Windows
      signing credentials before assets are uploaded for announcement.
-4. Wait for the macOS, Windows, and Linux jobs to finish.
+4. Wait for the macOS Apple Silicon, macOS Intel, Windows, and Linux jobs to
+   finish.
 5. Confirm the `v0.5.0` GitHub release has the generated installers, per-file
    `.sha256` files, `SHA256SUMS-*`, and `manifest-*` files attached.
 6. Verify the attached asset set:
@@ -98,6 +99,11 @@ and fails unless the tag has macOS, Windows, and Linux native artifacts, one
 per-artifact `.sha256` sidecar for every installer/package file. Use
 `--require-published` before announcement if draft releases should fail the
 gate.
+
+The checker accepts multiple architecture bundles for one platform. Each
+platform/architecture pair must have its own checksum index and manifest, so a
+dual macOS release has separate `macos-arm64` and `macos-x64` records instead of
+one ambiguous macOS checksum file.
 
 `scripts/resolve-native-release-asset.mjs` is the user-facing selector for those
 same attachments. It detects the current OS/CPU by default, or accepts
