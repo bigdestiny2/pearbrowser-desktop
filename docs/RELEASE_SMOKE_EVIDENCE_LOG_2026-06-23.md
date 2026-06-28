@@ -14,8 +14,8 @@ manual gate.
 | --- | --- |
 | Operator | Codex local release audit |
 | Date/time started | 2026-06-23T16:36:00Z |
-| Desktop repo/branch/head | `bigdestiny2/pearbrowser-desktop`, `main`, `bd5caa4e9bd16dfa870a42593dd97ca2552aed08` |
-| Desktop PR/CI URL | PR #23: `https://github.com/bigdestiny2/pearbrowser-desktop/pull/23`; Desktop CI run `https://github.com/bigdestiny2/pearbrowser-desktop/actions/runs/28319109847`, job `83897696771`, passed |
+| Desktop repo/branch/head | `bigdestiny2/pearbrowser-desktop`, `feat/vendor-hiverelay-source-install`, PR #28 head |
+| Desktop PR/CI URL | PR #28: `https://github.com/bigdestiny2/pearbrowser-desktop/pull/28`; Desktop CI pull_request run `https://github.com/bigdestiny2/pearbrowser-desktop/actions/runs/28320741592`, job `83902114643`, passed |
 | Mobile repo/head | `bigdestiny2/PearBrowser`, `main`, `9101200d8bb54ff31b21d6d90154cb2321756a6c` |
 | Mobile preflight CI URL | `https://github.com/bigdestiny2/PearBrowser/actions/runs/28316870344` (`mobile-release-preflight` artifact downloaded and verified locally) |
 | macOS machine | `Locals-Mac-Studio.local`, macOS 26.4.1 build 25E253 |
@@ -31,7 +31,7 @@ manual gate.
 | `npm test` | 448/448 pass | PASS | 2026-06-28 local rerun after the vendored HiveRelay source-install update: `node --test 'test/*.test.js'`, pass `448/448`; one earlier full-suite run showed the existing `nostr-index-room` verify-and-drop test flake, and the isolated test plus full rerun passed |
 | `git diff --check` | clean | PASS | 2026-06-28 local run on `feat/vendor-hiverelay-source-install` exited 0 after the vendored HiveRelay source-install docs refresh |
 | `npm audit --audit-level=high` | 0 high vulnerabilities | PASS | 2026-06-28 local run after the vendored HiveRelay lockfile update: `found 0 vulnerabilities` |
-| Desktop CI | install/test/audit success | PASS | 2026-06-28 GitHub Actions run `https://github.com/bigdestiny2/pearbrowser-desktop/actions/runs/28319109847`, PR #23 job `83897696771`, passed checkout, HiveRelay layout guard, install, test, and high-severity audit |
+| Desktop CI | install/test/audit success | PASS | 2026-06-28 GitHub Actions PR #28 pull_request run `https://github.com/bigdestiny2/pearbrowser-desktop/actions/runs/28320741592`, job `83902114643`, passed checkout, `Verify vendored HiveRelay packages`, install, test, and high-severity audit without checking out `bigdestiny2/P2P-Hiverelay` |
 | Standalone source install | `npm ci` succeeds without sibling HiveRelay checkout | PASS | 2026-06-28 local fixture `/private/tmp/pear-standalone-source-install-29arBb` contained only `package.json`, `package-lock.json`, `scripts/check-hiverelay-layout.mjs`, and `vendor/hiverelay/*.tgz`; `npm ci --prefix /private/tmp/pear-standalone-source-install-29arBb` installed 353 packages, audited 354, warned only that the optional local HiveRelay checkout was missing, and found 0 vulnerabilities |
 | `npm run check:appling-release -- --tag v0.5.0` | native wrapper metadata, lockfile, signing defaults, assets in sync | PASS | 2026-06-28 local run: `Appling release metadata ok: PearBrowser 0.5.0 -> pear://tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty` |
 | macOS native appling package | ad-hoc signed `.app.zip`, checksum, manifest produced locally | PASS | 2026-06-28 local run: `npm ci --prefix appling`, `npm run --prefix appling generate`, `npm run --prefix appling build`, `node scripts/collect-appling-artifacts.mjs --tag v0.5.0 --platform darwin --arch arm64`; produced `PearBrowser-0.5.0-macos-arm64.app.zip`, SHA-256 `5dcb5045f00b01f8dfb9f15fc4d505a53e04227ae9c35277e939e1aad67f7af6`; extracted app passed `codesign --verify --deep --strict` |
