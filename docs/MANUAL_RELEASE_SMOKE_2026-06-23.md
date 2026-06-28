@@ -29,6 +29,7 @@ announcement.
   - `node scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --expect-app hiveworm`
 - [ ] Build and verify desktop native package metadata:
   - `npm run check:appling-release -- --tag v0.5.0`
+  - `npm run check:native-signing`
   - `cd appling && npm ci && npm run generate && npm run build`
   - `cd .. && npm run package:appling -- --tag v0.5.0`
   - On macOS, verify the extracted `.app` with
@@ -40,6 +41,8 @@ announcement.
     packaging branch/commit, usually merged `main`.
   - Expected: `v0.5.0` release gets macOS `.app.zip`, Windows `.msix`, Linux
     `.AppImage`, per-asset `.sha256`, `SHA256SUMS-*`, and `manifest-*` files.
+  - Verify attachments after upload:
+    `npm run check:native-release-assets -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop`.
   - Record the Actions run URL and resulting release asset list in the evidence
     log.
 - [ ] After filling `docs/RELEASE_SMOKE_EVIDENCE_LOG_2026-06-23.md`, run

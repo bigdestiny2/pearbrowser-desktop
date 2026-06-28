@@ -245,6 +245,12 @@ jobs:
         shell: bash
 
     steps:
+      - name: Checkout release verifier
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_REF }}
+          path: pear-ecosystem/01-browser/pearbrowser-desktop
+
       - name: Download native artifacts
         uses: actions/download-artifact@v4
         with:
@@ -300,3 +306,12 @@ jobs:
           shopt -s nullglob
           assets=(release-assets/*)
           gh release upload "$RELEASE_TAG" "${assets[@]}" --repo "$GH_REPO" --clobber
+
+      - name: Verify attached release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: >
+          node pear-ecosystem/01-browser/pearbrowser-desktop/scripts/check-native-release-assets.mjs
+          --tag "$RELEASE_TAG"
+          --repo "$GH_REPO"
