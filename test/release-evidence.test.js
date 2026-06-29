@@ -105,6 +105,21 @@ test('ambiguous announcement answers remain incomplete', () => {
   assert.ok(result.incomplete.some((item) => item.item === 'Are all required desktop automated gates PASS?' && item.reason === 'answer must be yes/pass/defer or explicitly out of scope'))
 })
 
+test('blank final decision is one combined blocker', () => {
+  const blankFinal = completeLog.replace(
+    'Final decision (GO, NO-GO, or GO desktop only) | GO desktop only',
+    'Final decision (GO, NO-GO, or GO desktop only) |  '
+  )
+  const result = analyzeReleaseEvidence(blankFinal)
+  assert.equal(result.ok, false)
+  assert.equal(result.counts.incomplete, 1)
+  assert.deepEqual(result.incomplete, [{
+    section: 'Announcement Decision',
+    item: 'Final decision (GO, NO-GO, or GO desktop only)',
+    reason: 'answer is blank; final decision is missing'
+  }])
+})
+
 test('release evidence handoff groups incomplete rows with fill templates', () => {
   const handoff = buildEvidenceHandoff(incompleteLog, { file: 'fixture.md' })
   assert.equal(handoff.ok, false)
@@ -119,7 +134,7 @@ test('release evidence handoff groups incomplete rows with fill templates', () =
   assert.ok(gates.items.some((item) => item.item === 'CI' && item.template.includes('| CI | green | PASS | <evidence path, URL, or terminal excerpt> |')))
 
   const decision = handoff.groups.find((group) => group.section === 'Announcement Decision')
-  assert.ok(decision.items.some((item) => item.item === 'Final decision' && item.template.includes('GO desktop only')))
+  assert.ok(decision.items.some((item) => /^Final decision/i.test(item.item) && item.template.includes('GO desktop only')))
 })
 
 test('release evidence handoff markdown exposes summary, blockers, and rerun command', () => {

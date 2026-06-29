@@ -135,7 +135,7 @@ Recommended OS-level checks:
    credentials, public-trust assets, byte verification, Linux metadata,
    package-manager drafts, clean-host evidence, and the announcement decision
    are all represented.
-6. Use `npm run -s generate:public-trust-operator-report -- --source-ref <merged-main-commit> --signing-secret-source github` to hand grouped blockers and commands to the people holding credentials, clean-machine test hosts, and release evidence.
+6. Use `npm run -s generate:public-trust-operator-report -- --source-ref <merged-main-commit> --signing-secret-source github` to hand grouped blockers and commands to the people holding credentials, clean-machine test hosts, package-manager submitters, and release-evidence operators; the report now includes the release evidence handoff command.
 7. Use `npm run -s generate:release-evidence-handoff` to turn the current evidence-log blockers into grouped manual rows and copy-ready table templates before the final smoke pass.
 8. Generate Homebrew/WinGet drafts with `npm run generate:package-manager-manifests`; submit them only after public-trust assets and clean-machine install evidence are green.
 9. Add Homebrew Cask only after macOS ships a notarized `.dmg`; Homebrew casks expect stable versioned URLs and checksums.

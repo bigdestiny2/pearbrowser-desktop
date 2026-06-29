@@ -15,7 +15,7 @@ const repo = args.repo || process.env.GH_REPO || DEFAULT_REPO
 const sourceRef = normalizeSourceRef(args.sourceRef || 'main')
 const format = normalizeFormat(args.format || 'markdown')
 const readiness = loadReadiness(args, { tag, repo, sourceRef })
-const report = buildReport(readiness, { tag, repo, sourceRef })
+const report = buildReport(readiness, { tag, repo, sourceRef, evidenceFile: args.evidenceFile })
 
 if (format === 'json') printJson(report)
 else printMarkdown(report)
@@ -83,6 +83,7 @@ function buildReport (readiness, defaults) {
   const repo = normalized.repo || defaults.repo
   const tag = normalized.tag || defaults.tag
   const sourceRef = normalized.sourceRef || defaults.sourceRef
+  const evidenceFile = normalized.evidenceFile || defaults.evidenceFile || ''
   const checks = Array.isArray(normalized.checks) ? normalized.checks.map(normalizeCheck) : []
   const blockers = Array.isArray(normalized.blockers)
     ? normalized.blockers.map(normalizeBlocker)
@@ -91,13 +92,14 @@ function buildReport (readiness, defaults) {
     ? normalized.warnings.map(normalizeBlocker)
     : checks.flatMap((check) => check.warnings.map((message) => ({ check: check.id, message })))
   const blockerGroups = groupBlockers(blockers)
-  const nextCommands = nextCommandsFor({ repo, tag, sourceRef })
+  const nextCommands = nextCommandsFor({ repo, tag, sourceRef, evidenceFile })
 
   return {
     ok: blockers.length === 0 && normalized.ok !== false,
     repo,
     tag,
     sourceRef,
+    evidenceFile,
     mode: normalized.mode || 'public-trust',
     checks,
     blockerGroups,
@@ -145,7 +147,8 @@ function groupBlockers (blockers) {
   return [...groups.values()]
 }
 
-function nextCommandsFor ({ repo, tag, sourceRef }) {
+function nextCommandsFor ({ repo, tag, sourceRef, evidenceFile }) {
+  const evidenceArgs = evidenceFile ? ` -- --file ${shellQuote(evidenceFile)}` : ''
   return [
     {
       id: 'credential-handoff',
@@ -183,9 +186,14 @@ function nextCommandsFor ({ repo, tag, sourceRef }) {
       command: `npm run generate:package-manager-manifests -- --tag ${shellQuote(tag)} --repo ${shellQuote(repo)}`
     },
     {
+      id: 'generate-release-evidence-handoff',
+      label: 'Generate release evidence handoff',
+      command: `npm run -s generate:release-evidence-handoff${evidenceArgs}`
+    },
+    {
       id: 'verify-evidence-log',
       label: 'Verify the operator evidence log',
-      command: 'npm run check:release-evidence'
+      command: `npm run check:release-evidence${evidenceArgs}`
     }
   ]
 }

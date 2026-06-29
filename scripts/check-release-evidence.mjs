@@ -136,16 +136,23 @@ export function analyzeReleaseEvidence (markdown) {
 
     if (isDecisionTable(table)) {
       let finalDecision = ''
+      let finalDecisionQuestion = ''
+      let finalDecisionAnswerMissing = false
       for (const row of table.rows) {
         const obj = rowObject(table, row)
         const question = normalize(obj.question)
         const answer = normalize(obj.answer)
-        if (!answer) {
-          incomplete.push({ section: table.section, item: question, reason: 'answer is blank' })
+        if (/^Final decision/i.test(question)) {
+          finalDecisionQuestion = question || 'Final decision'
+          if (!answer) {
+            finalDecisionAnswerMissing = true
+            continue
+          }
+          finalDecision = normalizeUpper(answer)
           continue
         }
-        if (/^Final decision/i.test(question)) {
-          finalDecision = normalizeUpper(answer)
+        if (!answer) {
+          incomplete.push({ section: table.section, item: question, reason: 'answer is blank' })
           continue
         }
 
@@ -162,13 +169,17 @@ export function analyzeReleaseEvidence (markdown) {
       }
 
       if (!finalDecision) {
-        incomplete.push({ section: table.section, item: 'Final decision', reason: 'final decision is missing' })
+        incomplete.push({
+          section: table.section,
+          item: finalDecisionQuestion || 'Final decision',
+          reason: finalDecisionAnswerMissing ? 'answer is blank; final decision is missing' : 'final decision is missing'
+        })
       } else if (finalDecision === 'NO-GO') {
-        failures.push({ section: table.section, item: 'Final decision', reason: 'decision is NO-GO' })
+        failures.push({ section: table.section, item: finalDecisionQuestion || 'Final decision', reason: 'decision is NO-GO' })
       } else if (!READY_DECISIONS.has(finalDecision)) {
         incomplete.push({
           section: table.section,
-          item: 'Final decision',
+          item: finalDecisionQuestion || 'Final decision',
           reason: 'decision must be GO, GO desktop only, or NO-GO'
         })
       }
