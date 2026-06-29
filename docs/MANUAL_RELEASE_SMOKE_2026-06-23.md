@@ -55,7 +55,10 @@ announcement.
   - Generate user-facing install copy:
     `npm run -s generate:native-install-snippet -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop`.
   - Generate clean-host install smoke commands and evidence bullets:
-    `npm run -s generate:native-install-smoke-plan -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop`.
+    `npm run -s generate:native-install-smoke-plan -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --source-ref <merged-main-commit>`.
+    The generated plan downloads `scripts/runtime-rpc-smoke.mjs` from that
+    commit, so clean hosts can record runtime JSON evidence without a source
+    checkout.
   - Generate Homebrew/WinGet drafts after public-trust assets are attached:
     `npm run generate:package-manager-manifests -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop`.
     Use `--trust-mode package-proof` only for rehearsal output.

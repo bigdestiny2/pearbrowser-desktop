@@ -163,9 +163,10 @@ The release scripts are operational gates, not ordinary tests:
   emits release-note/install-page Markdown for the recommended desktop packages
   and checksum sidecars, using the same artifact preference order as the
   resolver.
-- `npm run -s generate:native-install-smoke-plan -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop`
+- `npm run -s generate:native-install-smoke-plan -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --source-ref <merged-main-commit>`
   emits clean-host install smoke commands and evidence bullets for the
-  resolver-selected macOS, Windows, and Linux packages. Add
+  resolver-selected macOS, Windows, and Linux packages, including a downloaded
+  runtime RPC smoke helper so clean hosts do not need a checkout. Add
   `--trust-mode public-trust` before announcement to require macOS DMGs.
 - `npm run generate:package-manager-manifests -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop`
   emits Homebrew Cask and WinGet manifest drafts from attached release assets

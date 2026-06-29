@@ -312,6 +312,8 @@ test('native install smoke plan generator is exposed for clean-machine evidence'
   assert.match(nativeInstallSmokePlan, /SUPPORTED_TARGETS/)
   assert.match(nativeInstallSmokePlan, /Native Clean-Install Smoke Plan/)
   assert.match(nativeInstallSmokePlan, /clean host or VM/)
+  assert.match(nativeInstallSmokePlan, /runtime-rpc-smoke\.mjs/)
+  assert.match(nativeInstallSmokePlan, /--source-ref/)
   assert.match(nativeInstallSmokePlan, /public-trust clean-install smoke requires notarized macOS DMG/)
 })
 
@@ -923,6 +925,8 @@ test('native install smoke plan generator emits clean-machine commands for every
       releasePath,
       '--tag',
       'v0.5.0',
+      '--source-ref',
+      'release-smoke-source',
       '--json'
     ], {
       cwd: fileURLToPath(new URL('..', import.meta.url)),
@@ -933,21 +937,30 @@ test('native install smoke plan generator emits clean-machine commands for every
     const report = JSON.parse(json.stdout)
     assert.equal(report.ok, true)
     assert.equal(report.trustMode, 'package-proof')
+    assert.equal(report.sourceRef, 'release-smoke-source')
+    assert.equal(report.runtimeSmokeScript, 'https://raw.githubusercontent.com/bigdestiny2/pearbrowser-desktop/release-smoke-source/scripts/runtime-rpc-smoke.mjs')
     assert.equal(report.targets.length, 4)
     assert.ok(report.warnings.some((warning) => warning.includes('package-proof clean-install smoke')))
     assert.ok(report.targets.find((target) => target.label === 'macOS Apple Silicon').commands.some((command) => command.includes('ditto -x -k')))
     assert.ok(report.targets.find((target) => target.label === 'macOS Apple Silicon').commands.some((command) => command.includes('codesign --verify')))
+    assert.ok(report.targets.find((target) => target.label === 'macOS Apple Silicon').commands.some((command) => command.includes('runtime-rpc-smoke.mjs --timeout 20000 --max-storage-percent 100 --json')))
     assert.ok(report.targets.find((target) => target.label === 'Windows x64').commands.some((command) => command.includes('Get-AuthenticodeSignature')))
     assert.ok(report.targets.find((target) => target.label === 'Windows x64').commands.some((command) => command.includes('Start menu')))
+    assert.ok(report.targets.find((target) => target.label === 'Windows x64').commands.some((command) => command.includes('Invoke-WebRequest -Uri') && command.includes('release-smoke-source/scripts/runtime-rpc-smoke.mjs')))
+    assert.ok(report.targets.find((target) => target.label === 'Windows x64').commands.some((command) => command.includes('node .\\pearbrowser-runtime-rpc-smoke.mjs')))
     assert.ok(report.targets.find((target) => target.label === 'Linux x64').commands.some((command) => command.includes('chmod +x')))
+    assert.ok(report.targets.find((target) => target.label === 'Linux x64').commands.some((command) => command.includes('curl -L -o pearbrowser-runtime-rpc-smoke.mjs')))
     assert.ok(report.targets.every((target) => target.evidence.some((item) => item.includes('source checkout'))))
+    assert.ok(report.targets.every((target) => target.evidence.some((item) => item.includes('runtime-rpc-smoke JSON output'))))
 
     const markdown = spawnSync(process.execPath, [
       nativeInstallSmokePlanPath,
       '--fixture',
       releasePath,
       '--tag',
-      'v0.5.0'
+      'v0.5.0',
+      '--source-ref',
+      'release-smoke-source'
     ], {
       cwd: fileURLToPath(new URL('..', import.meta.url)),
       encoding: 'utf8'
@@ -955,6 +968,7 @@ test('native install smoke plan generator emits clean-machine commands for every
 
     assert.equal(markdown.status, 0, markdown.stderr || markdown.stdout)
     assert.match(markdown.stdout, /## Native Clean-Install Smoke Plan/)
+    assert.match(markdown.stdout, /Smoke helper source: \[release-smoke-source\]/)
     assert.match(markdown.stdout, /### macOS Apple Silicon/)
     assert.match(markdown.stdout, /```powershell/)
     assert.match(markdown.stdout, /Evidence to record:/)

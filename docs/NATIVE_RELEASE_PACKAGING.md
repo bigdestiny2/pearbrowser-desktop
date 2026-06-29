@@ -131,13 +131,16 @@ npm run -s generate:native-install-snippet -- --tag v0.5.0 --repo bigdestiny2/pe
 
 `scripts/generate-native-install-smoke-plan.mjs` turns those same resolver
 choices into clean-host smoke instructions. It emits per-target download,
-checksum, OS trust, install, launch, and evidence-capture steps for macOS,
-Windows, and Linux. The default `package-proof` mode records expected trust
-prompts; `--trust-mode public-trust` refuses macOS assets unless the release has
-notarized DMGs:
+checksum, OS trust, install, launch, downloaded runtime diagnostic, and
+evidence-capture steps for macOS, Windows, and Linux. The default
+`package-proof` mode records expected trust prompts; `--trust-mode public-trust`
+refuses macOS assets unless the release has notarized DMGs. Use `--source-ref`
+with the merged commit SHA when producing announcement evidence so clean hosts
+fetch the exact `scripts/runtime-rpc-smoke.mjs` helper without needing a source
+checkout:
 
 ```sh
-npm run -s generate:native-install-smoke-plan -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
+npm run -s generate:native-install-smoke-plan -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --source-ref <merged-main-commit>
 ```
 
 `scripts/generate-package-manager-manifests.mjs` prepares the later channel
