@@ -181,7 +181,7 @@ function writeBlockedPublicTrustReadinessFixture (path) {
         summary: 'passed=38; deferred=3; incomplete=1; failures=0',
         command: 'node scripts/check-release-evidence.mjs --json',
         blockers: [
-          'incomplete: Announcement Decision / Final decision: final decision is missing'
+          'incomplete: Announcement Decision / Final decision (GO, NO-GO, or GO desktop only): answer is blank; final decision is missing'
         ],
         warnings: [
           'deferred: Desktop Automated Baseline / Peercord bundle: publisher reseed required'
@@ -191,7 +191,7 @@ function writeBlockedPublicTrustReadinessFixture (path) {
     blockers: [
       { check: 'native-signing', message: 'macos-certificate: macOS Developer ID certificate is missing' },
       { check: 'native-signing', message: 'windows-certificate: Windows signing certificate is missing' },
-      { check: 'release-evidence', message: 'incomplete: Announcement Decision / Final decision: final decision is missing' }
+      { check: 'release-evidence', message: 'incomplete: Announcement Decision / Final decision (GO, NO-GO, or GO desktop only): answer is blank; final decision is missing' }
     ],
     warnings: [
       { check: 'release-evidence', message: 'deferred: Desktop Automated Baseline / Peercord bundle: publisher reseed required' }
@@ -505,7 +505,9 @@ test('public-trust operator report formats readiness blockers into next actions'
     const markdown = spawnSync(process.execPath, [
       publicTrustOperatorReportPath,
       '--readiness-file',
-      readinessPath
+      readinessPath,
+      '--evidence-file',
+      'docs/custom-evidence.md'
     ], {
       encoding: 'utf8'
     })
@@ -518,12 +520,15 @@ test('public-trust operator report formats readiness blockers into next actions'
     assert.match(markdown.stdout, /Final decision is missing/i)
     assert.match(markdown.stdout, /npm run -s generate:native-signing-secret-plan -- --repo example\/pearbrowser --tag v9\.9\.9 --source-ref abc123/)
     assert.match(markdown.stdout, /gh workflow run desktop-native-release\.yml --repo example\/pearbrowser --ref main -f tag=v9\.9\.9 -f source_ref=abc123 -f release_mode=public-trust/)
-    assert.match(markdown.stdout, /npm run check:release-evidence/)
+    assert.match(markdown.stdout, /npm run -s generate:release-evidence-handoff -- --file docs\/custom-evidence\.md/)
+    assert.match(markdown.stdout, /npm run check:release-evidence -- --file docs\/custom-evidence\.md/)
 
     const json = spawnSync(process.execPath, [
       publicTrustOperatorReportPath,
       '--readiness-file',
       readinessPath,
+      '--evidence-file',
+      'docs/custom-evidence.md',
       '--json'
     ], {
       encoding: 'utf8'
@@ -534,8 +539,10 @@ test('public-trust operator report formats readiness blockers into next actions'
     assert.equal(report.repo, 'example/pearbrowser')
     assert.equal(report.tag, 'v9.9.9')
     assert.equal(report.sourceRef, 'abc123')
+    assert.equal(report.evidenceFile, 'docs/custom-evidence.md')
     assert.ok(report.blockerGroups.some((group) => group.id === 'native-signing' && group.blockers.length === 2))
     assert.ok(report.nextCommands.some((command) => command.id === 'dispatch-public-trust-workflow'))
+    assert.ok(report.nextCommands.some((command) => command.id === 'generate-release-evidence-handoff' && command.command.includes('--file docs/custom-evidence.md')))
     assert.ok(report.warnings.some((warning) => warning.check === 'release-evidence'))
   } finally {
     rmSync(fixture, { recursive: true, force: true })

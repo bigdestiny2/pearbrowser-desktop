@@ -203,7 +203,7 @@ node scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --
 | `npm run -s generate:native-install-smoke-plan -- --tag <tag>` | Emits clean-host install smoke commands, source-free runtime diagnostics, and evidence bullets for macOS, Windows, and Linux. |
 | `npm run generate:package-manager-manifests -- --tag <tag>` | Emits Homebrew Cask and WinGet manifest drafts from release assets; defaults to public-trust gates. |
 | `npm run check:public-trust-readiness -- --tag <tag>` | Aggregates the public-trust signing, published asset, download, Linux metadata, clean-install smoke-plan, package-manager draft, and evidence-log gates; pass `--source-ref` to pin the clean-host runtime smoke helper and `--signing-secret-source github` to verify GitHub Actions secret names before dispatching CI. |
-| `npm run -s generate:public-trust-operator-report -- --tag <tag>` | Formats the public-trust readiness state into a Markdown handoff with grouped blockers and exact next commands. |
+| `npm run -s generate:public-trust-operator-report -- --tag <tag>` | Formats the public-trust readiness state into a Markdown handoff with grouped blockers and exact next commands, including the release-evidence handoff. |
 | `npm run -s generate:release-evidence-handoff` | Formats the operator evidence log into grouped manual rows with copy-ready PASS/DEFER templates. |
 | `npm run check:release-evidence` | Reads the operator evidence log and fails until required gates are marked `PASS` or documented `DEFER`, with a final announcement decision. |
 | `scripts/verify-app-full.js --key <driveKey>` | Deeper fresh-peer blob sampling across a drive's file tree. |

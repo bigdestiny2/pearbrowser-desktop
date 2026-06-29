@@ -62,6 +62,7 @@ npm run -s generate:native-signing-secret-plan -- --repo bigdestiny2/pearbrowser
 npm run check:native-signing -- --require-public-trust --secret-source github --repo bigdestiny2/pearbrowser-desktop
 npm run check:public-trust-readiness -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --source-ref <merged-main-commit> --signing-secret-source github
 npm run -s generate:public-trust-operator-report -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --source-ref <merged-main-commit> --signing-secret-source github
+npm run -s generate:release-evidence-handoff
 ```
 
 The collector searches `appling/build` for platform-native outputs:
@@ -211,7 +212,8 @@ npm run check:public-trust-readiness -- --tag v0.5.0 --repo bigdestiny2/pearbrow
 `scripts/generate-public-trust-operator-report.mjs` formats that same readiness
 state for handoff: gate summary, grouped blockers, warning/deferral notes, and
 the exact next commands for credential setup, public-trust workflow dispatch,
-install-smoke generation, package-manager drafts, and evidence verification.
+install-smoke generation, package-manager drafts, release evidence handoff, and
+evidence verification.
 Use `--readiness-file` to format a saved readiness JSON artifact without
 rerunning network-backed checks:
 

@@ -17,10 +17,10 @@ Current local status from this loop:
 
 - `git diff --check` passed.
 - `npm audit --audit-level=high` passed with `found 0 vulnerabilities`.
-- `npm test` passed: 477 tests, 0 failed.
+- `npm test` passed: 478 tests, 0 failed.
 
 This supersedes older local counts in nearby docs for this checkout. The
-current release-readiness docs and latest rerun agree on 477/477.
+current release-readiness docs and latest rerun agree on 478/478.
 
 ## Fast Local Gates
 
@@ -28,7 +28,7 @@ current release-readiness docs and latest rerun agree on 477/477.
 | --- | --- | --- |
 | `git diff --check` | Whitespace/conflict-marker sanity | Passed |
 | `npm audit --audit-level=high` | High-severity dependency audit for desktop package | Passed, 0 vulnerabilities |
-| `npm test` | Full desktop Node test suite: `node --test 'test/*.test.js'` | Passed, 477/477 |
+| `npm test` | Full desktop Node test suite: `node --test 'test/*.test.js'` | Passed, 478/478 |
 | `npm run check:release-evidence` | Operator evidence-log completeness; fails until required rows are `PASS` or documented `DEFER` | Expected fail until manual gates are filled |
 
 The root package is the only package with test scripts relevant to this desktop
@@ -197,7 +197,7 @@ The release scripts are operational gates, not ordinary tests:
   formats the public-trust readiness result into a Markdown handoff with gate
   summaries, grouped blockers, warning/deferral notes, and the next commands for
   credential setup, CI dispatch, clean-install smoke, package-manager drafts,
-  and release evidence.
+  the release evidence handoff, and evidence-log verification.
 - `npm run -s generate:release-evidence-handoff` formats the current operator
   evidence log into grouped incomplete/failing rows with expected outcomes and
   copy-ready `PASS`/`DEFER` table templates. It exits non-zero until the
