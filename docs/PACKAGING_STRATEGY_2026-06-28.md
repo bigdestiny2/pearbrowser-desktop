@@ -29,7 +29,8 @@ Primary user promise: download one native package, launch it normally, and let P
 - `scripts/check-public-trust-readiness.mjs` aggregates the public-trust
   signing, published release asset, byte-level download, Linux AppImage
   metadata, clean-install smoke plan, package-manager draft, and operator
-  evidence-log gates into one blocker report.
+  evidence-log gates into one blocker report, and passes `--source-ref` through
+  to the clean-install smoke plan for reproducible helper downloads.
 - `.github/workflows/desktop-native-release.yml` builds macOS, Windows, and Linux packages in CI.
 - The native workflow now has two modes:
   - `package-proof`: manual default, permits ad-hoc macOS signing and unsigned Windows packages.
@@ -74,7 +75,7 @@ The stable Pear link is still the application-content update channel. Native pac
 3. Run `npm run check:native-signing -- --require-public-trust` before spending CI minutes.
 4. Run Desktop Native Release with `release_mode=public-trust` or publish/tag the release so the workflow defaults to public trust.
 5. Run the public-trust readiness aggregator after the workflow completes:
-   `npm run check:public-trust-readiness -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop`.
+   `npm run check:public-trust-readiness -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --source-ref <merged-main-commit>`.
    It should be treated as blocked until the subchecks below and the operator
    evidence log are green.
 6. Verify post-upload assets with:
@@ -106,7 +107,7 @@ Recommended OS-level checks:
 1. Keep GitHub Releases as the canonical asset host until public-trust desktop assets have at least one successful clean-machine install pass.
 2. Use `npm run -s generate:native-install-snippet` for the short install page or release-note block that points each OS to the resolver-selected package and checksum sidecar, then keep the stable Pear link fallback in the surrounding install guide.
 3. Use `npm run -s generate:native-install-smoke-plan` for the clean-host smoke checklist that must be executed before public-trust announcement or package-manager submission; the generated plan downloads the runtime RPC smoke helper from `--source-ref` so testers do not need a checkout.
-4. Use `npm run check:public-trust-readiness` as the operator-facing summary
+4. Use `npm run check:public-trust-readiness -- --source-ref <merged-main-commit>` as the operator-facing summary
    gate before announcement; it should return `READY` only after signing
    credentials, public-trust assets, byte verification, Linux metadata,
    package-manager drafts, clean-host evidence, and the announcement decision

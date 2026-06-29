@@ -12,6 +12,7 @@ const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url))
 const args = parseArgs(process.argv.slice(2))
 const tag = normalizeTag(args.tag || `v${pkg.version}`)
 const repo = args.repo || process.env.GH_REPO || DEFAULT_REPO
+const sourceRef = normalizeSourceRef(args.sourceRef || 'main')
 
 const sharedReleaseArgs = [
   '--tag',
@@ -50,7 +51,7 @@ const checks = [
     id: 'native-install-smoke-plan',
     label: 'Clean-machine install smoke plan',
     script: 'scripts/generate-native-install-smoke-plan.mjs',
-    args: [...sharedReleaseArgs, '--trust-mode', 'public-trust', '--json']
+    args: [...sharedReleaseArgs, '--trust-mode', 'public-trust', '--source-ref', sourceRef, '--json']
   }),
   runNodeCheck({
     id: 'package-manager-manifests',
@@ -78,6 +79,7 @@ const report = {
   ok: blockers.length === 0,
   repo,
   tag,
+  sourceRef,
   mode: 'public-trust',
   checks,
   blockers,
@@ -218,6 +220,7 @@ function parseArgs (argv) {
     repo: '',
     fixture: '',
     evidenceFile: '',
+    sourceRef: '',
     json: false
   }
   for (let i = 0; i < argv.length; i++) {
@@ -226,6 +229,7 @@ function parseArgs (argv) {
     else if (arg === '--repo') parsed.repo = requireValue(argv, ++i, arg)
     else if (arg === '--fixture') parsed.fixture = requireValue(argv, ++i, arg)
     else if (arg === '--evidence-file') parsed.evidenceFile = requireValue(argv, ++i, arg)
+    else if (arg === '--source-ref') parsed.sourceRef = requireValue(argv, ++i, arg)
     else if (arg === '--json') parsed.json = true
     else if (arg === '-h' || arg === '--help') usage(0)
     else usage(2, `unknown argument: ${arg}`)
@@ -241,7 +245,7 @@ function requireValue (argv, index, flag) {
 
 function usage (code, message = '') {
   if (message) console.error(`error: ${message}`)
-  console.error('usage: node scripts/check-public-trust-readiness.mjs [--tag v0.5.0] [--repo owner/repo] [--fixture release.json] [--evidence-file docs/RELEASE_SMOKE_EVIDENCE_LOG_2026-06-23.md] [--json]')
+  console.error('usage: node scripts/check-public-trust-readiness.mjs [--tag v0.5.0] [--repo owner/repo] [--fixture release.json] [--evidence-file docs/RELEASE_SMOKE_EVIDENCE_LOG_2026-06-23.md] [--source-ref main] [--json]')
   process.exit(code)
 }
 
@@ -253,13 +257,22 @@ function normalizeTag (tag) {
   return normalized
 }
 
+function normalizeSourceRef (value) {
+  const ref = String(value || '').trim()
+  if (!ref) usage(2, '--source-ref cannot be empty')
+  if (!/^[A-Za-z0-9._/@+-]+$/.test(ref)) {
+    usage(2, `--source-ref contains unsupported characters: ${value}`)
+  }
+  return ref
+}
+
 function printJson (report) {
   console.log(JSON.stringify(report, null, 2))
 }
 
 function printHuman (report) {
   console.log(`PearBrowser public-trust readiness (${report.ok ? 'READY' : 'BLOCKED'})`)
-  console.log(`repo=${report.repo} tag=${report.tag}`)
+  console.log(`repo=${report.repo} tag=${report.tag} sourceRef=${report.sourceRef}`)
   for (const check of report.checks) {
     console.log(`${check.status.toUpperCase().padEnd(5)} ${check.id}: ${check.summary}`)
   }
