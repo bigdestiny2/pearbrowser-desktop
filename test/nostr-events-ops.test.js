@@ -17,6 +17,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import bMod from '../backend/secp256k1-bundle.cjs'
+import { tamperLastHexByte } from './helpers/hex.js'
 const b = bMod
 
 // BIP-340 official test vector #1
@@ -47,7 +48,7 @@ test('schnorr verify rejects a tampered message, signature, and wrong key', () =
   const sig = b.schnorrSign(msg, sk)
   assert.equal(b.schnorrVerify(sig, msg, pk), true)
   assert.equal(b.schnorrVerify(sig, b.sha256Hex('hellox'), pk), false) // tampered msg
-  assert.equal(b.schnorrVerify(sig.slice(0, -2) + '00', msg, pk), false) // tampered sig
+  assert.equal(b.schnorrVerify(tamperLastHexByte(sig), msg, pk), false) // tampered sig
   assert.equal(b.schnorrVerify(sig, msg, b.schnorrGetPublicKey('22'.repeat(32))), false) // wrong key
 })
 
@@ -59,7 +60,7 @@ test('NIP-01: event id serialization + sign + verify, content-bound', () => {
   const signed = b.nip01Sign(ev, VEC.sk)
   assert.equal(b.nip01Verify(signed), true)
   assert.equal(b.nip01Verify({ ...signed, content: 'evil' }), false) // id no longer commits to content
-  assert.equal(b.nip01Verify({ ...signed, sig: signed.sig.slice(0, -2) + '00' }), false)
+  assert.equal(b.nip01Verify({ ...signed, sig: tamperLastHexByte(signed.sig) }), false)
 })
 
 test('the bundle is self-contained pure JS (no require() → Bare-loadable)', () => {

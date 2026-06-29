@@ -7,6 +7,7 @@ import crypto from 'hypercore-crypto'
 import b4a from 'b4a'
 import secpMod from '../backend/secp256k1-bundle.cjs'
 import nbMod from '../backend/nostr-bind.cjs'
+import { tamperLastHexByte } from './helpers/hex.js'
 const secp = secpMod; const nb = nbMod
 
 const hex = (b) => b4a.toString(b, 'hex')
@@ -26,8 +27,8 @@ test('tampering the nostr pubkey or epoch breaks the signatures', () => {
   const bind = mkBind(root, '11'.repeat(32))
   assert.equal(nb.verifyNostrBind({ ...bind, nostrPubkey: npk('22'.repeat(32)) }, rootHex), false)
   assert.equal(nb.verifyNostrBind({ ...bind, epoch: 2 }, rootHex), false)
-  assert.equal(nb.verifyNostrBind({ ...bind, nostrSig: bind.nostrSig.slice(0, -2) + '00' }, rootHex), false)
-  assert.equal(nb.verifyNostrBind({ ...bind, rootSig: bind.rootSig.slice(0, -2) + '00' }, rootHex), false)
+  assert.equal(nb.verifyNostrBind({ ...bind, nostrSig: tamperLastHexByte(bind.nostrSig) }, rootHex), false)
+  assert.equal(nb.verifyNostrBind({ ...bind, rootSig: tamperLastHexByte(bind.rootSig) }, rootHex), false)
 })
 
 test('cannot bind a Nostr key you do NOT control (forged nostr attestation)', () => {
