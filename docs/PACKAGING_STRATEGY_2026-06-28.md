@@ -35,6 +35,10 @@ Primary user promise: download one native package, launch it normally, and let P
 - `scripts/generate-public-trust-operator-report.mjs` formats that readiness
   state into a Markdown handoff with gate summaries, grouped blockers, warnings,
   and exact next commands for the credential holder and release operator.
+- `scripts/generate-release-evidence-handoff.mjs` formats the operator evidence
+  log into grouped manual rows with expected outcomes and copy-ready
+  `PASS`/`DEFER` table templates, so evidence capture does not require reading
+  raw checker JSON.
 - `scripts/generate-native-signing-secret-plan.mjs` emits the public-trust
   GitHub Actions secret inventory, safe `gh secret set` command templates, and
   the follow-up signing/readiness checks so credential setup can be handed to an
@@ -90,25 +94,27 @@ The stable Pear link is still the application-content update channel. Native pac
    evidence log are green.
 7. Generate the public-trust operator report from the same readiness state:
    `npm run -s generate:public-trust-operator-report -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --source-ref <merged-main-commit> --signing-secret-source github`.
-8. Verify post-upload assets with:
+8. Generate the release evidence handoff before filling manual rows:
+   `npm run -s generate:release-evidence-handoff`.
+9. Verify post-upload assets with:
    `npm run check:native-release-assets -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --require-published --require-public-trust`.
-9. Verify the recommended package downloads:
+10. Verify the recommended package downloads:
    `npm run verify:native-downloads -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --all`.
-10. Verify Linux AppImage desktop integration metadata:
+11. Verify Linux AppImage desktop integration metadata:
    `npm run check:linux-appimage-metadata`; the native release workflow also
    runs it with `--build-dir appling/build` on Linux before artifact collection.
-11. Resolve and record the user-facing packages for macOS, Windows, and Linux:
+12. Resolve and record the user-facing packages for macOS, Windows, and Linux:
    `npm run resolve:native-release -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --platform <platform> --arch <arch>`.
-12. Generate the release-note/install-page block from the attached assets:
+13. Generate the release-note/install-page block from the attached assets:
    `npm run -s generate:native-install-snippet -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --trust-mode public-trust`.
-13. Regenerate the full native install guide from the same resolver:
+14. Regenerate the full native install guide from the same resolver:
    `npm run -s generate:native-install-guide -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --trust-mode public-trust`.
-14. Generate the clean-machine smoke plan from the same assets, using the
+15. Generate the clean-machine smoke plan from the same assets, using the
     merged commit SHA as the helper source:
    `npm run -s generate:native-install-smoke-plan -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --trust-mode public-trust --source-ref <merged-main-commit>`.
-15. Generate Homebrew/WinGet package-manager drafts from the same assets:
+16. Generate Homebrew/WinGet package-manager drafts from the same assets:
    `npm run generate:package-manager-manifests -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop`.
-16. Smoke install from a clean machine or VM per OS and record evidence in `docs/RELEASE_SMOKE_EVIDENCE_LOG_2026-06-23.md`.
+17. Smoke install from a clean machine or VM per OS and record evidence in `docs/RELEASE_SMOKE_EVIDENCE_LOG_2026-06-23.md`.
 
 Recommended OS-level checks:
 
@@ -130,11 +136,12 @@ Recommended OS-level checks:
    package-manager drafts, clean-host evidence, and the announcement decision
    are all represented.
 6. Use `npm run -s generate:public-trust-operator-report -- --source-ref <merged-main-commit> --signing-secret-source github` to hand grouped blockers and commands to the people holding credentials, clean-machine test hosts, and release evidence.
-7. Generate Homebrew/WinGet drafts with `npm run generate:package-manager-manifests`; submit them only after public-trust assets and clean-machine install evidence are green.
-8. Add Homebrew Cask only after macOS ships a notarized `.dmg`; Homebrew casks expect stable versioned URLs and checksums.
-9. Add WinGet only after Windows assets are signed and stable; WinGet manifests carry installer metadata and SHA-256 hashes, and the generated draft still needs publisher and silent-install behavior reviewed before submission.
-10. Add Linux distro packages only after AppImage feedback proves there is demand. Avoid maintaining `.deb`/`.rpm` until the support burden is justified.
-11. Keep mobile out of the desktop announcement unless `npm run release:preflight` passes without `--soft` and real device/store evidence is recorded.
+7. Use `npm run -s generate:release-evidence-handoff` to turn the current evidence-log blockers into grouped manual rows and copy-ready table templates before the final smoke pass.
+8. Generate Homebrew/WinGet drafts with `npm run generate:package-manager-manifests`; submit them only after public-trust assets and clean-machine install evidence are green.
+9. Add Homebrew Cask only after macOS ships a notarized `.dmg`; Homebrew casks expect stable versioned URLs and checksums.
+10. Add WinGet only after Windows assets are signed and stable; WinGet manifests carry installer metadata and SHA-256 hashes, and the generated draft still needs publisher and silent-install behavior reviewed before submission.
+11. Add Linux distro packages only after AppImage feedback proves there is demand. Avoid maintaining `.deb`/`.rpm` until the support burden is justified.
+12. Keep mobile out of the desktop announcement unless `npm run release:preflight` passes without `--soft` and real device/store evidence is recorded.
 
 ## Release Decision Rule
 

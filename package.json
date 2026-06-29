@@ -9,6 +9,7 @@
     "start": "pear run --dev .",
     "run": "pear run .",
     "check:release-evidence": "node scripts/check-release-evidence.mjs",
+    "generate:release-evidence-handoff": "node scripts/generate-release-evidence-handoff.mjs",
     "check:appling-release": "node scripts/check-appling-release.mjs",
     "check:native-signing": "node scripts/check-native-signing-credentials.mjs",
     "generate:native-signing-secret-plan": "node scripts/generate-native-signing-secret-plan.mjs",

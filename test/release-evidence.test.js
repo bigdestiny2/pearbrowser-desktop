@@ -1,10 +1,17 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 
 import {
   analyzeReleaseEvidence,
   parseMarkdownTables
 } from '../scripts/check-release-evidence.mjs'
+import {
+  buildEvidenceHandoff,
+  formatEvidenceHandoffMarkdown
+} from '../scripts/generate-release-evidence-handoff.mjs'
+
+const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
 
 const completeLog = `
 # Release Smoke Evidence Log
@@ -96,4 +103,46 @@ test('ambiguous announcement answers remain incomplete', () => {
   const result = analyzeReleaseEvidence(completeLog.replace('Are all required desktop automated gates PASS? | yes', 'Are all required desktop automated gates PASS? | maybe after review'))
   assert.equal(result.ok, false)
   assert.ok(result.incomplete.some((item) => item.item === 'Are all required desktop automated gates PASS?' && item.reason === 'answer must be yes/pass/defer or explicitly out of scope'))
+})
+
+test('release evidence handoff groups incomplete rows with fill templates', () => {
+  const handoff = buildEvidenceHandoff(incompleteLog, { file: 'fixture.md' })
+  assert.equal(handoff.ok, false)
+  assert.equal(handoff.counts.incomplete, 3)
+  assert.equal(handoff.counts.failures, 1)
+
+  const metadata = handoff.groups.find((group) => group.section === 'Run Metadata')
+  assert.ok(metadata.items.some((item) => item.item === 'Operator' && item.template === '| Operator | <record value> |'))
+
+  const gates = handoff.groups.find((group) => group.section === 'Desktop Automated Baseline')
+  assert.ok(gates.items.some((item) => item.item === 'npm test' && item.template.includes('| npm test | green | <PASS|DEFER> | <evidence path, URL, or terminal excerpt> |')))
+  assert.ok(gates.items.some((item) => item.item === 'CI' && item.template.includes('| CI | green | PASS | <evidence path, URL, or terminal excerpt> |')))
+
+  const decision = handoff.groups.find((group) => group.section === 'Announcement Decision')
+  assert.ok(decision.items.some((item) => item.item === 'Final decision' && item.template.includes('GO desktop only')))
+})
+
+test('release evidence handoff markdown exposes summary, blockers, and rerun command', () => {
+  const markdown = formatEvidenceHandoffMarkdown(buildEvidenceHandoff(incompleteLog, { file: 'fixture.md' }))
+  assert.match(markdown, /# Release Evidence Handoff/)
+  assert.match(markdown, /Status: `BLOCKED`/)
+  assert.match(markdown, /### Desktop Automated Baseline/)
+  assert.match(markdown, /\| npm test \| green \| <PASS\|DEFER> \| <evidence path, URL, or terminal excerpt> \|/)
+  assert.match(markdown, /npm run check:release-evidence/)
+})
+
+test('release evidence handoff collapses duplicate final-decision blockers', () => {
+  const blankFinal = completeLog.replace(
+    'Final decision (GO, NO-GO, or GO desktop only) | GO desktop only',
+    'Final decision (GO, NO-GO, or GO desktop only) |  '
+  )
+  const handoff = buildEvidenceHandoff(blankFinal, { file: 'fixture.md' })
+  const decision = handoff.groups.find((group) => group.section === 'Announcement Decision')
+  const finalItems = decision.items.filter((item) => /^Final decision/i.test(item.item))
+  assert.equal(finalItems.length, 1)
+  assert.equal(finalItems[0].reason, 'answer is blank; final decision is missing')
+})
+
+test('release evidence handoff is exposed as an npm script', () => {
+  assert.equal(pkg.scripts['generate:release-evidence-handoff'], 'node scripts/generate-release-evidence-handoff.mjs')
 })

@@ -71,6 +71,10 @@ announcement.
     Use `--trust-mode package-proof` only for rehearsal output.
   - Record the Actions run URL and resulting release asset list in the evidence
     log.
+- [ ] Generate the release evidence handoff before filling manual rows:
+  `npm run -s generate:release-evidence-handoff`.
+  - Expected before manual gates are filled: non-zero with grouped blank rows,
+    expected outcomes, and copy-ready `PASS`/`DEFER` table templates.
 - [ ] After filling `docs/RELEASE_SMOKE_EVIDENCE_LOG_2026-06-23.md`, run
   `npm run check:release-evidence`.
   - Expected before manual gates are filled: non-zero with blank/incomplete
