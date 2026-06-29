@@ -4,7 +4,7 @@ A local-first peer-to-peer browser, app store, search engine, naming layer, Nost
 
 **No accounts. No DNS. No manual app updates.** Sites and apps are addressed by stable Pear/Hyperdrive keys and pinned 24/7 on the [HiveRelay](https://github.com/bigdestiny2/P2P-Hiverelay) backbone. The publisher's laptop being offline doesn't matter — the relays carry the bytes, and users launch the current release from the catalogue without hunting for a download or applying an updater.
 
-**Current release:** `v0.5.0` · production length `18640` · pinned on the HiveRelay backbone · fresh-peer verified · desktop packages vendor the HiveRelay `0.20.0` package tarballs under `vendor/hiverelay`, with runtime compatibility checked through relay capability documents.
+**Current release:** `v0.5.0` · production length `18640` · pinned on the HiveRelay backbone · fresh-peer verified · desktop installs HiveRelay from npm at `^0.20.2` (currently resolving to `0.20.2`), with runtime compatibility checked through relay capability documents.
 
 **Current architecture:** start with [docs/ARCHITECTURE_AND_CAPABILITIES.md](./docs/ARCHITECTURE_AND_CAPABILITIES.md). The deeper catalogue/search/naming/Nostr audit is in [docs/DEEP_AUDIT_CATALOG_SEARCH_NAMING_NOSTR_2026-06-21.md](./docs/DEEP_AUDIT_CATALOG_SEARCH_NAMING_NOSTR_2026-06-21.md).
 
@@ -154,7 +154,7 @@ npm install
 pear run --dev .
 ```
 
-Source installs are standalone. The desktop pins `p2p-hiverelay`, `p2p-hiverelay-client`, and `p2p-hiverelay-verifier` to vendored `0.20.0` tarballs in `vendor/hiverelay` because npm does not currently publish the compatible `0.20.0` package set. `npm install` runs `scripts/check-hiverelay-layout.mjs` to verify the tarballs. A sibling `../../00-core/hiverelay` checkout is optional for relay package development or refreshing the vendored tarballs.
+Source installs are standalone. The desktop installs `p2p-hiverelay`, `p2p-hiverelay-client`, and `p2p-hiverelay-verifier` from npm at `^0.20.2` (published `0.20.2`), so a clone of just this repo resolves them from the registry. `npm install` runs `scripts/check-hiverelay-layout.mjs`, which is warn-only for registry deps. A sibling `../../00-core/hiverelay` checkout is optional, for HiveRelay co-development.
 
 UI files use htm + React (no build step). Backend in `backend/` is CommonJS. See `package.json` `pear` field for runtime config, and `pear.json` for multisig signing config.
 
@@ -193,7 +193,7 @@ node scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --
 | `scripts/verify-release-contents.js --expect <length> --missing <path>` | Fresh-peer release metadata scan: proves ignored scratch/docs/scripts/tests paths are absent from the production drive after purge staging. |
 | `scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --expect-app hiveworm` | Fresh-peer Hyperbee catalogue check: proves the live app catalogue key is reachable and contains expected release rows and Peercord launch metadata. |
 | `scripts/runtime-rpc-smoke.mjs` | Runtime GUI smoke: after launching PearBrowser, checks the diagnostic RPC path reports DHT, proxy, relay, peer-count, and storage readiness without becoming the renderer. |
-| `scripts/check-hiverelay-layout.mjs` | Verifies the vendored HiveRelay `0.20.0` package tarballs used by standalone source installs; the sibling HiveRelay checkout is optional. |
+| `scripts/check-hiverelay-layout.mjs` | Confirms HiveRelay installs from npm (`^0.20.2`) for standalone source installs; warn-only when the optional sibling HiveRelay checkout is absent. |
 | `npm run resolve:native-release -- --tag <tag>` | Prints the recommended native release package and SHA-256 sidecar for the current or requested platform/architecture. |
 | `npm run verify:native-downloads -- --tag <tag> --all` | Downloads the recommended native packages and verifies each package against its `.sha256` sidecar. |
 | `npm run check:linux-appimage-metadata` | Verifies Linux AppImage desktop integration metadata source files, and can inspect a built AppDir/AppImage with `--build-dir`, `--appdir`, or `--appimage`. |

@@ -202,6 +202,49 @@ jobs:
       - name: Build native package
         run: npm run --prefix appling build
 
+      # Linux AppImages do not bundle GTK4 by default, so the build-machine-only
+      # libgtk-4 dependency makes them fail to launch on a clean distro. Use
+      # linuxdeploy + the GTK plugin (handles RPATH, AppRun hooks, GTK modules,
+      # gdk-pixbuf loaders, GSettings schemas) to repackage a self-contained image.
+      # NOTE: first run validates this against cmake-pear's AppDir layout.
+      - name: Bundle GTK4 runtime into the Linux AppImage
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          rel="$(find appling/build -maxdepth 5 -name '*.AppImage' -type f | head -n1)"
+          [ -n "$rel" ] || { echo "::error::No .AppImage found to bundle"; exit 1; }
+          abs="$PWD/$rel"; chmod +x "$abs"
+          work="$RUNNER_TEMP/appimage-gtk"; rm -rf "$work"; mkdir -p "$work"
+          ( cd "$work" && "$abs" --appimage-extract >/dev/null )
+          tools="$RUNNER_TEMP/ld"; mkdir -p "$tools"
+          curl -fsSL -o "$tools/linuxdeploy" https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          curl -fsSL -o "$tools/linuxdeploy-plugin-gtk.sh" https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gtk/master/linuxdeploy-plugin-gtk.sh
+          chmod +x "$tools/linuxdeploy" "$tools/linuxdeploy-plugin-gtk.sh"
+          export PATH="$tools:$PATH"
+          ( cd "$work" && linuxdeploy --appimage-extract-and-run --appdir squashfs-root --plugin gtk --output appimage )
+          out="$(find "$work" -maxdepth 1 -name '*.AppImage' -type f | head -n1)"
+          [ -n "$out" ] || { echo "::error::linuxdeploy did not produce an AppImage"; exit 1; }
+          mv -f "$out" "$abs"; chmod +x "$abs"
+
+      # Deterministic gate: assert libgtk-4 is now inside the image, in a clean
+      # container with no GTK dev libs. A broken bundle fails here instead of
+      # shipping an AppImage that will not start on users' machines.
+      - name: Verify GTK4 is bundled (clean container)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          rel="$(find appling/build -maxdepth 5 -name '*.AppImage' -type f | head -n1)"
+          docker run --rm -v "$PWD:/w" -w /w ubuntu:22.04 bash -lc '
+            set -e
+            apt-get update -qq && apt-get install -y -qq libfuse2 >/dev/null
+            chmod +x "'"$rel"'"
+            "'"$rel"'" --appimage-extract >/dev/null
+            if ! find squashfs-root -name "libgtk-4.so*" | grep -q .; then
+              echo "::error::libgtk-4 is not bundled; the AppImage will not run on a clean distro"; exit 1
+            fi
+            echo "GTK4 bundled:"; find squashfs-root -name "libgtk-4.so*"
+          '
+
       - name: Verify Linux AppImage metadata
         if: runner.os == 'Linux'
         run: npm run check:linux-appimage-metadata -- --build-dir appling/build
