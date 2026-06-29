@@ -40,9 +40,10 @@ Primary user promise: download one native package, launch it normally, and let P
   `PASS`/`DEFER` table templates, so evidence capture does not require reading
   raw checker JSON.
 - `scripts/generate-native-signing-secret-plan.mjs` emits the public-trust
-  GitHub Actions secret inventory, safe `gh secret set` command templates, and
-  the follow-up signing/readiness checks so credential setup can be handed to an
-  operator without copying workflow YAML by hand.
+  GitHub Actions secret inventory, guarded `gh secret set` command templates
+  that fail on empty files or env values, and the follow-up signing/readiness
+  checks so credential setup can be handed to an operator without copying
+  workflow YAML by hand.
 - `.github/workflows/desktop-native-release.yml` builds macOS, Windows, and Linux packages in CI.
 - The native workflow now has two modes:
   - `package-proof`: manual default, permits ad-hoc macOS signing and unsigned Windows packages.
@@ -129,7 +130,7 @@ Recommended OS-level checks:
 3. Use `npm run -s generate:native-install-smoke-plan` for the clean-host smoke checklist that must be executed before public-trust announcement or package-manager submission; the generated plan downloads the runtime RPC smoke helper from `--source-ref` so testers do not need a checkout.
 4. Use `npm run -s generate:native-signing-secret-plan` before public-trust
    workflow dispatch so the operator has the canonical secret names and setup
-   command templates.
+   command templates, including empty-input guards before `gh secret set`.
 5. Use `npm run check:public-trust-readiness -- --source-ref <merged-main-commit> --signing-secret-source github` as the operator-facing summary
    gate before announcement; it should return `READY` only after signing
    credentials, public-trust assets, byte verification, Linux metadata,

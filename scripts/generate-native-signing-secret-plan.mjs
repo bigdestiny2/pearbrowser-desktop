@@ -120,11 +120,11 @@ function verificationCommands (repo, tag, sourceRef) {
 }
 
 function envSecretCommand (name, repo) {
-  return `printf '%s' "$${name}" | gh secret set ${name} --repo ${shellQuote(repo)}`
+  return `(test -n "\${${name}:-}" || { echo "Set ${name} before running this command." >&2; exit 1; }; printf '%s' "$${name}" | gh secret set ${name} --repo ${shellQuote(repo)})`
 }
 
 function fileSecretCommand (name, file, repo) {
-  return `openssl base64 -A -in ${shellQuote(file)} | gh secret set ${name} --repo ${shellQuote(repo)}`
+  return `(test -s ${shellQuote(file)} || { echo "${file} is missing or empty." >&2; exit 1; }; openssl base64 -A -in ${shellQuote(file)} | gh secret set ${name} --repo ${shellQuote(repo)})`
 }
 
 function platformLabel (value) {

@@ -143,9 +143,10 @@ The release scripts are operational gates, not ordinary tests:
   GitHub does not expose secret values, so the workflow still validates payload
   import/signing/notarization.
 - `npm run -s generate:native-signing-secret-plan -- --repo bigdestiny2/pearbrowser-desktop --tag v0.5.0 --source-ref <merged-main-commit>`
-  emits the public-trust GitHub Actions secret inventory, `gh secret set`
-  command templates, and the follow-up signing/readiness checks for the
-  credential-holding operator.
+  emits the public-trust GitHub Actions secret inventory, guarded
+  `gh secret set` command templates, and the follow-up signing/readiness checks
+  for the credential-holding operator. The generated commands fail before
+  upload if a certificate file or env-sourced value is empty.
 - `cd appling && npm ci && npm run generate && npm run build` builds the native
   wrapper for the current platform.
 - `npm run package:appling -- --tag v0.5.0` collects native artifacts,
