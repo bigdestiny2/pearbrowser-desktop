@@ -123,12 +123,32 @@ function validateWindows () {
   const thumbprint = secret('PEARBROWSER_WINDOWS_SIGNING_THUMBPRINT')
   const subject = secret('PEARBROWSER_WINDOWS_SIGNING_SUBJECT') || 'CN=PearBrowser Desktop'
 
+  // Azure Trusted Signing is the EV-equivalent path (key in Azure's HSM, no
+  // exportable .pfx). It satisfies the Windows signing requirement as an
+  // alternative to the PFX/SignTool path below.
+  const azure = {
+    AZURE_TENANT_ID: secret('AZURE_TENANT_ID'),
+    AZURE_CLIENT_ID: secret('AZURE_CLIENT_ID'),
+    AZURE_CLIENT_SECRET: secret('AZURE_CLIENT_SECRET'),
+    AZURE_TRUSTED_SIGNING_ENDPOINT: secret('AZURE_TRUSTED_SIGNING_ENDPOINT'),
+    AZURE_TRUSTED_SIGNING_ACCOUNT: secret('AZURE_TRUSTED_SIGNING_ACCOUNT'),
+    AZURE_TRUSTED_SIGNING_CERT_PROFILE: secret('AZURE_TRUSTED_SIGNING_CERT_PROFILE')
+  }
+  const azureConfigured = Object.values(azure).some(Boolean)
   const certConfigured = Boolean(pfx || pfxPassword)
-  if (!certConfigured) {
-    if (args.requirePublicTrust) {
-      add('fail', 'windows-certificate', 'Windows signing certificate is missing', 'PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64 and PEARBROWSER_WINDOWS_CERTIFICATE_PASSWORD are required for public Windows distribution on GitHub-hosted runners.', 'Export the code-signing certificate as a .pfx, base64-encode it, and add both GitHub Actions secrets.')
+
+  if (azureConfigured) {
+    const missing = Object.entries(azure).filter(([, v]) => !v).map(([k]) => k)
+    if (missing.length) {
+      add('fail', 'windows-certificate', 'Azure Trusted Signing secret set is incomplete', `missing ${missing.join(', ')}`, 'Provide the full Azure Trusted Signing service-principal + account + certificate-profile secret set.')
     } else {
-      add('warn', 'windows-certificate', 'Windows signing certificate is not configured', 'The workflow will upload unsigned Windows packages for packaging proof only.', 'Add PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64 and PEARBROWSER_WINDOWS_CERTIFICATE_PASSWORD before public distribution.')
+      add('pass', 'windows-certificate', 'Windows Azure Trusted Signing payload is complete', 'CI will sign the .msix via azure/trusted-signing-action.')
+    }
+  } else if (!certConfigured) {
+    if (args.requirePublicTrust) {
+      add('fail', 'windows-certificate', 'Windows signing certificate is missing', 'PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64 and PEARBROWSER_WINDOWS_CERTIFICATE_PASSWORD (or the AZURE_TRUSTED_SIGNING_* set) are required for public Windows distribution on GitHub-hosted runners.', 'Export the code-signing certificate as a .pfx and base64-encode it, or configure Azure Trusted Signing.')
+    } else {
+      add('warn', 'windows-certificate', 'Windows signing certificate is not configured', 'The workflow will upload unsigned Windows packages for packaging proof only.', 'Add PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64 and PEARBROWSER_WINDOWS_CERTIFICATE_PASSWORD, or the AZURE_TRUSTED_SIGNING_* secret set, before public distribution.')
     }
   } else if (!pfx || !pfxPassword) {
     add('fail', 'windows-certificate', 'Windows certificate secret pair is incomplete', missingDetail({
