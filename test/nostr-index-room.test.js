@@ -11,6 +11,7 @@ import secpMod from '../backend/secp256k1-bundle.cjs'
 import nbMod from '../backend/nostr-bind.cjs'
 import ingestMod from '../backend/nostr-ingest.cjs'
 import idxMod from '../backend/index-room-client.js'
+import { tamperLastHexByte } from './helpers/hex.js'
 const secp = secpMod; const nb = nbMod
 const { buildNostrTrustSet, partitionByTrust } = ingestMod
 const { nostrRowToEvent, verifyNostrRows, INDEX_SCHEMAS } = idxMod
@@ -42,7 +43,8 @@ test('verifyNostrRows: keeps valid, drops forged / tampered / malformed (verify-
   const sk = '11'.repeat(32)
   const good = ev(sk, 'real')
   const tampered = { ...ev(sk, 'orig'), content: 'evil' } // id no longer commits
-  const badSig = { ...ev(sk, 'x'), sig: ev(sk, 'x').sig.slice(0, -2) + '00' }
+  const badSigBase = ev(sk, 'x')
+  const badSig = { ...badSigBase, sig: tamperLastHexByte(badSigBase.sig) }
   const malformed = { id: 'nothex', pubkey: 'no', sig: 'no', created_at: 0, kind: 1, tags: [], content: '' }
 
   const { events, dropped } = verifyNostrRows([row(good), row(tampered), row(badSig), row(malformed), row(null)])

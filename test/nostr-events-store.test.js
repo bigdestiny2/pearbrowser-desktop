@@ -12,6 +12,7 @@ import secpMod from '../backend/secp256k1-bundle.cjs'
 import opsMod from '../backend/nostr-events-ops.cjs'
 import applyMod from '../backend/nostr-events-apply.cjs'
 import storeMod from '../backend/nostr-events-store.cjs'
+import { tamperLastHexByte } from './helpers/hex.js'
 const secp = secpMod; const ops = opsMod; const apply = applyMod
 const { NostrEventStore } = storeMod
 
@@ -27,7 +28,7 @@ test('verifyEvent: valid passes; tampered content, bad sig, malformed all fail',
   const ev = signed('gm')
   assert.equal(apply.verifyEvent(ev).ok, true)
   assert.equal(apply.verifyEvent({ ...ev, content: 'evil' }).ok, false) // id no longer commits to content
-  assert.equal(apply.verifyEvent({ ...ev, sig: ev.sig.slice(0, -2) + '00' }).ok, false)
+  assert.equal(apply.verifyEvent({ ...ev, sig: tamperLastHexByte(ev.sig) }).ok, false)
   assert.equal(apply.verifyEvent({ ...ev, pubkey: 'nothex' }).ok, false) // malformed
 })
 
