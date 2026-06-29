@@ -48,7 +48,7 @@ Primary user promise: download one native package, launch it normally, and let P
 - The native workflow now has two modes:
   - `package-proof`: manual default, permits ad-hoc macOS signing and unsigned Windows packages.
   - `public-trust`: required for announcement-ready assets, requires macOS Developer ID/notary credentials, notarized macOS DMG assets, Windows signing credentials, a published GitHub release, and post-upload native download verification.
-- Source installs are standalone because the HiveRelay `0.20.0` packages are vendored under `vendor/hiverelay`.
+- Source installs are standalone because the HiveRelay packages install from npm at `^0.20.2` (published `0.20.2`). (Updated 2026-06-29: superseded vendoring `0.20.0` tarballs under `vendor/hiverelay`.)
 
 ## Distribution Model
 
@@ -56,7 +56,7 @@ Use three lanes, with stricter gates as the audience widens:
 
 | Lane | Audience | Artifact source | Trust level | Gate |
 | --- | --- | --- | --- | --- |
-| Source checkout | contributors and debuggers | `npm install`, `pear`, local scripts | developer trust | `npm test`, vendored HiveRelay guard, high-severity audit |
+| Source checkout | contributors and debuggers | `npm install`, `pear`, local scripts | developer trust | `npm test`, npm HiveRelay layout guard, high-severity audit |
 | Package proof | internal testers and packaging validation | GitHub release assets from manual workflow | checksum trust plus OS warnings where unsigned | native workflow `release_mode=package-proof`, asset checker, smoke evidence |
 | Public trust | public desktop users | GitHub release assets, then package managers | OS code-signing trust plus checksums | native workflow `release_mode=public-trust`, notarized macOS DMG, Windows signing verification, published release check, download verification |
 

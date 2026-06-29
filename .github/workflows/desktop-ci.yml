@@ -32,9 +32,32 @@ jobs:
           cache: npm
           cache-dependency-path: pear-ecosystem/01-browser/pearbrowser-desktop/package-lock.json
 
-      - name: Verify vendored HiveRelay packages
+      - name: Verify HiveRelay layout
         working-directory: pear-ecosystem/01-browser/pearbrowser-desktop
         run: node scripts/check-hiverelay-layout.mjs
+
+      - name: Verify HiveRelay packages are published to npm
+        working-directory: pear-ecosystem/01-browser/pearbrowser-desktop
+        run: |
+          node - <<'NODE'
+          const { readFileSync } = require('node:fs')
+          const { execSync } = require('node:child_process')
+          const lock = JSON.parse(readFileSync('package-lock.json', 'utf8'))
+          const names = ['p2p-hiverelay', 'p2p-hiverelay-client', 'p2p-hiverelay-verifier']
+          for (const name of names) {
+            const entry = lock.packages[`node_modules/${name}`] || {}
+            const version = entry.version
+            if (!version) throw new Error(`${name} is missing from package-lock.json`)
+            if (!(entry.resolved || '').includes('registry.npmjs.org')) {
+              throw new Error(`${name}@${version} is not registry-resolved (resolved: ${entry.resolved || 'none'}) — a standalone clone would not install it`)
+            }
+            const published = execSync(`npm view ${name}@${version} version`, { encoding: 'utf8' }).trim()
+            if (published !== version) {
+              throw new Error(`${name}@${version} is not published to npm (npm view returned: ${published || 'nothing'})`)
+            }
+            console.log(`ok ${name}@${version} published and registry-resolved`)
+          }
+          NODE
 
       - name: Install
         working-directory: pear-ecosystem/01-browser/pearbrowser-desktop

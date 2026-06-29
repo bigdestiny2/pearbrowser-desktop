@@ -215,9 +215,9 @@ The release scripts are operational gates, not ordinary tests:
   20 `v0.5.0` assets, including macOS arm64/x64; the release asset checker now
   runs after upload in the workflow.
 - Fresh-peer verification should be run off the publisher box when possible.
-- Desktop source install depends on the committed HiveRelay `0.20.0` package
-  tarballs in `vendor/hiverelay`, verified by
-  `scripts/check-hiverelay-layout.mjs` during `npm install`.
+- Desktop source install pulls HiveRelay from npm at `^0.20.2` (published
+  `0.20.2`), confirmed by the warn-only `scripts/check-hiverelay-layout.mjs`
+  during `npm install`. (Updated 2026-06-29: superseded vendored tarballs.)
 - A standalone clone of `pearbrowser-desktop` is sufficient for `npm install`;
   the sibling `../../00-core/hiverelay` checkout is optional development
   context until compatible relay packages are published to npm.

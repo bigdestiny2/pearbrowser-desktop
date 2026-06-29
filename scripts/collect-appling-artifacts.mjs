@@ -195,7 +195,7 @@ function findArtifacts (root, targetPlatform) {
         }
         if (shouldSkipDir(entry.name)) continue
         walk(path)
-      } else if (entry.isFile() && isReleaseFile(entry.name, targetPlatform)) {
+      } else if (entry.isFile() && isReleaseFile(entry.name, targetPlatform) && !isRawWindowsLauncher(entry.name, targetPlatform)) {
         const stats = statSync(path)
         if (stats.size > 0) found.push({ kind: 'file', path })
       }
@@ -209,6 +209,14 @@ function shouldSkipDir (name) {
 
 function isReleaseFile (name, targetPlatform) {
   return filePatterns[targetPlatform].some((pattern) => pattern.test(name))
+}
+
+// The bare-pear Windows build emits a raw "<AppName>.exe" launcher next to the
+// .msix. It is the app executable, not an installer, and shipping it alongside
+// the package confuses the download surface — drop it. A real installer (e.g.
+// "<AppName> Setup.exe") has a different basename and is still collected.
+function isRawWindowsLauncher (name, targetPlatform) {
+  return targetPlatform === 'win32' && name.toLowerCase() === `${appName}.exe`.toLowerCase()
 }
 
 function artifactExtension (path) {

@@ -111,8 +111,12 @@ validation, and broader real-device smoke.
 - Real-network checks can false-negative in restricted/sandboxed environments.
   `scripts/check-relays.js`, `scripts/verify-pin.js`, `scripts/verify-live-catalog.js`,
   and bundle sampling should be run with real DHT access before announcement.
-- Desktop source install now uses vendored HiveRelay `0.20.0` package tarballs
-  in `vendor/hiverelay`, verified by `scripts/check-hiverelay-layout.mjs`.
+- Desktop source install installs HiveRelay from npm at `^0.20.2` (published
+  `0.20.2`). A standalone clone resolves it from the registry; the optional
+  sibling `../../00-core/hiverelay` checkout is dev-only and the warn-only
+  `scripts/check-hiverelay-layout.mjs` never fails a standalone install.
+  (Updated 2026-06-29: superseded the earlier vendored-`0.20.0`-tarball approach
+  once the packages were published to npm.)
   A standalone clone can run `npm install`; the sibling
   `../../00-core/hiverelay` checkout is optional development context until
   compatible packages are published to npm.

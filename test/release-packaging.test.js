@@ -65,11 +65,7 @@ const hiveRelayLayout = readFileSync(new URL('../scripts/check-hiverelay-layout.
 const hiveRelayCheckPath = fileURLToPath(new URL('../scripts/check-hiverelay-layout.mjs', import.meta.url))
 const verifyPin = readFileSync(new URL('../scripts/verify-pin.js', import.meta.url), 'utf8')
 const pinAppOnHiveRelay = readFileSync(new URL('../scripts/pin-app-on-hiverelay.js', import.meta.url), 'utf8')
-const vendoredHiveRelayPackages = [
-  ['p2p-hiverelay', 'vendor/hiverelay/p2p-hiverelay-0.20.0.tgz'],
-  ['p2p-hiverelay-client', 'vendor/hiverelay/p2p-hiverelay-client-0.20.0.tgz'],
-  ['p2p-hiverelay-verifier', 'vendor/hiverelay/p2p-hiverelay-verifier-0.20.0.tgz']
-]
+const npmHiveRelayPackages = ['p2p-hiverelay', 'p2p-hiverelay-client', 'p2p-hiverelay-verifier']
 
 function writePackageManagerReleaseFixture (fixture, names) {
   const shaByName = new Map()
@@ -281,32 +277,23 @@ test('foreign-key app pin refuses empty checkouts before broadcasting seed', () 
   )
 })
 
-test('HiveRelay source install uses vendored v0.20.0 packages', () => {
-  for (const [name, tarball] of vendoredHiveRelayPackages) {
-    assert.equal(pkg.dependencies?.[name], `file:${tarball}`)
-    assert.match(hiveRelayLayout, new RegExp(`${name}', '0\\.20\\.0', '${tarball}`))
+test('HiveRelay source install resolves npm 0.20.x packages', () => {
+  for (const name of npmHiveRelayPackages) {
+    assert.equal(pkg.dependencies?.[name], '^0.20.2')
   }
 
-  assert.match(hiveRelayLayout, /readPackedPackageJson/)
-  assert.match(hiveRelayLayout, /package\.json -> file:vendor\/hiverelay\/\*\.tgz/)
-  assert.match(hiveRelayLayout, /The sibling \.\.\/\.\.\/00-core\/hiverelay checkout is optional/)
+  assert.match(hiveRelayLayout, /usesNpmRegistryDefaults/)
+  assert.match(hiveRelayLayout, /!spec\.startsWith\('file:'\)/)
+  assert.match(hiveRelayLayout, /if \(usesNpmRegistryDefaults\) process\.exit\(0\)/)
+  assert.match(hiveRelayLayout, /package\.json -> \^0\.20\.2 \(npm registry\)/)
+  assert.match(hiveRelayLayout, /confirm the npm registry resolves HiveRelay to 0\.20\.2/)
 })
 
-test('HiveRelay vendored package guard passes for standalone source installs', () => {
-  const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'pear-hiverelay-vendor-')))
+test('HiveRelay registry guard warns (not fails) for standalone source installs', () => {
+  const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'pear-hiverelay-npm-')))
   try {
-    const vendorDir = join(fixture, 'vendor', 'hiverelay')
-    mkdirSync(vendorDir, { recursive: true })
-
     const dependencies = {}
-    for (const [name, tarball] of vendoredHiveRelayPackages) {
-      dependencies[name] = `file:${tarball}`
-      copyFileSync(
-        fileURLToPath(new URL(`../${tarball}`, import.meta.url)),
-        join(fixture, tarball)
-      )
-    }
-
+    for (const name of npmHiveRelayPackages) dependencies[name] = '^0.20.2'
     writeFileSync(join(fixture, 'package.json'), JSON.stringify({ dependencies }, null, 2))
 
     const result = spawnSync(process.execPath, [hiveRelayCheckPath], {
@@ -314,18 +301,20 @@ test('HiveRelay vendored package guard passes for standalone source installs', (
       encoding: 'utf8'
     })
 
+    // Registry deps + no sibling checkout -> warn and exit 0, never fail.
     assert.equal(result.status, 0, result.stderr || result.stdout)
-    assert.match(result.stderr, /optional local HiveRelay checkout missing/)
+    assert.match(`${result.stdout}${result.stderr}`, /Missing optional local packages/)
   } finally {
     rmSync(fixture, { recursive: true, force: true })
   }
 })
 
-test('desktop CI verifies vendored HiveRelay source install without sibling checkout', () => {
-  assert.match(desktopCiWorkflow, /Verify vendored HiveRelay packages/)
+test('desktop CI verifies HiveRelay installs from npm without sibling checkout', () => {
+  assert.match(desktopCiWorkflow, /published to npm/)
   assert.match(desktopCiWorkflow, /npm ci/)
   assert.doesNotMatch(desktopCiWorkflow, /P2P-Hiverelay/)
   assert.doesNotMatch(desktopCiWorkflow, /Checkout HiveRelay workspace packages/)
+  assert.doesNotMatch(desktopCiWorkflow, /vendor\/hiverelay/)
 })
 
 test('release evidence checker is exposed as an operator script', () => {
@@ -800,6 +789,7 @@ test('appling artifact collector emits normalized assets and checksum manifests'
     const buildDir = join(fixture, 'appling', 'build', 'nested')
     mkdirSync(buildDir, { recursive: true })
     writeFileSync(join(buildDir, 'PearBrowser Setup.exe'), 'windows installer bytes')
+    writeFileSync(join(buildDir, 'PearBrowser.exe'), 'raw bare-pear launcher — must be excluded')
     writeFileSync(join(buildDir, 'PearBrowser.dmg'), 'wrong platform bytes')
     writeFileSync(join(buildDir, 'notes.txt'), 'not a release artifact')
 
