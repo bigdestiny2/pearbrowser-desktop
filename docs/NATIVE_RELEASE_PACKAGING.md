@@ -61,6 +61,7 @@ npm run -s generate:native-install-guide -- --tag v0.5.0 --repo bigdestiny2/pear
 npm run -s generate:native-signing-secret-plan -- --repo bigdestiny2/pearbrowser-desktop --tag v0.5.0 --source-ref <merged-main-commit>
 npm run check:native-signing -- --require-public-trust --secret-source github --repo bigdestiny2/pearbrowser-desktop
 npm run check:public-trust-readiness -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --source-ref <merged-main-commit> --signing-secret-source github
+npm run -s generate:public-trust-operator-report -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --source-ref <merged-main-commit> --signing-secret-source github
 ```
 
 The collector searches `appling/build` for platform-native outputs:
@@ -205,6 +206,17 @@ clean-install smoke plan downloads the exact runtime RPC smoke helper:
 
 ```sh
 npm run check:public-trust-readiness -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --source-ref <merged-main-commit> --signing-secret-source github
+```
+
+`scripts/generate-public-trust-operator-report.mjs` formats that same readiness
+state for handoff: gate summary, grouped blockers, warning/deferral notes, and
+the exact next commands for credential setup, public-trust workflow dispatch,
+install-smoke generation, package-manager drafts, and evidence verification.
+Use `--readiness-file` to format a saved readiness JSON artifact without
+rerunning network-backed checks:
+
+```sh
+npm run -s generate:public-trust-operator-report -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --source-ref <merged-main-commit> --signing-secret-source github
 ```
 
 This command should remain blocked for the current package-proof `v0.5.0`

@@ -17,10 +17,10 @@ Current local status from this loop:
 
 - `git diff --check` passed.
 - `npm audit --audit-level=high` passed with `found 0 vulnerabilities`.
-- `npm test` passed: 471 tests, 0 failed.
+- `npm test` passed: 473 tests, 0 failed.
 
 This supersedes older local counts in nearby docs for this checkout. The
-current release-readiness docs and latest rerun agree on 471/471.
+current release-readiness docs and latest rerun agree on 473/473.
 
 ## Fast Local Gates
 
@@ -28,7 +28,7 @@ current release-readiness docs and latest rerun agree on 471/471.
 | --- | --- | --- |
 | `git diff --check` | Whitespace/conflict-marker sanity | Passed |
 | `npm audit --audit-level=high` | High-severity dependency audit for desktop package | Passed, 0 vulnerabilities |
-| `npm test` | Full desktop Node test suite: `node --test 'test/*.test.js'` | Passed, 471/471 |
+| `npm test` | Full desktop Node test suite: `node --test 'test/*.test.js'` | Passed, 473/473 |
 | `npm run check:release-evidence` | Operator evidence-log completeness; fails until required rows are `PASS` or documented `DEFER` | Expected fail until manual gates are filled |
 
 The root package is the only package with test scripts relevant to this desktop
@@ -193,6 +193,11 @@ The release scripts are operational gates, not ordinary tests:
   evidence checker. The `--source-ref` value is forwarded to the nested
   clean-install smoke-plan generator. It should exit non-zero until
   public-trust credentials/assets and operator evidence are complete.
+- `npm run -s generate:public-trust-operator-report -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --source-ref <merged-main-commit> --signing-secret-source github`
+  formats the public-trust readiness result into a Markdown handoff with gate
+  summaries, grouped blockers, warning/deferral notes, and the next commands for
+  credential setup, CI dispatch, clean-install smoke, package-manager drafts,
+  and release evidence.
 - `.github/workflows/desktop-native-release.yml` is the cross-platform release
   asset backfill path. It must be present on the default branch, and manual
   backfills should run with tag `v0.5.0` plus `source_ref` set to the branch or
