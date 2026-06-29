@@ -17,10 +17,10 @@ Current local status from this loop:
 
 - `git diff --check` passed.
 - `npm audit --audit-level=high` passed with `found 0 vulnerabilities`.
-- `npm test` passed: 469 tests, 0 failed.
+- `npm test` passed: 470 tests, 0 failed.
 
 This supersedes older local counts in nearby docs for this checkout. The
-current release-readiness docs and latest rerun agree on 469/469.
+current release-readiness docs and latest rerun agree on 470/470.
 
 ## Fast Local Gates
 
@@ -28,7 +28,7 @@ current release-readiness docs and latest rerun agree on 469/469.
 | --- | --- | --- |
 | `git diff --check` | Whitespace/conflict-marker sanity | Passed |
 | `npm audit --audit-level=high` | High-severity dependency audit for desktop package | Passed, 0 vulnerabilities |
-| `npm test` | Full desktop Node test suite: `node --test 'test/*.test.js'` | Passed, 469/469 |
+| `npm test` | Full desktop Node test suite: `node --test 'test/*.test.js'` | Passed, 470/470 |
 | `npm run check:release-evidence` | Operator evidence-log completeness; fails until required rows are `PASS` or documented `DEFER` | Expected fail until manual gates are filled |
 
 The root package is the only package with test scripts relevant to this desktop
@@ -137,7 +137,11 @@ The release scripts are operational gates, not ordinary tests:
 - `npm run check:native-signing` verifies macOS/Windows/Linux signing credential
   completeness for the packaging-proof path; add `-- --require-public-trust`
   before public distribution to require macOS Developer ID/notary and Windows
-  PFX credential sets.
+  PFX credential sets. Use
+  `-- --require-public-trust --secret-source github --repo bigdestiny2/pearbrowser-desktop`
+  before CI dispatch to confirm the required GitHub Actions secret names exist;
+  GitHub does not expose secret values, so the workflow still validates payload
+  import/signing/notarization.
 - `cd appling && npm ci && npm run generate && npm run build` builds the native
   wrapper for the current platform.
 - `npm run package:appling -- --tag v0.5.0` collects native artifacts,
@@ -174,7 +178,7 @@ The release scripts are operational gates, not ordinary tests:
   `--trust-mode package-proof` only to rehearse draft generation against
   package-proof assets. The WinGet draft license defaults to the root
   `package.json` SPDX expression unless `--license` is supplied.
-- `npm run check:public-trust-readiness -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --source-ref <merged-main-commit>`
+- `npm run check:public-trust-readiness -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --source-ref <merged-main-commit> --signing-secret-source github`
   aggregates the public-trust signing preflight, published asset check,
   byte-level download verifier, Linux AppImage metadata checker,
   clean-install smoke-plan generator, package-manager draft dry-run, and release

@@ -1,8 +1,17 @@
 #!/usr/bin/env node
 
+import { execFileSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
+
 const args = parseArgs(process.argv.slice(2))
 const platform = normalizePlatform(args.platform || process.env.RUNNER_OS || 'all')
+const secretStore = loadSecretStore(args)
 const checks = []
+let unreadableSecretValuesWarned = false
+
+if (secretStore.error) {
+  add('fail', 'secret-source', 'Could not load signing secret source', secretStore.error, 'Use --secret-source env, authenticate gh for --secret-source github, or provide --github-secrets-file for offline checks.')
+}
 
 if (platform === 'all' || platform === 'macos') validateMacOS()
 if (platform === 'all' || platform === 'windows') validateWindows()
@@ -19,6 +28,8 @@ const report = {
   ok: counts.fail === 0,
   mode: args.requirePublicTrust ? 'public-trust' : 'package-proof',
   platform,
+  secretSource: secretStore.source,
+  repo: secretStore.repo,
   counts,
   checks
 }
@@ -27,7 +38,8 @@ if (args.json) {
   console.log(JSON.stringify(report, null, 2))
 } else {
   console.log(`PearBrowser native signing credential check (${report.ok ? 'PASS' : 'BLOCKED'})`)
-  console.log(`mode=${report.mode} platform=${platform} pass=${counts.pass} warn=${counts.warn} fail=${counts.fail}`)
+  const source = report.repo ? `${report.secretSource}:${report.repo}` : report.secretSource
+  console.log(`mode=${report.mode} platform=${platform} secretSource=${source} pass=${counts.pass} warn=${counts.warn} fail=${counts.fail}`)
   for (const check of checks) {
     const prefix = check.status.toUpperCase().padEnd(4)
     console.log(`${prefix} ${check.id}: ${check.summary}`)
@@ -69,7 +81,9 @@ function validateMacOS () {
         ? `identity=${identity}; keychain supplied by PEARBROWSER_MACOS_SIGNING_KEYCHAIN`
         : `identity=${identity}; CI will create a temporary signing keychain`
       add('pass', 'macos-certificate', 'macOS Developer ID certificate payload is complete', detail)
-      if (!/Developer ID Application/i.test(identity)) {
+      if (!secretStore.readValues) {
+        noteUnreadableSecretValues()
+      } else if (!/Developer ID Application/i.test(identity)) {
         add('warn', 'macos-signing-identity', 'macOS signing identity does not mention Developer ID Application', `identity=${identity}`, 'Confirm the identity resolves to a Developer ID Application certificate before publishing public macOS assets.')
       }
     }
@@ -95,7 +109,11 @@ function validateMacOS () {
   } else if (identity === '-') {
     add('fail', 'macos-notary', 'macOS notarization is configured without a real signing identity', 'notarytool requires a Developer ID signed app; PEARBROWSER_MACOS_SIGNING_IDENTITY is still "-".', 'Set PEARBROWSER_MACOS_SIGNING_IDENTITY and provide the matching Developer ID certificate.')
   } else {
-    add('pass', 'macos-notary', 'macOS notarization credential set is complete', `apple-id=${appleId}; team-id=${teamId}; password=(redacted)`)
+    const detail = secretStore.readValues
+      ? `apple-id=${appleId}; team-id=${teamId}; password=(redacted)`
+      : 'GitHub secret names are present; notary credential values are not readable by this preflight.'
+    add('pass', 'macos-notary', 'macOS notarization credential set is complete', detail)
+    if (!secretStore.readValues) noteUnreadableSecretValues()
   }
 }
 
@@ -130,7 +148,10 @@ function validateWindows () {
 
   if (thumbprint) {
     const normalized = thumbprint.replace(/\s+/g, '')
-    if (!/^[a-f0-9]{40}$/i.test(normalized)) {
+    if (!secretStore.readValues) {
+      add('pass', 'windows-signing-thumbprint', 'Windows signing thumbprint secret name is present', 'Secret value is not readable by this preflight; CI will validate the thumbprint shape when it runs.')
+      noteUnreadableSecretValues()
+    } else if (!/^[a-f0-9]{40}$/i.test(normalized)) {
       add('fail', 'windows-signing-thumbprint', 'Windows signing thumbprint has an unexpected shape', `thumbprint=${redactMiddle(thumbprint)}`, 'Use the 40-hex-character SHA-1 certificate thumbprint, or leave it empty so CI uses the imported PFX certificate.')
     } else {
       add('pass', 'windows-signing-thumbprint', 'Windows signing thumbprint is configured', redactMiddle(normalized))
@@ -139,6 +160,10 @@ function validateWindows () {
 }
 
 function validateBase64 (name, value) {
+  if (!secretStore.readValues) {
+    noteUnreadableSecretValues()
+    return
+  }
   const normalized = value.replace(/\s+/g, '')
   if (!normalized) {
     add('fail', `${name.toLowerCase()}-base64`, `${name} is empty`, '', 'Provide a non-empty base64-encoded certificate payload.')
@@ -159,7 +184,7 @@ function add (status, id, summary, detail = '', remediation = '') {
 }
 
 function secret (name) {
-  return (process.env[name] || '').trim()
+  return secretStore.value(name)
 }
 
 function missingDetail (vars) {
@@ -173,13 +198,90 @@ function redactMiddle (value) {
   return `${normalized.slice(0, 6)}...${normalized.slice(-6)}`
 }
 
+function loadSecretStore (args) {
+  const source = normalizeSecretSource(args.secretSource || (args.githubSecretsFile ? 'github' : 'env'))
+  if (source === 'env') {
+    return {
+      source,
+      repo: '',
+      readValues: true,
+      error: '',
+      value: (name) => (process.env[name] || '').trim()
+    }
+  }
+
+  const repo = args.repo || process.env.GH_REPO || 'bigdestiny2/pearbrowser-desktop'
+  try {
+    const names = args.githubSecretsFile
+      ? namesFromGithubSecretsJson(readFileSync(args.githubSecretsFile, 'utf8'))
+      : namesFromGithubSecretsJson(execFileSync('gh', ['secret', 'list', '--repo', repo, '--json', 'name'], { encoding: 'utf8' }))
+    return {
+      source,
+      repo,
+      readValues: false,
+      error: '',
+      value: (name) => names.has(name) ? name : ''
+    }
+  } catch (err) {
+    const stderr = err?.stderr ? String(err.stderr).trim() : ''
+    return {
+      source,
+      repo,
+      readValues: false,
+      error: stderr || (err && err.message ? err.message : String(err)),
+      value: () => ''
+    }
+  }
+}
+
+function namesFromGithubSecretsJson (text) {
+  const parsed = JSON.parse(String(text || '[]'))
+  const entries = Array.isArray(parsed) ? parsed : parsed.secrets
+  if (!Array.isArray(entries)) throw new Error('GitHub secret list must be an array or an object with a secrets array')
+  return new Set(entries
+    .map((entry) => typeof entry === 'string' ? entry : entry?.name)
+    .filter(Boolean)
+    .map(String))
+}
+
+function normalizeSecretSource (value) {
+  const source = String(value || '').toLowerCase()
+  if (source === 'env' || source === 'environment') return 'env'
+  if (source === 'github' || source === 'github-actions' || source === 'actions') return 'github'
+  failUsage(`unknown secret source: ${value}`)
+}
+
+function noteUnreadableSecretValues () {
+  if (secretStore.readValues || unreadableSecretValuesWarned) return
+  unreadableSecretValuesWarned = true
+  add('warn', 'secret-values-unreadable', 'GitHub Actions secret values are not readable by this preflight', 'Secret names are present; the native release workflow still validates certificate import, signing, and notarization when it runs.')
+}
+
 function parseArgs (argv) {
-  const parsed = { platform: '', json: false, requirePublicTrust: false }
+  const parsed = {
+    platform: '',
+    json: false,
+    requirePublicTrust: false,
+    secretSource: '',
+    repo: '',
+    githubSecretsFile: ''
+  }
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
     if (arg === '--platform') {
       parsed.platform = argv[++i] || ''
       if (!parsed.platform || parsed.platform.startsWith('--')) failUsage('--platform requires a value')
+    } else if (arg === '--secret-source') {
+      parsed.secretSource = argv[++i] || ''
+      if (!parsed.secretSource || parsed.secretSource.startsWith('--')) failUsage('--secret-source requires a value')
+    } else if (arg === '--repo') {
+      parsed.repo = argv[++i] || ''
+      if (!parsed.repo || parsed.repo.startsWith('--')) failUsage('--repo requires a value')
+    } else if (arg === '--github-secrets-file') {
+      parsed.githubSecretsFile = argv[++i] || ''
+      if (!parsed.githubSecretsFile || parsed.githubSecretsFile.startsWith('--')) failUsage('--github-secrets-file requires a value')
+    } else if (arg === '--github-secrets') {
+      parsed.secretSource = 'github'
     } else if (arg === '--json') {
       parsed.json = true
     } else if (arg === '--require-public-trust') {
@@ -202,6 +304,6 @@ function normalizePlatform (value) {
 
 function failUsage (message) {
   console.error(message)
-  console.error('usage: node scripts/check-native-signing-credentials.mjs [--platform all|macos|windows|linux] [--require-public-trust] [--json]')
+  console.error('usage: node scripts/check-native-signing-credentials.mjs [--platform all|macos|windows|linux] [--require-public-trust] [--secret-source env|github] [--repo owner/repo] [--github-secrets-file secrets.json] [--json]')
   process.exit(2)
 }

@@ -72,10 +72,10 @@ The stable Pear link is still the application-content update channel. Native pac
    `PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64`,
    `PEARBROWSER_WINDOWS_CERTIFICATE_PASSWORD`, and optionally
    `PEARBROWSER_WINDOWS_SIGNING_THUMBPRINT`.
-3. Run `npm run check:native-signing -- --require-public-trust` before spending CI minutes.
+3. Run `npm run check:native-signing -- --require-public-trust --secret-source github --repo bigdestiny2/pearbrowser-desktop` before spending CI minutes. This confirms the required GitHub Actions secret names are present; CI still validates the unreadable certificate values by importing/signing/notarizing during the workflow.
 4. Run Desktop Native Release with `release_mode=public-trust` or publish/tag the release so the workflow defaults to public trust.
 5. Run the public-trust readiness aggregator after the workflow completes:
-   `npm run check:public-trust-readiness -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --source-ref <merged-main-commit>`.
+   `npm run check:public-trust-readiness -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --source-ref <merged-main-commit> --signing-secret-source github`.
    It should be treated as blocked until the subchecks below and the operator
    evidence log are green.
 6. Verify post-upload assets with:
@@ -107,7 +107,7 @@ Recommended OS-level checks:
 1. Keep GitHub Releases as the canonical asset host until public-trust desktop assets have at least one successful clean-machine install pass.
 2. Use `npm run -s generate:native-install-snippet` for the short install page or release-note block that points each OS to the resolver-selected package and checksum sidecar, then keep the stable Pear link fallback in the surrounding install guide.
 3. Use `npm run -s generate:native-install-smoke-plan` for the clean-host smoke checklist that must be executed before public-trust announcement or package-manager submission; the generated plan downloads the runtime RPC smoke helper from `--source-ref` so testers do not need a checkout.
-4. Use `npm run check:public-trust-readiness -- --source-ref <merged-main-commit>` as the operator-facing summary
+4. Use `npm run check:public-trust-readiness -- --source-ref <merged-main-commit> --signing-secret-source github` as the operator-facing summary
    gate before announcement; it should return `READY` only after signing
    credentials, public-trust assets, byte verification, Linux metadata,
    package-manager drafts, clean-host evidence, and the announcement decision
