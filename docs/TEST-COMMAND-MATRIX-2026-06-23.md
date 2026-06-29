@@ -174,12 +174,13 @@ The release scripts are operational gates, not ordinary tests:
   `--trust-mode package-proof` only to rehearse draft generation against
   package-proof assets. The WinGet draft license defaults to the root
   `package.json` SPDX expression unless `--license` is supplied.
-- `npm run check:public-trust-readiness -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop`
+- `npm run check:public-trust-readiness -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --source-ref <merged-main-commit>`
   aggregates the public-trust signing preflight, published asset check,
   byte-level download verifier, Linux AppImage metadata checker,
   clean-install smoke-plan generator, package-manager draft dry-run, and release
-  evidence checker. It should exit non-zero until public-trust
-  credentials/assets and operator evidence are complete.
+  evidence checker. The `--source-ref` value is forwarded to the nested
+  clean-install smoke-plan generator. It should exit non-zero until
+  public-trust credentials/assets and operator evidence are complete.
 - `.github/workflows/desktop-native-release.yml` is the cross-platform release
   asset backfill path. It must be present on the default branch, and manual
   backfills should run with tag `v0.5.0` plus `source_ref` set to the branch or

@@ -57,7 +57,7 @@ cd ..
 npm run package:appling -- --tag v0.5.0
 npm run check:native-release-assets -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
 npm run resolve:native-release -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
-npm run check:public-trust-readiness -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
+npm run check:public-trust-readiness -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --source-ref <merged-main-commit>
 ```
 
 The collector searches `appling/build` for platform-native outputs:
@@ -191,10 +191,11 @@ published public-trust release asset checker, byte-level download verification,
 the Linux AppImage metadata checker, the public-trust clean-install smoke-plan
 generator, the package-manager draft generator in dry-run mode, and the operator
 evidence-log checker, then reports all blockers in one JSON or human-readable
-result:
+result. Use `--source-ref` with the merged commit SHA so the nested
+clean-install smoke plan downloads the exact runtime RPC smoke helper:
 
 ```sh
-npm run check:public-trust-readiness -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
+npm run check:public-trust-readiness -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --source-ref <merged-main-commit>
 ```
 
 This command should remain blocked for the current package-proof `v0.5.0`

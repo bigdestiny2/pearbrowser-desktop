@@ -345,6 +345,7 @@ test('public-trust readiness checker is exposed as the announcement gate', () =>
   assert.match(publicTrustReadiness, /check-release-evidence\.mjs/)
   assert.match(publicTrustReadiness, /--require-public-trust/)
   assert.match(publicTrustReadiness, /--require-published/)
+  assert.match(publicTrustReadiness, /--source-ref/)
   assert.match(publicTrustReadiness, /--dry-run/)
 })
 
@@ -1279,6 +1280,8 @@ test('public-trust readiness checker passes when all release gates are represent
       releasePath,
       '--tag',
       'v0.5.0',
+      '--source-ref',
+      'release-smoke-source',
       '--evidence-file',
       evidencePath,
       '--json'
@@ -1292,9 +1295,11 @@ test('public-trust readiness checker passes when all release gates are represent
     const report = JSON.parse(result.stdout)
     assert.equal(report.ok, true)
     assert.equal(report.mode, 'public-trust')
+    assert.equal(report.sourceRef, 'release-smoke-source')
     assert.equal(report.checks.length, 7)
     assert.deepEqual(report.blockers, [])
     assert.ok(report.checks.every((check) => check.ok))
+    assert.match(report.checks.find((check) => check.id === 'native-install-smoke-plan').command, /--source-ref release-smoke-source/)
     assert.equal(report.checks.find((check) => check.id === 'linux-appimage-metadata').status, 'pass')
     assert.ok(report.checks.some((check) => check.id === 'native-downloads' && check.summary.includes('verified=4')))
     assert.deepEqual(report.warnings, [])
@@ -1333,6 +1338,8 @@ test('public-trust readiness checker aggregates package-proof blockers', () => {
       releasePath,
       '--tag',
       'v0.5.0',
+      '--source-ref',
+      'release-smoke-source',
       '--evidence-file',
       evidencePath,
       '--json'
@@ -1350,6 +1357,7 @@ test('public-trust readiness checker aggregates package-proof blockers', () => {
     assert.equal(report.checks.find((check) => check.id === 'linux-appimage-metadata').status, 'pass')
     assert.equal(report.checks.find((check) => check.id === 'native-release-assets').status, 'block')
     assert.equal(report.checks.find((check) => check.id === 'native-install-smoke-plan').status, 'block')
+    assert.match(report.checks.find((check) => check.id === 'native-install-smoke-plan').command, /--source-ref release-smoke-source/)
     assert.equal(report.checks.find((check) => check.id === 'package-manager-manifests').status, 'block')
     assert.ok(report.blockers.some((blocker) => blocker.message.includes('missing public-trust macOS DMG for macos/arm64')))
     assert.ok(report.blockers.some((blocker) => blocker.message.includes('public-trust clean-install smoke requires notarized macOS DMG')))
