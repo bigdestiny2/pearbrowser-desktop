@@ -17,10 +17,10 @@ Current local status from this loop:
 
 - `git diff --check` passed.
 - `npm audit --audit-level=high` passed with `found 0 vulnerabilities`.
-- `npm test` passed: 473 tests, 0 failed.
+- `npm test` passed: 477 tests, 0 failed.
 
 This supersedes older local counts in nearby docs for this checkout. The
-current release-readiness docs and latest rerun agree on 473/473.
+current release-readiness docs and latest rerun agree on 477/477.
 
 ## Fast Local Gates
 
@@ -28,7 +28,7 @@ current release-readiness docs and latest rerun agree on 473/473.
 | --- | --- | --- |
 | `git diff --check` | Whitespace/conflict-marker sanity | Passed |
 | `npm audit --audit-level=high` | High-severity dependency audit for desktop package | Passed, 0 vulnerabilities |
-| `npm test` | Full desktop Node test suite: `node --test 'test/*.test.js'` | Passed, 473/473 |
+| `npm test` | Full desktop Node test suite: `node --test 'test/*.test.js'` | Passed, 477/477 |
 | `npm run check:release-evidence` | Operator evidence-log completeness; fails until required rows are `PASS` or documented `DEFER` | Expected fail until manual gates are filled |
 
 The root package is the only package with test scripts relevant to this desktop
@@ -198,6 +198,10 @@ The release scripts are operational gates, not ordinary tests:
   summaries, grouped blockers, warning/deferral notes, and the next commands for
   credential setup, CI dispatch, clean-install smoke, package-manager drafts,
   and release evidence.
+- `npm run -s generate:release-evidence-handoff` formats the current operator
+  evidence log into grouped incomplete/failing rows with expected outcomes and
+  copy-ready `PASS`/`DEFER` table templates. It exits non-zero until the
+  evidence log is complete, matching `check:release-evidence`.
 - `.github/workflows/desktop-native-release.yml` is the cross-platform release
   asset backfill path. It must be present on the default branch, and manual
   backfills should run with tag `v0.5.0` plus `source_ref` set to the branch or
@@ -221,15 +225,17 @@ The release scripts are operational gates, not ordinary tests:
 
 Run the PearBrowser Desktop release-evidence cleanup pass:
 
-1. Run real-DHT verifier scripts from a non-sandboxed, real-network environment
-   and append exact results to `docs/MANUAL_RELEASE_SMOKE_2026-06-23.md`.
-2. Capture runtime RPC smoke only after launching the desktop app.
-3. Capture Peercord trust-prompt and standalone-window evidence manually,
+1. Run `npm run -s generate:release-evidence-handoff` to get the current
+   grouped manual rows and copy-ready evidence-log templates.
+2. Run real-DHT verifier scripts from a non-sandboxed, real-network environment
+   and append exact results to `docs/RELEASE_SMOKE_EVIDENCE_LOG_2026-06-23.md`.
+3. Capture runtime RPC smoke only after launching the desktop app.
+4. Capture Peercord trust-prompt and standalone-window evidence manually,
    without automating approval.
-4. Run `npm run check:release-evidence`; it should exit `0` only after the
+5. Run `npm run check:release-evidence`; it should exit `0` only after the
    operator evidence log is filled and the final decision is `GO` or
    `GO desktop only`.
-5. Keep mobile/native production signing and store validation in the mobile
+6. Keep mobile/native production signing and store validation in the mobile
    release lane.
 
 ## Source Evidence
