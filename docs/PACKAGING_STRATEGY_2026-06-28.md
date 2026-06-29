@@ -14,7 +14,8 @@ Primary user promise: download one native package, launch it normally, and let P
   and verifies the bytes against the attached `.sha256` sidecars.
 - `scripts/generate-native-install-snippet.mjs` emits release-note/install-page
   Markdown from those resolver choices, so user-facing links come from attached
-  assets instead of hand-maintained copy.
+  assets instead of hand-maintained copy; `generate:native-install-guide` emits
+  the full direct-link native install guide from the same resolver.
 - `scripts/generate-native-install-smoke-plan.mjs` emits clean-host install
   smoke commands, a downloadable runtime diagnostic helper, and evidence
   bullets from the same resolver choices, so macOS/Windows/Linux manual smoke
@@ -89,12 +90,14 @@ The stable Pear link is still the application-content update channel. Native pac
    `npm run resolve:native-release -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --platform <platform> --arch <arch>`.
 10. Generate the release-note/install-page block from the attached assets:
    `npm run -s generate:native-install-snippet -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --trust-mode public-trust`.
-11. Generate the clean-machine smoke plan from the same assets, using the
+11. Regenerate the full native install guide from the same resolver:
+   `npm run -s generate:native-install-guide -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --trust-mode public-trust`.
+12. Generate the clean-machine smoke plan from the same assets, using the
     merged commit SHA as the helper source:
    `npm run -s generate:native-install-smoke-plan -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --trust-mode public-trust --source-ref <merged-main-commit>`.
-12. Generate Homebrew/WinGet package-manager drafts from the same assets:
+13. Generate Homebrew/WinGet package-manager drafts from the same assets:
    `npm run generate:package-manager-manifests -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop`.
-13. Smoke install from a clean machine or VM per OS and record evidence in `docs/RELEASE_SMOKE_EVIDENCE_LOG_2026-06-23.md`.
+14. Smoke install from a clean machine or VM per OS and record evidence in `docs/RELEASE_SMOKE_EVIDENCE_LOG_2026-06-23.md`.
 
 Recommended OS-level checks:
 
@@ -105,7 +108,7 @@ Recommended OS-level checks:
 ## Channel Expansion Plan
 
 1. Keep GitHub Releases as the canonical asset host until public-trust desktop assets have at least one successful clean-machine install pass.
-2. Use `npm run -s generate:native-install-snippet` for the short install page or release-note block that points each OS to the resolver-selected package and checksum sidecar, then keep the stable Pear link fallback in the surrounding install guide.
+2. Use `npm run -s generate:native-install-snippet` for release notes and `npm run -s generate:native-install-guide` for the full direct-link install page that points each OS to the resolver-selected package and checksum sidecar while keeping the stable Pear fallback.
 3. Use `npm run -s generate:native-install-smoke-plan` for the clean-host smoke checklist that must be executed before public-trust announcement or package-manager submission; the generated plan downloads the runtime RPC smoke helper from `--source-ref` so testers do not need a checkout.
 4. Use `npm run check:public-trust-readiness -- --source-ref <merged-main-commit> --signing-secret-source github` as the operator-facing summary
    gate before announcement; it should return `READY` only after signing

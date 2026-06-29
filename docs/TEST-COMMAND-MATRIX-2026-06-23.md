@@ -167,6 +167,10 @@ The release scripts are operational gates, not ordinary tests:
   emits release-note/install-page Markdown for the recommended desktop packages
   and checksum sidecars, using the same artifact preference order as the
   resolver.
+- `npm run -s generate:native-install-guide -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop`
+  emits the full user-facing native install guide with direct package links,
+  checksum sidecar links, verification commands, OS install notes, and the
+  stable Pear fallback.
 - `npm run -s generate:native-install-smoke-plan -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --source-ref <merged-main-commit>`
   emits clean-host install smoke commands and evidence bullets for the
   resolver-selected macOS, Windows, and Linux packages, including a downloaded

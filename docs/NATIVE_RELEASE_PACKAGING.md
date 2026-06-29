@@ -57,6 +57,7 @@ cd ..
 npm run package:appling -- --tag v0.5.0
 npm run check:native-release-assets -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
 npm run resolve:native-release -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
+npm run -s generate:native-install-guide -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
 npm run check:native-signing -- --require-public-trust --secret-source github --repo bigdestiny2/pearbrowser-desktop
 npm run check:public-trust-readiness -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --source-ref <merged-main-commit> --signing-secret-source github
 ```
@@ -128,7 +129,13 @@ so user-facing copy is generated from the release assets that actually shipped:
 
 ```sh
 npm run -s generate:native-install-snippet -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
+npm run -s generate:native-install-guide -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
 ```
+
+`generate:native-install-guide` is the same resolver in full-guide mode. It
+emits the user-facing `docs/INSTALL_NATIVE_PACKAGES.md` shape with direct
+package/checksum links, checksum verification commands, OS install notes, and
+the stable Pear fallback.
 
 `scripts/generate-native-install-smoke-plan.mjs` turns those same resolver
 choices into clean-host smoke instructions. It emits per-target download,
