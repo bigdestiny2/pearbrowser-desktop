@@ -50,6 +50,10 @@ env:
   PEARBROWSER_WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.PEARBROWSER_WINDOWS_CERTIFICATE_PASSWORD || '' }}
   PEARBROWSER_WINDOWS_SIGNING_SUBJECT: ${{ secrets.PEARBROWSER_WINDOWS_SIGNING_SUBJECT || 'CN=PearBrowser Desktop' }}
   PEARBROWSER_WINDOWS_SIGNING_THUMBPRINT: ${{ secrets.PEARBROWSER_WINDOWS_SIGNING_THUMBPRINT || '' }}
+  # Windows EV-equivalent via Azure Trusted Signing (key in Azure's HSM, no
+  # exportable .pfx). Presence of the account name turns the Azure signing step
+  # on; it is an alternative to the PFX/SignTool path above.
+  AZURE_TRUSTED_SIGNING_ACCOUNT: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT || '' }}
 
 jobs:
   build-native:
@@ -201,6 +205,28 @@ jobs:
 
       - name: Build native package
         run: npm run --prefix appling build
+
+      # Windows EV-equivalent signing via Azure Trusted Signing. Guarded on the
+      # account secret. The build's local SignTool path stays skipped (no
+      # thumbprint), so this signs the unsigned .msix/.exe post-build. NOTE: the
+      # MSIX Publisher (PEARBROWSER_WINDOWS_SIGNING_SUBJECT) must equal the
+      # certificate subject Azure issues, or the signed package will not install.
+      - name: Sign Windows artifacts with Azure Trusted Signing
+        if: runner.os == 'Windows' && env.AZURE_TRUSTED_SIGNING_ACCOUNT != ''
+        uses: azure/trusted-signing-action@v0.5.1
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_TRUSTED_SIGNING_CERT_PROFILE }}
+          files-folder: ${{ github.workspace }}/pear-ecosystem/01-browser/pearbrowser-desktop/appling/build
+          files-folder-filter: msix,exe
+          files-folder-recurse: true
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
 
       # Linux AppImages do not bundle GTK4 by default, so the build-machine-only
       # libgtk-4 dependency makes them fail to launch on a clean distro. Use

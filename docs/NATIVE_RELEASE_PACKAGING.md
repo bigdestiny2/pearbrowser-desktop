@@ -246,15 +246,24 @@ Public trust signing is still a release-credential gate:
   only then collects the public `.dmg` plus `.app.zip` fallback assets.
   `PEARBROWSER_MACOS_KEYCHAIN_PASSWORD` is optional; the run id is used when it
   is absent.
-- Windows: add `PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64` and
-  `PEARBROWSER_WINDOWS_CERTIFICATE_PASSWORD` as GitHub Actions secrets, plus
-  optional `PEARBROWSER_WINDOWS_SIGNING_THUMBPRINT` and
-  `PEARBROWSER_WINDOWS_SIGNING_SUBJECT`. If the thumbprint is empty, the
-  workflow uses the imported certificate thumbprint. If the thumbprint remains
-  empty, the build intentionally skips SignTool and uploads unsigned Windows
-  packages for packaging proof only. When signing is configured, the workflow
-  signs additional `.exe` installer artifacts and verifies Windows installer
-  signatures before collection.
+- Windows — two routes (either satisfies `public-trust`):
+  - **Option A · Azure Trusted Signing (EV-equivalent, recommended).** The key
+    lives in Azure's HSM (no exportable `.pfx`). Add `AZURE_TENANT_ID`,
+    `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_TRUSTED_SIGNING_ENDPOINT`
+    (e.g. `https://eus.codesigning.azure.net/`), `AZURE_TRUSTED_SIGNING_ACCOUNT`
+    (presence turns the step on), and `AZURE_TRUSTED_SIGNING_CERT_PROFILE`. The
+    workflow signs the `.msix`/`.exe` post-build via `azure/trusted-signing-action`.
+    Set `PEARBROWSER_WINDOWS_SIGNING_SUBJECT` to the CN Azure issues so it matches
+    the MSIX `Publisher`.
+  - **Option B · OV/software `.pfx`.** Add `PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64`
+    and `PEARBROWSER_WINDOWS_CERTIFICATE_PASSWORD`, plus optional
+    `PEARBROWSER_WINDOWS_SIGNING_THUMBPRINT` and `PEARBROWSER_WINDOWS_SIGNING_SUBJECT`.
+    If the thumbprint is empty the workflow uses the imported certificate
+    thumbprint via SignTool.
+  - With neither configured the build skips signing and uploads unsigned Windows
+    packages for packaging proof only. When signing is configured, the workflow
+    signs additional `.exe` installer artifacts and verifies Windows installer
+    signatures before collection.
 - Linux: attach package checksums; no signing is required for the current
   AppImage path.
 

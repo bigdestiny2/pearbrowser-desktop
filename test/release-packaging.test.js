@@ -722,6 +722,25 @@ test('native signing credential checker separates package proof from public trus
   assert.equal(windowsComplete.status, 0)
   assert.equal(windowsComplete.report.counts.fail, 0)
 
+  // Azure Trusted Signing is an accepted EV-equivalent alternative to the PFX path.
+  const windowsAzureComplete = run({
+    AZURE_TENANT_ID: 'tenant',
+    AZURE_CLIENT_ID: 'client',
+    AZURE_CLIENT_SECRET: 'secret',
+    AZURE_TRUSTED_SIGNING_ENDPOINT: 'https://eus.codesigning.azure.net/',
+    AZURE_TRUSTED_SIGNING_ACCOUNT: 'pearbrowser-signing',
+    AZURE_TRUSTED_SIGNING_CERT_PROFILE: 'pearbrowser'
+  }, ['--platform', 'windows', '--require-public-trust'])
+  assert.equal(windowsAzureComplete.status, 0)
+  assert.equal(windowsAzureComplete.report.counts.fail, 0)
+  assert.ok(windowsAzureComplete.report.checks.some((check) => check.id === 'windows-certificate' && check.status === 'pass'))
+
+  const partialAzure = run({
+    AZURE_TRUSTED_SIGNING_ACCOUNT: 'pearbrowser-signing'
+  }, ['--platform', 'windows', '--require-public-trust'])
+  assert.notEqual(partialAzure.status, 0)
+  assert.ok(partialAzure.report.checks.some((check) => check.id === 'windows-certificate' && check.status === 'fail'))
+
   const partialWindows = run({
     PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64: Buffer.from('dummy pfx').toString('base64')
   }, ['--platform', 'windows'])
