@@ -10,15 +10,15 @@ experience.
 
 ## Choose A Package
 
-Download from the
+Download directly from the
 [`v0.5.0` GitHub release](https://github.com/bigdestiny2/pearbrowser-desktop/releases/tag/v0.5.0).
 
 | Machine | Recommended package | Checksum sidecar |
 | --- | --- | --- |
-| macOS Apple Silicon | `PearBrowser-0.5.0-macos-arm64.app.zip` | `PearBrowser-0.5.0-macos-arm64.app.zip.sha256` |
-| macOS Intel | `PearBrowser-0.5.0-macos-x64.app.zip` | `PearBrowser-0.5.0-macos-x64.app.zip.sha256` |
-| Windows x64 | `PearBrowser-0.5.0-windows-x64.exe` | `PearBrowser-0.5.0-windows-x64.exe.sha256` |
-| Linux x64 | `PearBrowser-0.5.0-linux-x64.AppImage` | `PearBrowser-0.5.0-linux-x64.AppImage.sha256` |
+| macOS Apple Silicon | [PearBrowser-0.5.0-macos-arm64.app.zip](https://github.com/bigdestiny2/pearbrowser-desktop/releases/download/v0.5.0/PearBrowser-0.5.0-macos-arm64.app.zip) | [PearBrowser-0.5.0-macos-arm64.app.zip.sha256](https://github.com/bigdestiny2/pearbrowser-desktop/releases/download/v0.5.0/PearBrowser-0.5.0-macos-arm64.app.zip.sha256) |
+| macOS Intel | [PearBrowser-0.5.0-macos-x64.app.zip](https://github.com/bigdestiny2/pearbrowser-desktop/releases/download/v0.5.0/PearBrowser-0.5.0-macos-x64.app.zip) | [PearBrowser-0.5.0-macos-x64.app.zip.sha256](https://github.com/bigdestiny2/pearbrowser-desktop/releases/download/v0.5.0/PearBrowser-0.5.0-macos-x64.app.zip.sha256) |
+| Windows x64 | [PearBrowser-0.5.0-windows-x64.exe](https://github.com/bigdestiny2/pearbrowser-desktop/releases/download/v0.5.0/PearBrowser-0.5.0-windows-x64.exe) | [PearBrowser-0.5.0-windows-x64.exe.sha256](https://github.com/bigdestiny2/pearbrowser-desktop/releases/download/v0.5.0/PearBrowser-0.5.0-windows-x64.exe.sha256) |
+| Linux x64 | [PearBrowser-0.5.0-linux-x64.AppImage](https://github.com/bigdestiny2/pearbrowser-desktop/releases/download/v0.5.0/PearBrowser-0.5.0-linux-x64.AppImage) | [PearBrowser-0.5.0-linux-x64.AppImage.sha256](https://github.com/bigdestiny2/pearbrowser-desktop/releases/download/v0.5.0/PearBrowser-0.5.0-linux-x64.AppImage.sha256) |
 
 The Windows `.msix` and extra Linux AppImage artifact remain attached for
 package validation, but the resolver selects the `.exe` and normalized
@@ -47,11 +47,10 @@ sidecar in one pass:
 npm run verify:native-downloads -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --all
 ```
 
-Release operators can generate a Markdown install block for release notes or an
-install page from the same resolver rules:
+Release operators can regenerate this guide from the same resolver rules:
 
 ```sh
-npm run -s generate:native-install-snippet -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
+npm run -s generate:native-install-guide -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
 ```
 
 ## Verify The Download
@@ -68,7 +67,7 @@ Windows PowerShell:
 
 ```powershell
 $package = "PearBrowser-0.5.0-windows-x64.exe"
-$expected = (Get-Content "$package.sha256").Split(" ")[0].ToLowerInvariant()
+$expected = (Get-Content "$($package).sha256").Split(" ")[0].ToLowerInvariant()
 $actual = (Get-FileHash $package -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($actual -ne $expected) { throw "SHA-256 mismatch for $package" }
 ```

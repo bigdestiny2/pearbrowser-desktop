@@ -16,6 +16,7 @@
     "resolve:native-release": "node scripts/resolve-native-release-asset.mjs",
     "verify:native-downloads": "node scripts/verify-native-downloads.mjs",
     "generate:native-install-snippet": "node scripts/generate-native-install-snippet.mjs",
+    "generate:native-install-guide": "node scripts/generate-native-install-snippet.mjs --format guide",
     "generate:native-install-smoke-plan": "node scripts/generate-native-install-smoke-plan.mjs",
     "generate:package-manager-manifests": "node scripts/generate-package-manager-manifests.mjs",
     "check:public-trust-readiness": "node scripts/check-public-trust-readiness.mjs",

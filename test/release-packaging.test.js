@@ -37,6 +37,7 @@ const nativeDownloadVerifier = readFileSync(new URL('../scripts/verify-native-do
 const nativeDownloadVerifierPath = fileURLToPath(new URL('../scripts/verify-native-downloads.mjs', import.meta.url))
 const nativeInstallSnippet = readFileSync(new URL('../scripts/generate-native-install-snippet.mjs', import.meta.url), 'utf8')
 const nativeInstallSnippetPath = fileURLToPath(new URL('../scripts/generate-native-install-snippet.mjs', import.meta.url))
+const nativeInstallGuide = readFileSync(new URL('../docs/INSTALL_NATIVE_PACKAGES.md', import.meta.url), 'utf8')
 const nativeInstallSmokePlan = readFileSync(new URL('../scripts/generate-native-install-smoke-plan.mjs', import.meta.url), 'utf8')
 const nativeInstallSmokePlanPath = fileURLToPath(new URL('../scripts/generate-native-install-smoke-plan.mjs', import.meta.url))
 const packageManagerManifests = readFileSync(new URL('../scripts/generate-package-manager-manifests.mjs', import.meta.url), 'utf8')
@@ -320,10 +321,15 @@ test('Linux AppImage metadata checker is exposed for desktop integration gates',
 
 test('native install snippet generator is exposed for release notes', () => {
   assert.equal(pkg.scripts?.['generate:native-install-snippet'], 'node scripts/generate-native-install-snippet.mjs')
+  assert.equal(pkg.scripts?.['generate:native-install-guide'], 'node scripts/generate-native-install-snippet.mjs --format guide')
   assert.match(nativeInstallSnippet, /SUPPORTED_TARGETS/)
   assert.match(nativeInstallSnippet, /Native Installers/)
   assert.match(nativeInstallSnippet, /artifactRank/)
+  assert.match(nativeInstallSnippet, /--format/)
+  assert.match(nativeInstallSnippet, /Install Native Packages/)
   assert.match(nativeInstallSnippet, /Trust Note/)
+  assert.match(nativeInstallGuide, /releases\/download\/v0\.5\.0\/PearBrowser-0\.5\.0-macos-arm64\.app\.zip/)
+  assert.match(nativeInstallGuide, /generate:native-install-guide/)
 })
 
 test('native install smoke plan generator is exposed for clean-machine evidence', () => {
@@ -954,6 +960,28 @@ test('native install snippet generator emits release-note packages for every des
     assert.match(markdown.stdout, /PearBrowser-0\.5\.0-macos-arm64\.dmg/)
     assert.match(markdown.stdout, /PearBrowser-0\.5\.0-windows-x64\.exe/)
     assert.match(markdown.stdout, /These assets are expected to be signed\/notarized/)
+
+    const guide = spawnSync(process.execPath, [
+      nativeInstallSnippetPath,
+      '--fixture',
+      releasePath,
+      '--tag',
+      'v0.5.0',
+      '--trust-mode',
+      'public-trust',
+      '--format',
+      'guide'
+    ], {
+      cwd: fileURLToPath(new URL('..', import.meta.url)),
+      encoding: 'utf8'
+    })
+
+    assert.equal(guide.status, 0, guide.stderr || guide.stdout)
+    assert.match(guide.stdout, /# Install Native Packages/)
+    assert.match(guide.stdout, /\[PearBrowser-0\.5\.0-macos-arm64\.dmg\]\(https:\/\/example\.invalid\/PearBrowser-0\.5\.0-macos-arm64\.dmg\)/)
+    assert.match(guide.stdout, /npm run -s generate:native-install-guide/)
+    assert.match(guide.stdout, /PowerShell/)
+    assert.match(guide.stdout, /pear run pear:\/\/tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty/)
   } finally {
     rmSync(fixture, { recursive: true, force: true })
   }

@@ -54,6 +54,8 @@ announcement.
     `npm run verify:native-downloads -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --all`.
   - Generate user-facing install copy:
     `npm run -s generate:native-install-snippet -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop`.
+  - Regenerate the full direct-link native install guide:
+    `npm run -s generate:native-install-guide -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop`.
   - Generate clean-host install smoke commands and evidence bullets:
     `npm run -s generate:native-install-smoke-plan -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --source-ref <merged-main-commit>`.
     The generated plan downloads `scripts/runtime-rpc-smoke.mjs` from that
