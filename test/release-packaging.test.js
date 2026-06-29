@@ -46,6 +46,8 @@ const packageManagerManifests = readFileSync(new URL('../scripts/generate-packag
 const packageManagerManifestsPath = fileURLToPath(new URL('../scripts/generate-package-manager-manifests.mjs', import.meta.url))
 const publicTrustReadiness = readFileSync(new URL('../scripts/check-public-trust-readiness.mjs', import.meta.url), 'utf8')
 const publicTrustReadinessPath = fileURLToPath(new URL('../scripts/check-public-trust-readiness.mjs', import.meta.url))
+const publicTrustOperatorReport = readFileSync(new URL('../scripts/generate-public-trust-operator-report.mjs', import.meta.url), 'utf8')
+const publicTrustOperatorReportPath = fileURLToPath(new URL('../scripts/generate-public-trust-operator-report.mjs', import.meta.url))
 const linuxAppImageMetadata = readFileSync(new URL('../scripts/check-linux-appimage-metadata.mjs', import.meta.url), 'utf8')
 const linuxAppImageMetadataPath = fileURLToPath(new URL('../scripts/check-linux-appimage-metadata.mjs', import.meta.url))
 const linuxMetainfo = readFileSync(new URL('../appling/assets/linux/io.github.bigdestiny2.pearbrowser.metainfo.xml', import.meta.url), 'utf8')
@@ -138,6 +140,63 @@ function writeCompleteReleaseEvidenceFixture (path) {
 | Are residual risks documented in release notes? | YES |
 | Final decision (GO, NO-GO, or GO desktop only) | GO desktop only |
 `)
+}
+
+function writeBlockedPublicTrustReadinessFixture (path) {
+  writeFileSync(path, JSON.stringify({
+    ok: false,
+    repo: 'example/pearbrowser',
+    tag: 'v9.9.9',
+    sourceRef: 'abc123',
+    mode: 'public-trust',
+    checks: [
+      {
+        id: 'native-signing',
+        label: 'Native signing credentials',
+        ok: false,
+        status: 'block',
+        summary: 'mode=public-trust; pass=2; warn=0; fail=3',
+        command: 'node scripts/check-native-signing-credentials.mjs --require-public-trust --json',
+        blockers: [
+          'macos-certificate: macOS Developer ID certificate is missing',
+          'windows-certificate: Windows signing certificate is missing'
+        ],
+        warnings: []
+      },
+      {
+        id: 'native-downloads',
+        label: 'Native package byte verification',
+        ok: true,
+        status: 'pass',
+        summary: 'verified=4; errors=0',
+        command: 'node scripts/verify-native-downloads.mjs --all --json',
+        blockers: [],
+        warnings: []
+      },
+      {
+        id: 'release-evidence',
+        label: 'Operator release evidence log',
+        ok: false,
+        status: 'block',
+        summary: 'passed=38; deferred=3; incomplete=1; failures=0',
+        command: 'node scripts/check-release-evidence.mjs --json',
+        blockers: [
+          'incomplete: Announcement Decision / Final decision: final decision is missing'
+        ],
+        warnings: [
+          'deferred: Desktop Automated Baseline / Peercord bundle: publisher reseed required'
+        ]
+      }
+    ],
+    blockers: [
+      { check: 'native-signing', message: 'macos-certificate: macOS Developer ID certificate is missing' },
+      { check: 'native-signing', message: 'windows-certificate: Windows signing certificate is missing' },
+      { check: 'release-evidence', message: 'incomplete: Announcement Decision / Final decision: final decision is missing' }
+    ],
+    warnings: [
+      { check: 'release-evidence', message: 'deferred: Desktop Automated Baseline / Peercord bundle: publisher reseed required' }
+    ]
+  }, null, 2))
 }
 
 function publicTrustSigningEnv () {
@@ -425,6 +484,62 @@ test('public-trust readiness checker is exposed as the announcement gate', () =>
   assert.match(publicTrustReadiness, /--source-ref/)
   assert.match(publicTrustReadiness, /--signing-secret-source/)
   assert.match(publicTrustReadiness, /--dry-run/)
+})
+
+test('public-trust operator report is exposed for release handoff', () => {
+  assert.equal(pkg.scripts?.['generate:public-trust-operator-report'], 'node scripts/generate-public-trust-operator-report.mjs')
+  assert.match(publicTrustOperatorReport, /Public-Trust Release Operator Report/)
+  assert.match(publicTrustOperatorReport, /check-public-trust-readiness\.mjs/)
+  assert.match(publicTrustOperatorReport, /generate:native-signing-secret-plan/)
+  assert.match(publicTrustOperatorReport, /gh workflow run desktop-native-release\.yml/)
+  assert.match(publicTrustOperatorReport, /generate:native-install-smoke-plan/)
+  assert.match(publicTrustOperatorReport, /check:release-evidence/)
+})
+
+test('public-trust operator report formats readiness blockers into next actions', () => {
+  const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'pear-public-trust-operator-report-')))
+  try {
+    const readinessPath = join(fixture, 'readiness.json')
+    writeBlockedPublicTrustReadinessFixture(readinessPath)
+
+    const markdown = spawnSync(process.execPath, [
+      publicTrustOperatorReportPath,
+      '--readiness-file',
+      readinessPath
+    ], {
+      encoding: 'utf8'
+    })
+    assert.equal(markdown.status, 1)
+    assert.match(markdown.stdout, /# Public-Trust Release Operator Report/)
+    assert.match(markdown.stdout, /Status: `BLOCKED`/)
+    assert.match(markdown.stdout, /### Signing Credentials/)
+    assert.match(markdown.stdout, /\[ \] macos-certificate: macOS Developer ID certificate is missing/)
+    assert.match(markdown.stdout, /### Operator Evidence/)
+    assert.match(markdown.stdout, /Final decision is missing/i)
+    assert.match(markdown.stdout, /npm run -s generate:native-signing-secret-plan -- --repo example\/pearbrowser --tag v9\.9\.9 --source-ref abc123/)
+    assert.match(markdown.stdout, /gh workflow run desktop-native-release\.yml --repo example\/pearbrowser --ref main -f tag=v9\.9\.9 -f source_ref=abc123 -f release_mode=public-trust/)
+    assert.match(markdown.stdout, /npm run check:release-evidence/)
+
+    const json = spawnSync(process.execPath, [
+      publicTrustOperatorReportPath,
+      '--readiness-file',
+      readinessPath,
+      '--json'
+    ], {
+      encoding: 'utf8'
+    })
+    assert.equal(json.status, 1)
+    const report = JSON.parse(json.stdout)
+    assert.equal(report.ok, false)
+    assert.equal(report.repo, 'example/pearbrowser')
+    assert.equal(report.tag, 'v9.9.9')
+    assert.equal(report.sourceRef, 'abc123')
+    assert.ok(report.blockerGroups.some((group) => group.id === 'native-signing' && group.blockers.length === 2))
+    assert.ok(report.nextCommands.some((command) => command.id === 'dispatch-public-trust-workflow'))
+    assert.ok(report.warnings.some((warning) => warning.check === 'release-evidence'))
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
 })
 
 test('macOS DMG packager is exposed for public-trust native releases', () => {

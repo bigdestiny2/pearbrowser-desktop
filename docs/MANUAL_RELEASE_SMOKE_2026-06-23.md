@@ -55,6 +55,8 @@ announcement.
     `npm run check:native-release-assets -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --require-published --require-public-trust`.
   - Verify the recommended package downloads against their sidecars:
     `npm run verify:native-downloads -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --all`.
+  - Generate the public-trust operator handoff report:
+    `npm run -s generate:public-trust-operator-report -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --source-ref <merged-main-commit> --signing-secret-source github`.
   - Generate user-facing install copy:
     `npm run -s generate:native-install-snippet -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop`.
   - Regenerate the full direct-link native install guide:
