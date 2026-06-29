@@ -17,6 +17,7 @@ const tag = normalizeTag(args.tag || `v${pkg.version}`)
 const version = versionFromTag(tag)
 const repo = args.repo || process.env.GH_REPO || 'bigdestiny2/pearbrowser-desktop'
 const trustMode = normalizeTrustMode(args.trustMode || 'package-proof')
+const sourceRef = normalizeSourceRef(args.sourceRef || 'main')
 
 let release
 try {
@@ -25,7 +26,7 @@ try {
   fail(err && err.message ? err.message : String(err))
 }
 
-const report = buildSmokePlan(release, { repo, tag, version, trustMode })
+const report = buildSmokePlan(release, { repo, tag, version, trustMode, sourceRef })
 
 if (args.json) printJson(report)
 else printMarkdown(report)
@@ -38,6 +39,7 @@ function parseArgs (argv) {
     repo: '',
     fixture: '',
     trustMode: '',
+    sourceRef: '',
     json: false
   }
   for (let i = 0; i < argv.length; i++) {
@@ -46,6 +48,7 @@ function parseArgs (argv) {
     else if (arg === '--repo') parsed.repo = requireValue(argv, ++i, arg)
     else if (arg === '--fixture') parsed.fixture = requireValue(argv, ++i, arg)
     else if (arg === '--trust-mode') parsed.trustMode = requireValue(argv, ++i, arg)
+    else if (arg === '--source-ref') parsed.sourceRef = requireValue(argv, ++i, arg)
     else if (arg === '--json') parsed.json = true
     else if (arg === '-h' || arg === '--help') usage(0)
     else usage(2, `unknown argument: ${arg}`)
@@ -61,8 +64,8 @@ function requireValue (argv, index, flag) {
 
 function usage (code, message = '') {
   if (message) console.error(`error: ${message}`)
-  console.error('usage: node scripts/generate-native-install-smoke-plan.mjs [--tag v0.5.0] [--repo owner/repo] [--trust-mode package-proof|public-trust] [--json]')
-  console.error('       node scripts/generate-native-install-smoke-plan.mjs --fixture release.json [--tag v0.5.0] [--trust-mode package-proof|public-trust] [--json]')
+  console.error('usage: node scripts/generate-native-install-smoke-plan.mjs [--tag v0.5.0] [--repo owner/repo] [--trust-mode package-proof|public-trust] [--source-ref main] [--json]')
+  console.error('       node scripts/generate-native-install-smoke-plan.mjs --fixture release.json [--tag v0.5.0] [--trust-mode package-proof|public-trust] [--source-ref main] [--json]')
   process.exit(code)
 }
 
@@ -74,6 +77,7 @@ function fail (message) {
       tag,
       version,
       trustMode,
+      sourceRef,
       targets: [],
       warnings: [],
       errors: [message]
@@ -100,6 +104,15 @@ function normalizeTrustMode (value) {
   const mode = String(value || '').toLowerCase()
   if (mode === 'package-proof' || mode === 'public-trust') return mode
   usage(2, `unsupported trust mode: ${value}`)
+}
+
+function normalizeSourceRef (value) {
+  const ref = String(value || '').trim()
+  if (!ref) usage(2, '--source-ref cannot be empty')
+  if (!/^[A-Za-z0-9._/@+-]+$/.test(ref)) {
+    usage(2, `--source-ref contains unsupported characters: ${value}`)
+  }
+  return ref
 }
 
 function loadFixture (path) {
@@ -165,6 +178,8 @@ function buildSmokePlan (release, options) {
     tag: options.tag,
     version: options.version,
     trustMode: options.trustMode,
+    sourceRef: options.sourceRef,
+    runtimeSmokeScript: runtimeSmokeScriptUrl(options),
     release: {
       tagName,
       isDraft: !!release?.isDraft,
@@ -265,8 +280,8 @@ function cleanHostFor (platform) {
 
 function commandsFor (target, resolved, options) {
   if (target.platform === 'macos') return macosCommands(resolved, options)
-  if (target.platform === 'windows') return windowsCommands(resolved)
-  if (target.platform === 'linux') return linuxCommands(resolved)
+  if (target.platform === 'windows') return windowsCommands(resolved, options)
+  if (target.platform === 'linux') return linuxCommands(resolved, options)
   return []
 }
 
@@ -293,6 +308,7 @@ function macosCommands (resolved, options) {
       )
     }
     commands.push('open /Applications/PearBrowser.app')
+    commands.push(...runtimeSmokeCommands('sh', options))
     return commands
   }
 
@@ -304,10 +320,11 @@ function macosCommands (resolved, options) {
     'codesign --verify --deep --strict --verbose=2 /Applications/PearBrowser.app',
     'open /Applications/PearBrowser.app'
   )
+  commands.push(...runtimeSmokeCommands('sh', options))
   return commands
 }
 
-function windowsCommands (resolved) {
+function windowsCommands (resolved, options) {
   const asset = powershellString(resolved.asset.name)
   const checksum = powershellString(resolved.checksum.name)
   const assetUrl = powershellString(resolved.asset.url)
@@ -326,11 +343,12 @@ function windowsCommands (resolved) {
   } else {
     commands.push(`Start-Process .\\${resolved.asset.name} -Wait`)
   }
-  commands.push('# Launch PearBrowser from the Start menu and confirm the first window opens.')
+  commands.push('# Launch PearBrowser from the Start menu, then run the diagnostic smoke below.')
+  commands.push(...runtimeSmokeCommands('powershell', options))
   return commands
 }
 
-function linuxCommands (resolved) {
+function linuxCommands (resolved, options) {
   const asset = shellQuote(resolved.asset.name)
   const checksum = shellQuote(resolved.checksum.name)
   const commands = [
@@ -342,12 +360,32 @@ function linuxCommands (resolved) {
   if (/\.AppImage$/i.test(resolved.asset.name)) {
     commands.push(
       `chmod +x ${asset}`,
-      `./${resolved.asset.name}`
+      `./${resolved.asset.name}`,
+      ...runtimeSmokeCommands('sh', options)
     )
   } else {
     commands.push('Install the package with the platform package manager, then launch PearBrowser from the desktop environment.')
+    commands.push(...runtimeSmokeCommands('sh', options))
   }
   return commands
+}
+
+function runtimeSmokeCommands (shell, options) {
+  const url = runtimeSmokeScriptUrl(options)
+  if (shell === 'powershell') {
+    return [
+      `Invoke-WebRequest -Uri ${powershellString(url)} -OutFile 'pearbrowser-runtime-rpc-smoke.mjs'`,
+      'node .\\pearbrowser-runtime-rpc-smoke.mjs --timeout 20000 --max-storage-percent 100 --json'
+    ]
+  }
+  return [
+    `curl -L -o pearbrowser-runtime-rpc-smoke.mjs ${shellQuote(url)}`,
+    'node pearbrowser-runtime-rpc-smoke.mjs --timeout 20000 --max-storage-percent 100 --json'
+  ]
+}
+
+function runtimeSmokeScriptUrl (options) {
+  return `https://raw.githubusercontent.com/${options.repo}/${options.sourceRef}/scripts/runtime-rpc-smoke.mjs`
 }
 
 function evidenceFor (platform, trustMode) {
@@ -355,6 +393,7 @@ function evidenceFor (platform, trustMode) {
     'OS version and architecture',
     'Package filename and SHA-256 verification output',
     'Screenshot or screen recording of the first PearBrowser window',
+    'runtime-rpc-smoke JSON output showing DHT/proxy/relay readiness',
     'Confirmation that the test host did not use a source checkout'
   ]
   if (platform === 'macos') {
@@ -406,6 +445,7 @@ function printMarkdown (report) {
   console.log()
   console.log(`Release: ${markdownLink(report.tag, report.release.url)}`)
   console.log(`Trust mode: ${report.trustMode}`)
+  console.log(`Smoke helper source: ${markdownLink(report.sourceRef, report.runtimeSmokeScript)}`)
   for (const warning of report.warnings) console.log(`Warning: ${warning}`)
   console.log()
   console.log('Run each target on a clean host or VM. Record the evidence bullets back into the release smoke evidence log before announcement.')
