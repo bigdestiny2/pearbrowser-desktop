@@ -21,13 +21,20 @@ const sharedReleaseArgs = [
   repo,
   ...(args.fixture ? ['--fixture', args.fixture] : [])
 ]
+const nativeSigningArgs = [
+  '--require-public-trust',
+  '--json',
+  ...(args.signingSecretSource ? ['--secret-source', args.signingSecretSource] : []),
+  ...(args.signingRepo ? ['--repo', args.signingRepo] : args.signingSecretSource === 'github' ? ['--repo', repo] : []),
+  ...(args.signingGithubSecretsFile ? ['--github-secrets-file', args.signingGithubSecretsFile] : [])
+]
 
 const checks = [
   runNodeCheck({
     id: 'native-signing',
     label: 'Native signing credentials',
     script: 'scripts/check-native-signing-credentials.mjs',
-    args: ['--require-public-trust', '--json']
+    args: nativeSigningArgs
   }),
   runNodeCheck({
     id: 'native-release-assets',
@@ -221,6 +228,9 @@ function parseArgs (argv) {
     fixture: '',
     evidenceFile: '',
     sourceRef: '',
+    signingSecretSource: '',
+    signingRepo: '',
+    signingGithubSecretsFile: '',
     json: false
   }
   for (let i = 0; i < argv.length; i++) {
@@ -230,6 +240,9 @@ function parseArgs (argv) {
     else if (arg === '--fixture') parsed.fixture = requireValue(argv, ++i, arg)
     else if (arg === '--evidence-file') parsed.evidenceFile = requireValue(argv, ++i, arg)
     else if (arg === '--source-ref') parsed.sourceRef = requireValue(argv, ++i, arg)
+    else if (arg === '--signing-secret-source') parsed.signingSecretSource = requireValue(argv, ++i, arg)
+    else if (arg === '--signing-repo') parsed.signingRepo = requireValue(argv, ++i, arg)
+    else if (arg === '--signing-github-secrets-file') parsed.signingGithubSecretsFile = requireValue(argv, ++i, arg)
     else if (arg === '--json') parsed.json = true
     else if (arg === '-h' || arg === '--help') usage(0)
     else usage(2, `unknown argument: ${arg}`)
@@ -245,7 +258,7 @@ function requireValue (argv, index, flag) {
 
 function usage (code, message = '') {
   if (message) console.error(`error: ${message}`)
-  console.error('usage: node scripts/check-public-trust-readiness.mjs [--tag v0.5.0] [--repo owner/repo] [--fixture release.json] [--evidence-file docs/RELEASE_SMOKE_EVIDENCE_LOG_2026-06-23.md] [--source-ref main] [--json]')
+  console.error('usage: node scripts/check-public-trust-readiness.mjs [--tag v0.5.0] [--repo owner/repo] [--fixture release.json] [--evidence-file docs/RELEASE_SMOKE_EVIDENCE_LOG_2026-06-23.md] [--source-ref main] [--signing-secret-source env|github] [--signing-repo owner/repo] [--signing-github-secrets-file secrets.json] [--json]')
   process.exit(code)
 }
 

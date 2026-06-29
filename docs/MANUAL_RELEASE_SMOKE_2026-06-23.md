@@ -31,7 +31,7 @@ announcement.
   - `npm run check:appling-release -- --tag v0.5.0`
   - `npm run check:native-signing`
   - Before public announcement, rerun as
-    `npm run check:native-signing -- --require-public-trust`.
+    `npm run check:native-signing -- --require-public-trust --secret-source github --repo bigdestiny2/pearbrowser-desktop`.
   - `cd appling && npm ci && npm run generate && npm run build`
   - `cd .. && npm run package:appling -- --tag v0.5.0`
   - On macOS, verify the extracted `.app` with

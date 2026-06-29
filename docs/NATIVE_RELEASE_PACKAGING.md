@@ -57,7 +57,8 @@ cd ..
 npm run package:appling -- --tag v0.5.0
 npm run check:native-release-assets -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
 npm run resolve:native-release -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
-npm run check:public-trust-readiness -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --source-ref <merged-main-commit>
+npm run check:native-signing -- --require-public-trust --secret-source github --repo bigdestiny2/pearbrowser-desktop
+npm run check:public-trust-readiness -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --source-ref <merged-main-commit> --signing-secret-source github
 ```
 
 The collector searches `appling/build` for platform-native outputs:
@@ -195,7 +196,7 @@ result. Use `--source-ref` with the merged commit SHA so the nested
 clean-install smoke plan downloads the exact runtime RPC smoke helper:
 
 ```sh
-npm run check:public-trust-readiness -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --source-ref <merged-main-commit>
+npm run check:public-trust-readiness -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --source-ref <merged-main-commit> --signing-secret-source github
 ```
 
 This command should remain blocked for the current package-proof `v0.5.0`
@@ -240,6 +241,7 @@ credential payload set:
 
 ```sh
 npm run check:native-signing -- --require-public-trust
+npm run check:native-signing -- --require-public-trust --secret-source github --repo bigdestiny2/pearbrowser-desktop
 ```
 
 Without `--require-public-trust`, the command accepts the packaging-proof path:
@@ -247,6 +249,11 @@ macOS can remain ad-hoc signed, Windows can remain unsigned, and Linux relies on
 checksums. With `--require-public-trust`, macOS must have the Developer ID
 certificate pair, a real signing identity, and the notary credential trio;
 Windows must have the PFX certificate pair; Linux remains checksum-only.
+The default `env` secret source validates local payload values and catches
+malformed base64 or thumbprints. `--secret-source github` uses `gh secret list`
+to confirm the required GitHub Actions secret names exist for the target repo;
+GitHub does not expose secret values, so this mode passes with a warning that
+the workflow must still validate certificate import, signing, and notarization.
 
 The GitHub workflow mirrors this split. Manual `workflow_dispatch` runs default
 to `release_mode=package-proof` so maintainers can refresh packaging assets

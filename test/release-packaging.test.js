@@ -150,6 +150,22 @@ function publicTrustSigningEnv () {
   }
 }
 
+function writeGithubSigningSecretsFixture (path, options = {}) {
+  const omit = new Set(options.omit || [])
+  const names = [
+    'PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64',
+    'PEARBROWSER_MACOS_CERTIFICATE_PASSWORD',
+    'PEARBROWSER_MACOS_SIGNING_IDENTITY',
+    'PEARBROWSER_MACOS_NOTARY_APPLE_ID',
+    'PEARBROWSER_MACOS_NOTARY_PASSWORD',
+    'PEARBROWSER_MACOS_NOTARY_TEAM_ID',
+    'PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64',
+    'PEARBROWSER_WINDOWS_CERTIFICATE_PASSWORD'
+  ].filter((name) => !omit.has(name))
+
+  writeFileSync(path, JSON.stringify(names.map((name) => ({ name })), null, 2))
+}
+
 function writeLinuxAppDirFixture (fixture, options = {}) {
   const appDir = join(fixture, 'PearBrowser.AppDir')
   const metainfoDir = join(appDir, 'usr', 'share', 'metainfo')
@@ -257,6 +273,9 @@ test('release evidence checker is exposed as an operator script', () => {
 test('native signing credential checker is exposed as an operator script', () => {
   assert.equal(pkg.scripts?.['check:native-signing'], 'node scripts/check-native-signing-credentials.mjs')
   assert.match(nativeSigningCheck, /--require-public-trust/)
+  assert.match(nativeSigningCheck, /--secret-source/)
+  assert.match(nativeSigningCheck, /gh', \[\s*'secret',\s*'list'/)
+  assert.match(nativeSigningCheck, /--github-secrets-file/)
   assert.match(nativeSigningCheck, /PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64/)
   assert.match(nativeSigningCheck, /PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64/)
 })
@@ -346,6 +365,7 @@ test('public-trust readiness checker is exposed as the announcement gate', () =>
   assert.match(publicTrustReadiness, /--require-public-trust/)
   assert.match(publicTrustReadiness, /--require-published/)
   assert.match(publicTrustReadiness, /--source-ref/)
+  assert.match(publicTrustReadiness, /--signing-secret-source/)
   assert.match(publicTrustReadiness, /--dry-run/)
 })
 
@@ -532,6 +552,39 @@ test('native signing credential checker separates package proof from public trus
   }, ['--platform', 'windows'])
   assert.notEqual(partialWindows.status, 0)
   assert.ok(partialWindows.report.checks.some((check) => check.id === 'windows-certificate' && check.status === 'fail'))
+
+  const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'pear-github-signing-secrets-')))
+  try {
+    const secretsPath = join(fixture, 'github-secrets.json')
+    writeGithubSigningSecretsFixture(secretsPath)
+    const githubComplete = run({}, [
+      '--require-public-trust',
+      '--secret-source',
+      'github',
+      '--repo',
+      'bigdestiny2/pearbrowser-desktop',
+      '--github-secrets-file',
+      secretsPath
+    ])
+    assert.equal(githubComplete.status, 0, githubComplete.stderr || githubComplete.stdout)
+    assert.equal(githubComplete.report.secretSource, 'github')
+    assert.equal(githubComplete.report.repo, 'bigdestiny2/pearbrowser-desktop')
+    assert.equal(githubComplete.report.counts.fail, 0)
+    assert.ok(githubComplete.report.checks.some((check) => check.id === 'secret-values-unreadable' && check.status === 'warn'))
+
+    writeGithubSigningSecretsFixture(secretsPath, { omit: ['PEARBROWSER_MACOS_NOTARY_PASSWORD'] })
+    const githubIncomplete = run({}, [
+      '--require-public-trust',
+      '--secret-source',
+      'github',
+      '--github-secrets-file',
+      secretsPath
+    ])
+    assert.notEqual(githubIncomplete.status, 0)
+    assert.ok(githubIncomplete.report.checks.some((check) => check.id === 'macos-notary' && check.status === 'fail'))
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
 })
 
 test('macOS notarization helper submits, staples, and verifies app bundles', () => {
@@ -1303,6 +1356,66 @@ test('public-trust readiness checker passes when all release gates are represent
     assert.equal(report.checks.find((check) => check.id === 'linux-appimage-metadata').status, 'pass')
     assert.ok(report.checks.some((check) => check.id === 'native-downloads' && check.summary.includes('verified=4')))
     assert.deepEqual(report.warnings, [])
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
+})
+
+test('public-trust readiness checker can read signing gate from GitHub Actions secret names', () => {
+  const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'pear-public-trust-github-secrets-')))
+  try {
+    const { releasePath } = writePackageManagerReleaseFixture(fixture, [
+      'PearBrowser-0.5.0-macos-arm64.dmg',
+      'PearBrowser-0.5.0-macos-arm64.dmg.sha256',
+      'SHA256SUMS-macos-arm64.txt',
+      'manifest-macos-arm64.json',
+      'PearBrowser-0.5.0-macos-x64.dmg',
+      'PearBrowser-0.5.0-macos-x64.dmg.sha256',
+      'SHA256SUMS-macos-x64.txt',
+      'manifest-macos-x64.json',
+      'PearBrowser-0.5.0-windows-x64.exe',
+      'PearBrowser-0.5.0-windows-x64.exe.sha256',
+      'SHA256SUMS-windows-x64.txt',
+      'manifest-windows-x64.json',
+      'PearBrowser-0.5.0-linux-x64.AppImage',
+      'PearBrowser-0.5.0-linux-x64.AppImage.sha256',
+      'SHA256SUMS-linux-x64.txt',
+      'manifest-linux-x64.json'
+    ])
+    const evidencePath = join(fixture, 'evidence.md')
+    const secretsPath = join(fixture, 'github-secrets.json')
+    writeCompleteReleaseEvidenceFixture(evidencePath)
+    writeGithubSigningSecretsFixture(secretsPath)
+
+    const result = spawnSync(process.execPath, [
+      publicTrustReadinessPath,
+      '--fixture',
+      releasePath,
+      '--tag',
+      'v0.5.0',
+      '--source-ref',
+      'release-smoke-source',
+      '--evidence-file',
+      evidencePath,
+      '--signing-secret-source',
+      'github',
+      '--signing-github-secrets-file',
+      secretsPath,
+      '--json'
+    ], {
+      cwd: fileURLToPath(new URL('..', import.meta.url)),
+      encoding: 'utf8',
+      env: {}
+    })
+
+    assert.equal(result.status, 0, result.stderr || result.stdout)
+    const report = JSON.parse(result.stdout)
+    assert.equal(report.ok, true)
+    const nativeSigning = report.checks.find((check) => check.id === 'native-signing')
+    assert.equal(nativeSigning.status, 'warn')
+    assert.match(nativeSigning.command, /--secret-source github/)
+    assert.match(nativeSigning.command, /--github-secrets-file/)
+    assert.ok(report.warnings.some((warning) => warning.message.includes('secret-values-unreadable')))
   } finally {
     rmSync(fixture, { recursive: true, force: true })
   }
