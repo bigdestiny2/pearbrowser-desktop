@@ -29,6 +29,8 @@ const applingArtifactCollector = readFileSync(new URL('../scripts/collect-applin
 const applingArtifactCollectorPath = fileURLToPath(new URL('../scripts/collect-appling-artifacts.mjs', import.meta.url))
 const nativeSigningCheck = readFileSync(new URL('../scripts/check-native-signing-credentials.mjs', import.meta.url), 'utf8')
 const nativeSigningCheckPath = fileURLToPath(new URL('../scripts/check-native-signing-credentials.mjs', import.meta.url))
+const nativeSigningSecretPlan = readFileSync(new URL('../scripts/generate-native-signing-secret-plan.mjs', import.meta.url), 'utf8')
+const nativeSigningSecretPlanPath = fileURLToPath(new URL('../scripts/generate-native-signing-secret-plan.mjs', import.meta.url))
 const nativeReleaseAssetCheck = readFileSync(new URL('../scripts/check-native-release-assets.mjs', import.meta.url), 'utf8')
 const nativeReleaseAssetCheckPath = fileURLToPath(new URL('../scripts/check-native-release-assets.mjs', import.meta.url))
 const nativeReleaseAssetResolver = readFileSync(new URL('../scripts/resolve-native-release-asset.mjs', import.meta.url), 'utf8')
@@ -279,6 +281,56 @@ test('native signing credential checker is exposed as an operator script', () =>
   assert.match(nativeSigningCheck, /--github-secrets-file/)
   assert.match(nativeSigningCheck, /PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64/)
   assert.match(nativeSigningCheck, /PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64/)
+})
+
+test('native signing secret plan generator is exposed for credential handoff', () => {
+  assert.equal(pkg.scripts?.['generate:native-signing-secret-plan'], 'node scripts/generate-native-signing-secret-plan.mjs')
+  assert.match(nativeSigningSecretPlan, /Native Signing Secret Setup/)
+  assert.match(nativeSigningSecretPlan, /PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64/)
+  assert.match(nativeSigningSecretPlan, /PEARBROWSER_MACOS_NOTARY_TEAM_ID/)
+  assert.match(nativeSigningSecretPlan, /PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64/)
+  assert.match(nativeSigningSecretPlan, /openssl base64 -A/)
+  assert.match(nativeSigningSecretPlan, /check:native-signing/)
+  assert.match(nativeSigningSecretPlan, /check:public-trust-readiness/)
+
+  const markdown = spawnSync(process.execPath, [
+    nativeSigningSecretPlanPath,
+    '--repo',
+    'example/pearbrowser',
+    '--tag',
+    'v9.9.9',
+    '--source-ref',
+    'abc123'
+  ], {
+    encoding: 'utf8'
+  })
+  assert.equal(markdown.status, 0, markdown.stderr || markdown.stdout)
+  assert.match(markdown.stdout, /# Native Signing Secret Setup/)
+  assert.match(markdown.stdout, /Repository: `example\/pearbrowser`/)
+  assert.match(markdown.stdout, /openssl base64 -A -in DeveloperIDApplication\.p12/)
+  assert.match(markdown.stdout, /gh secret set PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64 --repo example\/pearbrowser/)
+  assert.match(markdown.stdout, /npm run check:native-signing -- --require-public-trust --secret-source github --repo example\/pearbrowser/)
+  assert.match(markdown.stdout, /--source-ref abc123/)
+
+  const json = spawnSync(process.execPath, [
+    nativeSigningSecretPlanPath,
+    '--repo',
+    'example/pearbrowser',
+    '--platform',
+    'macos',
+    '--json'
+  ], {
+    encoding: 'utf8'
+  })
+  assert.equal(json.status, 0, json.stderr || json.stdout)
+  const report = JSON.parse(json.stdout)
+  assert.equal(report.repo, 'example/pearbrowser')
+  assert.equal(report.platform, 'macos')
+  assert.ok(report.requiredSecrets.includes('PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64'))
+  assert.ok(report.requiredSecrets.includes('PEARBROWSER_MACOS_NOTARY_TEAM_ID'))
+  assert.ok(report.optionalSecrets.includes('PEARBROWSER_MACOS_KEYCHAIN_PASSWORD'))
+  assert.ok(!report.requiredSecrets.includes('PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64'))
+  assert.ok(report.verificationCommands.some((command) => command.includes('check:native-signing')))
 })
 
 test('native release asset checker is exposed as an operator script', () => {
