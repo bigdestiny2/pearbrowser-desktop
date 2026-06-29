@@ -271,8 +271,10 @@ npm run check:native-signing -- --require-public-trust --secret-source github --
 
 The generated plan uses `openssl base64 -A` for certificate payload files and
 `gh secret set` command templates for the required macOS and Windows GitHub
-Actions secrets. It deliberately prints names and commands only, not secret
-values.
+Actions secrets. The emitted commands check certificate files with `test -s`
+and env-sourced values with `test -n` before uploading, so an empty local input
+fails before `gh secret set`. It deliberately prints names and commands only,
+not secret values.
 
 Without `--require-public-trust`, the command accepts the packaging-proof path:
 macOS can remain ad-hoc signed, Windows can remain unsigned, and Linux relies on

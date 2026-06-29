@@ -33,6 +33,8 @@ announcement.
   - Generate the public-trust credential handoff before setting GitHub Actions
     secrets:
     `npm run -s generate:native-signing-secret-plan -- --repo bigdestiny2/pearbrowser-desktop --tag v0.5.0 --source-ref <merged-main-commit>`.
+    The generated setup commands should guard against empty certificate files
+    and env values before `gh secret set`.
   - Before public announcement, rerun as
     `npm run check:native-signing -- --require-public-trust --secret-source github --repo bigdestiny2/pearbrowser-desktop`.
   - `cd appling && npm ci && npm run generate && npm run build`

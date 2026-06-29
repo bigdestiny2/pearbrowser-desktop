@@ -349,6 +349,8 @@ test('native signing secret plan generator is exposed for credential handoff', (
   assert.match(nativeSigningSecretPlan, /PEARBROWSER_MACOS_NOTARY_TEAM_ID/)
   assert.match(nativeSigningSecretPlan, /PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64/)
   assert.match(nativeSigningSecretPlan, /openssl base64 -A/)
+  assert.match(nativeSigningSecretPlan, /test -s/)
+  assert.match(nativeSigningSecretPlan, /test -n/)
   assert.match(nativeSigningSecretPlan, /check:native-signing/)
   assert.match(nativeSigningSecretPlan, /check:public-trust-readiness/)
 
@@ -366,7 +368,9 @@ test('native signing secret plan generator is exposed for credential handoff', (
   assert.equal(markdown.status, 0, markdown.stderr || markdown.stdout)
   assert.match(markdown.stdout, /# Native Signing Secret Setup/)
   assert.match(markdown.stdout, /Repository: `example\/pearbrowser`/)
+  assert.match(markdown.stdout, /test -s DeveloperIDApplication\.p12/)
   assert.match(markdown.stdout, /openssl base64 -A -in DeveloperIDApplication\.p12/)
+  assert.match(markdown.stdout, /test -n "\$\{PEARBROWSER_MACOS_CERTIFICATE_PASSWORD:-\}"/)
   assert.match(markdown.stdout, /gh secret set PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64 --repo example\/pearbrowser/)
   assert.match(markdown.stdout, /npm run check:native-signing -- --require-public-trust --secret-source github --repo example\/pearbrowser/)
   assert.match(markdown.stdout, /--source-ref abc123/)
@@ -389,6 +393,8 @@ test('native signing secret plan generator is exposed for credential handoff', (
   assert.ok(report.requiredSecrets.includes('PEARBROWSER_MACOS_NOTARY_TEAM_ID'))
   assert.ok(report.optionalSecrets.includes('PEARBROWSER_MACOS_KEYCHAIN_PASSWORD'))
   assert.ok(!report.requiredSecrets.includes('PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64'))
+  assert.ok(report.secrets.some((secret) => secret.name === 'PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64' && secret.command.includes('test -s DeveloperIDApplication.p12')))
+  assert.ok(report.secrets.some((secret) => secret.name === 'PEARBROWSER_MACOS_CERTIFICATE_PASSWORD' && secret.command.includes('test -n "${PEARBROWSER_MACOS_CERTIFICATE_PASSWORD:-}"')))
   assert.ok(report.verificationCommands.some((command) => command.includes('check:native-signing')))
 })
 
