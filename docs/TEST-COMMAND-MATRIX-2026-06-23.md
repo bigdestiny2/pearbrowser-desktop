@@ -17,10 +17,10 @@ Current local status from this loop:
 
 - `git diff --check` passed.
 - `npm audit --audit-level=high` passed with `found 0 vulnerabilities`.
-- `npm test` passed: 470 tests, 0 failed.
+- `npm test` passed: 471 tests, 0 failed.
 
 This supersedes older local counts in nearby docs for this checkout. The
-current release-readiness docs and latest rerun agree on 470/470.
+current release-readiness docs and latest rerun agree on 471/471.
 
 ## Fast Local Gates
 
@@ -28,7 +28,7 @@ current release-readiness docs and latest rerun agree on 470/470.
 | --- | --- | --- |
 | `git diff --check` | Whitespace/conflict-marker sanity | Passed |
 | `npm audit --audit-level=high` | High-severity dependency audit for desktop package | Passed, 0 vulnerabilities |
-| `npm test` | Full desktop Node test suite: `node --test 'test/*.test.js'` | Passed, 470/470 |
+| `npm test` | Full desktop Node test suite: `node --test 'test/*.test.js'` | Passed, 471/471 |
 | `npm run check:release-evidence` | Operator evidence-log completeness; fails until required rows are `PASS` or documented `DEFER` | Expected fail until manual gates are filled |
 
 The root package is the only package with test scripts relevant to this desktop
@@ -142,6 +142,10 @@ The release scripts are operational gates, not ordinary tests:
   before CI dispatch to confirm the required GitHub Actions secret names exist;
   GitHub does not expose secret values, so the workflow still validates payload
   import/signing/notarization.
+- `npm run -s generate:native-signing-secret-plan -- --repo bigdestiny2/pearbrowser-desktop --tag v0.5.0 --source-ref <merged-main-commit>`
+  emits the public-trust GitHub Actions secret inventory, `gh secret set`
+  command templates, and the follow-up signing/readiness checks for the
+  credential-holding operator.
 - `cd appling && npm ci && npm run generate && npm run build` builds the native
   wrapper for the current platform.
 - `npm run package:appling -- --tag v0.5.0` collects native artifacts,

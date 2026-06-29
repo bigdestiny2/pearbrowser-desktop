@@ -58,6 +58,7 @@ npm run package:appling -- --tag v0.5.0
 npm run check:native-release-assets -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
 npm run resolve:native-release -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
 npm run -s generate:native-install-guide -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
+npm run -s generate:native-signing-secret-plan -- --repo bigdestiny2/pearbrowser-desktop --tag v0.5.0 --source-ref <merged-main-commit>
 npm run check:native-signing -- --require-public-trust --secret-source github --repo bigdestiny2/pearbrowser-desktop
 npm run check:public-trust-readiness -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --source-ref <merged-main-commit> --signing-secret-source github
 ```
@@ -244,12 +245,20 @@ Public trust signing is still a release-credential gate:
   AppImage path.
 
 Before spending a native release run on public distribution, validate the
-credential payload set:
+credential payload set. Generate the operator handoff first so the GitHub
+secret names, file/env-value command templates, and follow-up checks stay in
+sync with the workflow:
 
 ```sh
+npm run -s generate:native-signing-secret-plan -- --repo bigdestiny2/pearbrowser-desktop --tag v0.5.0 --source-ref <merged-main-commit>
 npm run check:native-signing -- --require-public-trust
 npm run check:native-signing -- --require-public-trust --secret-source github --repo bigdestiny2/pearbrowser-desktop
 ```
+
+The generated plan uses `openssl base64 -A` for certificate payload files and
+`gh secret set` command templates for the required macOS and Windows GitHub
+Actions secrets. It deliberately prints names and commands only, not secret
+values.
 
 Without `--require-public-trust`, the command accepts the packaging-proof path:
 macOS can remain ad-hoc signed, Windows can remain unsigned, and Linux relies on
