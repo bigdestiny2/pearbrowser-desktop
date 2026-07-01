@@ -134,7 +134,25 @@ html, body, #app {
 }
 .tab:hover { background: var(--pear-color-surface-soft); color: var(--pear-color-text); }
 .tab.active { background: var(--pear-color-surface-soft); color: var(--pear-color-text); border-color: var(--pear-color-line); }
-.tab-icon { font-size: 13px; line-height: 1; }
+.tab-icon {
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 16px;
+  color: currentColor;
+}
+.tab-icon-svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+  stroke: currentColor;
+  stroke-width: 1.45;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
 
 .panel { flex: 1; overflow: auto; padding: 24px; }
 .panel-browse { padding: 0; display: flex; flex-direction: column; overflow: hidden; }
@@ -214,8 +232,14 @@ p { color: var(--pear-color-muted); margin-bottom: 12px; }
 }
 .urlbar .nav:hover:not(:disabled) { background: var(--pear-color-surface-soft); }
 .urlbar .nav:disabled { opacity: 0.3; cursor: default; }
-.urlbar .nav.go { background: linear-gradient(180deg, var(--pear-color-accent), var(--pear-color-accent-hover)); border-color: var(--pear-color-accent-hover); color: #fff; font-weight: 600; padding: 5px 16px; }
-.urlbar .nav.go:hover:not(:disabled) { background: linear-gradient(180deg, var(--pear-color-success), var(--pear-color-accent)); }
+.urlbar .nav.go {
+  background: var(--pear-color-surface);
+  border-color: var(--pear-color-text);
+  color: var(--pear-color-text);
+  font-weight: 600;
+  padding: 5px 16px;
+}
+.urlbar .nav.go:hover:not(:disabled) { background: var(--pear-color-surface-soft); border-color: var(--pear-color-text); }
 
 .browse-status {
   padding: 4px 14px;
@@ -502,12 +526,12 @@ p { color: var(--pear-color-muted); margin-bottom: 12px; }
 .btn:hover:not(:disabled) { background: var(--pear-color-line); border-color: var(--pear-color-line-strong); }
 .btn:disabled { opacity: 0.55; cursor: default; }
 .btn.primary {
-  background: linear-gradient(180deg, var(--pear-color-accent), var(--pear-color-accent-hover));
-  border-color: var(--pear-color-accent-hover);
-  color: #fff;
+  background: var(--pear-color-surface);
+  border-color: var(--pear-color-text);
+  color: var(--pear-color-text);
   font-weight: 600;
 }
-.btn.primary:hover:not(:disabled) { background: linear-gradient(180deg, var(--pear-color-success), var(--pear-color-accent)); }
+.btn.primary:hover:not(:disabled) { background: var(--pear-color-surface-soft); border-color: var(--pear-color-text); }
 .btn.primary:disabled {
   background: var(--pear-color-surface-soft);
   border-color: var(--pear-color-line);

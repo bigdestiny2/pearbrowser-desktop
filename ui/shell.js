@@ -107,11 +107,75 @@ const FEATURED_APPS = [
 ]
 
 const TAB_META = {
-  browse: { label: 'Browse', icon: '🌐' },
-  apps: { label: 'Apps', icon: '📦' },
-  sites: { label: 'P2P Sites', icon: '✒️' },
-  library: { label: 'Library', icon: '🔖' },
-  settings: { label: 'Settings', icon: '⚙' }
+  browse: { label: 'Browse' },
+  apps: { label: 'Apps' },
+  sites: { label: 'P2P Sites' },
+  library: { label: 'Library' },
+  settings: { label: 'Settings' }
+}
+
+function TabIcon ({ id }) {
+  const common = {
+    className: 'tab-icon-svg',
+    viewBox: '0 0 18 18',
+    fill: 'none',
+    xmlns: 'http://www.w3.org/2000/svg',
+    'aria-hidden': 'true',
+    focusable: 'false'
+  }
+
+  if (id === 'apps') {
+    return html`
+      <svg ...${common}>
+        <rect x="3.25" y="3.25" width="4.1" height="4.1" rx="1.1" />
+        <rect x="10.65" y="3.25" width="4.1" height="4.1" rx="1.1" />
+        <rect x="3.25" y="10.65" width="4.1" height="4.1" rx="1.1" />
+        <rect x="10.65" y="10.65" width="4.1" height="4.1" rx="1.1" />
+      </svg>
+    `
+  }
+
+  if (id === 'sites') {
+    return html`
+      <svg ...${common}>
+        <path d="M6.2 6.1h5.6M7.2 6.9l3.6 4.2M10.8 6.9l-3.6 4.2" />
+        <circle cx="5" cy="5.6" r="2.05" />
+        <circle cx="13" cy="5.6" r="2.05" />
+        <circle cx="9" cy="13" r="2.05" />
+      </svg>
+    `
+  }
+
+  if (id === 'library') {
+    return html`
+      <svg ...${common}>
+        <path d="M5.2 3.4h7.6c.8 0 1.45.65 1.45 1.45v9.75l-5.25-2.55-5.25 2.55V4.85c0-.8.65-1.45 1.45-1.45Z" />
+        <path d="M6.1 6.1h5.8" />
+      </svg>
+    `
+  }
+
+  if (id === 'settings') {
+    return html`
+      <svg ...${common}>
+        <path d="M3.2 5.2h3.55M10.35 5.2h4.45" />
+        <path d="M3.2 9h7.1M13.9 9h.9" />
+        <path d="M3.2 12.8h1.55M8.35 12.8h6.45" />
+        <circle cx="8.55" cy="5.2" r="1.55" />
+        <circle cx="12.1" cy="9" r="1.55" />
+        <circle cx="6.55" cy="12.8" r="1.55" />
+      </svg>
+    `
+  }
+
+  return html`
+    <svg ...${common}>
+      <rect x="3" y="4" width="12" height="10" rx="2" />
+      <path d="M3.2 7.05h11.6" />
+      <path d="M6.05 10.35h3.9" />
+      <path d="M11.2 10.35h.85" />
+    </svg>
+  `
 }
 
 // Homepage drive — published from PearBrowser's own block editor
@@ -119,7 +183,7 @@ const TAB_META = {
 // and `efd7b0c6c38d…` keys have been unseeded; this is the live one.
 // To update: open the same site in the desktop's Sites editor and
 // republish — block-source lives at /.blocks.json inside the drive.
-const DEFAULT_URL = 'hyper://1868916a7a282ff0f211b11b536e9642828c32d3a817a254e1ef7e602709e25d/'
+const DEFAULT_URL = 'hyper://03f0060a35451cfb6b68ad1dda1b8474ebb43fd9100071ccf7d67679a83ebb4f/'
 
 // peerit — "the front page of the P2P internet" (a peer-to-peer Reddit). Opens
 // beside the PearBrowser landing page on launch and is pinned to the top of
@@ -5090,7 +5154,7 @@ export function App ({ rpc, C, storagePath }) {
         <div className="tabs">
           ${Object.entries(TAB_META).map(([id, m]) => html`
             <button className=${'tab' + (tab === id ? ' active' : '')} onClick=${() => setTab(id)} key=${id}>
-              <span className="tab-icon">${m.icon}</span>
+              <span className="tab-icon"><${TabIcon} id=${id} /></span>
               <span className="tab-label">${m.label}</span>
             </button>
           `)}

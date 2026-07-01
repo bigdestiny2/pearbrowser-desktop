@@ -117,16 +117,17 @@
 
 .pear-ui .pear-button-primary,
 .pear-button-primary {
-  background: var(--pear-color-accent);
-  border-color: var(--pear-color-accent);
-  color: #ffffff;
+  background: var(--pear-color-surface);
+  border-color: var(--pear-color-text);
+  color: var(--pear-color-text);
   font-weight: var(--pear-weight-semibold);
 }
 
 .pear-ui .pear-button-primary:hover,
 .pear-button-primary:hover {
-  background: var(--pear-color-accent-hover);
-  color: #ffffff;
+  background: var(--pear-color-surface-soft);
+  border-color: var(--pear-color-text);
+  color: var(--pear-color-text);
 }
 
 .pear-ui .pear-badge,
