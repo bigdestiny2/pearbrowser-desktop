@@ -52,9 +52,9 @@ announcement.
   - Expected: `v0.5.0` release gets macOS `.app.zip`, Windows `.msix`, Linux
     `.AppImage`, per-asset `.sha256`, `SHA256SUMS-*`, and `manifest-*` files.
   - Verify attachments after upload:
-    `npm run check:native-release-assets -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop`.
+    `npm run check:native-release-assets -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --require-backfill-formats`.
   - For public-trust runs, require published release assets and macOS DMGs:
-    `npm run check:native-release-assets -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --require-published --require-public-trust`.
+    `npm run check:native-release-assets -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --require-backfill-formats --require-published --require-public-trust`.
   - Verify the recommended package downloads against their sidecars:
     `npm run verify:native-downloads -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --all`.
   - Generate the public-trust operator handoff report:
@@ -71,6 +71,11 @@ announcement.
   - Generate Homebrew/WinGet drafts after public-trust assets are attached:
     `npm run generate:package-manager-manifests -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop`.
     Use `--trust-mode package-proof` only for rehearsal output.
+  - Final workflow run checklist: dispatch
+    `gh workflow run desktop-native-release.yml --repo bigdestiny2/pearbrowser-desktop --ref main -f tag=v0.5.0 -f source_ref=<merged-main-commit> -f release_mode=package-proof`,
+    wait for all four platform jobs plus the attach job to pass, rerun the
+    backfill-format asset check and `verify:native-downloads -- --all`, then
+    record the run URL and release asset list.
   - Record the Actions run URL and resulting release asset list in the evidence
     log.
 - [ ] Generate the release evidence handoff before filling manual rows:

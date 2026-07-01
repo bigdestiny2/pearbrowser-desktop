@@ -1,5 +1,38 @@
 # Changelog
 
+## v0.5.1 — 2026-07-01
+
+Patch release for the native-installer and Pear UI Light ship.
+
+### Added
+
+- Pear UI Light is now applied to the live desktop shell, not only the preview:
+  the runtime loads the shared token CSS, uses the light Pear runtime window
+  background, and restyles top-level chrome, tabs, URL bar, app cards, settings,
+  consent modals, status chips, and release preview surfaces around the shared
+  canvas/surface/line/text/accent tokens.
+- Added a static runtime shell preview under `previews/` for quick CSS QA while
+  keeping preview assets out of Pear production staging.
+
+### Changed
+
+- Desktop release metadata is bumped to `0.5.1`, including the native appling
+  CMake version and Linux AppStream release metadata so generated installer
+  filenames and package manifests line up with the GitHub tag.
+- The stable Pear production key was released at length `45701` and
+  fresh-peer verified from the network after HiveRelay pin refresh.
+- Native release operations continue to default HiveRelay packages to npm
+  `latest`, with lockfile and CI guards checking the current `0.20.2` line.
+
+### Fixed
+
+- Shared-store sync groups now open idempotently, reject conflicting invite keys,
+  and use per-app namespaced stores so closing an app sync group cannot close the
+  root Corestore used by the rest of PearBrowser.
+- Relay HTTP fetch/post paths now support HTTPS relays, close timed-out
+  requests, set JSON POST content length, and bound relay response sizes.
+- Pear staging now excludes local UI preview files from the production drive.
+
 ## v0.5.0 — 2026-06-23
 
 The peer-to-peer platform release. v0.4.x made PearBrowser a browser and

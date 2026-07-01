@@ -368,6 +368,19 @@ jobs:
             exit 1
           fi
 
+          for requirement in \
+            "macos:PearBrowser-*-macos-*.app.zip" \
+            "windows:PearBrowser-*-windows-*.msix" \
+            "linux:PearBrowser-*-linux-*.AppImage"; do
+            platform="${requirement%%:*}"
+            pattern="${requirement#*:}"
+            matches=(release-assets/${pattern})
+            if (( ${#matches[@]} == 0 )); then
+              echo "::error::Expected at least one ${platform} backfill artifact matching ${pattern}"
+              exit 1
+            fi
+          done
+
           for platform in macos windows linux; do
             sums=(release-assets/SHA256SUMS-${platform}-*.txt)
             manifests=(release-assets/manifest-${platform}-*.json)
@@ -407,7 +420,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          args=(--tag "$RELEASE_TAG" --repo "$GH_REPO")
+          args=(--tag "$RELEASE_TAG" --repo "$GH_REPO" --require-backfill-formats)
           if [[ "$RELEASE_MODE" == "public-trust" ]]; then
             args+=(--require-published --require-public-trust)
           fi

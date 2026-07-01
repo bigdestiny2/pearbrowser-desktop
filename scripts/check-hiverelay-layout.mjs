@@ -3,10 +3,9 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-// PearBrowser desktop installs HiveRelay from the npm registry. A standalone
-// clone resolves these from npm; an optional sibling ../../00-core/hiverelay
-// checkout is dev-only. With registry deps the guard only WARNS (never fails a
-// standalone install) when the optional local packages are absent/mismatched.
+// PearBrowser desktop defaults HiveRelay packages to npm latest for normal
+// source checkouts. A sibling ../../00-core/hiverelay checkout is only for
+// explicit file: based co-development.
 const expected = [
   ['p2p-hiverelay', '0.20.2', '../../00-core/hiverelay/packages/core/package.json'],
   ['p2p-hiverelay-client', '0.20.2', '../../00-core/hiverelay/packages/client/package.json'],
@@ -14,12 +13,70 @@ const expected = [
 ]
 
 const rootPackage = JSON.parse(readFileSync(resolve(process.cwd(), 'package.json'), 'utf8'))
-// Any non-`file:` spec (`^0.20.2`, `latest`, an exact version, …) means a
-// standalone install pulls HiveRelay from the registry and the sibling is optional.
-const usesNpmRegistryDefaults = expected.every(([name]) => {
+const specs = expected.map(([name]) => {
   const spec = rootPackage.dependencies?.[name]
-  return typeof spec === 'string' && spec.length > 0 && !spec.startsWith('file:')
+  return { name, spec, isFile: typeof spec === 'string' && spec.startsWith('file:') }
 })
+
+function usesNpmLatestDefaults () {
+  return specs.every(({ spec }) => spec === 'latest')
+}
+
+const fileSpecCount = specs.filter(({ isFile }) => isFile).length
+const dependencyDrift = []
+for (const { name, spec, isFile } of specs) {
+  if (fileSpecCount > 0 && isFile) continue
+  if (fileSpecCount === expected.length && isFile) continue
+  if (spec === 'latest') continue
+  dependencyDrift.push(`${name} expected latest, found ${spec || '(missing)'}`)
+}
+
+if (fileSpecCount > 0 && fileSpecCount !== expected.length) {
+  dependencyDrift.push('HiveRelay packages must use either all npm registry specs or all file: workspace specs')
+}
+
+if (dependencyDrift.length) {
+  console.error('PearBrowser desktop expects HiveRelay npm packages to default to npm latest.')
+  console.error('')
+  for (const msg of dependencyDrift) console.error(`  - ${msg}`)
+  console.error('')
+  console.error('Use latest for standalone installs. Use file: specs only when intentionally co-developing all three HiveRelay packages from ../../00-core/hiverelay.')
+  process.exit(1)
+}
+
+const usesNpmRegistryDefaults = usesNpmLatestDefaults()
+
+if (usesNpmRegistryDefaults) {
+  // This guard is intentionally local and side-effect-free. CI can separately
+  // verify npm latest resolves to HiveRelay 0.20.2 before app lockfile refresh.
+  const lockPath = resolve(process.cwd(), 'package-lock.json')
+  if (existsSync(lockPath)) {
+    const lock = JSON.parse(readFileSync(lockPath, 'utf8'))
+    const lockDrift = []
+    for (const [name, version] of expected) {
+      const entry = lock.packages?.[`node_modules/${name}`]
+      if (!entry) {
+        lockDrift.push(`${name} is missing from package-lock.json`)
+        continue
+      }
+      if (entry.version !== version) {
+        lockDrift.push(`${name} expected lockfile version ${version}, found ${entry.version || '(missing)'}`)
+      }
+      if (!String(entry.resolved || '').startsWith(`https://registry.npmjs.org/${name}/-/${name}-${version}.tgz`)) {
+        lockDrift.push(`${name}@${entry.version || version} is not locked to the npm registry tarball`)
+      }
+    }
+
+    if (lockDrift.length) {
+      console.error('PearBrowser desktop release installs must lock HiveRelay to npm 0.20.2 packages.')
+      console.error('')
+      for (const msg of lockDrift) console.error(`  - ${msg}`)
+      process.exit(1)
+    }
+  }
+
+  process.exit(0)
+}
 
 const missing = []
 const mismatched = []
@@ -42,23 +99,20 @@ for (const [name, version, rel] of expected) {
 }
 
 if (missing.length || mismatched.length) {
-  const write = usesNpmRegistryDefaults ? console.warn : console.error
-  write('PearBrowser desktop installs HiveRelay packages from the npm registry.')
+  const write = console.error
+  write('PearBrowser desktop is using file: HiveRelay dependencies, so the local workspace must match the release line.')
   write('')
-  write('Expected source-install shape:')
-  write('  package.json -> ^0.20.2 (npm registry)')
-  write('  ../../00-core/hiverelay/ -> optional sibling checkout for HiveRelay co-development')
+  write('Expected local workspace shape:')
+  write('  package.json -> file: specs for all HiveRelay packages')
+  write('  ../../00-core/hiverelay/ -> matching HiveRelay 0.20.2 package checkout')
   write('')
   if (missing.length) {
-    write('Missing optional local packages:')
+    write('Missing local packages:')
     for (const rel of missing) write(`  - ${rel}`)
   }
   if (mismatched.length) {
-    write('Mismatched optional local packages:')
+    write('Mismatched local packages:')
     for (const msg of mismatched) write(`  - ${msg}`)
   }
-  write('')
-  write('Release gate: confirm the npm registry resolves HiveRelay to 0.20.2 (or newer 0.20.x) before shipping standalone builds.')
-  if (usesNpmRegistryDefaults) process.exit(0)
   process.exit(1)
 }

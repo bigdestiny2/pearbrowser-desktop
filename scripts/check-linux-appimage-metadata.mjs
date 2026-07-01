@@ -247,6 +247,7 @@ function findPaths (root, predicate) {
     for (const entry of entries) {
       const path = join(current, entry.name)
       if (entry.isDirectory()) {
+        if (shouldSkipSearchDir(entry.name)) continue
         if (predicate(path)) matches.push(path)
         stack.push(path)
       } else if (predicate(path)) {
@@ -255,6 +256,10 @@ function findPaths (root, predicate) {
     }
   }
   return matches.sort((a, b) => a.length - b.length || basename(a).localeCompare(basename(b)))
+}
+
+function shouldSkipSearchDir (name) {
+  return name === '_deps' || name === 'node_modules' || name === '.git'
 }
 
 function splitCategories (value) {

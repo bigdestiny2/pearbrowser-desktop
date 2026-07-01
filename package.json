@@ -1,6 +1,6 @@
 {
   "name": "pearbrowser-desktop",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "P2P browser + decentralized app store + site builder, desktop Pear fork of PearBrowser (jj10133/Vinjari family)",
   "license": "Apache-2.0 AND MIT",
   "type": "module",
@@ -47,6 +47,7 @@
         "/appling",
         "/docs",
         "/examples",
+        "/previews",
         "/scripts",
         "/test",
         "/pearbrowser-storage"
@@ -59,7 +60,7 @@
       "ws://localhost"
     ],
     "gui": {
-      "backgroundColor": "#0b0e14",
+      "backgroundColor": "#f6f8f7",
       "height": 800,
       "width": 1280
     }
@@ -73,6 +74,7 @@
     "bare-events": "^2.0.0",
     "bare-fs": "^4.0.0",
     "bare-http1": "^4.5.5",
+    "bare-https": "^2.1.3",
     "bare-path": "^3.0.0",
     "bare-ws": "^2.1.0",
     "corestore": "^7.9.2",
@@ -83,9 +85,9 @@
     "hypercore-crypto": "^3.5.0",
     "hyperdrive": "^13.3.2",
     "hyperswarm": "^4.17.0",
-    "p2p-hiverelay": "^0.20.2",
-    "p2p-hiverelay-client": "^0.20.2",
-    "p2p-hiverelay-verifier": "^0.20.2",
+    "p2p-hiverelay": "latest",
+    "p2p-hiverelay-client": "latest",
+    "p2p-hiverelay-verifier": "latest",
     "pear-bridge": "1.2.5",
     "pear-electron": "1.7.28",
     "pear-run": "1.0.8",

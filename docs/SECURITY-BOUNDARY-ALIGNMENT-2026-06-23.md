@@ -58,7 +58,7 @@ signing/store validation, and eventual HiveRelay dependency publication.
   smoke plan generator, package-manager manifest draft generator,
   public-trust readiness aggregator, native public-trust workflow mode,
   macOS public-trust DMG gate, Linux AppImage metadata checker,
-  package-manager license metadata, and vendored HiveRelay source-install
+  package-manager license metadata, and HiveRelay registry source-install
   coverage landed.
 
 ## Known Security Residuals

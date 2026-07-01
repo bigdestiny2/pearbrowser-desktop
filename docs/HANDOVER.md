@@ -172,7 +172,7 @@ breaking the feature with no error. The drift guard fails CI if they disagree.
 ```bash
 npm start          # pear run --dev .   (dev shell)
 npm test           # node --test 'test/*.test.js'   → 469 passing on the release PR branch
-node scripts/check-hiverelay-layout.mjs  # confirms HiveRelay installs from npm (^0.20.2); sibling checkout optional
+node scripts/check-hiverelay-layout.mjs  # confirms HiveRelay installs from npm (^0.20.2 / lockfile 0.20.2); sibling checkout optional unless using file: deps
 gh pr checks 4 --repo bigdestiny2/pearbrowser-desktop  # GitHub Actions desktop CI, if enabled for the PR branch
 node scripts/browser-state-sync-smoke.js   # encrypted two-device bookmark sync (no GUI)
 node scripts/autobee-catalog-smoke.js      # collaborative catalog convergence

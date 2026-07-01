@@ -17,6 +17,7 @@ import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
+const packageLock = JSON.parse(readFileSync(new URL('../package-lock.json', import.meta.url), 'utf8'))
 const pearConfig = JSON.parse(readFileSync(new URL('../pear.json', import.meta.url), 'utf8'))
 const rootLicense = readFileSync(new URL('../LICENSE', import.meta.url), 'utf8')
 const applingPkg = JSON.parse(readFileSync(new URL('../appling/package.json', import.meta.url), 'utf8'))
@@ -63,9 +64,14 @@ const releaseStorySmoke = readFileSync(new URL('../scripts/release-rpc-story-smo
 const liveCatalogVerifier = readFileSync(new URL('../scripts/verify-live-catalog.js', import.meta.url), 'utf8')
 const hiveRelayLayout = readFileSync(new URL('../scripts/check-hiverelay-layout.mjs', import.meta.url), 'utf8')
 const hiveRelayCheckPath = fileURLToPath(new URL('../scripts/check-hiverelay-layout.mjs', import.meta.url))
+const relayClient = readFileSync(new URL('../backend/relay-client.js', import.meta.url), 'utf8')
 const verifyPin = readFileSync(new URL('../scripts/verify-pin.js', import.meta.url), 'utf8')
 const pinAppOnHiveRelay = readFileSync(new URL('../scripts/pin-app-on-hiverelay.js', import.meta.url), 'utf8')
 const npmHiveRelayPackages = ['p2p-hiverelay', 'p2p-hiverelay-client', 'p2p-hiverelay-verifier']
+const releaseVersion = pkg.version
+const releaseTag = `v${releaseVersion}`
+const releaseVersionPattern = releaseVersion.replaceAll('.', '\\.')
+const releaseTagPattern = releaseTag.replaceAll('.', '\\.')
 
 function writePackageManagerReleaseFixture (fixture, names) {
   const shaByName = new Map()
@@ -277,23 +283,26 @@ test('foreign-key app pin refuses empty checkouts before broadcasting seed', () 
   )
 })
 
-test('HiveRelay source install resolves npm 0.20.x packages', () => {
+test('HiveRelay source install defaults to npm latest packages locked at 0.20.2', () => {
   for (const name of npmHiveRelayPackages) {
-    assert.equal(pkg.dependencies?.[name], '^0.20.2')
+    assert.equal(pkg.dependencies?.[name], 'latest')
+    const entry = packageLock.packages?.[`node_modules/${name}`]
+    assert.equal(entry?.version, '0.20.2')
+    assert.match(entry?.resolved || '', new RegExp(`registry\\.npmjs\\.org/${name}/-/${name}-0\\.20\\.2\\.tgz`))
   }
 
-  assert.match(hiveRelayLayout, /usesNpmRegistryDefaults/)
-  assert.match(hiveRelayLayout, /!spec\.startsWith\('file:'\)/)
-  assert.match(hiveRelayLayout, /if \(usesNpmRegistryDefaults\) process\.exit\(0\)/)
-  assert.match(hiveRelayLayout, /package\.json -> \^0\.20\.2 \(npm registry\)/)
-  assert.match(hiveRelayLayout, /confirm the npm registry resolves HiveRelay to 0\.20\.2/)
+  assert.match(hiveRelayLayout, /usesNpmLatestDefaults/)
+  assert.match(hiveRelayLayout, /verify npm latest resolves to HiveRelay 0\.20\.2/)
+  assert.match(hiveRelayLayout, /entry\.version !== version/)
+  assert.match(hiveRelayLayout, /Use latest for standalone installs/)
+  assert.match(hiveRelayLayout, /process\.exit\(0\)/)
 })
 
-test('HiveRelay registry guard warns (not fails) for standalone source installs', () => {
+test('HiveRelay registry guard is quiet for standalone source installs', () => {
   const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'pear-hiverelay-npm-')))
   try {
     const dependencies = {}
-    for (const name of npmHiveRelayPackages) dependencies[name] = '^0.20.2'
+    for (const name of npmHiveRelayPackages) dependencies[name] = 'latest'
     writeFileSync(join(fixture, 'package.json'), JSON.stringify({ dependencies }, null, 2))
 
     const result = spawnSync(process.execPath, [hiveRelayCheckPath], {
@@ -301,20 +310,73 @@ test('HiveRelay registry guard warns (not fails) for standalone source installs'
       encoding: 'utf8'
     })
 
-    // Registry deps + no sibling checkout -> warn and exit 0, never fail.
     assert.equal(result.status, 0, result.stderr || result.stdout)
-    assert.match(`${result.stdout}${result.stderr}`, /Missing optional local packages/)
+    assert.equal(result.stdout, '')
+    assert.equal(result.stderr, '')
   } finally {
     rmSync(fixture, { recursive: true, force: true })
   }
 })
 
-test('desktop CI verifies HiveRelay installs from npm without sibling checkout', () => {
+test('HiveRelay registry guard fails when the npm release line drifts', () => {
+  const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'pear-hiverelay-drift-')))
+  try {
+    const dependencies = {}
+    for (const name of npmHiveRelayPackages) dependencies[name] = 'latest'
+    dependencies['p2p-hiverelay-client'] = '^0.21.0'
+    writeFileSync(join(fixture, 'package.json'), JSON.stringify({ dependencies }, null, 2))
+
+    const result = spawnSync(process.execPath, [hiveRelayCheckPath], {
+      cwd: fixture,
+      encoding: 'utf8'
+    })
+
+    assert.equal(result.status, 1)
+    assert.match(result.stderr, /p2p-hiverelay-client expected latest, found \^0\.21\.0/)
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
+})
+
+test('HiveRelay local workspace guard still fails for missing file dependencies', () => {
+  const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'pear-hiverelay-local-')))
+  try {
+    const dependencies = {}
+    for (const name of npmHiveRelayPackages) dependencies[name] = `file:../../00-core/hiverelay/packages/${name}`
+    writeFileSync(join(fixture, 'package.json'), JSON.stringify({ dependencies }, null, 2))
+
+    const result = spawnSync(process.execPath, [hiveRelayCheckPath], {
+      cwd: fixture,
+      encoding: 'utf8'
+    })
+
+    assert.equal(result.status, 1)
+    assert.match(result.stderr, /file: HiveRelay dependencies/)
+    assert.match(result.stderr, /Missing local packages/)
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
+})
+
+test('desktop CI checks out and guards the HiveRelay 0.20.2 release contract', () => {
+  assert.match(desktopCiWorkflow, /Checkout HiveRelay release contract/)
+  assert.match(desktopCiWorkflow, /ref: v0\.20\.2/)
+  assert.match(desktopCiWorkflow, /Guard HiveRelay 0\.20\.2 workspace layout/)
+  assert.match(desktopCiWorkflow, /pear-ecosystem\/00-core\/hiverelay\/packages\/core\/package\.json/)
   assert.match(desktopCiWorkflow, /published to npm/)
   assert.match(desktopCiWorkflow, /npm ci/)
-  assert.doesNotMatch(desktopCiWorkflow, /P2P-Hiverelay/)
   assert.doesNotMatch(desktopCiWorkflow, /Checkout HiveRelay workspace packages/)
   assert.doesNotMatch(desktopCiWorkflow, /vendor\/hiverelay/)
+})
+
+test('RelayClient uses scheme-aware transport for public HTTPS gateways', () => {
+  assert.match(relayClient, /const https = require\('bare-https'\)/)
+  assert.match(relayClient, /function relayTransportForUrl/)
+  assert.match(relayClient, /parsed\.protocol === 'https:' \? 443 : 80/)
+  assert.match(relayClient, /transport\.get\(relayRequestOptions\(parsed\)/)
+  assert.match(relayClient, /transport\.request\(\{/)
+  assert.match(relayClient, /DEFAULT_MAX_RESPONSE_BYTES = 16 \* 1024 \* 1024/)
+  assert.match(relayClient, /DEFAULT_MAX_CONTROL_RESPONSE_BYTES = 1024 \* 1024/)
 })
 
 test('release evidence checker is exposed as an operator script', () => {
@@ -395,7 +457,9 @@ test('native release asset checker is exposed as an operator script', () => {
   assert.match(nativeReleaseAssetCheck, /missing SHA-256 sidecar/)
   assert.match(nativeReleaseAssetCheck, /--require-published/)
   assert.match(nativeReleaseAssetCheck, /--require-public-trust/)
+  assert.match(nativeReleaseAssetCheck, /--require-backfill-formats/)
   assert.match(nativeReleaseAssetCheck, /missing public-trust macOS DMG/)
+  assert.match(nativeReleaseAssetCheck, /missing required v0\.5\.0 backfill/)
 })
 
 test('native release asset resolver is exposed for platform download guidance', () => {
@@ -434,7 +498,7 @@ test('native install snippet generator is exposed for release notes', () => {
   assert.match(nativeInstallSnippet, /--format/)
   assert.match(nativeInstallSnippet, /Install Native Packages/)
   assert.match(nativeInstallSnippet, /Trust Note/)
-  assert.match(nativeInstallGuide, /releases\/download\/v0\.5\.0\/PearBrowser-0\.5\.0-macos-arm64\.app\.zip/)
+  assert.match(nativeInstallGuide, new RegExp(`releases/download/${releaseTagPattern}/PearBrowser-${releaseVersionPattern}-macos-arm64\\.app\\.zip`))
   assert.match(nativeInstallGuide, /generate:native-install-guide/)
 })
 
@@ -476,6 +540,7 @@ test('public-trust readiness checker is exposed as the announcement gate', () =>
   assert.match(publicTrustReadiness, /check-release-evidence\.mjs/)
   assert.match(publicTrustReadiness, /--require-public-trust/)
   assert.match(publicTrustReadiness, /--require-published/)
+  assert.match(publicTrustReadiness, /--require-backfill-formats/)
   assert.match(publicTrustReadiness, /--source-ref/)
   assert.match(publicTrustReadiness, /--signing-secret-source/)
   assert.match(publicTrustReadiness, /--dry-run/)
@@ -635,10 +700,12 @@ test('native release workflow builds and attaches appling artifacts for every de
   assert.match(nativeReleaseWorkflow, /gh release view "\$RELEASE_TAG"/)
   assert.match(nativeReleaseWorkflow, /SHA256SUMS-\$\{platform\}-\*\.txt/)
   assert.match(nativeReleaseWorkflow, /Expected at least one SHA256SUMS file/)
+  assert.match(nativeReleaseWorkflow, /Expected at least one \$\{platform\} backfill artifact matching \$\{pattern\}/)
   assert.match(nativeReleaseWorkflow, /Missing SHA-256 sidecar/)
   assert.match(nativeReleaseWorkflow, /gh release upload "\$RELEASE_TAG" "\$\{assets\[@\]\}"/)
   assert.match(nativeReleaseWorkflow, /Checkout release verifier/)
   assert.match(nativeReleaseWorkflow, /check-native-release-assets\.mjs/)
+  assert.match(nativeReleaseWorkflow, /--require-backfill-formats/)
   assert.match(nativeReleaseWorkflow, /Verify public-trust release downloads/)
   assert.match(nativeReleaseWorkflow, /verify-native-downloads\.mjs/)
   assert.match(nativeReleaseWorkflow, /--require-published/)
@@ -796,7 +863,7 @@ test('appling artifact collector emits normalized assets and checksum manifests'
     execFileSync(process.execPath, [
       applingArtifactCollectorPath,
       '--tag',
-      'v0.5.0',
+      releaseTag,
       '--platform',
       'windows',
       '--arch',
@@ -805,27 +872,27 @@ test('appling artifact collector emits normalized assets and checksum manifests'
       join(fixture, 'appling', 'build')
     ], { cwd: fixture, encoding: 'utf8' })
 
-    const outDir = join(fixture, 'dist', 'appling-release', 'v0.5.0', 'windows')
+    const outDir = join(fixture, 'dist', 'appling-release', releaseTag, 'windows')
     assert.deepEqual(readdirSync(outDir).sort(), [
-      'PearBrowser-0.5.0-windows-x64.exe',
-      'PearBrowser-0.5.0-windows-x64.exe.sha256',
+      `PearBrowser-${releaseVersion}-windows-x64.exe`,
+      `PearBrowser-${releaseVersion}-windows-x64.exe.sha256`,
       'SHA256SUMS-windows-x64.txt',
       'manifest-windows-x64.json'
     ])
 
-    const sidecar = readFileSync(join(outDir, 'PearBrowser-0.5.0-windows-x64.exe.sha256'), 'utf8')
-    assert.match(sidecar, /^[a-f0-9]{64}  PearBrowser-0\.5\.0-windows-x64\.exe\n$/)
+    const sidecar = readFileSync(join(outDir, `PearBrowser-${releaseVersion}-windows-x64.exe.sha256`), 'utf8')
+    assert.match(sidecar, new RegExp(`^[a-f0-9]{64}  PearBrowser-${releaseVersion.replaceAll('.', '\\.')}-windows-x64\\.exe\\n$`))
 
     const sums = readFileSync(join(outDir, 'SHA256SUMS-windows-x64.txt'), 'utf8')
     assert.equal(sums, sidecar)
 
     const manifest = JSON.parse(readFileSync(join(outDir, 'manifest-windows-x64.json'), 'utf8'))
-    assert.equal(manifest.tag, 'v0.5.0')
-    assert.equal(manifest.version, '0.5.0')
+    assert.equal(manifest.tag, releaseTag)
+    assert.equal(manifest.version, releaseVersion)
     assert.equal(manifest.platform, 'windows')
     assert.equal(manifest.arch, 'x64')
     assert.equal(manifest.artifacts.length, 1)
-    assert.equal(manifest.artifacts[0].name, 'PearBrowser-0.5.0-windows-x64.exe')
+    assert.equal(manifest.artifacts[0].name, `PearBrowser-${releaseVersion}-windows-x64.exe`)
     assert.equal(manifest.artifacts[0].source, 'appling/build/nested/PearBrowser Setup.exe')
   } finally {
     rmSync(fixture, { recursive: true, force: true })
@@ -846,7 +913,7 @@ test('appling artifact collector refuses unsafe output directories before cleari
     const result = spawnSync(process.execPath, [
       applingArtifactCollectorPath,
       '--tag',
-      'v0.5.0',
+      releaseTag,
       '--platform',
       'windows',
       '--arch',
@@ -901,6 +968,7 @@ test('native release asset checker accepts complete attached asset fixtures', ()
       releasePath,
       '--tag',
       'v0.5.0',
+      '--require-backfill-formats',
       '--json'
     ], {
       cwd: fileURLToPath(new URL('..', import.meta.url)),
@@ -998,6 +1066,54 @@ test('native release asset checker requires macOS DMGs for public-trust assets',
     assert.notEqual(missing.status, 0)
     const missingReport = JSON.parse(missing.stdout)
     assert.ok(missingReport.errors.some((error) => error.includes('missing public-trust macOS DMG for macos/x64')))
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
+})
+
+test('native release asset checker requires v0.5.0 backfill package formats when requested', () => {
+  const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'pear-native-backfill-formats-')))
+  try {
+    const releasePath = join(fixture, 'release.json')
+    writeFileSync(releasePath, JSON.stringify({
+      tagName: 'v0.5.0',
+      isDraft: false,
+      isPrerelease: false,
+      assets: [
+        'PearBrowser-0.5.0-macos-arm64.dmg',
+        'PearBrowser-0.5.0-macos-arm64.dmg.sha256',
+        'SHA256SUMS-macos-arm64.txt',
+        'manifest-macos-arm64.json',
+        'PearBrowser-0.5.0-windows-x64.exe',
+        'PearBrowser-0.5.0-windows-x64.exe.sha256',
+        'SHA256SUMS-windows-x64.txt',
+        'manifest-windows-x64.json',
+        'PearBrowser-0.5.0-linux-x64.deb',
+        'PearBrowser-0.5.0-linux-x64.deb.sha256',
+        'SHA256SUMS-linux-x64.txt',
+        'manifest-linux-x64.json'
+      ].map((name, i) => ({ name, size: i + 1 }))
+    }, null, 2))
+
+    const result = spawnSync(process.execPath, [
+      nativeReleaseAssetCheckPath,
+      '--fixture',
+      releasePath,
+      '--tag',
+      'v0.5.0',
+      '--require-backfill-formats',
+      '--json'
+    ], {
+      cwd: fileURLToPath(new URL('..', import.meta.url)),
+      encoding: 'utf8'
+    })
+
+    assert.notEqual(result.status, 0)
+    const report = JSON.parse(result.stdout)
+    assert.equal(report.ok, false)
+    assert.ok(report.errors.some((error) => error.includes('missing required v0.5.0 backfill macOS .app.zip artifact for macos/arm64')))
+    assert.ok(report.errors.some((error) => error.includes('missing required v0.5.0 backfill Windows .msix artifact for windows/x64')))
+    assert.ok(report.errors.some((error) => error.includes('missing required v0.5.0 backfill Linux .AppImage artifact for linux/x64')))
   } finally {
     rmSync(fixture, { recursive: true, force: true })
   }
@@ -1317,6 +1433,9 @@ test('Linux AppImage metadata checker validates source metadata and AppDir conte
     const buildDir = join(fixture, 'build')
     mkdirSync(buildDir)
     const buildAppDir = writeLinuxAppDirFixture(buildDir)
+    const dependencyFixtureAppDir = join(buildDir, '_deps', 'libappling-src', 'test', 'fixtures', 'app', 'linux-x64', 'Example.AppDir')
+    mkdirSync(dependencyFixtureAppDir, { recursive: true })
+    writeFileSync(join(dependencyFixtureAppDir, 'README.txt'), 'dependency fixture, not a release AppDir')
     const build = spawnSync(process.execPath, [
       linuxAppImageMetadataPath,
       '--build-dir',
@@ -1331,6 +1450,7 @@ test('Linux AppImage metadata checker validates source metadata and AppDir conte
     const buildReport = JSON.parse(build.stdout)
     assert.equal(buildReport.ok, true)
     assert.ok(buildReport.inspections.some((inspection) => inspection.appDir === buildAppDir))
+    assert.ok(!buildReport.inspections.some((inspection) => inspection.appDir === dependencyFixtureAppDir))
   } finally {
     rmSync(fixture, { recursive: true, force: true })
   }
@@ -1507,14 +1627,20 @@ test('public-trust readiness checker passes when all release gates are represent
     const { releasePath } = writePackageManagerReleaseFixture(fixture, [
       'PearBrowser-0.5.0-macos-arm64.dmg',
       'PearBrowser-0.5.0-macos-arm64.dmg.sha256',
+      'PearBrowser-0.5.0-macos-arm64.app.zip',
+      'PearBrowser-0.5.0-macos-arm64.app.zip.sha256',
       'SHA256SUMS-macos-arm64.txt',
       'manifest-macos-arm64.json',
       'PearBrowser-0.5.0-macos-x64.dmg',
       'PearBrowser-0.5.0-macos-x64.dmg.sha256',
+      'PearBrowser-0.5.0-macos-x64.app.zip',
+      'PearBrowser-0.5.0-macos-x64.app.zip.sha256',
       'SHA256SUMS-macos-x64.txt',
       'manifest-macos-x64.json',
       'PearBrowser-0.5.0-windows-x64.exe',
       'PearBrowser-0.5.0-windows-x64.exe.sha256',
+      'PearBrowser-0.5.0-windows-x64.msix',
+      'PearBrowser-0.5.0-windows-x64.msix.sha256',
       'SHA256SUMS-windows-x64.txt',
       'manifest-windows-x64.json',
       'PearBrowser-0.5.0-linux-x64.AppImage',
@@ -1565,14 +1691,20 @@ test('public-trust readiness checker can read signing gate from GitHub Actions s
     const { releasePath } = writePackageManagerReleaseFixture(fixture, [
       'PearBrowser-0.5.0-macos-arm64.dmg',
       'PearBrowser-0.5.0-macos-arm64.dmg.sha256',
+      'PearBrowser-0.5.0-macos-arm64.app.zip',
+      'PearBrowser-0.5.0-macos-arm64.app.zip.sha256',
       'SHA256SUMS-macos-arm64.txt',
       'manifest-macos-arm64.json',
       'PearBrowser-0.5.0-macos-x64.dmg',
       'PearBrowser-0.5.0-macos-x64.dmg.sha256',
+      'PearBrowser-0.5.0-macos-x64.app.zip',
+      'PearBrowser-0.5.0-macos-x64.app.zip.sha256',
       'SHA256SUMS-macos-x64.txt',
       'manifest-macos-x64.json',
       'PearBrowser-0.5.0-windows-x64.exe',
       'PearBrowser-0.5.0-windows-x64.exe.sha256',
+      'PearBrowser-0.5.0-windows-x64.msix',
+      'PearBrowser-0.5.0-windows-x64.msix.sha256',
       'SHA256SUMS-windows-x64.txt',
       'manifest-windows-x64.json',
       'PearBrowser-0.5.0-linux-x64.AppImage',

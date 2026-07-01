@@ -46,8 +46,10 @@ const DEFAULT_KEY = '8b21b577993ce0fc45036ca9011861e25f0a49fd4d68bcc655fb2690a03
 const PEER_TIMEOUT_MS = 30_000
 const LENGTH_TIMEOUT_MS = 20_000
 const BLOB_SAMPLE_TIMEOUT_MS = 20_000
+const BLOB_LIST_TIMEOUT_MS = 20_000
 const HIVERELAY_TIMEOUT_MS = 45_000
 const HIVERELAY_PROOF_TIMEOUT_MS = 30_000
+const DEFAULT_SAMPLE_PATHS = ['/index.html', '/package.json', '/pear.json']
 
 function parseArgs (argv) {
   const args = {
@@ -129,6 +131,25 @@ function summarizeProofFailures (reports) {
       return r.relay.slice(0, 12) + ':' + reason
     })
     .join(', ')
+}
+
+async function collectSampleEntries (drive) {
+  const entries = []
+  for await (const entry of drive.list('/', { recursive: false })) {
+    entries.push(entry)
+    if (entries.length >= 5) break
+  }
+  return entries
+}
+
+async function getWithTimeout (drive, path) {
+  const buf = await Promise.race([
+    drive.get(path),
+    new Promise((_, reject) => setTimeout(() =>
+      reject(new Error('blob fetch timed out')),
+      BLOB_SAMPLE_TIMEOUT_MS))
+  ])
+  return { key: path, buf }
 }
 
 async function verifyHiveRelaySeed (args) {
@@ -227,21 +248,35 @@ async function main () {
   // Sample one blob to confirm content (not just metadata) replicates
   process.stdout.write('   → sampling a blob...')
   try {
-    const entries = []
-    for await (const entry of drive.list('/', { recursive: false })) {
-      entries.push(entry)
-      if (entries.length >= 5) break
+    let sampleResult = null
+    const sampleErrors = []
+    for (const path of DEFAULT_SAMPLE_PATHS) {
+      try {
+        sampleResult = await getWithTimeout(drive, path)
+        if (sampleResult.buf?.length > 0) break
+      } catch (err) {
+        sampleErrors.push(path + ': ' + err.message)
+      }
+      sampleResult = null
     }
-    if (entries.length === 0) throw new Error('drive has no top-level entries')
-    const sample = entries.find((e) => e.value?.blob?.byteLength > 0) || entries[0]
-    const blobPromise = drive.get(sample.key)
-    const buf = await Promise.race([
-      blobPromise,
-      new Promise((_, reject) => setTimeout(() =>
-        reject(new Error('blob fetch timed out')),
-        BLOB_SAMPLE_TIMEOUT_MS))
-    ])
-    process.stdout.write(' ✓ ' + (buf?.length || 0) + ' bytes from ' + sample.key + '\n')
+
+    let entries = []
+    if (!sampleResult) {
+      entries = await Promise.race([
+        collectSampleEntries(drive),
+        new Promise((_, reject) => setTimeout(() =>
+          reject(new Error('blob listing timed out')),
+          BLOB_LIST_TIMEOUT_MS))
+      ])
+    }
+    if (!sampleResult) {
+      if (entries.length === 0) {
+        throw new Error('drive has no top-level entries' + (sampleErrors.length ? ' (' + sampleErrors.join('; ') + ')' : ''))
+      }
+      const sample = entries.find((e) => e.value?.blob?.byteLength > 0) || entries[0]
+      sampleResult = await getWithTimeout(drive, sample.key)
+    }
+    process.stdout.write(' ✓ ' + (sampleResult.buf?.length || 0) + ' bytes from ' + sampleResult.key + '\n')
   } catch (err) {
     process.stdout.write(' ✗\n')
     console.error('   blob sample failed:', err.message)

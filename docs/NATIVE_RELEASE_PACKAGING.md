@@ -28,20 +28,40 @@ Use the manual GitHub Actions trigger:
 5. Confirm the `v0.5.0` GitHub release has the generated installers, per-file
    `.sha256` files, `SHA256SUMS-*`, and `manifest-*` files attached.
 6. Verify the attached asset set:
-   `npm run check:native-release-assets -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop`.
+   `npm run check:native-release-assets -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --require-backfill-formats`.
 7. Confirm the user-facing asset selector resolves the expected package for the
    current machine:
    `npm run resolve:native-release -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop`.
 
 The target GitHub release must already exist. The attach job verifies the
-downloaded bundle has one checksum index and one manifest for each desktop
-platform, then uploads the generated assets with `gh release upload --clobber`.
-If the release tag is mistyped or the release is missing, the workflow fails
-without creating a new release.
+downloaded bundle has macOS `.app.zip`, Windows `.msix`, and Linux `.AppImage`
+assets, a sidecar `.sha256` for every package, and one checksum index plus one
+manifest for each desktop platform. It then uploads the generated assets with
+`gh release upload --clobber`. If the release tag is mistyped or the release is
+missing, the workflow fails without creating a new release.
 
 The attach job uses `gh release upload --clobber`, so rerunning the workflow
 refreshes broken or stale assets for the same tag instead of creating duplicate
 release entries.
+
+## Final Workflow Run Checklist
+
+Use this as the last operator pass before handing off the refreshed `v0.5.0`
+assets:
+
+1. Confirm the packaging branch has landed on the workflow branch GitHub will
+   run, usually `main`, and record the merged commit SHA.
+2. Dispatch the workflow:
+   `gh workflow run desktop-native-release.yml --repo bigdestiny2/pearbrowser-desktop --ref main -f tag=v0.5.0 -f source_ref=<merged-main-commit> -f release_mode=package-proof`.
+3. Wait for `macOS Apple Silicon`, `macOS Intel`, `Windows`, `Linux`, and
+   `Attach assets to GitHub release` to finish green.
+4. Run:
+   `npm run check:native-release-assets -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --require-backfill-formats`.
+5. Run:
+   `npm run verify:native-downloads -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --all`.
+6. Record the Actions run URL, release asset list, checksum/download verifier
+   output, and any expected package-proof OS trust prompts in the release smoke
+   evidence log.
 
 ## Local Build
 
@@ -55,7 +75,7 @@ npm run generate
 npm run build
 cd ..
 npm run package:appling -- --tag v0.5.0
-npm run check:native-release-assets -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
+npm run check:native-release-assets -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --require-backfill-formats
 npm run resolve:native-release -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
 npm run -s generate:native-install-guide -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
 npm run -s generate:native-signing-secret-plan -- --repo bigdestiny2/pearbrowser-desktop --tag v0.5.0 --source-ref <merged-main-commit>
@@ -108,7 +128,10 @@ and fails unless the tag has macOS, Windows, and Linux native artifacts, one
 per-artifact `.sha256` sidecar for every installer/package file. Use
 `--require-published` before announcement if draft releases should fail the
 gate. Use `--require-public-trust` for public-trust release checks; it requires
-each macOS architecture to include a `.dmg` artifact.
+each macOS architecture to include a `.dmg` artifact. Use
+`--require-backfill-formats` for the `v0.5.0` native packaging backfill; it
+requires each detected architecture to include the expected package-proof
+format: macOS `.app.zip`, Windows `.msix`, and Linux `.AppImage`.
 
 The checker accepts multiple architecture bundles for one platform. Each
 platform/architecture pair must have its own checksum index and manifest, so a
@@ -198,12 +221,13 @@ npm run check:linux-appimage-metadata -- --build-dir appling/build
 
 `scripts/check-public-trust-readiness.mjs` is the operator-facing summary gate
 for announcement readiness. It runs the public-trust signing preflight, the
-published public-trust release asset checker, byte-level download verification,
-the Linux AppImage metadata checker, the public-trust clean-install smoke-plan
-generator, the package-manager draft generator in dry-run mode, and the operator
-evidence-log checker, then reports all blockers in one JSON or human-readable
-result. Use `--source-ref` with the merged commit SHA so the nested
-clean-install smoke plan downloads the exact runtime RPC smoke helper:
+published release asset checker with both public-trust and backfill-format
+requirements, byte-level download verification, the Linux AppImage metadata
+checker, the public-trust clean-install smoke-plan generator, the package-manager
+draft generator in dry-run mode, and the operator evidence-log checker, then
+reports all blockers in one JSON or human-readable result. Use `--source-ref`
+with the merged commit SHA so the nested clean-install smoke plan downloads the
+exact runtime RPC smoke helper:
 
 ```sh
 npm run check:public-trust-readiness -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --source-ref <merged-main-commit> --signing-secret-source github
