@@ -134,25 +134,6 @@ html, body, #app {
 }
 .tab:hover { background: var(--pear-color-surface-soft); color: var(--pear-color-text); }
 .tab.active { background: var(--pear-color-surface-soft); color: var(--pear-color-text); border-color: var(--pear-color-line); }
-.tab-icon {
-  width: 16px;
-  height: 16px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 16px;
-  color: currentColor;
-}
-.tab-icon-svg {
-  width: 16px;
-  height: 16px;
-  display: block;
-  stroke: currentColor;
-  stroke-width: 1.45;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  vector-effect: non-scaling-stroke;
-}
 
 .panel { flex: 1; overflow: auto; padding: 24px; }
 .panel-browse { padding: 0; display: flex; flex-direction: column; overflow: hidden; }
@@ -233,13 +214,21 @@ p { color: var(--pear-color-muted); margin-bottom: 12px; }
 .urlbar .nav:hover:not(:disabled) { background: var(--pear-color-surface-soft); }
 .urlbar .nav:disabled { opacity: 0.3; cursor: default; }
 .urlbar .nav.go {
-  background: var(--pear-color-surface);
-  border-color: var(--pear-color-text);
+  background:
+    linear-gradient(#ffffff, #ffffff) padding-box,
+    linear-gradient(135deg, #111827 0%, #19bfa7 48%, #8b5cf6 100%) border-box;
+  border-color: transparent;
   color: var(--pear-color-text);
   font-weight: 600;
   padding: 5px 16px;
+  box-shadow: none;
 }
-.urlbar .nav.go:hover:not(:disabled) { background: var(--pear-color-surface-soft); border-color: var(--pear-color-text); }
+.urlbar .nav.go:hover:not(:disabled) {
+  background:
+    linear-gradient(#ffffff, #ffffff) padding-box,
+    linear-gradient(135deg, #020617 0%, #0f766e 48%, #7c3aed 100%) border-box;
+  border-color: transparent;
+}
 
 .browse-status {
   padding: 4px 14px;
@@ -1208,7 +1197,6 @@ p { color: var(--pear-color-muted); margin-bottom: 12px; }
 .tabchip:hover { background: var(--pear-color-surface-soft); color: var(--pear-color-text); }
 .tabchip.active { background: var(--pear-color-canvas); color: var(--pear-color-text); border-color: var(--pear-color-line); }
 .tabchip.pinned { border-color: rgba(15, 118, 110, 0.34); min-width: 92px; max-width: 180px; }
-.tabchip-favicon { font-size: 12px; flex-shrink: 0; }
 .tabchip-pin {
   width: 14px;
   height: 14px;

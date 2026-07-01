@@ -114,70 +114,6 @@ const TAB_META = {
   settings: { label: 'Settings' }
 }
 
-function TabIcon ({ id }) {
-  const common = {
-    className: 'tab-icon-svg',
-    viewBox: '0 0 18 18',
-    fill: 'none',
-    xmlns: 'http://www.w3.org/2000/svg',
-    'aria-hidden': 'true',
-    focusable: 'false'
-  }
-
-  if (id === 'apps') {
-    return html`
-      <svg ...${common}>
-        <rect x="3.25" y="3.25" width="4.1" height="4.1" rx="1.1" />
-        <rect x="10.65" y="3.25" width="4.1" height="4.1" rx="1.1" />
-        <rect x="3.25" y="10.65" width="4.1" height="4.1" rx="1.1" />
-        <rect x="10.65" y="10.65" width="4.1" height="4.1" rx="1.1" />
-      </svg>
-    `
-  }
-
-  if (id === 'sites') {
-    return html`
-      <svg ...${common}>
-        <path d="M6.2 6.1h5.6M7.2 6.9l3.6 4.2M10.8 6.9l-3.6 4.2" />
-        <circle cx="5" cy="5.6" r="2.05" />
-        <circle cx="13" cy="5.6" r="2.05" />
-        <circle cx="9" cy="13" r="2.05" />
-      </svg>
-    `
-  }
-
-  if (id === 'library') {
-    return html`
-      <svg ...${common}>
-        <path d="M5.2 3.4h7.6c.8 0 1.45.65 1.45 1.45v9.75l-5.25-2.55-5.25 2.55V4.85c0-.8.65-1.45 1.45-1.45Z" />
-        <path d="M6.1 6.1h5.8" />
-      </svg>
-    `
-  }
-
-  if (id === 'settings') {
-    return html`
-      <svg ...${common}>
-        <path d="M3.2 5.2h3.55M10.35 5.2h4.45" />
-        <path d="M3.2 9h7.1M13.9 9h.9" />
-        <path d="M3.2 12.8h1.55M8.35 12.8h6.45" />
-        <circle cx="8.55" cy="5.2" r="1.55" />
-        <circle cx="12.1" cy="9" r="1.55" />
-        <circle cx="6.55" cy="12.8" r="1.55" />
-      </svg>
-    `
-  }
-
-  return html`
-    <svg ...${common}>
-      <rect x="3" y="4" width="12" height="10" rx="2" />
-      <path d="M3.2 7.05h11.6" />
-      <path d="M6.05 10.35h3.9" />
-      <path d="M11.2 10.35h.85" />
-    </svg>
-  `
-}
-
 // Homepage drive — published from PearBrowser's own block editor
 // (Sites tab), 2026-04-28. Pinned on HiveRelay. Earlier `fec1568a…`
 // and `efd7b0c6c38d…` keys have been unseeded; this is the live one.
@@ -198,6 +134,7 @@ const PEERIT_URL = 'hyper://' + PEERIT_DRIVE_KEY + '/'
 // Published 2026-06-23, seeded on HiveRelay. Source: 02-apps/p2pbuilders.
 const P2PBUILDERS_DRIVE_KEY = 'ac1977a75cc84b46af0af8bb559cd4ebbe10507eb0f51d863e289d09635f6d74'
 const P2PBUILDERS_URL = 'hyper://' + P2PBUILDERS_DRIVE_KEY + '/'
+const STARTUP_URLS = [DEFAULT_URL, P2PBUILDERS_URL, PEERIT_URL]
 
 // Default catalog — auto-loads on first Apps-tab visit when the user has not yet
 // pinned a catalog of their own. The "PearBrowser Network" curated entry point,
@@ -820,21 +757,26 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
   }, [tabs])
 
   // Auto-load restored tabs on first activation without adding duplicate
-  // entries to the per-tab back/forward list.
+  // entries to the per-tab back/forward list. The three first-party startup
+  // tabs are loaded immediately, even in the background, so the browser opens
+  // onto real landing pages instead of URL-only placeholders.
   useEffect(() => {
     if (!sessionReady) return
-    if (!active || active.src || !active.url) return
-    const key = `${active.id}:${active.url}`
-    if (autoLoadedRef.current.has(key)) return
-    autoLoadedRef.current.add(key)
-    const hasHistory = Array.isArray(active.history) && active.history.length > 0
-    go(active.url, active.id, {
-      recordHistory: !hasHistory,
-      rememberVisit: !hasHistory,
-      historyIndex: active.histIdx
-    })
+    for (const tab of tabs) {
+      if (!tab || tab.src || !tab.url) continue
+      if (tab.id !== active?.id && !STARTUP_URLS.includes(tab.url)) continue
+      const key = `${tab.id}:${tab.url}`
+      if (autoLoadedRef.current.has(key)) continue
+      autoLoadedRef.current.add(key)
+      const hasHistory = Array.isArray(tab.history) && tab.history.length > 0
+      go(tab.url, tab.id, {
+        recordHistory: !hasHistory,
+        rememberVisit: !hasHistory,
+        historyIndex: tab.histIdx
+      })
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionReady, active?.id, active?.url, active?.src])
+  }, [sessionReady, active?.id, tabs])
 
   // External navUrl prop (Apps tab → "open in Browse"). Open in a new
   // tab if the active tab already has an address; otherwise navigate the
@@ -958,7 +900,6 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
             onClick=${() => setActive(t.id)}
             title=${t.displayUrl || 'New tab'}
           >
-            <span className="tabchip-favicon">${t.src ? '🌐' : '🆕'}</span>
             <span
               className=${'tabchip-pin' + (t.pinned ? ' on' : '')}
               title=${t.pinned ? 'Unpin tab' : 'Pin tab'}
@@ -4315,10 +4256,18 @@ function Settings ({ rpc, C, status, storagePath, log }) {
   // Whether the Device-sync section is shown — driven by the experimental flag,
   // toggled live from the Experimental card below.
   const [deviceSync, setDeviceSync] = useState(false)
+  // Device linking (blind-pairing): transfer THIS identity to a new device, or
+  // adopt an identity from another device — no 24-word typing.
+  const [linkInvite, setLinkInvite] = useState('')
+  const [showLinkJoin, setShowLinkJoin] = useState(false)
+  const [linkJoinInput, setLinkJoinInput] = useState('')
+  const [linkNotice, setLinkNotice] = useState('')
   const CMD_GET_IDENTITY = C?.CMD_GET_IDENTITY ?? 31
   const CMD_IDENTITY_EXPORT_PHRASE = C?.CMD_IDENTITY_EXPORT_PHRASE ?? 70
   const CMD_IDENTITY_IMPORT_PHRASE = C?.CMD_IDENTITY_IMPORT_PHRASE ?? 71
   const CMD_IDENTITY_VALIDATE_PHRASE = C?.CMD_IDENTITY_VALIDATE_PHRASE ?? 73
+  const CMD_DEVICE_LINK_CREATE_INVITE = C?.CMD_DEVICE_LINK_CREATE_INVITE ?? 76
+  const CMD_DEVICE_LINK_JOIN = C?.CMD_DEVICE_LINK_JOIN ?? 77
   const CMD_CLEAR_CACHE = C?.CMD_CLEAR_CACHE ?? 30
   const CMD_RESET_APP = C?.CMD_RESET_APP ?? 29
 
@@ -4379,6 +4328,35 @@ function Settings ({ rpc, C, status, storagePath, log }) {
     }
   }
 
+  // SOURCE device — mint a single-use invite. Share it (copy/QR) with your OWN
+  // new device; it's a bearer secret that hands over your identity, so treat it
+  // like the backup phrase and don't paste it anywhere public.
+  const createLinkInvite = async () => {
+    setErr(''); setLinkNotice(''); setBusy('link-invite')
+    try {
+      const res = await rpc.request(CMD_DEVICE_LINK_CREATE_INVITE, {}, 30000)
+      setLinkInvite(res.invite)
+    } catch (e) { setErr(`link: ${e.message}`) }
+    finally { setBusy(null) }
+  }
+
+  // TARGET device — adopt the identity advertised by an invite from your other
+  // device. Rewrites this device's identity, so warn like Restore does.
+  const joinLinkInvite = async () => {
+    const invite = linkJoinInput.trim()
+    if (!invite) return
+    if (!confirm('Linking will REPLACE this device\'s identity with the one from your other device.\n\nThis device\'s current identity is discarded (make sure its phrase is saved if you need it). Proceed?')) return
+    setErr(''); setLinkNotice(''); setBusy('link-join')
+    try {
+      await rpc.request(CMD_DEVICE_LINK_JOIN, { invite, device: 'this device' }, 120000)
+      setLinkJoinInput('')
+      setShowLinkJoin(false)
+      setLinkNotice('Device linked — your peer key has rotated. Restart PearBrowser for the linked identity to take effect.')
+      await refreshIdentity()
+    } catch (e) { setErr(`link: ${e.message}`) }
+    finally { setBusy(null) }
+  }
+
   const clearCache = async () => {
     if (!confirm('Clear all cached drives + proxy cache? Installed apps and your sites are NOT affected.')) return
     setErr(''); setBusy('cache')
@@ -4420,7 +4398,7 @@ function Settings ({ rpc, C, status, storagePath, log }) {
       </div>
 
       <h2>Moving to a new device?</h2>
-      <p className="subtitle">Your identity lives on this machine. To use the same identity on another computer or after a wipe, write down your 12-word backup phrase. Anyone with the phrase can sign in as you — store it like a password.</p>
+      <p className="subtitle">Your identity lives on this machine. To use the same identity on another computer or after a wipe, write down your backup phrase (or use <em>Link a device</em> below). Anyone with the phrase can sign in as you — store it like a password.</p>
       <div className="settings-card">
         <div className="settings-row">
           <div>
@@ -4466,6 +4444,55 @@ function Settings ({ rpc, C, status, storagePath, log }) {
           </div>
         `}
         ${restoreNotice && html`<div className="apps-ok">${restoreNotice}</div>`}
+      </div>
+
+      <h2>Link a device</h2>
+      <p className="subtitle">Move this identity to another device without typing your phrase. Devices pair directly over the P2P network (blind-pairing) — no server, no account. The invite is a one-time secret that hands over your identity, so only share it with your own device.</p>
+      <div className="settings-card">
+        <div className="settings-row">
+          <div>
+            <div className="settings-label">Link a new device</div>
+            <div className="settings-subtle">Generate an invite here, then paste it into <em>Link this device</em> on your other device to copy this identity across.</div>
+          </div>
+          <button className="btn" onClick=${createLinkInvite} disabled=${busy === 'link-invite' || !identity?.hasBackupPhrase}>
+            ${busy === 'link-invite' ? 'Creating…' : 'Create invite'}
+          </button>
+        </div>
+        ${linkInvite && html`
+          <pre className="seed-phrase">${linkInvite}</pre>
+          <div className="settings-warning">One-time invite — anyone who receives it can adopt your identity. Paste it into your other device now; it expires when you close this screen.</div>
+        `}
+        <div className="settings-row">
+          <div>
+            <div className="settings-label">Link this device</div>
+            <div className="settings-subtle">Paste an invite from your other device to adopt its identity here. Replaces this device's current identity.</div>
+          </div>
+          <button className="btn subtle" onClick=${() => { setShowLinkJoin((v) => !v); setLinkNotice(''); setErr('') }}
+                  disabled=${busy?.startsWith?.('link')}>
+            ${showLinkJoin ? 'Cancel' : 'Paste invite…'}
+          </button>
+        </div>
+        ${showLinkJoin && html`
+          <div className="restore-form">
+            <textarea
+              className="restore-textarea"
+              placeholder="Paste the invite from your other device"
+              value=${linkJoinInput}
+              rows="2"
+              spellCheck="false"
+              autoCapitalize="none"
+              onInput=${(e) => setLinkJoinInput(e.target.value)}
+            ></textarea>
+            <div className="restore-actions">
+              <button className="btn primary" onClick=${joinLinkInvite}
+                      disabled=${!linkJoinInput.trim() || busy === 'link-join'}>
+                ${busy === 'link-join' ? 'Linking…' : 'Link this device'}
+              </button>
+            </div>
+            <div className="settings-warning">This destroys the current identity on disk. Make sure you've saved its phrase first.</div>
+          </div>
+        `}
+        ${linkNotice && html`<div className="apps-ok">${linkNotice}</div>`}
       </div>
 
       <h2>Profile</h2>
@@ -5019,7 +5046,7 @@ export function App ({ rpc, C, storagePath }) {
   // then p2pbuilders, then peerit. Restored session tabs stay behind those
   // defaults so an app homepage such as Dealroom cannot hijack the release
   // landing slot.
-  const [tabs, setTabs] = useState(() => [makeTab(DEFAULT_URL), makeTab(P2PBUILDERS_URL), makeTab(PEERIT_URL)])
+  const [tabs, setTabs] = useState(() => STARTUP_URLS.map((url) => makeTab(url)))
   const [browseActiveId, setBrowseActiveId] = useState(() => 'placeholder')
   const [closedTabs, setClosedTabs] = useState(() => [])
   // Tracks whether we've completed the one-time tabs-restore from
@@ -5054,7 +5081,7 @@ export function App ({ rpc, C, storagePath }) {
         // are preserved.
         const savedTabs = Array.isArray(s?.browseTabs) ? s.browseTabs : null
         if (savedTabs && savedTabs.length > 0) {
-          const restored = restoreStartupTabs(savedTabs, [DEFAULT_URL, P2PBUILDERS_URL, PEERIT_URL])
+          const restored = restoreStartupTabs(savedTabs, STARTUP_URLS)
           if (restored.tabs.length > 0) {
             setTabs(restored.tabs)
             setBrowseActiveId(restored.activeId)
@@ -5154,7 +5181,6 @@ export function App ({ rpc, C, storagePath }) {
         <div className="tabs">
           ${Object.entries(TAB_META).map(([id, m]) => html`
             <button className=${'tab' + (tab === id ? ' active' : '')} onClick=${() => setTab(id)} key=${id}>
-              <span className="tab-icon"><${TabIcon} id=${id} /></span>
               <span className="tab-label">${m.label}</span>
             </button>
           `)}

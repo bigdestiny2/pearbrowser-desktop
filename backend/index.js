@@ -1322,18 +1322,51 @@ rpc.handle(C.CMD_IDENTITY_EXPORT_PHRASE, async () => {
 rpc.handle(C.CMD_IDENTITY_IMPORT_PHRASE, async ({ mnemonic } = {}) => {
   if (typeof mnemonic !== 'string') throw new Error('mnemonic must be a string')
   if (!validateMnemonic(mnemonic)) throw new Error('Invalid seed phrase — check each word and try again')
-  requireIdentity().restoreFromMnemonic(mnemonic)
+  await requireIdentity().restoreFromMnemonic(mnemonic)
   // Caller MUST restart the worklet for the new identity to take effect
   return { ok: true, restartRequired: true }
 })
 
 rpc.handle(C.CMD_IDENTITY_ROTATE, async () => {
-  requireIdentity().rotate()
+  await requireIdentity().rotate()
   return { ok: true, restartRequired: true }
 })
 
 rpc.handle(C.CMD_IDENTITY_VALIDATE_PHRASE, async ({ mnemonic } = {}) => {
   return { valid: validateMnemonic(mnemonic || '') }
+})
+
+// --- Device linking (blind-pairing) ----------------------------------------
+// Port of hyper-identity's DeviceLinker, hardened: minting an invite is an
+// explicit user action on the SOURCE device, and the root seed is only revealed
+// to a device that pairs with THAT single-use invite (see backend/device-linker.js).
+let _deviceLinker = null
+function getDeviceLinker () {
+  if (!swarm) throw new Error('swarm not ready — cannot link devices yet')
+  if (!_deviceLinker) {
+    const { DeviceLinker } = require('./device-linker.js')
+    // autoAccept: the user explicitly initiated linking on THIS device and will
+    // only hand the single-use invite to their own new device (e.g. via QR).
+    _deviceLinker = new DeviceLinker(swarm, { identity: requireIdentity(), autoAccept: true, log: (m) => console.log(m) })
+  }
+  return _deviceLinker
+}
+
+rpc.handle(C.CMD_DEVICE_LINK_CREATE_INVITE, async () => {
+  const { invite, discoveryKey, done } = await getDeviceLinker().createInvite()
+  done.then((r) => console.log('[device-link] linked ' + ((r && r.device && r.device.device) || 'device')))
+    .catch((e) => console.warn('[device-link] failed:', e && e.message))
+  return { invite, discoveryKey }
+})
+
+rpc.handle(C.CMD_DEVICE_LINK_JOIN, async ({ invite, device } = {}) => {
+  if (typeof invite !== 'string' || !invite) throw new Error('invite required')
+  if (!swarm) throw new Error('swarm not ready — cannot link devices yet')
+  const { DeviceLinker } = require('./device-linker.js')
+  const linker = new DeviceLinker(swarm, { identity: requireIdentity() })
+  await linker.joinWithInvite(invite, { device: device || 'this device' })
+  // identity.json was rewritten — every store must re-open under the linked seed
+  return { ok: true, restartRequired: true }
 })
 
 rpc.handle(C.CMD_IDENTITY_SIGN, async ({ payload, driveKey } = {}) => {
