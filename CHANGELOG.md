@@ -19,7 +19,7 @@ Patch release for the native-installer and Pear UI Light ship.
 - Desktop release metadata is bumped to `0.5.1`, including the native appling
   CMake version and Linux AppStream release metadata so generated installer
   filenames and package manifests line up with the GitHub tag.
-- The stable Pear production key was released at length `45701` and
+- The stable Pear production key was released at length `45704` and
   fresh-peer verified from the network after HiveRelay pin refresh.
 - Native release operations continue to default HiveRelay packages to npm
   `latest`, with lockfile and CI guards checking the current `0.20.2` line.
