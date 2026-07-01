@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.5.2 — 2026-07-01
+
+Logo hotfix for the live Pear app, public website, and refreshed native installer packages.
+
+### Changed
+
+- Replaced the desktop shell mark with the same clean seven-circle PearBrowser logo used on the website, adding a larger centered bottom peer so the mark reads more clearly as a pear at small sizes.
+- Refreshed the stable Pear production key at length `45707` after HiveRelay pin refresh and fresh-peer verification.
+- Native release metadata is bumped to `0.5.2` so macOS, Windows, and Linux package-proof installer artifacts line up with the logo hotfix tag.
+
 ## v0.5.1 — 2026-07-01
 
 Patch release for the native-installer and Pear UI Light ship.
