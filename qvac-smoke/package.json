@@ -1,0 +1,12 @@
+{
+  "name": "pearbrowser-qvac-native-smoke",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "pear": {
+    "name": "pearbrowser-qvac-native-smoke",
+    "type": "terminal",
+    "main": "index.mjs"
+  }
+}
+

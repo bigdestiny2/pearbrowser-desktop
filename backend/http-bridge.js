@@ -31,7 +31,14 @@ class HttpBridge {
     this._swarmBridge = opts.swarmBridge || null   // SwarmBridge instance — see backend/swarm-bridge.js
     this._anongptBuyer = opts.anongptBuyer || null // AnongptBuyer — see backend/anongpt-buyer.js
     this._anongptDriveKey = (opts.anongptDriveKey || '').toLowerCase()
+    this._aiService = opts.aiService || null
+    this._aiManifestCache = new Map()
+    this._aiManifestTtlMs = opts.aiManifestTtlMs || 30000
+    this._aiRequestOwners = new Map()
     this._rateLimiter = new Map() // Simple rate limiting per IP
+    this._sseTickets = new Map()
+    this._sseTicketTtlMs = opts.sseTicketTtlMs || 30000
+    this._maxSseTickets = opts.maxSseTickets || 4096
   }
 
   // Simple rate limit check
@@ -70,6 +77,38 @@ class HttpBridge {
     }
   }
 
+  _requestOrigins (req) {
+    const origins = []
+    const rawOrigin = Array.isArray(req.headers.origin) ? req.headers.origin[0] : req.headers.origin
+    if (typeof rawOrigin === 'string' && rawOrigin.length > 0) origins.push(rawOrigin)
+
+    const rawHost = Array.isArray(req.headers.host) ? req.headers.host[0] : req.headers.host
+    if (typeof rawHost === 'string' && rawHost.length > 0) origins.push(`http://${rawHost}`)
+
+    return [...new Set(origins)]
+  }
+
+  _sameOrigin (a, b) {
+    try {
+      return new URL(a).origin === new URL(b).origin
+    } catch {
+      return false
+    }
+  }
+
+  _checkTokenOrigin (req, res, expectedOrigin) {
+    if (!expectedOrigin) return true
+    const origins = this._requestOrigins(req)
+    if (origins.length === 0) return true
+    for (const origin of origins) {
+      if (!this._sameOrigin(origin, expectedOrigin)) {
+        this._jsonError(res, 'Token origin mismatch', 403)
+        return false
+      }
+    }
+    return true
+  }
+
   // Namespace a page's appId by the drive it was served from, so two apps can't
   // touch each other's sync data. We HASH `driveKey:appId` to a fixed 64 hex
   // chars: a plain `driveKey:appId` concat is ≥65 chars and the Autobase bridge
@@ -82,22 +121,109 @@ class HttpBridge {
     return b4a.toString(hypercoreCrypto.data(b4a.from(`${driveKeyHex}:${appId}`)), 'hex')
   }
 
-  _requireToken (req, res, urlObj) {
-    // Token is normally in the X-Pear-Token header. EventSource cannot
-    // set custom headers, so the SSE endpoint also accepts the token on
-    // the URL as ?token=…. Same security boundary either way — the
-    // worklet validates against its in-memory issuance map.
+  async _hasAiPermission (driveKeyHex) {
+    const keyHex = String(driveKeyHex || '').toLowerCase()
+    if (!/^[0-9a-f]{64}$/.test(keyHex) || !this._getDrive) return false
+    const cached = this._aiManifestCache.get(keyHex)
+    if (cached && Date.now() - cached.checkedAt < this._aiManifestTtlMs) return cached.allowed
+
+    let allowed = false
+    try {
+      const drive = await this._getDrive(keyHex)
+      let timer = null
+      const raw = drive && await Promise.race([
+        drive.get('/manifest.json', { wait: true }),
+        new Promise(resolve => { timer = setTimeout(() => resolve(null), 10000) })
+      ]).finally(() => { if (timer) clearTimeout(timer) })
+      const manifest = raw ? JSON.parse(raw.toString('utf8')) : null
+      allowed = !!(manifest && (
+        (Array.isArray(manifest.permissions) && manifest.permissions.includes('pear.ai.infer')) ||
+        manifest.pear?.ai?.infer === true
+      ))
+    } catch {}
+
+    this._aiManifestCache.set(keyHex, { allowed, checkedAt: Date.now() })
+    return allowed
+  }
+
+  _requireToken (req, res) {
     const rawToken = req.headers['x-pear-token']
-    let token = Array.isArray(rawToken) ? rawToken[0] : rawToken
-    if (!token && urlObj && urlObj.searchParams) {
-      token = urlObj.searchParams.get('token') || null
-    }
-    const driveKeyHex = this._validateToken(token)
-    if (!driveKeyHex) {
+    const token = Array.isArray(rawToken) ? rawToken[0] : rawToken
+    const entry = this._validateToken(token)
+    if (!entry) {
       this._jsonError(res, 'Unauthorized', 401)
       return null
     }
-    return { driveKeyHex, token }
+    if (typeof entry === 'string') return { driveKeyHex: entry, token }
+    if (entry && typeof entry.driveKeyHex === 'string') {
+      const auth = {
+        driveKeyHex: entry.driveKeyHex,
+        token,
+        origin: entry.origin || null,
+        kind: entry.kind || 'drive'
+      }
+      if (!this._checkTokenOrigin(req, res, auth.origin)) return null
+      return auth
+    }
+    this._jsonError(res, 'Unauthorized', 401)
+    return null
+  }
+
+  _pruneSseTickets (now = Date.now()) {
+    for (const [ticket, entry] of this._sseTickets) {
+      if (entry.expiresAt <= now) this._sseTickets.delete(ticket)
+    }
+    while (this._sseTickets.size > this._maxSseTickets) {
+      const oldest = this._sseTickets.keys().next().value
+      if (!oldest) break
+      this._sseTickets.delete(oldest)
+    }
+  }
+
+  _mintSseTicket (auth, channelId) {
+    const now = Date.now()
+    this._pruneSseTickets(now)
+    let ticket
+    do {
+      ticket = b4a.toString(hypercoreCrypto.randomBytes(32), 'hex')
+    } while (this._sseTickets.has(ticket))
+    this._sseTickets.set(ticket, {
+      driveKeyHex: auth.driveKeyHex,
+      origin: auth.origin || null,
+      kind: auth.kind || 'drive',
+      channelId,
+      expiresAt: now + this._sseTicketTtlMs
+    })
+    return { ticket, expiresInMs: this._sseTicketTtlMs }
+  }
+
+  _consumeSseTicket (req, res, urlObj, channelId) {
+    const ticket = urlObj.searchParams.get('ticket')
+    if (!ticket) {
+      this._jsonError(res, 'SSE ticket required', 401)
+      return null
+    }
+    const entry = this._sseTickets.get(ticket)
+    if (!entry) {
+      this._jsonError(res, 'Invalid SSE ticket', 401)
+      return null
+    }
+    this._sseTickets.delete(ticket)
+    if (entry.expiresAt <= Date.now()) {
+      this._jsonError(res, 'Expired SSE ticket', 401)
+      return null
+    }
+    if (entry.channelId !== channelId) {
+      this._jsonError(res, 'SSE ticket channel mismatch', 403)
+      return null
+    }
+    if (!this._checkTokenOrigin(req, res, entry.origin || null)) return null
+    return {
+      driveKeyHex: entry.driveKeyHex,
+      token: ticket,
+      origin: entry.origin || null,
+      kind: entry.kind || 'drive'
+    }
   }
 
   /**
@@ -455,10 +581,60 @@ class HttpBridge {
         if (!this._swarmBridge) {
           return this._jsonError(res, 'swarm bridge not available', 503)
         }
-        // Pass `url` so /api/swarm/events (SSE) can fall back to ?token=…
-        // when EventSource can't set the X-Pear-Token header.
-        const auth = this._requireToken(req, res, url)
+        if (req.method === 'GET' && path === '/api/swarm/events') {
+          const channelId = url.searchParams.get('channelId')
+          if (!channelId) return this._jsonError(res, 'channelId required', 400)
+          const auth = this._consumeSseTicket(req, res, url, channelId)
+          if (!auth) return true
+          // SSE response — long-lived, no JSON Content-Type.
+          res.statusCode = 200
+          res.setHeader('Content-Type', 'text/event-stream; charset=utf-8')
+          res.setHeader('Cache-Control', 'no-cache, no-transform')
+          res.setHeader('Connection', 'keep-alive')
+          res.setHeader('X-Accel-Buffering', 'no')
+          // Initial comment to flush headers immediately.
+          res.write(': pear.swarm.v1 stream\n\n')
+
+          const closeHandlers = []
+          const stream = {
+            send (eventObj) {
+              try {
+                res.write('data: ' + JSON.stringify(eventObj) + '\n\n')
+              } catch {}
+            },
+            close () {
+              try { res.end() } catch {}
+            },
+            onClose (fn) {
+              closeHandlers.push(fn)
+            }
+          }
+          const cleanup = () => closeHandlers.forEach((fn) => { try { fn() } catch {} })
+          req.on('close', cleanup)
+          req.on('error', cleanup)
+          res.on('close', cleanup)
+
+          this._swarmBridge.attachStream(channelId, stream)
+          // attachStream sends the 'unknown channelId' error + closes itself
+          // when the channel doesn't exist, so we don't need to do anything
+          // else here. If it succeeded, the response stays open until the
+          // page closes the EventSource (or the channel is leave()'d).
+          return true
+        }
+
+        const auth = this._requireToken(req, res)
         if (!auth) return true
+
+        if (req.method === 'POST' && path === '/api/swarm/ticket') {
+          const channelId = body?.channelId
+          if (typeof channelId !== 'string' || channelId.length === 0) {
+            return this._jsonError(res, 'channelId required', 400)
+          }
+          if (channelId.length > 256) {
+            return this._jsonError(res, 'channelId too long', 400)
+          }
+          return this._json(res, this._mintSseTicket(auth, channelId))
+        }
 
         if (req.method === 'POST' && path === '/api/swarm/join') {
           try {
@@ -497,45 +673,6 @@ class HttpBridge {
           }
         }
 
-        if (req.method === 'GET' && path === '/api/swarm/events') {
-          const channelId = url.searchParams.get('channelId')
-          if (!channelId) return this._jsonError(res, 'channelId required', 400)
-          // SSE response — long-lived, no JSON Content-Type.
-          res.statusCode = 200
-          res.setHeader('Content-Type', 'text/event-stream; charset=utf-8')
-          res.setHeader('Cache-Control', 'no-cache, no-transform')
-          res.setHeader('Connection', 'keep-alive')
-          res.setHeader('X-Accel-Buffering', 'no')
-          // Initial comment to flush headers immediately.
-          res.write(': pear.swarm.v1 stream\n\n')
-
-          const closeHandlers = []
-          const stream = {
-            send (eventObj) {
-              try {
-                res.write('data: ' + JSON.stringify(eventObj) + '\n\n')
-              } catch {}
-            },
-            close () {
-              try { res.end() } catch {}
-            },
-            onClose (fn) {
-              closeHandlers.push(fn)
-            }
-          }
-          const cleanup = () => closeHandlers.forEach((fn) => { try { fn() } catch {} })
-          req.on('close', cleanup)
-          req.on('error', cleanup)
-          res.on('close', cleanup)
-
-          const ok = this._swarmBridge.attachStream(channelId, stream)
-          // attachStream sends the 'unknown channelId' error + closes itself
-          // when the channel doesn't exist, so we don't need to do anything
-          // else here. If it succeeded, the response stays open until the
-          // page closes the EventSource (or the channel is leave()'d).
-          return true
-        }
-
         return this._jsonError(res, 'Unknown swarm endpoint', 404)
       }
 
@@ -567,6 +704,79 @@ class HttpBridge {
         }
         const result = await this._anongptBuyer.infer(body || {})
         return this._json(res, result)
+      }
+
+      // --- Browser-owned native AI (QVAC) ---
+
+      if (req.method === 'GET' && path === '/api/ai/capabilities') {
+        const auth = this._requireToken(req, res)
+        if (!auth) return true
+        const allowed = await this._hasAiPermission(auth.driveKeyHex)
+        const capabilities = this._aiService
+          ? this._aiService.capabilities()
+          : { available: false, local: true, streaming: true, models: [], reason: 'runtime-not-configured' }
+        return this._json(res, { ...capabilities, allowed })
+      }
+
+      if (req.method === 'POST' && path === '/api/ai/completions') {
+        const auth = this._requireToken(req, res)
+        if (!auth) return true
+        if (!this._aiService) return this._jsonError(res, 'Local AI runtime is unavailable', 503)
+        if (!await this._hasAiPermission(auth.driveKeyHex)) {
+          return this._jsonError(res, 'App manifest does not declare pear.ai.infer', 403)
+        }
+
+        let run
+        try {
+          run = this._aiService.complete({
+            origin: `hyper://${auth.driveKeyHex}`,
+            model: body?.model,
+            messages: body?.messages,
+            maxTokens: body?.maxTokens,
+            temperature: body?.temperature,
+            reasoningBudget: body?.reasoningBudget
+          })
+        } catch (err) {
+          return this._jsonError(res, err.message || 'Invalid AI request', err.code === 'queue-full' ? 429 : 400)
+        }
+
+        res.statusCode = 200
+        res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8')
+        res.setHeader('Cache-Control', 'no-store')
+        res.setHeader('X-Pear-AI-Request-Id', run.requestId)
+        this._aiRequestOwners.set(run.requestId, auth.driveKeyHex.toLowerCase())
+        let streamDone = false
+        const cancelOnDisconnect = () => {
+          if (!streamDone) this._aiService.cancel(run.requestId).catch(() => {})
+        }
+        if (typeof res.on === 'function') res.on('close', cancelOnDisconnect)
+
+        try {
+          for await (const event of run.events) {
+            res.write(JSON.stringify(event) + '\n')
+          }
+          await run.final.catch(() => {})
+        } finally {
+          streamDone = true
+          this._aiRequestOwners.delete(run.requestId)
+          res.end()
+        }
+        return true
+      }
+
+      if (req.method === 'POST' && path === '/api/ai/cancel') {
+        const auth = this._requireToken(req, res)
+        if (!auth) return true
+        if (!this._aiService) return this._jsonError(res, 'Local AI runtime is unavailable', 503)
+        if (!await this._hasAiPermission(auth.driveKeyHex)) {
+          return this._jsonError(res, 'App manifest does not declare pear.ai.infer', 403)
+        }
+        const requestId = typeof body?.requestId === 'string' ? body.requestId : ''
+        if (!requestId) return this._jsonError(res, 'requestId required', 400)
+        if (this._aiRequestOwners.get(requestId) !== auth.driveKeyHex.toLowerCase()) {
+          return this._json(res, { ok: false })
+        }
+        return this._json(res, { ok: await this._aiService.cancel(requestId) })
       }
 
       // --- Status ---

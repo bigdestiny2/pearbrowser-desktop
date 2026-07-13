@@ -1,5 +1,5 @@
 /*
- * Pear UI Light desktop entrypoint.
+ * Pear UI desktop entrypoint.
  * Keep token values in sync with ../../../design-system/platform/css/pear-ui.css.
  */
 
@@ -28,6 +28,13 @@
   --pear-color-warning: #b97812;
   --pear-color-error: #c2412f;
   --pear-color-link: #0f766e;
+  --pear-color-chrome: rgba(255, 255, 255, 0.86);
+  --pear-color-chrome-soft: rgba(255, 255, 255, 0.78);
+  --pear-color-chrome-muted: rgba(255, 255, 255, 0.68);
+  --pear-color-floating: rgba(255, 255, 255, 0.92);
+  --pear-color-gradient-fill: #ffffff;
+  --pear-color-webview: #ffffff;
+  --pear-shadow-dropdown: 0 12px 32px -8px rgba(23, 33, 27, 0.42);
 
   --pear-space-1: 2px;
   --pear-space-2: 4px;
@@ -66,6 +73,43 @@
 
   --pear-shadow-panel: 0 18px 48px rgba(24, 36, 30, 0.10);
   --pear-shadow-soft: 0 10px 28px rgba(24, 36, 30, 0.06);
+}
+
+:root[data-theme="dark"],
+.pear-ui[data-theme="dark"],
+.theme-dark {
+  color-scheme: dark;
+  --pear-color-canvas: #0f1512;
+  --pear-color-surface: #171f1a;
+  --pear-color-surface-soft: #202a23;
+  --pear-color-surface-warm: #261d17;
+  --pear-color-line: #2f3d35;
+  --pear-color-line-strong: #45564c;
+  --pear-color-text: #eef7f1;
+  --pear-color-muted: #a2b1a8;
+  --pear-color-quiet: #74857b;
+  --pear-color-accent: #45d58b;
+  --pear-color-accent-hover: #6ee7a8;
+  --pear-color-accent-soft: #173527;
+  --pear-color-teal: #3fd0c2;
+  --pear-color-teal-soft: #143331;
+  --pear-color-coral: #ff8a75;
+  --pear-color-coral-soft: #3b211d;
+  --pear-color-amber: #f2bd5c;
+  --pear-color-amber-soft: #352816;
+  --pear-color-success: #45d58b;
+  --pear-color-warning: #f2bd5c;
+  --pear-color-error: #ff806b;
+  --pear-color-link: #3fd0c2;
+  --pear-color-chrome: rgba(15, 21, 18, 0.88);
+  --pear-color-chrome-soft: rgba(23, 31, 26, 0.84);
+  --pear-color-chrome-muted: rgba(23, 31, 26, 0.72);
+  --pear-color-floating: rgba(23, 31, 26, 0.94);
+  --pear-color-gradient-fill: #171f1a;
+  --pear-color-webview: #0b100d;
+  --pear-shadow-panel: 0 18px 48px rgba(0, 0, 0, 0.36);
+  --pear-shadow-soft: 0 10px 28px rgba(0, 0, 0, 0.24);
+  --pear-shadow-dropdown: 0 18px 42px -10px rgba(0, 0, 0, 0.62);
 }
 
 .pear-ui {

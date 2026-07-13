@@ -39,12 +39,16 @@ test('shell.js opens PearBrowser landing first with peerit beside it', () => {
   assert.match(shell, new RegExp(`PEERIT_DRIVE_KEY = '${PEERIT_KEY}'`))
   assert.match(shell, /const PEERIT_URL = 'hyper:\/\/' \+ PEERIT_DRIVE_KEY \+ '\/'/)
   // Fresh launch opens PearBrowser first (tabs[0] == the active tab), then p2pbuilders + peerit.
-  assert.match(shell, /const STARTUP_URLS = \[DEFAULT_URL, P2PBUILDERS_URL, PEERIT_URL\]/)
-  assert.match(shell, /STARTUP_URLS\.map\(\(url\) => makeTab\(url\)\)/)
+  assert.match(shell, /const STARTUP_TABS = \[/)
+  assert.match(shell, /\{ url: DEFAULT_URL, title: 'PearBrowser' \}/)
+  assert.match(shell, /\{ url: P2PBUILDERS_URL, title: 'P2P Builders' \}/)
+  assert.match(shell, /\{ url: PEERIT_URL, title: 'peerit' \}/)
+  assert.match(shell, /STARTUP_TABS\.map\(\(tab\) => makeBrowserTab\(tab\.url, \{ title: tab\.title \}\)\)/)
   // Session restore must keep those defaults in front of restored app pages.
-  assert.match(shell, /restoreStartupTabs\(savedTabs, STARTUP_URLS\)/)
-  // Background startup tabs should load too, not just the active tab.
-  assert.match(shell, /STARTUP_URLS\.includes\(tab\.url\)/)
+  assert.match(shell, /restoreStartupTabs\(savedTabs, STARTUP_TABS\)/)
+  // Restored background tabs should load too, not just the active/default tabs.
+  assert.match(shell, /Preload every restored tab once the backend session is ready/)
+  assert.doesNotMatch(shell, /STARTUP_URLS\.includes\(tab\.url\)/)
 })
 
 test('shell.js pins peerit to the top of the Sites discovery grid', () => {

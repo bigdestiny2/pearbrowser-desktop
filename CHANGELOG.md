@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.6.0 — 2026-07-13
+
+Privacy-first browser release: Content Shield (Brave-grade ad/tracker blocking for `hyper://` and proxied clearnet), Pear Plugins foundation, optional history, zero telemetry, and on-device Ask Browser / QVAC AI kept operational.
+
+### Added
+
+- **Content Shield (Phases 1–3)** — browser-owned request filter + cosmetic hider on the hyper-proxy chokepoint; named multi-list hot-swap with durable offline reload; per-drive allowlist and strict third-party CSP; scriptlets (`set-constant`, `abort-on-property-read`) via hash-authorized inject; Settings counters + urlbar shield chip.
+- **Pear Plugins foundation** — Hyperdrive-style plugins with `pear.net.filter` / `pear.content.styles` / `pear.content.scripts` capabilities; fail-closed without caps; kill-switch without uninstall; fixture plugin under `test/fixtures/`.
+- **Clearnet tabs** — `https://` / bare hostnames navigate through a browser-owned clearnet proxy (default) so shields apply; optional direct mode; session-bridge facade for a future pear-electron `webRequest` hook.
+- **Privacy ladder** — HTTPS-only upgrades, tracking-parameter strip, third-party cookie drop in proxy mode, fingerprint farbling on proxied pages.
+- **Privacy-first data policy** — history and local page search indexing **opt-in (default OFF)**; telemetry never; expanded built-in ad/tracker seed list; Settings → Clearnet & privacy control panel.
+- **Ask Browser / QVAC** — browser-owned on-device AI (✦ Ask panel + blank-tab Local AI widget); page context is chrome-gated, not exposed as a page API.
+
+### Changed
+
+- URL bar accepts `hyper://…`, `https://…`, and bare domains (`example.com`).
+- `pear.links` allowlists `https://` and `http://` for clearnet loads.
+- Native release metadata bumped to `0.6.0` (package.json, appling CMake VERSION, AppStream metainfo).
+- Library copy clarifies history/search indexing defaults and local-only storage.
+
+### Security / privacy
+
+- Content Shield enabled by default; blocked requests never reach peers, relays, or clearnet.
+- Visit history and search indexing refuse writes unless explicitly enabled; disabling history clears stored visits.
+- No telemetry pipeline; `telemetryEnabled` cannot be turned on.
+
 ## v0.5.2 — 2026-07-01
 
 Logo hotfix for the live Pear app, public website, and refreshed native installer packages.

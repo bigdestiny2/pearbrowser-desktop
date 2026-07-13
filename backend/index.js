@@ -35,6 +35,17 @@ const { AppManager } = require('./app-manager.js')
 const { SiteManager } = require('./site-manager.js')
 const { PearBridge, PEAR_SWARM_V1_SHIM, PEAR_SYNC_SHIM, PEAR_ANONGPT_SHIM } = require('./pear-bridge.js')
 const { HttpBridge } = require('./http-bridge.js')
+const { AskBrowserService } = require('./ai/ask-browser-service.cjs')
+const { ContentShield } = require('./content-shield.cjs')
+const { PearPluginRegistry } = require('./pear-plugins.cjs')
+const { SessionBridge } = require('./session-bridge.cjs')
+const {
+  normalizePrivacySettings,
+  mergeSettingsWithPrivacyDefaults,
+  isHistoryEnabled,
+  isSearchIndexEnabled,
+  DEFAULT_PRIVACY
+} = require('./privacy-policy.cjs')
 const { AnongptBuyer } = require('./anongpt-buyer.js')
 const { UserData } = require('./user-data.js')
 const { Identity, validateMnemonic } = require('./identity.js')
@@ -44,6 +55,8 @@ const { Names } = require('./names.cjs')
 const { resolveName } = require('./resolve-name.cjs')
 const { NameRegistry } = require('./name-registry-store.cjs')
 const { NostrEventStore } = require('./nostr-events-store.cjs')
+const { createSearchHandler } = require('./search-handler.js')
+const { PersonalIndex } = require('./personal-index.cjs')
 const { SwarmBridge } = require('./swarm-bridge.js')
 const { SwarmGrants } = require('./swarm-grants.js')
 const C = require('./constants.js')
@@ -54,6 +67,11 @@ const ENV = (typeof Bare !== 'undefined' && Bare.env) ||
   (typeof process !== 'undefined' && process.env) || {}
 const ENABLE_DEV_CATALOGUE = ENV.PEARBROWSER_DEV_CATALOGUE === '1'
 const ENABLE_RELAY_INDEX_ROOMS = ENV.PEARBROWSER_RELAY_INDEX_ROOMS === '1'
+// Browser origin isolation is a security boundary, not an experiment: without
+// it, one drive can same-origin read another drive's injected page/API tokens.
+// Keep an explicit emergency rollback while shipping the safe posture by
+// default.
+const ENABLE_PER_DRIVE_ORIGINS = ENV.PEARBROWSER_PER_DRIVE_ORIGINS !== '0'
 
 // Swallow benign races that would otherwise crash Bare with an
 // unhandled rejection — most commonly `Corestore is closed` from
@@ -108,6 +126,11 @@ let federatedNameResolver = null // naming Phase N5 — resolve contacts' names 
 let federatedNostrFeed = null // NOSTR Phase 3 — surface contacts' attested events in the feed
 let swarmBridge = null
 let swarmGrants = null
+let aiService = null
+let contentShield = null // Content Shield — request filter + cosmetic hiding (BROWSER_PARITY_PLAN.md)
+let pearPlugins = null // Pear Plugins registry (Phase 3)
+let sessionBridge = null // Clearnet session bridge facade (Phase 4)
+let privacySettings = { ...DEFAULT_PRIVACY }
 /** Map<requestId, { resolve, reject, timer }> for login() ceremonies. */
 const pendingLogins = new Map()
 /** Map<requestId, { resolve, reject, timer }> for swarm.join() consent ceremonies. */
@@ -127,23 +150,75 @@ async function whenReady () { return bootReady }
 // --- RPC ---
 
 const rpc = new WorkletRPC(IPC)
+const askBrowserService = new AskBrowserService({
+  getAiService: () => aiService,
+  loadContext: async (page) => ({
+    context: page,
+    source: { kind: page?.text || page?.selection ? 'active-page' : 'metadata' }
+  }),
+  emit: (payload) => rpc.event(C.EVT_ASK_BROWSER_STREAM, payload)
+})
 
 // Browser commands
-rpc.handle(C.CMD_NAVIGATE, async (data) => {
+rpc.handle(C.CMD_NAVIGATE, async (data = {}) => {
   await whenReady()
-  const { url } = data
-  const parsed = new URL(url)
+  let navUrl = typeof data.url === 'string' ? data.url : ''
+  if (!navUrl) throw new Error('url required')
+
+  // Phase 4 clearnet / loopback / hyper routing via SessionBridge when ready.
+  if (sessionBridge) {
+    const resolved = sessionBridge.resolveNavigation(navUrl)
+    if (resolved.kind === 'clearnet') {
+      return {
+        localUrl: resolved.localUrl,
+        key: null,
+        path: '/',
+        apiToken: null,
+        contextToken: null,
+        kind: 'clearnet',
+        url: resolved.url,
+        mode: resolved.mode,
+        upgraded: !!resolved.upgraded,
+        stripped: resolved.stripped || [],
+        shieldActive: !!resolved.shieldActive
+      }
+    }
+    if (resolved.kind === 'loopback') {
+      const proxyDriveKey = driveKeyFromProxyUrl(resolved.url)
+      const contextToken = proxyDriveKey && proxy?.pageContextToken
+        ? proxy.pageContextToken(proxyDriveKey)
+        : tabRuntime?.contextTokenForUrl?.(resolved.url) || null
+      return {
+        localUrl: resolved.localUrl,
+        key: proxyDriveKey || null,
+        path: new URL(resolved.url).pathname || '/',
+        apiToken: null,
+        contextToken,
+        kind: 'loopback',
+        url: resolved.url
+      }
+    }
+    if (resolved.kind === 'hyper') navUrl = resolved.url
+  }
+
+  const parsed = new URL(navUrl)
   // The run-in-tab wrapper is served by tab-runtime on a loopback http(s) port
   // (whitelisted in pear.json links) — load it directly, not via /hyper/<key>.
   if ((parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
       (parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost')) {
-    return { localUrl: url, key: null, path: parsed.pathname || '/', apiToken: null }
+    const proxyDriveKey = driveKeyFromProxyUrl(navUrl)
+    const contextToken = proxyDriveKey && proxy?.pageContextToken
+      ? proxy.pageContextToken(proxyDriveKey)
+      : tabRuntime?.contextTokenForUrl?.(navUrl) || null
+    return { localUrl: navUrl, key: proxyDriveKey || null, path: parsed.pathname || '/', apiToken: null, contextToken, kind: 'loopback' }
+  }
+  // Non-loopback http(s) without session bridge: refuse rather than map host → drive key
+  if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+    throw new Error('Clearnet navigation requires session bridge (still booting?)')
   }
   const key = normalizeDriveKey(parsed.hostname)
   const path = parsed.pathname || '/'
-  const apiToken = /^[0-9a-f]{64}$/i.test(key) && proxy?.issueApiToken
-    ? proxy.issueApiToken(key)
-    : null
+  const validKey = /^[0-9a-f]{64}$/i.test(key)
 
   // Start loading the drive in the background — don't wait for sync.
   // The proxy will handle waiting for content when WebView requests it.
@@ -152,11 +227,25 @@ rpc.handle(C.CMD_NAVIGATE, async (data) => {
     console.error('Failed to load browse drive:', err.message)
   })
 
+  const pathAndSearch = `${path}${parsed.search || ''}`
+  const localUrl = validKey && proxy?.localUrlForDrive
+    ? await proxy.localUrlForDrive(key, 'hyper', pathAndSearch)
+    : `http://127.0.0.1:${proxy.port}/hyper/${key}${pathAndSearch}`
+  const apiToken = validKey && proxy?.issueApiToken
+    ? proxy.issueApiToken(key, { origin: new URL(localUrl).origin })
+    : null
+  const contextToken = validKey && proxy?.pageContextToken
+    ? proxy.pageContextToken(key)
+    : null
+
   return {
-    localUrl: `http://127.0.0.1:${proxy.port}/hyper/${key}${path}${parsed.search || ''}`,
+    localUrl,
     key,
     path,
-    apiToken
+    apiToken,
+    contextToken,
+    kind: 'hyper',
+    url: navUrl
   }
 })
 
@@ -205,6 +294,168 @@ rpc.handle(C.CMD_GET_DRIVE_INFO, async (data = {}) => {
     updatedAt: Date.now()
   }
 })
+
+rpc.handle(C.CMD_RELEASE_ORIGIN, async (data = {}) => {
+  await whenReady()
+  const keyHex = normalizeDriveKey(data.keyHex || driveKeyFromProxyUrl(data.url) || driveKeyFromUrl(data.url))
+  if (!/^[0-9a-f]{64}$/i.test(keyHex)) {
+    return { ok: false, released: false, reason: 'invalid-drive-key' }
+  }
+  const released = proxy?.releaseDriveOrigin ? await proxy.releaseDriveOrigin(keyHex) : false
+  return { ok: true, released, keyHex: keyHex.toLowerCase() }
+})
+
+// Ask Browser is browser-chrome-owned. Hyperdrive pages use the separately
+// token/manifest-gated /api/ai/* surface and cannot invoke these RPC commands.
+rpc.handle(C.CMD_ASK_BROWSER_CAPABILITIES, async () => {
+  await whenReady()
+  return askBrowserService.capabilities()
+})
+
+rpc.handle(C.CMD_ASK_BROWSER_START, async (data = {}) => {
+  await whenReady()
+  return askBrowserService.start(data)
+})
+
+rpc.handle(C.CMD_ASK_BROWSER_CANCEL, async (data = {}) => {
+  return { ok: await askBrowserService.cancel(data) }
+})
+
+// Content Shield live status for the Settings card + urlbar chip.
+// Toggle / allowlist / strict / lists persist via user-data settings.
+rpc.handle(C.CMD_SHIELD_STATUS, async (data = {}) => {
+  await whenReady()
+  if (!contentShield) {
+    return {
+      enabled: false, blocked: 0, allowed: 0, blockRules: 0, exceptionRules: 0,
+      cosmeticRules: 0, scriptletRules: 0, lists: [], listDetails: [],
+      allowlist: [], strict: [], plugins: {}, topRules: []
+    }
+  }
+  const stats = contentShield.stats()
+  const driveKey = typeof data.driveKey === 'string' ? data.driveKey.trim().toLowerCase() : ''
+  if (driveKey && /^[0-9a-f]{64}$/.test(driveKey)) {
+    stats.driveKey = driveKey
+    stats.driveAllowlisted = contentShield.isAllowlisted(driveKey)
+    stats.driveStrict = contentShield.isStrict(driveKey)
+  }
+  return stats
+})
+
+rpc.handle(C.CMD_SHIELD_LOAD_LIST, async (data = {}) => {
+  await whenReady()
+  if (!contentShield) throw new Error('Content Shield not available')
+  const name = typeof data.name === 'string' ? data.name.trim() : ''
+  if (!name || name === 'builtin' || name.startsWith('plugin:')) {
+    throw new Error('invalid list name')
+  }
+  const result = contentShield.addList(name, data.text == null ? '' : String(data.text))
+  await persistShieldState()
+  return result
+})
+
+rpc.handle(C.CMD_SHIELD_REMOVE_LIST, async (data = {}) => {
+  await whenReady()
+  if (!contentShield) throw new Error('Content Shield not available')
+  const name = typeof data.name === 'string' ? data.name.trim() : ''
+  if (!name || name === 'builtin') throw new Error('invalid list name')
+  const removed = contentShield.removeList(name)
+  await persistShieldState()
+  return { removed, name }
+})
+
+rpc.handle(C.CMD_SHIELD_SET_ALLOW, async (data = {}) => {
+  await whenReady()
+  if (!contentShield) throw new Error('Content Shield not available')
+  const driveKey = typeof data.driveKey === 'string' ? data.driveKey.trim().toLowerCase() : ''
+  if (!/^[0-9a-f]{64}$/.test(driveKey)) throw new Error('driveKey must be 64-char hex')
+  if (data.allow) contentShield.allowlistDrive(driveKey)
+  else contentShield.removeAllowlistDrive(driveKey)
+  await persistShieldState()
+  return {
+    driveKey,
+    allowlisted: contentShield.isAllowlisted(driveKey),
+    allowlist: contentShield.allowlist()
+  }
+})
+
+rpc.handle(C.CMD_SHIELD_SET_STRICT, async (data = {}) => {
+  await whenReady()
+  if (!contentShield) throw new Error('Content Shield not available')
+  const driveKey = typeof data.driveKey === 'string' ? data.driveKey.trim().toLowerCase() : ''
+  if (!/^[0-9a-f]{64}$/.test(driveKey)) throw new Error('driveKey must be 64-char hex')
+  contentShield.setStrictDrive(driveKey, !!data.strict)
+  await persistShieldState()
+  return {
+    driveKey,
+    strict: contentShield.isStrict(driveKey),
+    strictDrives: contentShield.strictDrives()
+  }
+})
+
+rpc.handle(C.CMD_PLUGIN_LIST, async () => {
+  await whenReady()
+  return { plugins: pearPlugins ? pearPlugins.list() : [] }
+})
+
+rpc.handle(C.CMD_PLUGIN_SET_ENABLED, async (data = {}) => {
+  await whenReady()
+  if (!pearPlugins) throw new Error('Plugin registry not available')
+  const result = pearPlugins.setEnabled(data.id, data.enabled !== false)
+  await persistShieldState()
+  return result
+})
+
+rpc.handle(C.CMD_PLUGIN_REGISTER, async (data = {}) => {
+  await whenReady()
+  if (!pearPlugins) throw new Error('Plugin registry not available')
+  const result = pearPlugins.register({
+    id: data.id,
+    manifest: data.manifest,
+    contribution: data.contribution,
+    enabled: data.enabled !== false
+  })
+  if (result && result.ok) rememberPluginPayload(data)
+  await persistShieldState()
+  return result
+})
+
+async function persistShieldState () {
+  if (!contentShield || !userData) return
+  try {
+    const state = contentShield.exportListState()
+    // Sync enable flags from registry into durable state.
+    if (pearPlugins) {
+      for (const p of pearPlugins.list()) {
+        state.plugins[p.id] = p.enabled
+        if (persistShieldState._pluginPayloads[p.id]) {
+          persistShieldState._pluginPayloads[p.id].enabled = p.enabled
+        }
+      }
+    }
+    await userData.setSettings({
+      contentShieldState: state,
+      contentShieldPlugins: { ...persistShieldState._pluginPayloads },
+      contentShieldAllow: state.allowlist,
+      contentShieldStrict: state.strict
+    })
+  } catch (err) {
+    console.warn('[content-shield] persist failed:', err && err.message)
+  }
+}
+
+// Remember last-known plugin register payloads so restart can rehydrate.
+persistShieldState._pluginPayloads = {}
+function rememberPluginPayload (data) {
+  if (!data || !data.id) return
+  const id = String(data.id).trim().toLowerCase()
+  persistShieldState._pluginPayloads[id] = {
+    id,
+    manifest: data.manifest,
+    contribution: data.contribution,
+    enabled: data.enabled !== false
+  }
+}
 
 rpc.handle(C.CMD_GET_IDENTITY, async () => {
   return {
@@ -308,13 +559,18 @@ rpc.handle(C.CMD_LAUNCH_APP, async (data) => {
 
   // Ensure the app drive is loaded in the proxy
   await appManager.getDrive(app.driveKey)
+  const driveKey = normalizeDriveKey(app.driveKey)
+  const localUrl = proxy?.localUrlForDrive
+    ? await proxy.localUrlForDrive(driveKey, 'app', '/index.html')
+    : `http://127.0.0.1:${proxy.port}/app/${driveKey}/index.html`
 
   return {
-    localUrl: `http://127.0.0.1:${proxy.port}/app/${app.driveKey}/index.html`,
+    localUrl,
     appId: data.id,
     name: app.name,
-    driveKey: app.driveKey,
-    apiToken: proxy?.issueApiToken ? proxy.issueApiToken(app.driveKey) : null
+    driveKey,
+    apiToken: proxy?.issueApiToken ? proxy.issueApiToken(driveKey, { origin: new URL(localUrl).origin }) : null,
+    contextToken: proxy?.pageContextToken ? proxy.pageContextToken(driveKey) : null
   }
 })
 
@@ -352,7 +608,6 @@ rpc.handle(C.CMD_UNLOAD_CATALOG, async (data) => {
 // with the enriched trusted-peer set (queryId-correlated, stale-suppressed). The
 // reply shape is the old { results, stats } plus additive { phase, federating,
 // queryId } — so existing renderers keep working unchanged.
-const { createSearchHandler } = require('./search-handler.js')
 const handleSearch = createSearchHandler({
   getPersonalIndex: () => personalIndex,
   getQueryPlanner: () => queryPlanner,
@@ -389,8 +644,13 @@ rpc.handle(C.CMD_IDENTITY_BINDING_RESOLVE, async (data) => {
 
 rpc.handle(C.CMD_SEARCH_INDEX, async (data) => {
   await whenReady()
-  if (!personalIndex || !data || !data.driveKey) return { ok: false }
+  // Privacy-first: local page indexing is opt-in (searchIndexEnabled).
+  if (!personalIndex || !data || !data.driveKey) return { ok: false, indexed: false }
   try {
+    const settings = userData ? await userData.getSettings() : {}
+    if (!isSearchIndexEnabled(settings)) {
+      return { ok: true, indexed: false, reason: 'search-index-disabled' }
+    }
     const docId = await personalIndex.indexDoc({
       driveKey: normalizeDriveKey(data.driveKey),
       path: data.path || '/',
@@ -398,10 +658,10 @@ rpc.handle(C.CMD_SEARCH_INDEX, async (data) => {
       body: data.text || data.body || '',
       publishedAt: Number.isFinite(data.publishedAt) ? data.publishedAt : 0,
     })
-    return { ok: !!docId, docId }
+    return { ok: !!docId, docId, indexed: !!docId }
   } catch (err) {
-    console.error('[search] index failed:', err && err.message)
-    return { ok: false }
+    console.error('[search] index failed')
+    return { ok: false, indexed: false }
   }
 })
 
@@ -991,7 +1251,7 @@ rpc.handle(C.CMD_RUN_APP_IN_TAB, async (data) => {
     throw new Error('Only the demo, or pear:// / file:// apps, can run in a tab')
   }
   const res = tabRuntime.open(link)
-  console.log('[tab-runtime] run-in-tab', link, '->', res.url)
+  console.log('[tab-runtime] run-in-tab')
   return res
 })
 
@@ -1094,6 +1354,14 @@ rpc.handle(C.CMD_SET_RELAY_ENABLED, async ({ enabled } = {}) => {
   relayClient.setEnabled(enabled)
   persistState()
   return { ok: true, enabled: relayClient.enabled }
+})
+
+rpc.handle(C.CMD_CHECK_RELAY_CAPABILITY, async ({ url } = {}) => {
+  if (!relayClient) return { ok: false, error: 'Relay client not initialised' }
+  const clean = typeof url === 'string' ? url.trim().replace(/\/+$/, '') : ''
+  const configured = new Set(relayClient.relays.map((relayUrl) => relayUrl.replace(/\/+$/, '')))
+  if (!configured.has(clean)) return { ok: false, error: 'relay is not configured' }
+  return relayClient.checkCapability(clean)
 })
 
 // --- User data (Phase 1 ticket 2) ---
@@ -1270,14 +1538,26 @@ rpc.handle(C.CMD_USERDATA_REMOVE_BOOKMARK, async ({ url } = {}) => {
 })
 
 rpc.handle(C.CMD_USERDATA_LIST_HISTORY, async ({ limit } = {}) => {
-  if (!userData) return { history: [] }
-  return { history: await userData.listHistory({ limit }) }
+  if (!userData) return { history: [], historyEnabled: false }
+  const settings = await userData.getSettings()
+  const enabled = isHistoryEnabled(settings)
+  // When history is off, never surface stored visits (and clear any leftovers).
+  if (!enabled) {
+    try { await userData.clearHistory() } catch {}
+    return { history: [], historyEnabled: false }
+  }
+  return { history: await userData.listHistory({ limit }), historyEnabled: true }
 })
 
 rpc.handle(C.CMD_USERDATA_ADD_HISTORY, async ({ url, title } = {}) => {
   await whenReady()
+  // Privacy-first: visit history is opt-in. Default OFF — refuse silently.
+  const settings = userData ? await userData.getSettings() : {}
+  if (!isHistoryEnabled(settings)) {
+    return { ok: true, recorded: false, reason: 'history-disabled' }
+  }
   await requireUserData().addHistory({ url, title })
-  return { ok: true }
+  return { ok: true, recorded: true }
 })
 
 rpc.handle(C.CMD_USERDATA_CLEAR_HISTORY, async () => {
@@ -1286,12 +1566,70 @@ rpc.handle(C.CMD_USERDATA_CLEAR_HISTORY, async () => {
 })
 
 rpc.handle(C.CMD_USERDATA_GET_SETTINGS, async () => {
-  return { settings: await requireUserData().getSettings() }
+  const stored = userData ? await requireUserData().getSettings() : {}
+  return { settings: mergeSettingsWithPrivacyDefaults(stored) }
 })
 
 rpc.handle(C.CMD_USERDATA_SET_SETTINGS, async ({ updates } = {}) => {
+  // Telemetry can never be turned on.
+  if (updates && typeof updates === 'object') {
+    updates = { ...updates, telemetryEnabled: false }
+  }
   const settings = await requireUserData().setSettings(updates || {})
-  return { settings }
+  // Apply the Content Shield toggle live — default ON; only explicit false disables.
+  if (contentShield) contentShield.setEnabled(settings.contentShield !== false)
+  // Allowlist / strict arrays can also be written as settings for simpler UI paths.
+  if (contentShield && updates && typeof updates === 'object') {
+    if (Array.isArray(updates.contentShieldAllow)) {
+      for (const key of contentShield.allowlist()) contentShield.removeAllowlistDrive(key)
+      for (const key of updates.contentShieldAllow) contentShield.allowlistDrive(key)
+    }
+    if (Array.isArray(updates.contentShieldStrict)) {
+      for (const key of contentShield.strictDrives()) contentShield.setStrictDrive(key, false)
+      for (const key of updates.contentShieldStrict) contentShield.setStrictDrive(key, true)
+    }
+  }
+  // Turning history off wipes any previously stored visits.
+  if (updates && updates.historyEnabled === false && userData) {
+    try { await userData.clearHistory() } catch {}
+  }
+  // Privacy ladder + clearnet mode — apply live to proxy + session bridge.
+  applyPrivacyFromSettings(settings)
+  return { settings: mergeSettingsWithPrivacyDefaults(settings) }
+})
+
+function applyPrivacyFromSettings (settings) {
+  const merged = mergeSettingsWithPrivacyDefaults(settings || {})
+  privacySettings = normalizePrivacySettings(merged)
+  if (proxy && typeof proxy.setPrivacySettings === 'function') {
+    proxy.setPrivacySettings(privacySettings)
+  }
+  if (contentShield && typeof merged.contentShield === 'boolean') {
+    contentShield.setEnabled(merged.contentShield !== false)
+  }
+}
+
+rpc.handle(C.CMD_PRIVACY_STATUS, async () => {
+  await whenReady()
+  const stored = userData ? await userData.getSettings() : {}
+  const merged = mergeSettingsWithPrivacyDefaults(stored)
+  return {
+    privacy: {
+      ...privacySettings,
+      historyEnabled: merged.historyEnabled === true,
+      searchIndexEnabled: merged.searchIndexEnabled === true,
+      telemetryEnabled: false,
+      contentShield: merged.contentShield !== false
+    },
+    dataCollection: {
+      telemetry: false,
+      history: merged.historyEnabled === true,
+      searchIndex: merged.searchIndexEnabled === true,
+      remoteAnalytics: false,
+      note: 'PearBrowser does not ship telemetry. History and local search indexing are opt-in only.'
+    },
+    session: sessionBridge ? sessionBridge.status() : { nativeBridge: false, hasNativeHook: false }
+  }
 })
 
 rpc.handle(C.CMD_USERDATA_GET_SESSION, async () => {
@@ -2189,6 +2527,18 @@ function driveKeyFromUrl (url) {
   }
 }
 
+function driveKeyFromProxyUrl (url) {
+  if (typeof url !== 'string' || !url.trim()) return ''
+  try {
+    const parsed = new URL(url)
+    if (parsed.protocol !== 'http:' || (parsed.hostname !== '127.0.0.1' && parsed.hostname !== 'localhost')) return ''
+    const match = parsed.pathname.match(/^\/(?:hyper|app)\/([0-9a-f]{64})(?:\/|$)/i)
+    return match ? match[1].toLowerCase() : ''
+  } catch {
+    return ''
+  }
+}
+
 function registerHiveRelayDrive (keyHex, drive) {
   if (!keyHex || !drive || !hiveRelay?.drives || typeof hiveRelay.drives.set !== 'function') return
   const existing = hiveRelay.drives.get(keyHex)
@@ -2445,10 +2795,9 @@ async function boot () {
   // Lighthouse Phase 0 — local self-search index over the user's own browsed/
   // bookmarked content (docs/P2P-SEARCH-RESEARCH.md). Each posting is signed by
   // the per-user 'search' subkey (forward-compat with the networked phases);
-  // queried fully locally. Lazy require so a .cjs-resolution hiccup under Bare
-  // disables search gracefully instead of crashing boot.
+  // queried fully locally. PersonalIndex is imported in the static dependency
+  // block so Pear stages it for the Bare main process.
   try {
-    const { PersonalIndex } = require('./personal-index.cjs')
     // Sign each posting with the BOUND (rotatable) search key via the binding
     // publisher, so a trusted peer who resolves our search key can verify our
     // postings (Lighthouse Phase 2). The publisher is created just below; this
@@ -2667,13 +3016,60 @@ async function boot () {
   // Start HTTP proxy with hybrid fetching (relay + P2P)
   proxy = new HyperProxy(getDriveForProxy, (path, err) => {
     rpc.event(C.EVT_ERROR, { type: 'proxy-error', path, message: err })
-  }, relayClient)
+  }, relayClient, {
+    perDriveOrigins: ENABLE_PER_DRIVE_ORIGINS
+  })
 
   // swarm.v1 — page-side shim that exposes window.pear.swarm.v1 to every
   // text/html response served by the proxy. Pages get it for free; no
   // <script src> required from the page author. See docs/SWARM-V1.md.
   proxy.setPearSwarmShim(PEAR_SWARM_V1_SHIM)
   proxy.setPearSyncShim(PEAR_SYNC_SHIM)
+
+  // Content Shield — enabled by default, persisted `contentShield: false`
+  // turns it off. Phase 2 durable lists / allowlist / strict and Phase 3
+  // plugin kill-switches rehydrate from user-data (offline after first save).
+  contentShield = new ContentShield()
+  pearPlugins = new PearPluginRegistry({ shield: contentShield })
+  try {
+    const shieldSettings = userData ? await userData.getSettings() : null
+    if (shieldSettings && shieldSettings.contentShield === false) contentShield.setEnabled(false)
+    if (shieldSettings && shieldSettings.contentShieldState) {
+      contentShield.importListState(shieldSettings.contentShieldState)
+    }
+    // Legacy array keys (settings UI may write these directly).
+    if (shieldSettings && Array.isArray(shieldSettings.contentShieldAllow)) {
+      for (const key of shieldSettings.contentShieldAllow) contentShield.allowlistDrive(key)
+    }
+    if (shieldSettings && Array.isArray(shieldSettings.contentShieldStrict)) {
+      for (const key of shieldSettings.contentShieldStrict) contentShield.setStrictDrive(key, true)
+    }
+    if (shieldSettings && shieldSettings.contentShieldPlugins && typeof shieldSettings.contentShieldPlugins === 'object') {
+      persistShieldState._pluginPayloads = { ...shieldSettings.contentShieldPlugins }
+      for (const payload of Object.values(shieldSettings.contentShieldPlugins)) {
+        try { pearPlugins.register(payload) } catch {}
+      }
+    }
+  } catch {}
+  proxy.setContentShield(contentShield)
+
+  // Session bridge + privacy ladder (Phases 4–5). Clearnet navigations route
+  // through the browser-owned /clearnet/* proxy by default so Content Shield
+  // sees every request. Direct mode (real https load) is a settings opt-in.
+  try {
+    const bootSettings = userData ? await userData.getSettings() : null
+    applyPrivacyFromSettings(bootSettings || {})
+  } catch {
+    privacySettings = { ...DEFAULT_PRIVACY }
+    if (proxy) proxy.setPrivacySettings(privacySettings)
+  }
+  sessionBridge = new SessionBridge({
+    getShield: () => contentShield,
+    getPrivacy: () => privacySettings,
+    getProxyPort: () => (proxy && proxy.port) || 0
+  })
+  // Try attaching a native webRequest hook if pear-electron ever injects one.
+  try { sessionBridge.attachNativeSession() } catch {}
 
   // anonGPT — page-side shim that exposes window.pear.anongpt.infer
   // ONLY for the anonGPT drive AND only when that drive's manifest.json
@@ -2692,6 +3088,7 @@ async function boot () {
   })
   proxy.setAnongptShim(PEAR_ANONGPT_SHIM)
   proxy.setAnongptDriveKey(C.ANONGPT_DRIVE_KEY)
+  aiService = globalThis._pearbrowserEsmModules?.aiService || null
 
   // Mount direct HTTP bridge (WebView → localhost → Bare, bypasses RN relay)
   const httpBridge = new HttpBridge(pearBridge, swarm, getDriveForProxy, {
@@ -2702,6 +3099,7 @@ async function boot () {
     swarmBridge,
     anongptBuyer,
     anongptDriveKey: C.ANONGPT_DRIVE_KEY,
+    aiService,
     // Login ceremony plumbing — http-bridge calls requestLogin() when a
     // page invokes pear.login(). We fire EVT_LOGIN_REQUEST up to the
     // UI, which calls CMD_LOGIN_RESOLVE after the user decides. See
@@ -2797,6 +3195,8 @@ async function ensureDevCatalogue () {
 
 async function shutdown () {
   if (storageTimer) { clearInterval(storageTimer); storageTimer = null }
+  try { await askBrowserService.close() } catch {}
+  if (aiService) { try { await aiService.close() } catch {}; aiService = null }
   if (swarmBridge) { try { await swarmBridge.destroy() } catch {} swarmBridge = null }
   if (proxy) { try { await proxy.stop() } catch {} proxy = null }
   if (pearBridge) { try { await pearBridge.close() } catch {} pearBridge = null }

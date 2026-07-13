@@ -8,13 +8,16 @@ import {
   MAX_TAB_HISTORY,
   normalizeTabHistory, clampHistoryIndex, pushTabHistory,
   normalizeTabSnapshot, serializeTab, restoreSavedTab, sortTabsPinnedFirst,
-  restoreStartupTabs, makeTab
+  normalizeDefaultTab, restoreStartupTabs, makeTab,
+  driveKeyFromTabAddress, tabDriveKey, tabListUsesDriveKey
 } from '../ui/lib/tabs.js'
 
 const A = 'hyper://aaa/'
 const B = 'hyper://bbb/'
 const C = 'hyper://ccc/'
 const DEALROOM = 'hyper://0724aabf2ad6394983f91c6b24ebd417cb3d25addcf29c98eb246c512dc77f90/'
+const DRIVE_A = 'a'.repeat(64)
+const DRIVE_B = 'b'.repeat(64)
 
 test('normalizeTabHistory drops empties and collapses consecutive repeats', () => {
   assert.deepEqual(normalizeTabHistory([A, A, B, B, B, C]), [A, B, C])
@@ -24,7 +27,7 @@ test('normalizeTabHistory drops empties and collapses consecutive repeats', () =
 
 test('normalizeTabHistory uses fallback only when empty, and caps length', () => {
   assert.deepEqual(normalizeTabHistory([], A), [A])
-  assert.deepEqual(normalizeTabHistory([B], A), [B])   // non-empty → fallback ignored
+  assert.deepEqual(normalizeTabHistory([B], A), [B]) // non-empty → fallback ignored
   const long = Array.from({ length: MAX_TAB_HISTORY + 25 }, (_, i) => `hyper://k${i}/`)
   assert.equal(normalizeTabHistory(long).length, MAX_TAB_HISTORY)
 })
@@ -33,7 +36,7 @@ test('clampHistoryIndex clamps into range and handles empties', () => {
   assert.equal(clampHistoryIndex([A, B, C], 1), 1)
   assert.equal(clampHistoryIndex([A, B, C], 99), 2)
   assert.equal(clampHistoryIndex([A, B, C], -5), 0)
-  assert.equal(clampHistoryIndex([A, B, C], undefined), 2)  // default → last
+  assert.equal(clampHistoryIndex([A, B, C], undefined), 2) // default → last
   assert.equal(clampHistoryIndex([], 0), -1)
 })
 
@@ -97,11 +100,32 @@ test('restoreStartupTabs keeps PearBrowser landing first even when Dealroom was 
   assert.equal(restored.activeId, restored.tabs[0].id)
 })
 
+test('normalizeDefaultTab accepts named startup entries', () => {
+  assert.deepEqual(normalizeDefaultTab({ url: A, title: 'PearBrowser' }), { url: A, title: 'PearBrowser' })
+  assert.deepEqual(normalizeDefaultTab(B), { url: B, title: '' })
+  assert.deepEqual(normalizeDefaultTab(null), { url: '', title: '' })
+})
+
 test('restoreStartupTabs dedupes default tabs from saved sessions', () => {
   const restored = restoreStartupTabs([
     { url: B, title: 'peerit', active: true },
     { url: C, title: 'other' }
-  ], [A, B])
+  ], [
+    { url: A, title: 'PearBrowser' },
+    { url: B, title: 'peerit' }
+  ])
   assert.deepEqual(restored.tabs.map((tab) => tab.url), [A, B, C])
+  assert.deepEqual(restored.tabs.map((tab) => tab.title), ['PearBrowser', 'peerit', 'other'])
   assert.equal(restored.activeId, restored.tabs[0].id)
+})
+
+test('tab origin helpers extract drive keys from hyper and local proxy addresses', () => {
+  assert.equal(driveKeyFromTabAddress(`hyper://${DRIVE_A}/posts/1`), DRIVE_A)
+  assert.equal(driveKeyFromTabAddress(`http://127.0.0.1:12345/hyper/${DRIVE_A}/index.html`), DRIVE_A)
+  assert.equal(driveKeyFromTabAddress(`http://localhost:12345/app/${DRIVE_B}/index.html`), DRIVE_B)
+  assert.equal(driveKeyFromTabAddress(`http://example.com/hyper/${DRIVE_A}/`), '')
+
+  assert.equal(tabDriveKey({ url: '', displayUrl: '', src: `http://127.0.0.1:1/app/${DRIVE_A}/index.html` }), DRIVE_A)
+  assert.equal(tabListUsesDriveKey([{ url: `hyper://${DRIVE_A}/` }], DRIVE_A), true)
+  assert.equal(tabListUsesDriveKey([{ url: `hyper://${DRIVE_A}/` }], DRIVE_B), false)
 })

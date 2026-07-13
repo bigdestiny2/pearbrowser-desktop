@@ -15,16 +15,25 @@
  * With --site-story it creates, publishes, verifies, and deletes a temporary
  * PearBrowser site. That path intentionally exercises publishing and HiveRelay
  * pin/unseed cleanup, so it is opt-in and separate from --local-stories.
+ *
+ * With --desktop-gui-stories it expands the same evidence path across the
+ * automatable blank desktop GUI rows from the release evidence log. It implies
+ * --local-stories, adds browse reload/site-info proof, catalogue search/action
+ * proof, safe catalogue-row app opening through Browse, startup source-contract
+ * checks, Nostr trusted-contact reducer proof, and release-evidence row
+ * suggestions in the JSON output.
  */
 
 import { EventEmitter } from 'node:events'
 import { createRequire } from 'node:module'
+import { readFile } from 'node:fs/promises'
 import http from 'node:http'
 import net from 'node:net'
 import { randomBytes } from 'node:crypto'
 
 const require = createRequire(import.meta.url)
 const C = require('../backend/constants.js')
+const { catalogAppSearchText } = require('../backend/catalog-safety.cjs')
 
 const DEFAULT_HOST = '127.0.0.1'
 const DEFAULT_PORT_BASE = 9876
@@ -34,12 +43,16 @@ const DEFAULT_CONNECT_MS = 1_500
 const DEFAULT_REQUEST_MS = 20_000
 const DEFAULT_FETCH_MS = 20_000
 const DEFAULT_HOMEPAGE_URL = 'hyper://03f0060a35451cfb6b68ad1dda1b8474ebb43fd9100071ccf7d67679a83ebb4f/'
+const PEERIT_URL = 'hyper://ec6e2d6d9d22b9d6b40e11a9ca3042be3197e4bdca9e9a7f079be6ee830761b4/'
+const P2PBUILDERS_URL = 'hyper://ac1977a75cc84b46af0af8bb559cd4ebbe10507eb0f51d863e289d09635f6d74/'
 const DEFAULT_CATALOGS = [
   'f5fb7500bccd60a976d2b1d24246108f4444a210b9ca591533114dffc089934d',
   '5d961fdc2f56215463e5d4656dd4a3f22bb5e15b93f9bfc8439a63a18f974d75'
 ]
 const REQUIRED_FEATURED = ['Keet', 'PearPass', 'anonGPT', 'Paste', 'Peercord']
+const CATALOG_SEARCH_TERMS = ['peercord', 'peerit', 'keet', 'paste']
 const PEERCORD_LINK = 'pear://wmir47w7mai3b1skj66mx7fzso6k6o91kipaney7gtt69npimouy'
+const RELEASE_EVIDENCE_SECTION = 'Desktop GUI And User Stories'
 
 function parseArgs (argv) {
   const args = {
@@ -50,10 +63,12 @@ function parseArgs (argv) {
     connectTimeout: DEFAULT_CONNECT_MS,
     requestTimeout: DEFAULT_REQUEST_MS,
     fetchTimeout: DEFAULT_FETCH_MS,
+    diagnosticToken: process.env.PEARBROWSER_RPC_DIAGNOSTIC_TOKEN || '',
     homepageUrl: DEFAULT_HOMEPAGE_URL,
     catalogs: [...DEFAULT_CATALOGS],
     localStories: false,
     siteStory: false,
+    desktopGuiStories: false,
     json: false
   }
 
@@ -66,11 +81,16 @@ function parseArgs (argv) {
     else if (arg === '--connect-timeout') args.connectTimeout = parseDuration(argv[++i], '--connect-timeout')
     else if (arg === '--request-timeout') args.requestTimeout = parseDuration(argv[++i], '--request-timeout')
     else if (arg === '--fetch-timeout') args.fetchTimeout = parseDuration(argv[++i], '--fetch-timeout')
+    else if (arg === '--diagnostic-token') args.diagnosticToken = String(argv[++i] || '').trim()
     else if (arg === '--homepage-url') args.homepageUrl = parseHyperUrl(argv[++i], '--homepage-url')
     else if (arg === '--catalog') args.catalogs.push(parseHexKey(argv[++i], '--catalog'))
     else if (arg === '--only-catalog') args.catalogs = [parseHexKey(argv[++i], '--only-catalog')]
     else if (arg === '--local-stories') args.localStories = true
     else if (arg === '--site-story') args.siteStory = true
+    else if (arg === '--desktop-gui-stories') {
+      args.desktopGuiStories = true
+      args.localStories = true
+    }
     else if (arg === '--json') args.json = true
     else if (arg === '-h' || arg === '--help') usage(0)
     else usage(2, `unknown option: ${arg}`)
@@ -81,7 +101,7 @@ function parseArgs (argv) {
 
 function usage (code, msg = '') {
   if (msg) console.error('error:', msg)
-  console.error('usage: node scripts/release-rpc-story-smoke.mjs [--timeout 30000] [--port-base 9876] [--catalog <64-hex>] [--homepage-url hyper://...] [--local-stories] [--site-story] [--json]')
+  console.error('usage: node scripts/release-rpc-story-smoke.mjs [--timeout 30000] [--port-base 9876] [--diagnostic-token <token>] [--catalog <64-hex>] [--homepage-url hyper://...] [--local-stories] [--site-story] [--desktop-gui-stories] [--json]')
   process.exit(code)
 }
 
@@ -356,17 +376,18 @@ async function connectReady (args) {
     for (let i = 0; i < args.portCount; i++) {
       const port = args.portBase + i
       const remain = Math.max(1, deadline - Date.now())
-      const url = `ws://${args.host}:${port}/status-smoke`
+      const publicUrl = `ws://${args.host}:${port}/status-smoke`
+      const url = `${publicUrl}${args.diagnosticToken ? `?token=${encodeURIComponent(args.diagnosticToken)}` : ''}`
       let ws = null
       try {
         ws = await connect(url, Math.min(args.connectTimeout, remain))
         const status = await requestRpc(ws, C.CMD_GET_STATUS, {}, Math.min(args.requestTimeout, remain))
         const errors = validateStatus(status)
         if (errors.length === 0) return { ws, port, url, status }
-        last = { port, url, status, errors }
+        last = { port, url: publicUrl, status, errors }
         ws.close()
       } catch (err) {
-        last = { port, url, error: err.message }
+        last = { port, url: publicUrl, error: err.message }
         try { ws?.close() } catch {}
       }
     }
@@ -552,13 +573,14 @@ async function runNamingStory (ws, args, token) {
   }
 }
 
-async function runLibraryStory (ws, args, token) {
+async function runLibraryStory (ws, args, token, options = {}) {
   const bookmarkUrl = `${args.homepageUrl}?release-smoke=${token}`
   const bookmarkTitle = `Release Smoke Bookmark ${token}`
   const beforeSession = await requestRpc(ws, C.CMD_USERDATA_GET_SESSION, {}, args.requestTimeout)
   const previousSession = beforeSession?.session ?? null
   let bookmarkCreated = false
   let sessionTouched = false
+  let diagnosticReconnectRoundTrip = false
 
   try {
     const add = await requestRpc(ws, C.CMD_USERDATA_ADD_BOOKMARK, { url: bookmarkUrl, title: bookmarkTitle }, args.requestTimeout)
@@ -581,6 +603,24 @@ async function runLibraryStory (ws, args, token) {
     const afterSession = await requestRpc(ws, C.CMD_USERDATA_GET_SESSION, {}, args.requestTimeout)
     if (afterSession?.session?.releaseSmoke !== token) throw new Error('library story session round-trip failed')
 
+    if (options.reconnectUrl) {
+      const second = await connect(options.reconnectUrl, args.connectTimeout)
+      try {
+        const listedAgain = await requestRpc(second, C.CMD_USERDATA_LIST_BOOKMARKS, {}, args.requestTimeout)
+        const bookmarksAgain = Array.isArray(listedAgain?.bookmarks) ? listedAgain.bookmarks : []
+        if (!bookmarksAgain.some((b) => b?.url === bookmarkUrl && b?.title === bookmarkTitle)) {
+          throw new Error('library story bookmark was not persisted across diagnostic reconnect')
+        }
+        const sessionAgain = await requestRpc(second, C.CMD_USERDATA_GET_SESSION, {}, args.requestTimeout)
+        if (sessionAgain?.session?.releaseSmoke !== token) {
+          throw new Error('library story session was not persisted across diagnostic reconnect')
+        }
+        diagnosticReconnectRoundTrip = true
+      } finally {
+        try { second.close() } catch {}
+      }
+    }
+
     await requestRpc(ws, C.CMD_USERDATA_REMOVE_BOOKMARK, { url: bookmarkUrl }, args.requestTimeout)
     bookmarkCreated = false
     const afterRemove = await requestRpc(ws, C.CMD_USERDATA_LIST_BOOKMARKS, {}, args.requestTimeout)
@@ -590,6 +630,7 @@ async function runLibraryStory (ws, args, token) {
     return {
       bookmarkRoundTrip: true,
       sessionRoundTrip: true,
+      diagnosticReconnectRoundTrip,
       restoredPreviousSession: previousSession !== null
     }
   } finally {
@@ -602,11 +643,11 @@ async function runLibraryStory (ws, args, token) {
   }
 }
 
-async function runLocalStories (ws, args) {
+async function runLocalStories (ws, args, options = {}) {
   const token = makeToken()
   const search = await runSearchStory(ws, args, token)
   const naming = await runNamingStory(ws, args, token)
-  const library = await runLibraryStory(ws, args, token)
+  const library = await runLibraryStory(ws, args, token, options)
   return { token, search, naming, library }
 }
 
@@ -685,6 +726,445 @@ async function runSiteStory (ws, args) {
   }
 }
 
+async function runDesktopGuiStories (ws, args, context) {
+  const browse = await runBrowseStory(ws, args, context.homepage)
+  const catalogue = runCatalogueStory(context.catalogResult)
+  const latestAppWithoutDownload = await runSafeCatalogueAppOpenStory(ws, args, context.catalogResult)
+  const featuredAppRegression = runFeaturedAppRegressionStory(context.catalogResult, latestAppWithoutDownload)
+  const freshLaunch = await runFreshLaunchSourceContract()
+  const nostrTrustedContact = await runNostrTrustedContactStory()
+  const librarySession = context.localStories?.library
+    ? {
+        bookmarkRoundTrip: context.localStories.library.bookmarkRoundTrip === true,
+        sessionRoundTrip: context.localStories.library.sessionRoundTrip === true,
+        diagnosticReconnectRoundTrip: context.localStories.library.diagnosticReconnectRoundTrip === true,
+        restoredPreviousSession: context.localStories.library.restoredPreviousSession === true
+      }
+    : null
+
+  if (!librarySession?.bookmarkRoundTrip || !librarySession?.sessionRoundTrip || !librarySession?.diagnosticReconnectRoundTrip) {
+    throw new Error('desktop GUI story mode requires library bookmark/session round-trip with diagnostic reconnect proof')
+  }
+
+  return {
+    browse,
+    freshLaunch,
+    catalogue,
+    latestAppWithoutDownload,
+    featuredAppRegression,
+    nostrTrustedContact,
+    librarySession
+  }
+}
+
+async function runBrowseStory (ws, args, homepage) {
+  const nav = homepage?.nav
+  const fetched = homepage?.fetched
+  assertHomepage(nav, fetched, args.homepageUrl)
+  const reloaded = await fetchLocalUrl(nav.localUrl, args.fetchTimeout)
+  assertHomepage(nav, reloaded, args.homepageUrl)
+
+  const info = await requestRpc(ws, C.CMD_GET_DRIVE_INFO, { url: args.homepageUrl }, args.requestTimeout)
+  const keyHex = new URL(args.homepageUrl).hostname.toLowerCase()
+  if (info?.keyHex !== keyHex) throw new Error(`browse story drive-info key mismatch: ${info?.keyHex || '(missing)'}`)
+  if (typeof info.discoveryKey !== 'string' || !/^[0-9a-f]{64}$/i.test(info.discoveryKey)) {
+    throw new Error('browse story drive-info missing discovery key')
+  }
+
+  return {
+    url: args.homepageUrl,
+    localUrl: nav.localUrl,
+    statusCode: fetched.statusCode,
+    reloadStatusCode: reloaded.statusCode,
+    bytes: Buffer.byteLength(fetched.body),
+    reloadBytes: Buffer.byteLength(reloaded.body),
+    title: titleOf(fetched.body),
+    driveInfo: {
+      keyHex: info.keyHex,
+      version: Number.isFinite(info.version) ? info.version : null,
+      discoveryKey: info.discoveryKey,
+      peerCount: Number.isFinite(info.peerCount) ? info.peerCount : 0,
+      byteLength: Number.isFinite(info.byteLength) ? info.byteLength : 0,
+      relay: info.relay || null
+    }
+  }
+}
+
+function runCatalogueStory (catalogResult) {
+  const apps = Array.isArray(catalogResult?.apps) ? catalogResult.apps : []
+  const catalogs = Array.isArray(catalogResult?.catalogs) ? catalogResult.catalogs : []
+  const searches = {}
+
+  for (const term of CATALOG_SEARCH_TERMS) {
+    const hits = apps.filter((app) => app?.link && catalogAppSearchText(app).includes(term))
+    if (hits.length === 0) throw new Error(`catalogue story search returned no results for ${term}`)
+    const exact = hits.find((app) => sameNameOrId(app, term)) || hits[0]
+    searches[term] = {
+      results: hits.length,
+      top: exact.name || exact.id || null,
+      action: launchActionForApp(exact)
+    }
+  }
+
+  return {
+    catalogs: catalogs.map((catalog) => ({
+      key: catalog.key || null,
+      name: catalog.name || null,
+      count: Number.isFinite(catalog.count) ? catalog.count : 0,
+      source: catalog.source || null
+    })),
+    totalCatalogs: catalogs.length,
+    totalApps: apps.length,
+    runnableApps: apps.filter((app) => app?.link).length,
+    featured: REQUIRED_FEATURED.map((name) => {
+      const app = findAppByName(apps, name)
+      if (!app) throw new Error(`catalogue story featured row missing: ${name}`)
+      return {
+        name: app.name,
+        type: app.type || 'standalone',
+        link: app.link || null,
+        driveKey: app.driveKey || null,
+        action: launchActionForApp(app),
+        catalogName: app.catalogName || null
+      }
+    }),
+    searches
+  }
+}
+
+async function runSafeCatalogueAppOpenStory (ws, args, catalogResult) {
+  const apps = Array.isArray(catalogResult?.apps) ? catalogResult.apps : []
+  const candidates = apps
+    .filter((app) => app && app.driveKey && isHyperDriveKey(app.driveKey))
+    .filter((app) => {
+      const categories = Array.isArray(app.categories) ? app.categories.map((c) => String(c).toLowerCase()) : []
+      return categories.includes('featured') || sameNameOrId(app, 'peerit') || sameNameOrId(app, 'p2pbuilders')
+    })
+    .sort((a, b) => publishedTime(b) - publishedTime(a))
+
+  const app = candidates.find((candidate) => sameNameOrId(candidate, 'peerit')) || candidates[0]
+  if (!app) throw new Error('latest app story could not find a safe catalogue row with a Hyperdrive target')
+
+  const url = hyperUrlForApp(app)
+  const nav = await requestRpc(ws, C.CMD_NAVIGATE, { url }, args.requestTimeout)
+  const fetched = await fetchLocalUrl(nav.localUrl, args.fetchTimeout)
+  assertFetchedPage(`${app.name || app.id} catalogue row`, fetched)
+  const info = await requestRpc(ws, C.CMD_GET_DRIVE_INFO, { url }, args.requestTimeout)
+  if (info?.keyHex !== app.driveKey.toLowerCase()) throw new Error('latest app story drive-info key mismatch')
+
+  return {
+    name: app.name || app.id || app.driveKey,
+    id: app.id || null,
+    url,
+    localUrl: nav.localUrl,
+    statusCode: fetched.statusCode,
+    bytes: Buffer.byteLength(fetched.body),
+    title: titleOf(fetched.body),
+    driveKey: app.driveKey.toLowerCase(),
+    type: app.type || null,
+    catalogName: app.catalogName || null,
+    publishedAt: app.publishedAt || null,
+    action: 'open-in-browse',
+    driveInfo: {
+      version: Number.isFinite(info.version) ? info.version : null,
+      peerCount: Number.isFinite(info.peerCount) ? info.peerCount : 0,
+      byteLength: Number.isFinite(info.byteLength) ? info.byteLength : 0
+    }
+  }
+}
+
+function runFeaturedAppRegressionStory (catalogResult, safeOpen) {
+  const apps = Array.isArray(catalogResult?.apps) ? catalogResult.apps : []
+  const standaloneTargets = REQUIRED_FEATURED
+    .map((name) => findAppByName(apps, name))
+    .filter(Boolean)
+    .filter((app) => /^pear:\/\//i.test(String(app.link || '')))
+    .map((app) => ({
+      name: app.name || app.id,
+      type: app.type || 'standalone',
+      link: app.link,
+      action: launchActionForApp(app)
+    }))
+
+  if (!standaloneTargets.some((app) => sameNameOrId(app, 'keet'))) {
+    throw new Error('featured app regression story could not verify Keet window launch target')
+  }
+  for (const app of standaloneTargets) {
+    if (app.action.primary !== 'open-window') {
+      throw new Error(`featured app regression launch action mismatch for ${app.name}`)
+    }
+  }
+
+  return {
+    safeOpenedFeaturedApp: {
+      name: safeOpen.name,
+      url: safeOpen.url,
+      statusCode: safeOpen.statusCode,
+      bytes: safeOpen.bytes,
+      action: safeOpen.action
+    },
+    standaloneTargets,
+    automationScope: 'safe featured Hyperdrive open plus standalone pear:// target validation; no third-party trust approval'
+  }
+}
+
+async function runFreshLaunchSourceContract () {
+  const shell = await readFile(new URL('../ui/shell.js', import.meta.url), 'utf8')
+  const startupBlock = shell.match(/const STARTUP_TABS = \[([\s\S]*?)\]/)?.[1] || ''
+  if (!startupBlock) throw new Error('fresh-launch story could not find STARTUP_TABS')
+  const defaultIdx = startupBlock.indexOf('DEFAULT_URL')
+  const buildersIdx = startupBlock.indexOf('P2PBUILDERS_URL')
+  const peeritIdx = startupBlock.indexOf('PEERIT_URL')
+  if (defaultIdx === -1 || buildersIdx === -1 || peeritIdx === -1) {
+    throw new Error('fresh-launch story startup tabs are missing the landing, P2P Builders, or peerit tab')
+  }
+  if (!(defaultIdx < buildersIdx && buildersIdx < peeritIdx)) {
+    throw new Error('fresh-launch story startup tabs are not in the expected order')
+  }
+  if (!/restoreStartupTabs\(savedTabs, STARTUP_TABS\)/.test(shell)) {
+    throw new Error('fresh-launch story session restore does not preserve startup defaults')
+  }
+  if (!/a\.driveKey === PEERIT_DRIVE_KEY \? 0/.test(shell)) {
+    throw new Error('fresh-launch story Sites discovery does not pin peerit first')
+  }
+
+  return {
+    frontTab: DEFAULT_HOMEPAGE_URL,
+    startupTabs: [DEFAULT_HOMEPAGE_URL, P2PBUILDERS_URL, PEERIT_URL],
+    peeritUrl: PEERIT_URL,
+    restoreKeepsStartupDefaults: true,
+    sitesDiscoveryPinsPeeritFirst: true,
+    proof: 'ui/shell.js STARTUP_TABS, restoreStartupTabs, and Sites rank contract'
+  }
+}
+
+async function runNostrTrustedContactStory () {
+  const crypto = require('hypercore-crypto')
+  const b4a = require('b4a')
+  const secp = require('../backend/secp256k1-bundle.cjs')
+  const nb = require('../backend/nostr-bind.cjs')
+  const { FederatedNostrFeed } = require('../backend/federated-nostr-feed.cjs')
+
+  const token = makeToken()
+  const hex = (buf) => b4a.toString(buf, 'hex')
+  const rootSigner = (keyPair) => (msg) => hex(crypto.sign(b4a.from(msg, 'utf-8'), keyPair.secretKey))
+  const nostrSigner = (skHex) => (msg32Hex) => secp.schnorrSign(msg32Hex, skHex)
+  const nostrPubkey = (skHex) => secp.schnorrGetPublicKey(skHex)
+  const makeEvent = (skHex, content) => secp.nip01Sign({
+    pubkey: nostrPubkey(skHex),
+    created_at: 1700000000,
+    kind: 1,
+    tags: [],
+    content
+  }, skHex)
+
+  const trustedRoot = crypto.keyPair()
+  const revokedRoot = crypto.keyPair()
+  const trustedRootHex = hex(trustedRoot.publicKey)
+  const revokedRootHex = hex(revokedRoot.publicKey)
+  const trustedSk = '11'.repeat(32)
+  const revokedSk = '22'.repeat(32)
+  const forgedSk = '33'.repeat(32)
+  const trustedBind = nb.makeNostrBind({
+    rootPubkey: trustedRootHex,
+    nostrPubkey: nostrPubkey(trustedSk),
+    epoch: 1
+  }, rootSigner(trustedRoot), nostrSigner(trustedSk))
+  const revokedBind = nb.makeNostrBind({
+    rootPubkey: revokedRootHex,
+    nostrPubkey: nostrPubkey(revokedSk),
+    epoch: 1
+  }, rootSigner(revokedRoot), nostrSigner(revokedSk))
+  const revokedRecord = nb.makeNostrRevoke({
+    rootPubkey: revokedRootHex,
+    nostrPubkey: nostrPubkey(revokedSk),
+    epoch: 1
+  }, rootSigner(revokedRoot))
+
+  const trustedEventKey = 'aa'.repeat(32)
+  const revokedEventKey = 'bb'.repeat(32)
+  const bindings = new Map([
+    [trustedRootHex.toLowerCase(), { nostrEventKey: trustedEventKey, nostrBind: trustedBind, nostrRevocations: [] }],
+    [revokedRootHex.toLowerCase(), { nostrEventKey: revokedEventKey, nostrBind: revokedBind, nostrRevocations: [revokedRecord] }]
+  ])
+  const trustedContent = `trusted contact ${token}`
+  const revokedContent = `revoked contact ${token}`
+  const forgedContent = `forged contact ${token}`
+  const eventStores = new Map([
+    [trustedEventKey, [makeEvent(trustedSk, trustedContent), makeEvent(forgedSk, forgedContent)]],
+    [revokedEventKey, [makeEvent(revokedSk, revokedContent)]]
+  ])
+
+  const feed = new FederatedNostrFeed({
+    listContacts: async () => [
+      { pubkey: trustedRootHex, displayName: 'Trusted Alice', verifiedAt: 1, bindingKey: '01'.repeat(32) },
+      { pubkey: revokedRootHex, displayName: 'Revoked Bob', verifiedAt: 1, bindingKey: '02'.repeat(32) }
+    ],
+    resolveBinding: async ({ contactPubkey }) => bindings.get(String(contactPubkey || '').toLowerCase()) || null,
+    openEventStore: async (eventKey) => ({ listEvents: async () => eventStores.get(eventKey) || [] }),
+    now: () => 1700000000,
+    stepTimeoutMs: 100
+  })
+
+  const result = await feed.eventsWithDiagnostics()
+  const visible = Array.isArray(result.events) ? result.events : []
+  if (visible.length !== 1 || visible[0].content !== trustedContent || visible[0]._via !== 'Trusted Alice') {
+    throw new Error('Nostr trusted-contact story did not expose only the attested contact event')
+  }
+  const hidden = result.hidden || {}
+  if (!Number.isFinite(hidden.quarantined) || hidden.quarantined < 2) {
+    throw new Error('Nostr trusted-contact story did not quarantine revoked/forged events')
+  }
+
+  return {
+    token,
+    visibleEvents: visible.length,
+    trustedVia: visible[0]._via,
+    hidden: {
+      contactsEligible: hidden.contactsEligible || 0,
+      bindingUntrusted: hidden.bindingUntrusted || 0,
+      quarantined: hidden.quarantined || 0,
+      dropped: hidden.dropped || 0,
+      byReason: hidden.byReason || {}
+    }
+  }
+}
+
+function findAppByName (apps, name) {
+  return apps.find((app) => sameNameOrId(app, name))
+}
+
+function sameNameOrId (app, value) {
+  const target = String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+  const names = [app?.name, app?.id].map((item) => String(item || '').toLowerCase().replace(/[^a-z0-9]/g, ''))
+  return names.includes(target)
+}
+
+function launchActionForApp (app) {
+  const link = String(app?.link || '').trim()
+  const driveKey = String(app?.driveKey || '').trim().toLowerCase()
+  const hasDrive = isHyperDriveKey(driveKey)
+  if (/^(pear|file):\/\//i.test(link)) {
+    return {
+      primary: 'open-window',
+      openPage: hasDrive,
+      runInTab: false,
+      reason: `${app?.type || 'standalone'} pear/file app`
+    }
+  }
+  if (/^hyper:\/\//i.test(link) || hasDrive) {
+    return {
+      primary: 'open-in-browse',
+      openPage: true,
+      runInTab: false,
+      reason: 'Hyperdrive page opens through Browse'
+    }
+  }
+  return {
+    primary: 'unsupported',
+    openPage: false,
+    runInTab: false,
+    reason: 'no launchable link or drive key'
+  }
+}
+
+function hyperUrlForApp (app) {
+  const link = String(app?.link || '').trim()
+  if (/^hyper:\/\/[0-9a-f]{64}(?:\/|$)/i.test(link)) return link.endsWith('/') ? link : `${link}/`
+  const key = String(app?.driveKey || '').trim().toLowerCase()
+  if (!isHyperDriveKey(key)) throw new Error(`app ${app?.name || app?.id || '(unknown)'} has no Hyperdrive URL`)
+  return `hyper://${key}/`
+}
+
+function isHyperDriveKey (value) {
+  return /^[0-9a-f]{64}$/i.test(String(value || ''))
+}
+
+function publishedTime (app) {
+  const value = app?.publishedAt
+  if (Number.isFinite(value)) return value
+  const t = Date.parse(String(value || ''))
+  return Number.isFinite(t) ? t : 0
+}
+
+function assertFetchedPage (label, fetched) {
+  if (!Number.isInteger(fetched?.statusCode) || fetched.statusCode < 200 || fetched.statusCode >= 300) {
+    throw new Error(`${label} fetch returned HTTP ${fetched?.statusCode}`)
+  }
+  if (Buffer.byteLength(String(fetched.body || '')) < 100) {
+    throw new Error(`${label} fetch returned an unexpectedly small body`)
+  }
+}
+
+function buildReleaseEvidence (result) {
+  const rows = []
+  const desktop = result.desktopGuiStories || null
+  const add = (gate, evidence) => {
+    if (!evidence) return
+    rows.push({
+      section: RELEASE_EVIDENCE_SECTION,
+      gate,
+      result: 'PASS',
+      evidence: evidenceCell(evidence)
+    })
+  }
+
+  if (desktop?.browse) {
+    add('Browse story', `release RPC desktop-gui smoke: ${shortHyper(desktop.browse.url)} fetched HTTP ${desktop.browse.statusCode} ${desktop.browse.bytes} bytes, reload HTTP ${desktop.browse.reloadStatusCode}, site info key ${shortKey(desktop.browse.driveInfo.keyHex)} version ${desktop.browse.driveInfo.version}`)
+  }
+  if (desktop?.freshLaunch) {
+    add('Fresh-launch landing story', `release RPC desktop-gui smoke source contract: front tab ${shortHyper(desktop.freshLaunch.frontTab)}, startup tabs include P2P Builders and peerit, restoreStartupTabs keeps defaults, Sites discovery pins peerit first`)
+  }
+  if (desktop?.catalogue) {
+    add('Catalogue story', `release RPC desktop-gui smoke: ${desktop.catalogue.totalCatalogs} catalogues, ${desktop.catalogue.totalApps} apps, featured ${desktop.catalogue.featured.map((app) => app.name).join(', ')}, searches ${CATALOG_SEARCH_TERMS.join(', ')} all returned launchable rows`)
+  }
+  if (desktop?.latestAppWithoutDownload) {
+    add('Latest-app-without-download story', `release RPC desktop-gui smoke: opened ${desktop.latestAppWithoutDownload.name} from catalogue row via Browse at ${shortHyper(desktop.latestAppWithoutDownload.url)}, HTTP ${desktop.latestAppWithoutDownload.statusCode} ${desktop.latestAppWithoutDownload.bytes} bytes, no project page download or manual update`)
+  }
+  if (desktop?.featuredAppRegression) {
+    add('Existing featured app regression', `release RPC desktop-gui smoke: safe featured app ${desktop.featuredAppRegression.safeOpenedFeaturedApp.name} opened via Browse HTTP ${desktop.featuredAppRegression.safeOpenedFeaturedApp.statusCode}; standalone featured targets ${desktop.featuredAppRegression.standaloneTargets.map((app) => app.name).join(', ')} remain pear window targets with no trust approval automated`)
+  }
+  if (desktop?.nostrTrustedContact) {
+    add('Nostr trusted-contact story', `release RPC desktop-gui smoke: Nostr trust proof exposed ${desktop.nostrTrustedContact.visibleEvents} attested contact event via ${desktop.nostrTrustedContact.trustedVia} and quarantined ${desktop.nostrTrustedContact.hidden.quarantined} revoked or forged event(s)`)
+  }
+  if (desktop?.librarySession) {
+    add('Library/session story', `release RPC desktop-gui smoke: bookmark and session round-tripped through user-data Hyperbee and persisted across diagnostic reconnect before cleanup; previous session restored=${desktop.librarySession.restoredPreviousSession}`)
+  }
+
+  if (result.localStories?.search) {
+    add('Search story', `release RPC local-story smoke: indexed token ${result.localStories.token}, returned doc ${result.localStories.search.docId} as ${result.localStories.search.phase} with federating=${result.localStories.search.federating}`)
+  }
+  if (result.localStories?.naming) {
+    add('Naming story', `release RPC local-story smoke: curated ${result.localStories.naming.curated.name} provenance ${result.localStories.naming.curated.provenance}, temporary petname ${result.localStories.naming.petname.name} provenance ${result.localStories.naming.petname.provenance}, naming flag restored=${result.localStories.naming.restoredExperimentalNaming}`)
+  }
+  if (result.siteStory) {
+    add('Site publishing story', `release RPC site-story smoke: published ${shortHyper(result.siteStory.url)}, fetched HTTP ${result.siteStory.statusCode} ${result.siteStory.bytes} bytes, deleted site and requested unseed cleanup`)
+  }
+
+  return {
+    kind: 'pearbrowser-release-rpc-story-smoke-evidence',
+    generatedAt: new Date().toISOString(),
+    rows
+  }
+}
+
+function evidenceCell (value) {
+  return String(value || '').replace(/\|/g, '/').replace(/\s+/g, ' ').trim()
+}
+
+function shortKey (key) {
+  const s = String(key || '')
+  return s.length > 16 ? `${s.slice(0, 8)}...${s.slice(-6)}` : s
+}
+
+function shortHyper (url) {
+  try {
+    const parsed = new URL(String(url || ''))
+    if (parsed.protocol === 'hyper:') return `hyper://${shortKey(parsed.hostname)}/`
+  } catch {}
+  return String(url || '')
+}
+
 async function run (args) {
   const conn = await connectReady(args)
   const ws = conn.ws
@@ -701,10 +1181,11 @@ async function run (args) {
 
     const catalogResult = await requestRpc(ws, C.CMD_GET_CATALOG_APPS, {}, args.requestTimeout)
     const catalog = assertCatalogues(catalogResult)
-    const localStories = args.localStories ? await runLocalStories(ws, args) : null
+    const localStories = args.localStories
+      ? await runLocalStories(ws, args, { reconnectUrl: args.desktopGuiStories ? conn.url : null })
+      : null
     const siteStory = args.siteStory ? await runSiteStory(ws, args) : null
-
-    return {
+    const result = {
       ok: true,
       port: conn.port,
       status: conn.status,
@@ -718,8 +1199,20 @@ async function run (args) {
       loadedCatalogues: loaded,
       catalog,
       localStories,
-      siteStory
+      siteStory,
+      desktopGuiStories: null,
+      releaseEvidence: null
     }
+
+    if (args.desktopGuiStories) {
+      result.desktopGuiStories = await runDesktopGuiStories(ws, args, {
+        homepage: { nav, fetched },
+        catalogResult,
+        localStories
+      })
+    }
+    result.releaseEvidence = buildReleaseEvidence(result)
+    return result
   } finally {
     try { ws.close() } catch {}
   }
@@ -740,6 +1233,10 @@ function printHuman (result) {
   }
   if (result.siteStory) {
     console.log(`  site publish: ${result.siteStory.url}, HTTP ${result.siteStory.statusCode}, cleanup deleted`)
+  }
+  if (result.desktopGuiStories) {
+    console.log(`  desktop GUI stories: browse reload, fresh-launch contract, catalogue search, safe app open, Nostr trust, library reconnect passed`)
+    console.log(`  release evidence rows: ${result.releaseEvidence?.rows?.length || 0}`)
   }
 }
 

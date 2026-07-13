@@ -1,0 +1,24 @@
+{
+  "name": "fixture-blocker",
+  "version": "1.0.0",
+  "description": "Test fixture Pear Plugin for content-shield Phase 3 gates",
+  "pear": {
+    "plugin": true,
+    "capabilities": [
+      "pear.net.filter",
+      "pear.content.styles",
+      "pear.content.scripts"
+    ]
+  },
+  "content": {
+    "filters": "||fixture-ads.example^\n##.fixture-ad",
+    "styles": {
+      "matches": ["*"],
+      "css": ".fixture-banner { display: none !important; }"
+    },
+    "scripts": {
+      "matches": ["*"],
+      "js": "window.__pearFixturePlugin = true"
+    }
+  }
+}

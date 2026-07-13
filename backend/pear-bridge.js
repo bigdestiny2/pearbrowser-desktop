@@ -604,9 +604,9 @@ class PearBridge {
  * HyperProxy. Adds `window.pear.swarm.v1` (and reserves `window.pear`
  * for future companion APIs).
  *
- * Talks to `/api/swarm/{join,send,leave,events}` over same-origin fetch
- * + EventSource. Token is read from a `<meta name="pear-api-token">`
- * tag the proxy injects alongside this script.
+ * Talks to `/api/swarm/{join,send,leave,ticket,events}` over same-origin
+ * fetch + EventSource. Bearer auth stays in `X-Pear-Token`; the EventSource
+ * stream uses a one-time ticket minted via authenticated fetch.
  *
  * Page authors should always feature-detect:
  *
@@ -678,9 +678,7 @@ const PEAR_SWARM_V1_SHIM = `<script>(function () {
         }
       }
     }
-    function attachStream () {
-      var url = '/api/swarm/events?channelId=' + encodeURIComponent(info.channelId)
-        + '&token=' + encodeURIComponent(readToken())
+    function openEventSource (url) {
       es = new EventSource(url)
       es.onmessage = function (ev) {
         var msg
@@ -706,6 +704,19 @@ const PEAR_SWARM_V1_SHIM = `<script>(function () {
       es.onerror = function () {
         if (!destroyed) { try { es.close() } catch (_) {} channel.destroy() }
       }
+    }
+    function attachStream () {
+      rpc('POST', '/api/swarm/ticket', { channelId: info.channelId }).then(function (result) {
+        if (destroyed) return
+        if (!result || !result.ticket) throw new Error('missing swarm stream ticket')
+        var url = '/api/swarm/events?channelId=' + encodeURIComponent(info.channelId)
+          + '&ticket=' + encodeURIComponent(result.ticket)
+        openEventSource(url)
+      }).catch(function (err) {
+        if (destroyed) return
+        emit('error', err)
+        channel.destroy()
+      })
     }
     var channel = {
       channelId: info.channelId,
@@ -773,7 +784,7 @@ const PEAR_SWARM_V1_SHIM = `<script>(function () {
  * forward the token (X-Pear-Token), exactly like the swarm shim.
  */
 const PEAR_SYNC_SHIM = `<script>(function () {
-  if (window.pear && window.pear.sync && window.pear.identity) return
+  if (window.pear && window.pear.sync && window.pear.identity && window.pear.ai) return
   function readToken () {
     var m = document.querySelector('meta[name="pear-api-token"]')
     return m ? m.content : ''
@@ -832,9 +843,51 @@ const PEAR_SYNC_SHIM = `<script>(function () {
     getPublicKey: function () { return apiGet('/api/identity') },
     sign: function (payload, namespace) { return apiPost('/api/identity/sign', { payload: String(payload), namespace: namespace || '' }) }
   }
+  var ai = {
+    capabilities: function () { return apiGet('/api/ai/capabilities') },
+    cancel: function (requestId) { return apiPost('/api/ai/cancel', { requestId: String(requestId || '') }) },
+    complete: async function (input) {
+      var res = await fetch('/api/ai/completions', {
+        method: 'POST',
+        headers: { 'X-Pear-Token': readToken(), 'Content-Type': 'application/json' },
+        body: JSON.stringify(input || {})
+      })
+      if (!res.ok) {
+        var message = res.statusText
+        try { var json = await res.json(); message = (json && json.error) || message } catch (_) {}
+        throw new Error('pear.ai: ' + message)
+      }
+      var requestId = res.headers.get('X-Pear-AI-Request-Id') || ''
+      var reader = res.body && res.body.getReader ? res.body.getReader() : null
+      if (!reader) throw new Error('pear.ai: streaming response body unavailable')
+      var decoder = new TextDecoder()
+      var buffered = ''
+      async function * events () {
+        while (true) {
+          var next = await reader.read()
+          if (next.done) break
+          buffered += decoder.decode(next.value, { stream: true })
+          var newline
+          while ((newline = buffered.indexOf('\\n')) !== -1) {
+            var line = buffered.slice(0, newline)
+            buffered = buffered.slice(newline + 1)
+            if (line) yield JSON.parse(line)
+          }
+        }
+        buffered += decoder.decode()
+        if (buffered.trim()) yield JSON.parse(buffered)
+      }
+      return {
+        requestId: requestId,
+        events: events(),
+        cancel: function () { return ai.cancel(requestId) }
+      }
+    }
+  }
   if (!window.pear) window.pear = {}
   if (!window.pear.sync) window.pear.sync = sync
   if (!window.pear.identity) window.pear.identity = identity
+  if (!window.pear.ai) window.pear.ai = ai
 })();</script>`
 
 /**

@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 1,
+  "kind": "pearbrowser-origin-isolation-smoke-evidence",
+  "featureFlag": "PEARBROWSER_PER_DRIVE_ORIGINS=1",
+  "proofKey": "pear-origin-isolation-proof",
+  "apps": [
+    {
+      "label": "Peerit",
+      "url": "hyper://ec6e2d6d9d22b9d6b40e11a9ca3042be3197e4bdca9e9a7f079be6ee830761b4/",
+      "driveKey": "ec6e2d6d9d22b9d6b40e11a9ca3042be3197e4bdca9e9a7f079be6ee830761b4",
+      "origin": "<record location.origin from app A>"
+    },
+    {
+      "label": "Pearfeed",
+      "url": "hyper://5c2807c5ba1383e55d69a2fe5085fdeb563e2e18f175f363f3f18437219c1aec/",
+      "driveKey": "5c2807c5ba1383e55d69a2fe5085fdeb563e2e18f175f363f3f18437219c1aec",
+      "origin": "<record location.origin from app B>"
+    }
+  ],
+  "storage": {
+    "proofKey": "pear-origin-isolation-proof",
+    "writtenValue": "<value returned by the app A write snippet>",
+    "appA": {
+      "localStorage": "<app A localStorage value>",
+      "cookie": "<app A document.cookie>",
+      "indexedDB": "<app A IndexedDB value>"
+    },
+    "appB": {
+      "localStorage": null,
+      "cookie": "<app B document.cookie>",
+      "indexedDB": null
+    }
+  },
+  "strictCsp": {
+    "status": "<PASS>",
+    "evidence": "<screenshot/log path>"
+  },
+  "tabLifecycle": {
+    "status": "<PASS>",
+    "evidence": "<screenshot/log path>"
+  },
+  "realAppBridge": {
+    "status": "<PASS>",
+    "evidence": "<Peerit or real-app bridge log path>",
+    "routes": {
+      "identity": true,
+      "sync": true,
+      "swarmTicket": true,
+      "swarmEvents": true
+    }
+  },
+  "artifacts": [
+    "<screenshot-or-log-path>"
+  ],
+  "operatorRun": {
+    "runDate": "2026-07-04",
+    "sourcePlan": "docs/origin-isolation-smoke-plan-peerit-pearfeed-2026-07-02.json",
+    "featureFlag": "PEARBROWSER_PER_DRIVE_ORIGINS=1",
+    "commands": [
+      {
+        "id": "launch-feature-flagged-desktop",
+        "command": "PEARBROWSER_PER_DRIVE_ORIGINS=1 npm start",
+        "evidence": "PearBrowser is launched with PEARBROWSER_PER_DRIVE_ORIGINS=1."
+      },
+      {
+        "id": "runtime-readiness",
+        "command": "node scripts/runtime-rpc-smoke.mjs --timeout 20000 --max-storage-percent 100 --json",
+        "evidence": "Runtime smoke JSON shows backend readiness, proxy port, and relay status."
+      },
+      {
+        "id": "nonvisual-app-a-navigation",
+        "command": "node scripts/release-rpc-story-smoke.mjs --homepage-url 'hyper://ec6e2d6d9d22b9d6b40e11a9ca3042be3197e4bdca9e9a7f079be6ee830761b4/' --json",
+        "evidence": "Peerit navigates through the production RPC/proxy path without approving a third-party trust prompt."
+      }
+    ],
+    "manualSteps": [
+      {
+        "id": "open-both-apps",
+        "action": "Open Peerit (hyper://ec6e2d6d9d22b9d6b40e11a9ca3042be3197e4bdca9e9a7f079be6ee830761b4/) and Pearfeed (hyper://5c2807c5ba1383e55d69a2fe5085fdeb563e2e18f175f363f3f18437219c1aec/) in separate PearBrowser tabs while the feature flag is enabled.",
+        "evidence": "Screenshots or console output show both tabs loaded."
+      },
+      {
+        "id": "origin-split",
+        "action": "In each tab, record `location.origin` from DevTools.",
+        "evidence": "The two origins are different loopback origins, normally different `127.0.0.1:<port>` values."
+      },
+      {
+        "id": "storage-write-a",
+        "action": "Run the write snippet in Peerit.",
+        "evidence": "Peerit reports its origin and writes localStorage, cookie, and IndexedDB proof values."
+      },
+      {
+        "id": "storage-read-b",
+        "action": "Run the read snippet in Pearfeed.",
+        "evidence": "Pearfeed reports a different origin and reads no pear-origin-isolation-proof value from localStorage, cookie, or IndexedDB."
+      },
+      {
+        "id": "strict-csp-real-app",
+        "action": "Load at least one strict-CSP real app under the feature flag.",
+        "evidence": "The app loads its assets and Pear bridge without CSP console failures caused by per-drive origin mode."
+      },
+      {
+        "id": "tab-lifecycle",
+        "action": "Close Peerit, or navigate its tab to Pearfeed, then keep Pearfeed open.",
+        "evidence": "PearBrowser stays responsive and subsequent app navigation still works, confirming the release path did not break tab-origin lifecycle behavior."
+      },
+      {
+        "id": "real-app-bridge",
+        "action": "Run a real app bridge flow such as Peerit identity/sync under the feature flag.",
+        "evidence": "`/api/identity`, `/api/sync/*`, `/api/swarm/ticket`, and `/api/swarm/events?ticket=` continue to work from the per-drive origin."
+      }
+    ],
+    "snippets": {
+      "writeStorageInAppA": "(async () => {\n  const key = \"pear-origin-isolation-proof\"\n  const value = \"peerit-1782993478171\"\n  localStorage.setItem(key, value)\n  document.cookie = key + '=' + value + '; SameSite=Lax'\n  await new Promise((resolve, reject) => {\n    const request = indexedDB.open(key, 1)\n    request.onupgradeneeded = () => request.result.createObjectStore('proof')\n    request.onerror = () => reject(request.error)\n    request.onsuccess = () => {\n      const db = request.result\n      const tx = db.transaction('proof', 'readwrite')\n      tx.objectStore('proof').put(value, 'value')\n      tx.oncomplete = () => { db.close(); resolve() }\n      tx.onerror = () => reject(tx.error)\n    }\n  })\n  return { origin: location.origin, value, localStorage: localStorage.getItem(key), cookie: document.cookie }\n})()",
+      "readStorageInAppB": "(async () => {\n  const key = \"pear-origin-isolation-proof\"\n  const indexedValue = await new Promise((resolve) => {\n    const request = indexedDB.open(key)\n    request.onerror = () => resolve(null)\n    request.onupgradeneeded = () => { request.transaction.abort(); resolve(null) }\n    request.onsuccess = () => {\n      const db = request.result\n      if (!db.objectStoreNames.contains('proof')) { db.close(); resolve(null); return }\n      const tx = db.transaction('proof', 'readonly')\n      const get = tx.objectStore('proof').get('value')\n      get.onsuccess = () => { db.close(); resolve(get.result || null) }\n      get.onerror = () => { db.close(); resolve(null) }\n    }\n  })\n  return { origin: location.origin, localStorage: localStorage.getItem(key), cookie: document.cookie, indexedDB: indexedValue }\n})()"
+    },
+    "verifier": "npm run check:origin-isolation-smoke-evidence -- --file docs/origin-isolation-smoke-evidence-peerit-pearfeed-2026-07-04.json --json",
+    "fillNotes": [
+      "Launch PearBrowser Desktop with PEARBROWSER_PER_DRIVE_ORIGINS=1 before recording values.",
+      "Replace every placeholder string with observed GUI/runtime evidence.",
+      "Copy this template to the .json verifier path before filling, or run the verifier against the completed file path you choose."
+    ]
+  }
+}

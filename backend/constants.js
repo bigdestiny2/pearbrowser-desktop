@@ -11,6 +11,7 @@
 const CMD_NAVIGATE = 1
 const CMD_GET_STATUS = 2
 const CMD_GET_DRIVE_INFO = 3
+const CMD_RELEASE_ORIGIN = 4
 
 // App Store
 const CMD_LOAD_CATALOG = 10
@@ -56,6 +57,7 @@ const CMD_SET_SITE_ICON = 33  // { siteId, dataUrl } -> { ok, path }
 const CMD_GET_RELAYS = 40
 const CMD_SET_RELAYS = 41
 const CMD_SET_RELAY_ENABLED = 42
+const CMD_CHECK_RELAY_CAPABILITY = 43
 
 // User data — bookmarks + history + settings in Hyperbee (Phase 1 ticket 2)
 const CMD_USERDATA_LIST_BOOKMARKS = 50
@@ -183,6 +185,27 @@ const CMD_MOD_PENDING = 211  // → { pending: [...] } pulled from the relay rev
 const CMD_MOD_APPROVE = 212  // { id } → relay approve + write app into community bee + re-pin
 const CMD_MOD_REJECT = 213   // { id, reason? } → relay reject
 
+// Browser chrome-owned local AI. Unlike /api/ai/* these commands are not
+// callable by Hyperdrive pages: only PearBrowser's renderer can use them.
+const CMD_ASK_BROWSER_CAPABILITIES = 220
+const CMD_ASK_BROWSER_START = 221
+const CMD_ASK_BROWSER_CANCEL = 222
+
+// Content Shield (docs/BROWSER_PARITY_PLAN.md Phases 1–3). The enable toggle
+// and durable list/allowlist/strict state persist through user-data settings;
+// these commands return live state and mutate per-drive / list / plugin policy.
+const CMD_SHIELD_STATUS = 230
+const CMD_SHIELD_LOAD_LIST = 231   // { name, text } → hot-swap named list (durable)
+const CMD_SHIELD_REMOVE_LIST = 232 // { name } → drop a named list
+const CMD_SHIELD_SET_ALLOW = 233   // { driveKey, allow: boolean } → per-drive allowlist
+const CMD_SHIELD_SET_STRICT = 234  // { driveKey, strict: boolean } → per-drive strict CSP
+const CMD_PLUGIN_LIST = 235        // → { plugins: [...] }
+const CMD_PLUGIN_SET_ENABLED = 236 // { id, enabled } → kill-switch without uninstall
+const CMD_PLUGIN_REGISTER = 237   // { id, manifest, contribution?, enabled? } → fixture/install path
+
+// Privacy ladder + clearnet session bridge status (Phases 4–5).
+const CMD_PRIVACY_STATUS = 238
+
 // Pear Bridge (WebView → worklet via RN relay)
 const CMD_BRIDGE = 200
 
@@ -209,6 +232,7 @@ const EVT_SWARM_REQUEST = 107
 const EVT_SEARCH_FEDERATED = 108           // { queryId, results, phase:'enriched', verifyBudgetExhausted, digestHit, fallbackPull, partial, provenance }
 const EVT_IDENTITY_BINDING_PUBLISHED = 109 // { searchPubkey, version }
 const EVT_LAUNCH_PROGRESS = 110            // { key, link, phase:'connecting'|'downloading'|'launching'|'done'|'error', downloaded, total, percent, peers, error }
+const EVT_ASK_BROWSER_STREAM = 111         // { streamId, requestId, event }
 
 // --- anonGPT bridge (Phase 0 plumbing — see backend/anongpt-buyer.js) ---
 
@@ -259,7 +283,7 @@ const BOOTSTRAP_RELAYS = [
 
 module.exports = {
   CMD_LOAD_CATALOG_INDEX, BOOTSTRAP_RELAYS,
-  CMD_NAVIGATE, CMD_GET_STATUS, CMD_GET_DRIVE_INFO,
+  CMD_NAVIGATE, CMD_GET_STATUS, CMD_GET_DRIVE_INFO, CMD_RELEASE_ORIGIN,
   CMD_LOAD_CATALOG, CMD_LOAD_CATALOG_BEE, CMD_LOAD_CATALOG_AUTOBEE, CMD_INSTALL_APP, CMD_UNINSTALL_APP,
   CMD_LAUNCH_APP, CMD_LIST_INSTALLED, CMD_CHECK_UPDATES,
   CMD_GET_CATALOG_APPS, CMD_UNLOAD_CATALOG,
@@ -268,7 +292,7 @@ module.exports = {
   CMD_CREATE_SITE, CMD_UPDATE_SITE, CMD_PUBLISH_SITE,
   CMD_UNPUBLISH_SITE, CMD_LIST_SITES, CMD_DELETE_SITE, CMD_LOAD_TEMPLATE, CMD_GET_SITE_BLOCKS, CMD_LAUNCH_PEAR_LINK, CMD_RESET_APP,
   CMD_CLEAR_CACHE, CMD_RUN_APP_IN_TAB, CMD_GET_IDENTITY, CMD_GET_APP_ICON, CMD_SET_SITE_ICON,
-  CMD_GET_RELAYS, CMD_SET_RELAYS, CMD_SET_RELAY_ENABLED,
+  CMD_GET_RELAYS, CMD_SET_RELAYS, CMD_SET_RELAY_ENABLED, CMD_CHECK_RELAY_CAPABILITY,
   CMD_USERDATA_LIST_BOOKMARKS, CMD_USERDATA_ADD_BOOKMARK, CMD_USERDATA_REMOVE_BOOKMARK,
   CMD_USERDATA_LIST_HISTORY, CMD_USERDATA_ADD_HISTORY, CMD_USERDATA_CLEAR_HISTORY,
   CMD_USERDATA_GET_SETTINGS, CMD_USERDATA_SET_SETTINGS,
@@ -294,10 +318,15 @@ module.exports = {
   CMD_NOSTR_GET_IDENTITY, CMD_NOSTR_BIND, CMD_NOSTR_REVOKE,
   CMD_NOSTR_PUBLISH, CMD_NOSTR_QUERY,
   CMD_SUBMIT_APP, CMD_MOD_PENDING, CMD_MOD_APPROVE, CMD_MOD_REJECT,
+  CMD_ASK_BROWSER_CAPABILITIES, CMD_ASK_BROWSER_START, CMD_ASK_BROWSER_CANCEL,
+  CMD_SHIELD_STATUS, CMD_SHIELD_LOAD_LIST, CMD_SHIELD_REMOVE_LIST,
+  CMD_SHIELD_SET_ALLOW, CMD_SHIELD_SET_STRICT,
+  CMD_PLUGIN_LIST, CMD_PLUGIN_SET_ENABLED, CMD_PLUGIN_REGISTER,
+  CMD_PRIVACY_STATUS,
   CMD_BRIDGE,
   CMD_STOP,
   EVT_READY, EVT_PEER_COUNT, EVT_ERROR, EVT_INSTALL_PROGRESS, EVT_SITE_PUBLISHED, EVT_BOOT_PROGRESS,
   EVT_LOGIN_REQUEST, EVT_SWARM_REQUEST,
-  EVT_SEARCH_FEDERATED, EVT_IDENTITY_BINDING_PUBLISHED, EVT_LAUNCH_PROGRESS,
+  EVT_SEARCH_FEDERATED, EVT_IDENTITY_BINDING_PUBLISHED, EVT_LAUNCH_PROGRESS, EVT_ASK_BROWSER_STREAM,
   ANONGPT_DRIVE_KEY,
 }

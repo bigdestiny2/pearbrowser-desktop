@@ -119,14 +119,37 @@ export function shortKey (k) {
   return k.slice(0, 8) + '…' + k.slice(-6)
 }
 
+/**
+ * Normalize URL-bar input to a navigable absolute URL.
+ * Accepts hyper:// keys, pear:// links, https?/http URLs, and bare hostnames
+ * (example.com → https://example.com). Bare words without a dot still map
+ * to hyper:// for the name-resolver path.
+ */
 export function normalizeUrl (raw) {
-  const s = raw.trim()
+  const s = String(raw || '').trim()
   if (!s) return null
-  if (s.startsWith('hyper://')) return s
-  if (/^[0-9a-f]{64}$/i.test(s)) return `hyper://${s}/`
+  if (/^hyper:\/\//i.test(s)) return s
+  if (/^https?:\/\//i.test(s)) return s
+  if (/^[0-9a-f]{64}$/i.test(s)) return `hyper://${s.toLowerCase()}/`
   if (/^[13-9a-km-uw-z]{52}$/i.test(s)) return `hyper://${s}/`
+  // Public hostname (optionally with path/port) → https clearnet
+  if (/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}(?::\d{1,5})?(?:[/?#].*)?$/i.test(s)) {
+    return `https://${s.replace(/^\/+/, '')}`
+  }
   if (s.includes('/') || s.startsWith('pear://')) return s
   return `hyper://${s}`
+}
+
+/** True when the URL is non-loopback http(s) clearnet. */
+export function isClearnetUrl (raw) {
+  try {
+    const u = new URL(String(raw || '').trim())
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return false
+    const host = (u.hostname || '').toLowerCase()
+    return host !== '127.0.0.1' && host !== 'localhost' && host !== '[::1]'
+  } catch {
+    return false
+  }
 }
 
 export function driveKeyFromHyperRef (raw) {

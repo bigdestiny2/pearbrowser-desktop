@@ -43,6 +43,9 @@ const nativeInstallSnippetPath = fileURLToPath(new URL('../scripts/generate-nati
 const nativeInstallGuide = readFileSync(new URL('../docs/INSTALL_NATIVE_PACKAGES.md', import.meta.url), 'utf8')
 const nativeInstallSmokePlan = readFileSync(new URL('../scripts/generate-native-install-smoke-plan.mjs', import.meta.url), 'utf8')
 const nativeInstallSmokePlanPath = fileURLToPath(new URL('../scripts/generate-native-install-smoke-plan.mjs', import.meta.url))
+const originIsolationSmokePlan = readFileSync(new URL('../scripts/generate-origin-isolation-smoke-plan.mjs', import.meta.url), 'utf8')
+const originIsolationSmokePlanPath = fileURLToPath(new URL('../scripts/generate-origin-isolation-smoke-plan.mjs', import.meta.url))
+const originIsolationSmokeEvidence = readFileSync(new URL('../scripts/generate-origin-isolation-smoke-evidence.mjs', import.meta.url), 'utf8')
 const packageManagerManifests = readFileSync(new URL('../scripts/generate-package-manager-manifests.mjs', import.meta.url), 'utf8')
 const packageManagerManifestsPath = fileURLToPath(new URL('../scripts/generate-package-manager-manifests.mjs', import.meta.url))
 const publicTrustReadiness = readFileSync(new URL('../scripts/check-public-trust-readiness.mjs', import.meta.url), 'utf8')
@@ -58,6 +61,7 @@ const releaseScript = readFileSync(new URL('../scripts/release-prod.sh', import.
 const sheetsBundleScript = readFileSync(new URL('../scripts/build-sheets-bundle.sh', import.meta.url), 'utf8')
 const mainEntry = readFileSync(new URL('../index.js', import.meta.url), 'utf8')
 const bootEntry = readFileSync(new URL('../ui/boot.js', import.meta.url), 'utf8')
+const rpcWebSocketAuth = readFileSync(new URL('../backend/rpc-websocket-auth.cjs', import.meta.url), 'utf8')
 const tabRuntime = readFileSync(new URL('../backend/tab-runtime.js', import.meta.url), 'utf8')
 const runtimeSmoke = readFileSync(new URL('../scripts/runtime-rpc-smoke.mjs', import.meta.url), 'utf8')
 const releaseStorySmoke = readFileSync(new URL('../scripts/release-rpc-story-smoke.mjs', import.meta.url), 'utf8')
@@ -499,6 +503,8 @@ test('native install snippet generator is exposed for release notes', () => {
   assert.match(nativeInstallSnippet, /Install Native Packages/)
   assert.match(nativeInstallSnippet, /Trust Note/)
   assert.match(nativeInstallGuide, new RegExp(`releases/download/${releaseTagPattern}/PearBrowser-${releaseVersionPattern}-macos-arm64\\.app\\.zip`))
+  assert.match(nativeInstallGuide, /Apple could not verify that\s+PearBrowser is free of malware/)
+  assert.match(nativeInstallGuide, /Open Anyway/)
   assert.match(nativeInstallGuide, /generate:native-install-guide/)
 })
 
@@ -510,6 +516,77 @@ test('native install smoke plan generator is exposed for clean-machine evidence'
   assert.match(nativeInstallSmokePlan, /runtime-rpc-smoke\.mjs/)
   assert.match(nativeInstallSmokePlan, /--source-ref/)
   assert.match(nativeInstallSmokePlan, /public-trust clean-install smoke requires notarized macOS DMG/)
+})
+
+test('origin isolation smoke plan generator is exposed for feature-flagged GUI evidence', () => {
+  assert.equal(pkg.scripts?.['generate:origin-isolation-smoke-plan'], 'node scripts/generate-origin-isolation-smoke-plan.mjs')
+  assert.equal(pkg.scripts?.['generate:origin-isolation-smoke-evidence'], 'node scripts/generate-origin-isolation-smoke-evidence.mjs')
+  assert.match(originIsolationSmokePlan, /PEARBROWSER_PER_DRIVE_ORIGINS=1/)
+  assert.match(originIsolationSmokePlan, /localStorage/)
+  assert.match(originIsolationSmokePlan, /indexedDB/)
+  assert.match(originIsolationSmokePlan, /document\.cookie/)
+  assert.match(originIsolationSmokePlan, /strict-CSP real app/)
+  assert.match(originIsolationSmokePlan, /Peerit identity\/sync/)
+  assert.match(originIsolationSmokePlan, /generate-origin-isolation-smoke-evidence\.mjs/)
+  assert.match(originIsolationSmokeEvidence, /local-hyperproxy-httpbridge-fixture/)
+  assert.match(originIsolationSmokeEvidence, /new HyperProxy/)
+  assert.match(originIsolationSmokeEvidence, /new HttpBridge/)
+})
+
+test('origin isolation smoke plan generator emits app-specific acceptance evidence', () => {
+  const appA = `hyper://${'a'.repeat(64)}/index.html`
+  const appB = `hyper://${'b'.repeat(64)}/index.html`
+  const result = spawnSync(process.execPath, [
+    originIsolationSmokePlanPath,
+    '--app-a',
+    appA,
+    '--app-b',
+    appB,
+    '--label-a',
+    'Peerit fixture',
+    '--label-b',
+    'Poked fixture',
+    '--json'
+  ], {
+    encoding: 'utf8'
+  })
+
+  assert.equal(result.status, 0, result.stderr || result.stdout)
+  const report = JSON.parse(result.stdout)
+  assert.equal(report.ok, true)
+  assert.equal(report.kind, 'pearbrowser-origin-isolation-smoke-plan')
+  assert.equal(report.featureFlag, 'PEARBROWSER_PER_DRIVE_ORIGINS=1')
+  assert.equal(report.apps[0].driveKey, 'a'.repeat(64))
+  assert.equal(report.apps[1].driveKey, 'b'.repeat(64))
+  assert.ok(report.commands.some((command) => command.id === 'launch-feature-flagged-desktop'))
+  assert.ok(report.commands.some((command) => command.command.includes('--homepage-url')))
+  assert.ok(report.commands.some((command) => command.id === 'automated-origin-isolation-evidence'))
+  assert.match(report.automatedVerifier.command, /generate:origin-isolation-smoke-evidence/)
+  assert.match(report.automatedVerifier.validatesWith, /check:origin-isolation-smoke-evidence/)
+  assert.ok(report.manualSteps.some((step) => step.id === 'origin-split'))
+  assert.ok(report.manualSteps.some((step) => step.id === 'real-app-bridge'))
+  assert.equal(report.evidenceTemplate.kind, 'pearbrowser-origin-isolation-smoke-evidence')
+  assert.equal(report.evidenceTemplate.apps[0].driveKey, 'a'.repeat(64))
+  assert.equal(report.evidenceTemplate.storage.proofKey, 'pear-origin-isolation-proof')
+  assert.equal(report.evidenceTemplate.realAppBridge.routes.swarmEvents, true)
+  assert.match(report.evidenceTemplate.automatedVerifier.command, /generate:origin-isolation-smoke-evidence/)
+  assert.match(report.snippets.writeStorageInAppA, /localStorage\.setItem/)
+  assert.match(report.snippets.writeStorageInAppA, /indexedDB\.open/)
+  assert.match(report.snippets.readStorageInAppB, /document\.cookie/)
+  assert.ok(report.acceptance.some((item) => item.includes('different `location.origin`')))
+
+  const rejected = spawnSync(process.execPath, [
+    originIsolationSmokePlanPath,
+    '--app-a',
+    appA,
+    '--app-b',
+    appA,
+    '--json'
+  ], {
+    encoding: 'utf8'
+  })
+  assert.equal(rejected.status, 2)
+  assert.match(rejected.stderr, /different drive keys/)
 })
 
 test('package-manager manifest generator is exposed for channel expansion drafts', () => {
@@ -1268,6 +1345,36 @@ test('native install snippet generator emits release-note packages for every des
     assert.match(guide.stdout, /npm run -s generate:native-install-guide/)
     assert.match(guide.stdout, /PowerShell/)
     assert.match(guide.stdout, /pear run pear:\/\/tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty/)
+
+    const packageProofDir = join(fixture, 'package-proof')
+    mkdirSync(packageProofDir)
+    const { releasePath: packageProofRelease } = writePackageManagerReleaseFixture(packageProofDir, [
+      'PearBrowser-0.5.0-macos-arm64.app.zip',
+      'PearBrowser-0.5.0-macos-arm64.app.zip.sha256',
+      'PearBrowser-0.5.0-macos-x64.app.zip',
+      'PearBrowser-0.5.0-macos-x64.app.zip.sha256',
+      'PearBrowser-0.5.0-windows-x64.msix',
+      'PearBrowser-0.5.0-windows-x64.msix.sha256',
+      'PearBrowser-0.5.0-linux-x64.AppImage',
+      'PearBrowser-0.5.0-linux-x64.AppImage.sha256'
+    ])
+    const packageProofGuide = spawnSync(process.execPath, [
+      nativeInstallSnippetPath,
+      '--fixture',
+      packageProofRelease,
+      '--tag',
+      'v0.5.0',
+      '--format',
+      'guide'
+    ], {
+      cwd: fileURLToPath(new URL('..', import.meta.url)),
+      encoding: 'utf8'
+    })
+
+    assert.equal(packageProofGuide.status, 0, packageProofGuide.stderr || packageProofGuide.stdout)
+    assert.match(packageProofGuide.stdout, /Apple could not verify that PearBrowser is free of malware/)
+    assert.match(packageProofGuide.stdout, /Control-click `PearBrowser\.app` -> Open -> Open/)
+    assert.match(packageProofGuide.stdout, /Open Anyway/)
   } finally {
     rmSync(fixture, { recursive: true, force: true })
   }
@@ -1937,13 +2044,18 @@ test('schema-sheets bundle keeps native addons in package context', () => {
   assert.match(sheetsBundleScript, /--external:simdle-native/)
 })
 
-test('runtime smoke uses a diagnostic RPC path that does not become the renderer', () => {
-  assert.match(mainEntry, /\/status-smoke/)
+test('runtime smoke is authenticated, status-only by default, and does not become the renderer', () => {
+  assert.match(rpcWebSocketAuth, /\/status-smoke/)
   assert.match(mainEntry, /function listenRpcServer/)
   assert.match(mainEntry, /http\.createServer/)
+  assert.match(mainEntry, /authorizeRpcWebSocket/)
+  assert.match(mainEntry, /DiagnosticRpcRouter/)
   assert.match(bootEntry, /function probeBackend/)
   assert.match(bootEntry, /diagnosticUrlFor/)
+  assert.match(bootEntry, /RPC_SESSION_TOKEN/)
   assert.match(bootEntry, /CMD_GET_STATUS/)
+  assert.match(rpcWebSocketAuth, /Diagnostic RPC only allows CMD_GET_STATUS/)
+  assert.match(rpcWebSocketAuth, /routeBackend/)
   assert.match(tabRuntime, /function listenWsServer/)
   assert.match(tabRuntime, /http\.createServer/)
   assert.match(mainEntry, /onDiagnosticSocket/)
@@ -1975,16 +2087,28 @@ test('release story smoke covers browse, catalogue, local stories, and opt-in si
   assert.match(releaseStorySmoke, /CMD_GET_CATALOG_APPS/)
   assert.match(releaseStorySmoke, /--local-stories/)
   assert.match(releaseStorySmoke, /--site-story/)
+  assert.match(releaseStorySmoke, /--desktop-gui-stories/)
   assert.match(releaseStorySmoke, /siteStory: false/)
+  assert.match(releaseStorySmoke, /desktopGuiStories: false/)
   assert.match(releaseStorySmoke, /CMD_SEARCH_INDEX/)
   assert.match(releaseStorySmoke, /CMD_SEARCH/)
   assert.match(releaseStorySmoke, /CMD_NAME_RESOLVE/)
   assert.match(releaseStorySmoke, /CMD_USERDATA_ADD_BOOKMARK/)
   assert.match(releaseStorySmoke, /CMD_USERDATA_SAVE_SESSION/)
+  assert.match(releaseStorySmoke, /CMD_GET_DRIVE_INFO/)
   assert.match(releaseStorySmoke, /CMD_CREATE_SITE/)
   assert.match(releaseStorySmoke, /CMD_UPDATE_SITE/)
   assert.match(releaseStorySmoke, /CMD_PUBLISH_SITE/)
   assert.match(releaseStorySmoke, /CMD_DELETE_SITE/)
+  assert.match(releaseStorySmoke, /runDesktopGuiStories/)
+  assert.match(releaseStorySmoke, /runNostrTrustedContactStory/)
+  assert.match(releaseStorySmoke, /buildReleaseEvidence/)
+  assert.match(releaseStorySmoke, /Browse story/)
+  assert.match(releaseStorySmoke, /Fresh-launch landing story/)
+  assert.match(releaseStorySmoke, /Catalogue story/)
+  assert.match(releaseStorySmoke, /Latest-app-without-download story/)
+  assert.match(releaseStorySmoke, /Nostr trusted-contact story/)
+  assert.match(releaseStorySmoke, /Library\/session story/)
   assert.match(releaseStorySmoke, /PearBrowser\|Pear Browser/)
   assert.match(releaseStorySmoke, /REQUIRED_FEATURED = \['Keet', 'PearPass', 'anonGPT', 'Paste', 'Peercord'\]/)
   assert.match(releaseStorySmoke, /PEERCORD_LINK/)

@@ -64,7 +64,7 @@ covered by `npm test`.
 | Command | Classification |
 | --- | --- |
 | `node scripts/runtime-rpc-smoke.mjs --timeout 20000 --max-storage-percent 100 --json` | Diagnostic WebSocket smoke against an already-running app. Requires PearBrowser to be launched first; public smoke should fail if the profile is over quota |
-| `node scripts/release-rpc-story-smoke.mjs --timeout 60000 --request-timeout 80000 --local-stories --site-story --json` | Nonvisual story preflight against an already-running app. Loads the release catalogues, fetches the PearBrowser homepage through the local proxy, validates featured catalogue rows, confirms Peercord remains window-only, proves local search first-paint, curated/petname naming, bookmark/session round-trips, and with `--site-story` publishes/fetches/deletes a temporary site with HiveRelay unseed cleanup. It does not launch third-party apps or approve trust prompts |
+| `PEARBROWSER_RPC_DIAGNOSTIC_TOKEN=<random> node scripts/release-rpc-story-smoke.mjs --timeout 60000 --request-timeout 80000 --desktop-gui-stories --site-story --json` | Nonvisual story preflight against an app launched with the same `PEARBROWSER_RPC_DIAGNOSTIC_TOKEN`. Loads the release catalogues, fetches/reloads the PearBrowser homepage through the local proxy, verifies drive-info/site metadata, validates featured catalogue rows, confirms Peercord remains window-only, proves catalogue search/action rows, opens a safe catalogue-row Hyperdrive app through Browse, proves local search first-paint, curated/petname naming, bookmark/session round-trips with diagnostic reconnect, runs the Nostr trusted-contact proof, and emits release-evidence row suggestions. With `--site-story` it publishes/fetches/deletes a temporary site with HiveRelay unseed cleanup. It does not launch third-party Pear apps or approve trust prompts |
 | `npm run start` | Interactive Pear dev launch: `pear run --dev .` |
 | `npm run run` | Interactive Pear launch: `pear run .` |
 | `pear run pear://tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty` | Production browser launch/manual smoke gate |
@@ -203,7 +203,10 @@ The release scripts are operational gates, not ordinary tests:
   the release evidence handoff, and evidence-log verification.
 - `npm run -s generate:release-evidence-handoff` formats the current operator
   evidence log into grouped incomplete/failing rows with expected outcomes and
-  copy-ready `PASS`/`DEFER` table templates. It exits non-zero until the
+  copy-ready `PASS`/`DEFER` table templates. Add
+  `-- --story-smoke-json <story-smoke.json>` after a
+  `release-rpc-story-smoke.mjs --desktop-gui-stories --json` run to prefill
+  matching desktop GUI rows from the smoke output. It exits non-zero until the
   evidence log is complete, matching `check:release-evidence`.
 - `.github/workflows/desktop-native-release.yml` is the cross-platform release
   asset backfill path. It must be present on the default branch, and manual

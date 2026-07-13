@@ -132,3 +132,39 @@ test('RelayClient timeout actively destroys hanging relay requests', async () =>
   await assert.rejects(request, /Timeout/)
   assert.equal(httpTransport.lastRequest.destroyed, true)
 })
+
+test('RelayClient capability check reads well-known doc via backend transport', async () => {
+  resetTransports()
+  const client = new RelayClient()
+  const request = client.checkCapability('https://relay.example.com/', 1000)
+  await tick()
+
+  assert.equal(httpsTransport.calls.length, 1)
+  assert.equal(httpsTransport.lastOptions.hostname, 'relay.example.com')
+  assert.equal(httpsTransport.lastOptions.path, '/.well-known/hiverelay.json')
+
+  httpsTransport.lastResponse.emit('data', Buffer.from(JSON.stringify({
+    version: '0.20.2',
+    supported_transports: ['hyperswarm', 'dht-relay-ws']
+  })))
+  httpsTransport.lastResponse.emit('end')
+
+  const result = await request
+  assert.equal(result.ok, true)
+  assert.equal(result.status, 200)
+  assert.equal(result.doc.version, '0.20.2')
+  assert.deepEqual(result.doc.supported_transports, ['hyperswarm', 'dht-relay-ws'])
+})
+
+test('RelayClient capability check reports HTTP failures without throwing', async () => {
+  resetTransports()
+  const client = new RelayClient()
+  const request = client.checkCapability('https://relay.example.com', 1000)
+  await tick()
+
+  httpsTransport.lastResponse.statusCode = 502
+  httpsTransport.lastResponse.emit('end')
+
+  const result = await request
+  assert.deepEqual(result, { ok: false, status: 502, error: 'HTTP 502' })
+})

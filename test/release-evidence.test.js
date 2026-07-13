@@ -61,6 +61,44 @@ const incompleteLog = `
 | Final decision (GO, NO-GO, or GO desktop only) | NO-GO |
 `
 
+const guiBlockerLog = `
+# Release Smoke Evidence Log
+
+## Run Metadata
+
+| Field | Value |
+| --- | --- |
+| Operator | Alice |
+
+## Desktop GUI And User Stories
+
+| Gate | Expected | Result | Evidence |
+| --- | --- | --- | --- |
+| Browse story | homepage renders, reloads, site info correct |  |  |
+| Catalogue story | Apps auto-loads, featured cards visible, search works |  |  |
+
+## Announcement Decision
+
+| Question | Answer |
+| --- | --- |
+| Final decision (GO, NO-GO, or GO desktop only) | GO desktop only |
+`
+
+const storySmoke = {
+  ok: true,
+  releaseEvidence: {
+    kind: 'pearbrowser-release-rpc-story-smoke-evidence',
+    rows: [
+      {
+        section: 'Desktop GUI And User Stories',
+        gate: 'Browse story',
+        result: 'PASS',
+        evidence: 'release RPC desktop-gui smoke: homepage fetched and drive-info key matched'
+      }
+    ]
+  }
+}
+
 test('release evidence parser keeps table sections and rows', () => {
   const tables = parseMarkdownTables(completeLog)
   assert.equal(tables.length, 3)
@@ -135,6 +173,21 @@ test('release evidence handoff groups incomplete rows with fill templates', () =
 
   const decision = handoff.groups.find((group) => group.section === 'Announcement Decision')
   assert.ok(decision.items.some((item) => /^Final decision/i.test(item.item) && item.template.includes('GO desktop only')))
+})
+
+test('release evidence handoff can prefill matching rows from release story smoke JSON', () => {
+  const handoff = buildEvidenceHandoff(guiBlockerLog, { file: 'fixture.md', storySmoke })
+  const group = handoff.groups.find((item) => item.section === 'Desktop GUI And User Stories')
+  const browse = group.items.find((item) => item.item === 'Browse story')
+  const catalogue = group.items.find((item) => item.item === 'Catalogue story')
+
+  assert.equal(browse.automatedEvidence.result, 'PASS')
+  assert.equal(browse.automatedEvidence.evidence, 'release RPC desktop-gui smoke: homepage fetched and drive-info key matched')
+  assert.match(browse.template, /\| Browse story \| homepage renders, reloads, site info correct \| PASS \| release RPC desktop-gui smoke: homepage fetched and drive-info key matched \|/)
+  assert.match(catalogue.template, /\| Catalogue story \| Apps auto-loads, featured cards visible, search works \| <PASS\|DEFER> \| <evidence path, URL, or terminal excerpt> \|/)
+
+  const markdown = formatEvidenceHandoffMarkdown(handoff)
+  assert.match(markdown, /Automated evidence: PASS - release RPC desktop-gui smoke/)
 })
 
 test('release evidence handoff markdown exposes summary, blockers, and rerun command', () => {

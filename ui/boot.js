@@ -16,6 +16,7 @@ import { RpcClient } from './rpc-client.js'
 const RPC_PORT_BASE = 9876
 const RPC_PORT_COUNT = 5
 const RPC_PROBE_ID = 900000001
+const RPC_SESSION_TOKEN = String(globalThis.Pear?.config?.startId || '')
 
 // Must match backend/constants.js exactly (numeric wire codes). This is a
 // COMPLETE mirror — every command/event the renderer can send or receive.
@@ -27,6 +28,7 @@ const C = {
   CMD_NAVIGATE: 1,
   CMD_GET_STATUS: 2,
   CMD_GET_DRIVE_INFO: 3,
+  CMD_RELEASE_ORIGIN: 4,
   CMD_LOAD_CATALOG: 10,
   CMD_INSTALL_APP: 11,
   CMD_UNINSTALL_APP: 12,
@@ -61,6 +63,7 @@ const C = {
   CMD_GET_RELAYS: 40,
   CMD_SET_RELAYS: 41,
   CMD_SET_RELAY_ENABLED: 42,
+  CMD_CHECK_RELAY_CAPABILITY: 43,
   CMD_USERDATA_LIST_BOOKMARKS: 50,
   CMD_USERDATA_ADD_BOOKMARK: 51,
   CMD_USERDATA_REMOVE_BOOKMARK: 52,
@@ -140,6 +143,18 @@ const C = {
   CMD_MOD_PENDING: 211,
   CMD_MOD_APPROVE: 212,
   CMD_MOD_REJECT: 213,
+  CMD_ASK_BROWSER_CAPABILITIES: 220,
+  CMD_ASK_BROWSER_START: 221,
+  CMD_ASK_BROWSER_CANCEL: 222,
+  CMD_SHIELD_STATUS: 230,
+  CMD_SHIELD_LOAD_LIST: 231,
+  CMD_SHIELD_REMOVE_LIST: 232,
+  CMD_SHIELD_SET_ALLOW: 233,
+  CMD_SHIELD_SET_STRICT: 234,
+  CMD_PLUGIN_LIST: 235,
+  CMD_PLUGIN_SET_ENABLED: 236,
+  CMD_PLUGIN_REGISTER: 237,
+  CMD_PRIVACY_STATUS: 238,
   CMD_BRIDGE: 200,
   EVT_READY: 100,
   EVT_PEER_COUNT: 101,
@@ -151,7 +166,8 @@ const C = {
   EVT_SWARM_REQUEST: 107,
   EVT_SEARCH_FEDERATED: 108,
   EVT_IDENTITY_BINDING_PUBLISHED: 109,
-  EVT_LAUNCH_PROGRESS: 110
+  EVT_LAUNCH_PROGRESS: 110,
+  EVT_ASK_BROWSER_STREAM: 111
 }
 
 class WsPipe {
@@ -208,9 +224,14 @@ function frameRpc (msg) {
 function diagnosticUrlFor (url) {
   const u = new URL(url)
   u.pathname = '/status-smoke'
-  u.search = ''
+  u.search = `?session=${encodeURIComponent(RPC_SESSION_TOKEN)}`
   u.hash = ''
   return u.toString()
+}
+
+function rendererUrlFor (port) {
+  if (!RPC_SESSION_TOKEN) throw new Error('Pear runtime RPC session token is unavailable')
+  return `ws://127.0.0.1:${port}/?session=${encodeURIComponent(RPC_SESSION_TOKEN)}`
 }
 
 function parseRpcFrames (state, data) {
@@ -284,7 +305,7 @@ export async function startBackend () {
   const errors = []
   for (let p = RPC_PORT_BASE; p < RPC_PORT_BASE + RPC_PORT_COUNT; p++) {
     try {
-      pipe = await tryConnect(`ws://127.0.0.1:${p}/`, 1500)
+      pipe = await tryConnect(rendererUrlFor(p), 1500)
       connectedPort = p
       console.log('[rpc] connected on :' + p)
       break

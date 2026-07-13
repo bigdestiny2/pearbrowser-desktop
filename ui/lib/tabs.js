@@ -9,6 +9,8 @@
 // History is de-duplicated (no consecutive repeats) and capped at
 // MAX_TAB_HISTORY; the closed-tab stack is capped at MAX_CLOSED_TABS.
 
+import { driveKeyFromHyperRef } from './keys.js'
+
 export const MAX_TAB_HISTORY = 50
 export const MAX_CLOSED_TABS = 20
 
@@ -102,6 +104,15 @@ export function restoreSavedTab (source) {
   return makeTab(snap.url, snap)
 }
 
+export function normalizeDefaultTab (entry) {
+  if (typeof entry === 'string') return { url: cleanTabUrl(entry), title: '' }
+  if (!entry || typeof entry !== 'object') return { url: '', title: '' }
+  return {
+    url: cleanTabUrl(entry.url),
+    title: cleanTabTitle(entry.title, '')
+  }
+}
+
 export function restoreStartupTabs (savedTabs, defaultUrls = []) {
   const tabs = []
   const seenUrls = new Set()
@@ -113,9 +124,9 @@ export function restoreStartupTabs (savedTabs, defaultUrls = []) {
     tabs.push(tab)
   }
 
-  for (const url of defaultUrls) {
-    const clean = cleanTabUrl(url)
-    if (clean) add(makeTab(clean))
+  for (const entry of defaultUrls) {
+    const { url, title } = normalizeDefaultTab(entry)
+    if (url) add(makeTab(url, title ? { title } : {}))
   }
 
   const restoredPairs = Array.isArray(savedTabs)
@@ -142,11 +153,44 @@ export function sortTabsPinnedFirst (list) {
   ]
 }
 
+export function driveKeyFromTabAddress (value) {
+  const clean = cleanTabUrl(value)
+  if (!clean) return ''
+  const hyperDrive = driveKeyFromHyperRef(clean)
+  if (hyperDrive) return hyperDrive
+  try {
+    const parsed = new URL(clean)
+    if (parsed.protocol !== 'http:' || (parsed.hostname !== '127.0.0.1' && parsed.hostname !== 'localhost')) return ''
+    const match = parsed.pathname.match(/^\/(?:hyper|app)\/([0-9a-f]{64})(?:\/|$)/i)
+    return match ? match[1].toLowerCase() : ''
+  } catch {
+    return ''
+  }
+}
+
+export function tabDriveKey (tab) {
+  if (!tab || typeof tab !== 'object') return ''
+  return driveKeyFromTabAddress(tab.url) ||
+    driveKeyFromTabAddress(tab.displayUrl) ||
+    driveKeyFromTabAddress(tab.src)
+}
+
+export function tabListUsesDriveKey (tabs, driveKeyHex) {
+  const key = typeof driveKeyHex === 'string' ? driveKeyHex.toLowerCase() : ''
+  if (!/^[0-9a-f]{64}$/.test(key) || !Array.isArray(tabs)) return false
+  return tabs.some((tab) => tabDriveKey(tab) === key)
+}
+
 export function makeTab (initialUrl = '', opts = {}) {
   const history = Array.isArray(opts.history) ? normalizeTabHistory(opts.history, initialUrl) : []
   const histIdx = clampHistoryIndex(history, opts.histIdx)
   const historyUrl = histIdx >= 0 ? history[histIdx] : ''
   const url = cleanTabUrl(historyUrl || initialUrl)
+  const kind = opts.kind === 'clearnet' || opts.kind === 'hyper' || opts.kind === 'loopback'
+    ? opts.kind
+    : (url && /^https?:\/\//i.test(url) && !/^https?:\/\/(?:127\.0\.0\.1|localhost)\b/i.test(url)
+      ? 'clearnet'
+      : 'hyper')
   return {
     id: makeTabId(),
     url,
@@ -156,6 +200,8 @@ export function makeTab (initialUrl = '', opts = {}) {
     histIdx,
     status: '',
     title: cleanTabTitle(opts.title),
-    pinned: !!opts.pinned
+    pinned: !!opts.pinned,
+    kind,
+    clearnetMode: opts.clearnetMode || null
   }
 }

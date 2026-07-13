@@ -13,10 +13,10 @@ trust are rooted in signed identity bindings, Nostr events are accepted only
 after event-signature and contact-binding checks, and page APIs are scoped by
 per-page loopback tokens.
 
-This pass did not need a runtime code change. It adds the missing dated
-alignment map between the current threat/security claims and the maintained
-source boundaries. Public release risk remains mostly operational: manual GUI
-smoke, third-party trust prompts, real-DHT release proof, mobile production
+This pass began as a dated alignment map and now includes the 2026-07-02 SSE
+ticket follow-up: `/api/swarm/events` no longer accepts bearer tokens in query
+strings. Public release risk remains mostly operational: manual GUI smoke,
+third-party trust prompts, real-DHT release proof, mobile production
 signing/store validation, and eventual HiveRelay dependency publication.
 
 ## Boundary Map
@@ -24,9 +24,9 @@ signing/store validation, and eventual HiveRelay dependency publication.
 | Boundary | Current control | Source anchors | Local proof |
 | --- | --- | --- | --- |
 | Hyperdrive page proxy | 64-hex drive keys, path traversal/NUL rejection, per-request API token injection, raw HTML cache with fresh token injection on hits, CSP shim hashes instead of `unsafe-inline`, P2P-first relay race | `backend/hyper-proxy.js:84`, `backend/hyper-proxy.js:125`, `backend/hyper-proxy.js:344`, `backend/hyper-proxy.js:514`, `backend/hyper-proxy.js:690`, `backend/hyper-proxy.js:849` | `test/anongpt-gate.test.js`, `test/release-packaging.test.js`, `test/p2p-first-fetch.test.js` |
-| `/api/*` loopback bridge | Loopback Origin check when `Origin` is present, 100 req/min per IP, token required for privileged routes, app IDs scoped as `driveKey:appId`, request body size cap, prototype-pollution scrub | `backend/http-bridge.js:32`, `backend/http-bridge.js:57`, `backend/http-bridge.js:72`, `backend/http-bridge.js:108`, `backend/http-bridge.js:132`, `backend/http-bridge.js:598` | `test/http-bridge-sync.test.js`, `test/anongpt-gate.test.js` |
+| `/api/*` loopback bridge | Loopback Origin check when `Origin` is present, 100 req/min per IP, token required for privileged routes, app IDs scoped as `driveKey:appId`, request body size cap, prototype-pollution scrub, one-time SSE tickets for EventSource streams | `backend/http-bridge.js:32`, `backend/http-bridge.js:57`, `backend/http-bridge.js:72`, `backend/http-bridge.js:108`, `backend/http-bridge.js:132`, `backend/http-bridge.js:598` | `test/http-bridge-sync.test.js`, `test/http-bridge-sse-ticket.test.js`, `test/anongpt-gate.test.js` |
 | Runtime sync bridge | Validated app IDs, reserved prototype names rejected, per-app Corestore namespaces, invite keys constrained to 64-hex, result limits capped | `backend/pear-bridge.js:27`, `backend/pear-bridge.js:60`, `backend/pear-bridge.js:94`, `backend/pear-bridge.js:173`, `backend/pear-bridge.js:224`, `backend/pear-bridge.js:501` | `test/http-bridge-sync.test.js`, `test/pear-bridge-shared-store.test.js` |
-| `swarm.v1` page API | Topic joins are drive-derived Tier A, persisted-grant Tier B, or consent-gated Tier C; per-app channel/join limits, one pending consent, per-peer outbound byte cap | `backend/swarm-bridge.js:14`, `backend/swarm-bridge.js:31`, `backend/swarm-bridge.js:94`, `backend/swarm-bridge.js:182`, `backend/swarm-bridge.js:251`, `backend/swarm-bridge.js:461` | `test/mobile-source-contract.test.js`, `docs/SWARM-V1.md`, `docs/PEARBROWSER-APP-COMPAT-STANDARD.md` |
+| `swarm.v1` page API | Topic joins are drive-derived Tier A, persisted-grant Tier B, or consent-gated Tier C; per-app channel/join limits, one pending consent, per-peer outbound byte cap; injected page shim mints an SSE ticket before opening EventSource | `backend/swarm-bridge.js:14`, `backend/swarm-bridge.js:31`, `backend/swarm-bridge.js:94`, `backend/swarm-bridge.js:182`, `backend/swarm-bridge.js:251`, `backend/swarm-bridge.js:461` | `test/mobile-source-contract.test.js`, `test/http-bridge-sse-ticket.test.js`, `docs/SWARM-V1.md`, `docs/PEARBROWSER-APP-COMPAT-STANDARD.md` |
 | Catalogue ingestion | Prototype keys scrubbed, safe target universe limited to 64-hex/z32/hyper/pear/file, stable dedupe by drive/link/id, verification rank preferred over version, personal entries sanitized before write | `backend/catalog-safety.cjs:1`, `backend/catalog-safety.cjs:27`, `backend/catalog-safety.cjs:93`, `backend/catalog-safety.cjs:138`, `backend/catalog-safety.cjs:164`, `backend/catalog-safety.cjs:247` | `test/catalog-manager-safety.test.js`, `test/catalog-bee.test.js`, `test/autobee-catalog.test.js`, `test/community-submit.test.js` |
 | schema-sheets catalogue | Strict apps schema, validated `sheets://` decoding, public room only, safe JMESPath subset and row cap, row DTO normalization through catalogue safety helper, CJS bundle is generated from `schema-sheets` | `backend/sheets-catalog.js:23`, `backend/sheets-catalog.js:54`, `backend/sheets-catalog.js:67`, `backend/sheets-catalog.js:91`, `backend/sheets-catalog.js:103`, `backend/sheets-import.mjs:1` | `test/sheets-catalog-query.test.js`, `test/keys.test.js` |
 | HiveRelay index room | Index room is treated as an index, not authority; relay-directory capability docs are re-verified client-side; Nostr rows are event-verified before trust-frontier handling | `backend/index-room-client.js:1`, `backend/index-room-client.js:31`, `backend/index-room-client.js:50`, `backend/index-room-client.js:155`, `backend/capability-verify.cjs:1` | `test/index-room-client.test.js`, `test/capability-verify.test.js`, `test/relay-directory.test.js` |
@@ -52,27 +52,31 @@ signing/store validation, and eventual HiveRelay dependency publication.
   naming is contact/provenance aware, and the Nostr bridge is Pear-native rather
   than a general public relay client.
 - `docs/TEST-COMMAND-MATRIX-2026-06-23.md` supersedes older test-count claims.
-  The current release branch records `npm test` at 470/470 after the runtime
-  storage gate, release story smoke, native release asset checker/resolver,
-  native download verifier, native install snippet generator, native install
-  smoke plan generator, package-manager manifest draft generator,
-  public-trust readiness aggregator, native public-trust workflow mode,
-  macOS public-trust DMG gate, Linux AppImage metadata checker,
-  package-manager license metadata, and HiveRelay registry source-install
-  coverage landed.
+  The current release branch records `npm test` at 512/512 after the SSE ticket,
+  release evidence, per-drive origin, origin-release lifecycle, and
+  origin-isolation smoke-plan/evidence-checker tests landed.
 
 ## Known Security Residuals
 
 1. **Shared loopback origin is still the largest browser-app isolation tradeoff.**
    The token, Origin check, and app-id scoping protect the backend, but all
-   proxied apps still execute on the same `127.0.0.1:<port>` origin. A page XSS
-   can steal its live token and call that page's `/api/*` permissions until the
-   token expires. The app compatibility standard already tells app authors to
-   avoid untrusted HTML, persistent browser storage, and token caching.
-2. **SSE has a deliberate query-token fallback.** EventSource cannot set custom
-   headers, so `/api/swarm/events` accepts `?token=`. The boundary is loopback,
-   token TTL, and same app token validation; this should be replaced later with
-   a one-time SSE ticket if the runtime wants to remove tokens from URLs.
+   proxied apps still execute on the same `127.0.0.1:<port>` origin by default.
+   A page XSS can steal its live token and call that page's `/api/*` permissions
+   until the token expires. The app compatibility standard already tells app
+   authors to avoid untrusted HTML, persistent browser storage, and token
+   caching. The feature-flagged migration path is now implemented in core behind
+   `PEARBROWSER_PER_DRIVE_ORIGINS=1`; unit proof covers idle listener release,
+   and the Peerit/Pearfeed smoke plan now has an automated HyperProxy/HttpBridge
+   evidence artifact that verifies origin split, storage split, strict-CSP shim
+   hashing, tab-origin release, and bridge routes. The remaining product
+   decision is whether/when to make per-drive listeners default-on.
+2. **SSE bearer URLs are closed locally; channel attach is still capability
+   style.** EventSource cannot set custom headers, so pages now call
+   header-authenticated `POST /api/swarm/ticket` and open
+   `/api/swarm/events?...&ticket=...`. Tickets are short-lived, single-use, and
+   channel-bound. `SwarmBridge.attachStream()` still accepts a channelId as the
+   channel capability; a future hardening slice can pass `driveKeyHex` into
+   `attachStream()` and assert the channel belongs to that drive.
 3. **Tier A swarm topics are public-derivable from a drive key plus subtopic.**
    That is acceptable for app-scoped coordination, not private rendezvous. Any
    secret-room pattern must use a stronger application-layer handshake or a
@@ -92,19 +96,30 @@ signing/store validation, and eventual HiveRelay dependency publication.
 
 Run a narrow release-evidence/security cleanup pass:
 
-1. Add one-time SSE ticketing for `/api/swarm/events` while preserving the
-   existing EventSource UX, then cover it in `test/http-bridge-sync.test.js`.
-2. Surface search and catalogue verification provenance more clearly in the UI:
+1. Decide the LRU/default-on listener policy for the feature-flagged per-drive
+   loopback-port migration from `docs/ORIGIN_ISOLATION_MIGRATION_2026-07-02.md`.
+2. Preserve one-time SSE ticketing for `/api/swarm/events`; if this area is
+   reopened, tighten `SwarmBridge.attachStream(channelId, driveKeyHex)` so the
+   stream attach also verifies channel ownership.
+3. Surface search and catalogue verification provenance more clearly in the UI:
    signed/relay-listed/unverified, digest hit, fallback pull, and partial result
    state.
-3. Add a compact Nostr hidden/quarantine diagnostics view so revoked, stale, and
+4. Add a compact Nostr hidden/quarantine diagnostics view so revoked, stale, and
    unverified contact notes stay fail-closed but understandable.
-4. Keep Peercord execution and persistent third-party trust approval manual.
+5. Keep Peercord execution and persistent third-party trust approval manual.
 
 ## Validation For This Pass
 
 Local validation completed in this loop:
 
+- 2026-07-02 follow-up: `node --test test/http-bridge-sse-ticket.test.js test/http-bridge-sync.test.js` passed: 3 tests, 0 failed.
+- 2026-07-02 follow-up: `npm test` passed: 512 tests, 0 failed.
+- 2026-07-02 follow-up: `docs/ORIGIN_ISOLATION_MIGRATION_2026-07-02.md` selects the PB-AUDIT-002 migration path and names its implementation gates.
+- 2026-07-02 follow-up: feature-flagged origin-isolation core landed and `node --test test/origin-isolation.test.js test/http-bridge-sse-ticket.test.js test/http-bridge-sync.test.js test/anongpt-gate.test.js` passed: 13 tests, 0 failed.
+- 2026-07-02 follow-up: origin release lifecycle helpers landed and `node --test test/origin-isolation.test.js test/tabs.test.js test/constants-mirror.test.js` passed: 24 tests, 0 failed.
+- 2026-07-02 follow-up: origin-isolation operator smoke-plan generator landed and `node --test test/release-packaging.test.js` passed: 56 tests, 0 failed.
+- 2026-07-02 follow-up: origin-isolation completed-evidence verifier landed and `node --test test/origin-isolation-smoke-evidence.test.js` passed: 3 tests, 0 failed.
+- 2026-07-04 follow-up: automated origin-isolation evidence generator landed; `node --test test/origin-isolation-smoke-evidence.test.js` passed: 6 tests, 0 failed; `node --test test/release-packaging.test.js` passed: 56 tests, 0 failed; generated `docs/origin-isolation-smoke-evidence-peerit-pearfeed-2026-07-04.json` passed `check:origin-isolation-smoke-evidence`.
 - `git diff --check -- docs/SECURITY-BOUNDARY-ALIGNMENT-2026-06-23.md` passed.
 - `node --test test/capability-verify.test.js test/catalog-manager-safety.test.js test/http-bridge-sync.test.js test/anongpt-gate.test.js test/identity-verify.test.js test/identity-binding-publisher.test.js test/nostr-events-store.test.js test/nostr-ingest.test.js test/federated-nostr-feed.test.js test/search-federation.test.js test/cmd-search-contract.test.js test/sheets-catalog-query.test.js`
 - Targeted security/trust slice passed: 78 tests, 0 failed.

@@ -241,6 +241,31 @@ class RelayClient {
     return results
   }
 
+  async checkCapability (relayUrl, timeout = this.timeout) {
+    const clean = typeof relayUrl === 'string' ? relayUrl.trim().replace(/\/+$/, '') : ''
+    if (!clean || !/^https?:\/\//i.test(clean)) {
+      return { ok: false, error: 'invalid relay URL' }
+    }
+
+    try {
+      const result = await this._httpGet(`${clean}/.well-known/hiverelay.json`, timeout)
+      if (result.status !== 200) {
+        return { ok: false, status: result.status, error: `HTTP ${result.status}` }
+      }
+
+      let doc = null
+      try {
+        doc = JSON.parse(b4a.toString(result.body, 'utf8'))
+      } catch {
+        return { ok: false, status: result.status, error: 'invalid capability JSON' }
+      }
+
+      return { ok: true, status: result.status, doc }
+    } catch (err) {
+      return { ok: false, error: err && err.message ? err.message : String(err) }
+    }
+  }
+
   async requestSeed (keyHex) {
     if (!keyHex || typeof keyHex !== 'string') {
       return { ok: false, error: 'requestSeed requires a hex app key' }
