@@ -18,6 +18,9 @@ GitHub release, and stable Pear channel on one verified version.
 
 ### Distribution note
 
+- Released the stable Pear production key at length `63165` (from `63158`),
+  received five HiveRelay pin acceptances, and verified the exact length plus
+  `/index.html` from a fresh peer with five connected peers.
 - The normalized Linux AppImage attached to `v0.6.0` contained AppImageTool and
   is superseded by the verified `v0.6.1` PearBrowser AppImage. macOS, Windows,
   and stable-Pear users should also use `v0.6.1` so every public surface agrees.
