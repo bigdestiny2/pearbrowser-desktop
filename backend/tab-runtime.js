@@ -26,6 +26,9 @@
  */
 const http = require('bare-http1')
 const ws = require('bare-ws')
+const hypercoreCrypto = require('hypercore-crypto')
+const b4a = require('b4a')
+const { PAGE_CONTEXT_SHIM, pageContextMeta } = require('./page-context-bridge.cjs')
 const router = require('./tab-assets/router.cjs')   // { PearRequestRouter, registerRoutes }
 const assets = require('./tab-assets/assets.js')     // { wrapper, htmx, client } inline strings
 
@@ -128,8 +131,33 @@ class TabRuntime {
   open (link) {
     const tabId = 'tab' + (++this._seq)
     const source = (!link || link === 'demo') ? 'demo' : String(link)
-    this.tabs.set(tabId, { source })
-    return { tabId, url: `http://127.0.0.1:${this.httpPort}/tab/${tabId}?ws=${this.wsPort}` }
+    const tab = { source, contextToken: this._newContextToken() }
+    this.tabs.set(tabId, tab)
+    return {
+      tabId,
+      url: `http://127.0.0.1:${this.httpPort}/tab/${tabId}?ws=${this.wsPort}`,
+      contextToken: tab.contextToken
+    }
+  }
+
+  contextTokenForUrl (url) {
+    try {
+      const parsed = new URL(url)
+      if (parsed.protocol !== 'http:' || parsed.hostname !== '127.0.0.1') return null
+      if (Number(parsed.port) !== this.httpPort) return null
+      const match = parsed.pathname.match(/^\/tab\/([a-zA-Z0-9_-]+)$/)
+      if (!match) return null
+      const tab = this.tabs.get(match[1])
+      if (!tab) return null
+      if (!tab.contextToken) tab.contextToken = this._newContextToken()
+      return tab.contextToken
+    } catch {
+      return null
+    }
+  }
+
+  _newContextToken () {
+    return b4a.toString(hypercoreCrypto.randomBytes(32), 'hex')
   }
 
   _serve (req, res) {
@@ -137,9 +165,12 @@ class TabRuntime {
     res.setHeader('Access-Control-Allow-Origin', '*')
     if (u.startsWith('/tab/')) {
       const tabId = u.slice('/tab/'.length)
-      if (!this.tabs.has(tabId)) { res.statusCode = 404; return res.end('unknown tab') }
+      const tab = this.tabs.get(tabId)
+      if (!tab) { res.statusCode = 404; return res.end('unknown tab') }
+      if (!tab.contextToken) tab.contextToken = this._newContextToken()
       res.setHeader('Content-Type', 'text/html; charset=utf-8')
-      return res.end(this._wrapper)
+      const contextHead = pageContextMeta(tab.contextToken) + PAGE_CONTEXT_SHIM
+      return res.end(this._wrapper.replace('<head>', `<head>${contextHead}`))
     }
     const asset = this._assets[u]
     if (asset) { res.setHeader('Content-Type', asset.type); return res.end(asset.body) }
@@ -201,6 +232,7 @@ class TabRuntime {
   async stop () {
     try { this._ws && this._ws.close() } catch {}
     try { this._http && this._http.close() } catch {}
+    this.tabs.clear()
   }
 }
 

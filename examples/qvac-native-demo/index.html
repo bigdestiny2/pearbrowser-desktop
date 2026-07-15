@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>QVAC Native AI Demo</title>
+</head>
+<body>
+  <main>
+    <h1>QVAC Native AI Demo</h1>
+    <textarea id="prompt" rows="5" cols="60">Explain peer-to-peer systems in one sentence.</textarea>
+    <div><button id="run" data-testid="run-local">Run locally</button> <button id="cancel" data-testid="cancel-local" disabled>Cancel</button></div>
+    <pre id="status" data-testid="ai-status">Checking native runtime…</pre>
+    <pre id="output" data-testid="ai-output"></pre>
+  </main>
+  <script>
+    const status = document.querySelector('#status')
+    const output = document.querySelector('#output')
+    const runButton = document.querySelector('#run')
+    const cancelButton = document.querySelector('#cancel')
+    let active = null
+    let selectedModel = 'pear-small-chat'
+
+    async function refresh () {
+      if (!window.pear?.ai) {
+        status.textContent = 'window.pear.ai is unavailable'
+        runButton.disabled = true
+        return
+      }
+      const capabilities = await window.pear.ai.capabilities()
+      selectedModel = capabilities.models?.[0]?.alias || selectedModel
+      status.textContent = JSON.stringify(capabilities, null, 2)
+      runButton.disabled = !capabilities.available || !capabilities.allowed || !capabilities.models?.length
+    }
+
+    runButton.addEventListener('click', async () => {
+      output.textContent = ''
+      runButton.disabled = true
+      cancelButton.disabled = false
+      try {
+        active = await window.pear.ai.complete({
+          model: selectedModel,
+          messages: [{ role: 'user', content: document.querySelector('#prompt').value }],
+          maxTokens: 96,
+          temperature: 0.3
+        })
+        for await (const event of active.events) {
+          if (event.type === 'text') output.textContent += event.delta
+          if (event.type === 'model-progress') status.textContent = JSON.stringify(event.progress, null, 2)
+          if (event.type === 'stats') status.textContent = JSON.stringify(event.stats, null, 2)
+          if (event.type === 'error') status.textContent = event.code + ': ' + event.message
+        }
+      } catch (error) {
+        status.textContent = error.message
+      } finally {
+        active = null
+        runButton.disabled = false
+        cancelButton.disabled = true
+      }
+    })
+
+    cancelButton.addEventListener('click', () => active?.cancel())
+    refresh().catch(error => { status.textContent = error.message })
+  </script>
+</body>
+</html>

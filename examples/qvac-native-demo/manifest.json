@@ -1,0 +1,8 @@
+{
+  "name": "QVAC Native AI Demo",
+  "version": "0.1.0",
+  "permissions": [
+    "pear.ai.infer"
+  ]
+}
+

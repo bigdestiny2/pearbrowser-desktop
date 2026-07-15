@@ -52,9 +52,9 @@ announcement.
   - Expected: `v0.5.0` release gets macOS `.app.zip`, Windows `.msix`, Linux
     `.AppImage`, per-asset `.sha256`, `SHA256SUMS-*`, and `manifest-*` files.
   - Verify attachments after upload:
-    `npm run check:native-release-assets -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop`.
+    `npm run check:native-release-assets -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --require-backfill-formats`.
   - For public-trust runs, require published release assets and macOS DMGs:
-    `npm run check:native-release-assets -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --require-published --require-public-trust`.
+    `npm run check:native-release-assets -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --require-backfill-formats --require-published --require-public-trust`.
   - Verify the recommended package downloads against their sidecars:
     `npm run verify:native-downloads -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --all`.
   - Generate the public-trust operator handoff report:
@@ -71,12 +71,21 @@ announcement.
   - Generate Homebrew/WinGet drafts after public-trust assets are attached:
     `npm run generate:package-manager-manifests -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop`.
     Use `--trust-mode package-proof` only for rehearsal output.
+  - Final workflow run checklist: dispatch
+    `gh workflow run desktop-native-release.yml --repo bigdestiny2/pearbrowser-desktop --ref main -f tag=v0.5.0 -f source_ref=<merged-main-commit> -f release_mode=package-proof`,
+    wait for all four platform jobs plus the attach job to pass, rerun the
+    backfill-format asset check and `verify:native-downloads -- --all`, then
+    record the run URL and release asset list.
   - Record the Actions run URL and resulting release asset list in the evidence
     log.
 - [ ] Generate the release evidence handoff before filling manual rows:
   `npm run -s generate:release-evidence-handoff`.
   - Expected before manual gates are filled: non-zero with grouped blank rows,
     expected outcomes, and copy-ready `PASS`/`DEFER` table templates.
+  - If `release-rpc-story-smoke.mjs --desktop-gui-stories --json` has already
+    produced a JSON report, rerun the handoff with
+    `npm run -s generate:release-evidence-handoff -- --story-smoke-json <story-smoke.json>`
+    so matching desktop GUI rows are prefilled from that smoke output.
 - [ ] After filling `docs/RELEASE_SMOKE_EVIDENCE_LOG_2026-06-23.md`, run
   `npm run check:release-evidence`.
   - Expected before manual gates are filled: non-zero with blank/incomplete
@@ -91,23 +100,43 @@ announcement.
     `proxyPort`, at least one configured HiveRelay, and a profile at or below
     its storage quota without becoming the renderer or closing the app.
   - Nonvisual preflight before screenshots:
-    `node scripts/release-rpc-story-smoke.mjs --timeout 60000 --request-timeout 80000 --local-stories --site-story --json`.
+    `node scripts/release-rpc-story-smoke.mjs --timeout 60000 --request-timeout 80000 --desktop-gui-stories --site-story --json`.
   - Expected: homepage fetches through the local proxy, release catalogues load,
     featured rows include Keet, PearPass, anonGPT, Paste, and Peercord, and
-    Peercord remains `standalone`/window-only. With `--local-stories`, the
-    smoke also proves local search first-paint, curated/petname name resolution,
-    and bookmark/session round-trips. With `--site-story`, it creates, publishes,
-    fetches, deletes, and HiveRelay-unseeds a temporary test site. This does not
-    launch Peercord, approve a third-party trust prompt, or replace the human GUI
-    checks below.
+    Peercord remains `standalone`/window-only. With `--desktop-gui-stories`, the
+    smoke also proves browse reload/site-info, startup source contracts,
+    catalogue search/action rows, a safe catalogue-row Hyperdrive app open,
+    local search first-paint, curated/petname name resolution, bookmark/session
+    round-trips with diagnostic reconnect, and Nostr trusted-contact filtering.
+    With `--site-story`, it creates, publishes, fetches, deletes, and
+    HiveRelay-unseeds a temporary test site. This does not launch Peercord,
+    approve a third-party trust prompt, or replace any row whose evidence owner
+    still requires a human screenshot/window check.
+  - For the feature-flagged per-app origin proof, generate the operator plan
+    with two real app drives before producing evidence:
+    `npm run -s generate:origin-isolation-smoke-plan -- --app-a hyper://<app-a-drive>/ --app-b hyper://<app-b-drive>/ --json --out origin-isolation-smoke-plan.json`.
+    Expected: the plan names the `PEARBROWSER_PER_DRIVE_ORIGINS=1` launch,
+    runtime readiness command, automated evidence command, two-tab
+    `location.origin` comparison, localStorage/cookie/IndexedDB separation
+    snippets, strict-CSP check, tab close/navigation check, and bridge proof.
+  - Produce the automated evidence artifact from the plan:
+    `npm run -s generate:origin-isolation-smoke-evidence -- --plan origin-isolation-smoke-plan.json --out origin-isolation-smoke-evidence.json --json`.
+    Expected: the verifier runs the feature-flagged HyperProxy/HttpBridge
+    harness, records distinct loopback origins, storage split, strict-CSP shim
+    hashes, tab-origin release, and bridge route results.
+  - Verify the generated artifact:
+    `npm run -s check:origin-isolation-smoke-evidence -- --file origin-isolation-smoke-evidence.json --json`.
+    Expected before recording release evidence: `status` is `verified`; same
+    origin, leaked storage, missing strict-CSP evidence, missing tab lifecycle
+    evidence, or missing bridge route proof blocks the checker.
 - [ ] Browse user story:
-  - Open `hyper://1868916a7a282ff0f211b536e9642828c32d3a817a254e1ef7e602709e25d/`.
+  - Open `hyper://03f0060a35451cfb6b68ad1dda1b8474ebb43fd9100071ccf7d67679a83ebb4f/`.
   - Expected: page renders, About-this-site shows the drive key, reload works.
 - [ ] Fresh-launch landing story:
   - Start with no saved tab/session state or a clean browser profile.
   - Expected: the PearBrowser landing page opens as the active front Browse tab,
-    `peerit` is still available as the second tab, and Sites discovery pins
-    `peerit` first.
+    P2P Builders and `peerit` are still available as startup tabs, and Sites
+    discovery pins `peerit` first.
 - [ ] Catalogue user story:
   - Open Apps.
   - Expected: PearBrowser Network catalogue auto-loads.

@@ -17,7 +17,7 @@ module.exports = {
     {
       "name": "PearBrowser Desktop",
       "type": "standalone",
-      "driveKey": "1868916a7a282ff0f211b11b536e9642828c32d3a817a254e1ef7e602709e25d",
+      "driveKey": "03f0060a35451cfb6b68ad1dda1b8474ebb43fd9100071ccf7d67679a83ebb4f",
       "link": "pear://tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty",
       "author": "bigdestiny2",
       "categories": [
@@ -27,7 +27,7 @@ module.exports = {
       ],
       "description": "P2P browser, decentralized app store, and site publisher. macOS / Windows / Linux. Talks to peers directly over Hyperswarm. Pinned 24/7 on HiveRelay.",
       "version": "0.4.5",
-      "homepage": "hyper://1868916a7a282ff0f211b11b536e9642828c32d3a817a254e1ef7e602709e25d/",
+      "homepage": "hyper://03f0060a35451cfb6b68ad1dda1b8474ebb43fd9100071ccf7d67679a83ebb4f/",
       "sourceUrl": "https://github.com/bigdestiny2/pearbrowser-desktop",
       "license": "MIT",
       "verification": "relay-listed"

@@ -40,7 +40,7 @@ const checks = [
     id: 'native-release-assets',
     label: 'Published public-trust release assets',
     script: 'scripts/check-native-release-assets.mjs',
-    args: [...sharedReleaseArgs, '--require-published', '--require-public-trust', '--json']
+    args: [...sharedReleaseArgs, '--require-published', '--require-public-trust', '--require-backfill-formats', '--json']
   }),
   runNodeCheck({
     id: 'native-downloads',

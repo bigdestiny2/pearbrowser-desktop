@@ -1,19 +1,63 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { html } from 'htm/react'
 import { Logo, Wordmark } from './logo.js'
-import { z32FromHex, hexFromZ32, formatBytes, shortKey, normalizeUrl, driveKeyFromHyperRef, normalizeNameTarget, parseCatalogRef, catalogCacheKeyForRef, looksLikeName, parseSyncInvite, formatSyncInvite, parsePearname } from './lib/keys.js'
+import { z32FromHex, hexFromZ32, formatBytes, shortKey, normalizeUrl, isClearnetUrl, driveKeyFromHyperRef, normalizeNameTarget, parseCatalogRef, catalogCacheKeyForRef, looksLikeName, parseSyncInvite, formatSyncInvite, parsePearname } from './lib/keys.js'
 import {
   MAX_TAB_HISTORY, MAX_CLOSED_TABS,
   makeTab, cleanTabUrl, cleanTabTitle,
   normalizeTabHistory, clampHistoryIndex, pushTabHistory,
-  normalizeTabSnapshot, serializeTab, restoreSavedTab, restoreStartupTabs, sortTabsPinnedFirst
+  normalizeTabSnapshot, serializeTab, restoreSavedTab, restoreStartupTabs, sortTabsPinnedFirst,
+  tabDriveKey, tabListUsesDriveKey
 } from './lib/tabs.js'
+import {
+  createAskStreamId,
+  normalizePageContextResponse,
+  createInitialAskStreamState,
+  reduceAskStreamEvent,
+  formatModelLabel,
+  formatBytes as formatAskBytes,
+  presentAskText
+} from './lib/ask-browser.js'
+import {
+  summarizeAiCapabilities,
+  pickQuickAskModel,
+  describeAiStatus,
+  buildQuickAskRequest
+} from './lib/qvac-widget.js'
 
 function copyText (text) {
   try {
     navigator.clipboard?.writeText(text)
   } catch {}
 }
+
+const APPEARANCE_THEME_SETTING = 'appearanceTheme'
+const APPEARANCE_THEME_STORAGE = 'pearbrowser.appearanceTheme'
+const APPEARANCE_THEMES = new Set(['light', 'dark'])
+
+function normalizeAppearanceTheme (theme) {
+  return APPEARANCE_THEMES.has(theme) ? theme : 'light'
+}
+
+function readCachedAppearanceTheme () {
+  try {
+    return normalizeAppearanceTheme(localStorage.getItem(APPEARANCE_THEME_STORAGE))
+  } catch {
+    return 'light'
+  }
+}
+
+function applyAppearanceTheme (theme) {
+  const normalized = normalizeAppearanceTheme(theme)
+  try {
+    document.documentElement.dataset.theme = normalized
+    document.documentElement.style.colorScheme = normalized
+    localStorage.setItem(APPEARANCE_THEME_STORAGE, normalized)
+  } catch {}
+  return normalized
+}
+
+applyAppearanceTheme(readCachedAppearanceTheme())
 
 // Vetted against https://github.com/holepunchto/pear-aliases — these
 // are the canonical pear:// keys for Holepunch-ecosystem apps.
@@ -107,11 +151,11 @@ const FEATURED_APPS = [
 ]
 
 const TAB_META = {
-  browse: { label: 'Browse', icon: '🌐' },
-  apps: { label: 'Apps', icon: '📦' },
-  sites: { label: 'P2P Sites', icon: '✒️' },
-  library: { label: 'Library', icon: '🔖' },
-  settings: { label: 'Settings', icon: '⚙' }
+  browse: { label: 'Browse' },
+  apps: { label: 'Apps' },
+  sites: { label: 'P2P Sites' },
+  library: { label: 'Library' },
+  settings: { label: 'Settings' }
 }
 
 // Homepage drive — published from PearBrowser's own block editor
@@ -119,7 +163,7 @@ const TAB_META = {
 // and `efd7b0c6c38d…` keys have been unseeded; this is the live one.
 // To update: open the same site in the desktop's Sites editor and
 // republish — block-source lives at /.blocks.json inside the drive.
-const DEFAULT_URL = 'hyper://1868916a7a282ff0f211b11b536e9642828c32d3a817a254e1ef7e602709e25d/'
+const DEFAULT_URL = 'hyper://03f0060a35451cfb6b68ad1dda1b8474ebb43fd9100071ccf7d67679a83ebb4f/'
 
 // peerit — "the front page of the P2P internet" (a peer-to-peer Reddit). Opens
 // beside the PearBrowser landing page on launch and is pinned to the top of
@@ -134,6 +178,75 @@ const PEERIT_URL = 'hyper://' + PEERIT_DRIVE_KEY + '/'
 // Published 2026-06-23, seeded on HiveRelay. Source: 02-apps/p2pbuilders.
 const P2PBUILDERS_DRIVE_KEY = 'ac1977a75cc84b46af0af8bb559cd4ebbe10507eb0f51d863e289d09635f6d74'
 const P2PBUILDERS_URL = 'hyper://' + P2PBUILDERS_DRIVE_KEY + '/'
+const STARTUP_TABS = [
+  { url: DEFAULT_URL, title: 'PearBrowser' },
+  { url: P2PBUILDERS_URL, title: 'P2P Builders' },
+  { url: PEERIT_URL, title: 'peerit' }
+]
+const KNOWN_TAB_TITLES = new Map(STARTUP_TABS.map((tab) => [tab.url, tab.title]))
+
+function knownTabTitleForUrl (url) {
+  const clean = cleanTabUrl(url).replace(/#.*$/, '')
+  if (!clean) return ''
+  if (KNOWN_TAB_TITLES.has(clean)) return KNOWN_TAB_TITLES.get(clean)
+  try {
+    const parsed = new URL(clean)
+    if (parsed.protocol !== 'hyper:' || !parsed.hostname) return ''
+    return KNOWN_TAB_TITLES.get(`hyper://${parsed.hostname}/`) || ''
+  } catch {
+    return ''
+  }
+}
+
+function readablePathLabel (pathname) {
+  const segment = String(pathname || '').replace(/^\/+/, '').split('/').filter(Boolean).pop()
+  if (!segment) return ''
+  try { return decodeURIComponent(segment) } catch { return segment }
+}
+
+function tabTitleForUrl (url) {
+  const clean = cleanTabUrl(url)
+  if (!clean) return 'New tab'
+  const known = knownTabTitleForUrl(clean)
+  if (known) return known
+  try {
+    const parsed = new URL(clean)
+    if (parsed.protocol === 'hyper:' && parsed.hostname) {
+      const driveLabel = shortKey(parsed.hostname)
+      const pathLabel = readablePathLabel(parsed.pathname)
+      return pathLabel ? `${driveLabel} / ${pathLabel}` : driveLabel
+    }
+    if (parsed.hostname) return parsed.hostname
+  } catch {}
+  const fallback = clean.replace(/^hyper:\/\//i, '')
+  return fallback.length > 40 ? fallback.slice(0, 37) + '...' : fallback
+}
+
+function tabTitleFromPage (pageTitle, url) {
+  const known = knownTabTitleForUrl(url)
+  if (known) return known
+  const title = cleanTabTitle(pageTitle, '').trim()
+  if (title && title !== url && !/^hyper:\/\//i.test(title)) return title
+  return tabTitleForUrl(url)
+}
+
+function makeBrowserTab (url = '', opts = {}) {
+  const clean = cleanTabUrl(url)
+  return makeTab(clean, {
+    ...opts,
+    title: cleanTabTitle(opts.title, clean ? tabTitleForUrl(clean) : 'New tab')
+  })
+}
+
+function visibleTabTitle (tab) {
+  return cleanTabTitle(tab?.title, tabTitleForUrl(tab?.displayUrl || tab?.url || ''))
+}
+
+function tabTooltip (tab) {
+  const title = visibleTabTitle(tab)
+  const url = tab?.displayUrl || tab?.url || ''
+  return url && url !== title ? `${title}\n${url}` : title
+}
 
 // Default catalog — auto-loads on first Apps-tab visit when the user has not yet
 // pinned a catalog of their own. The "PearBrowser Network" curated entry point,
@@ -454,17 +567,594 @@ function AboutSite ({ rpc, C, url, onClose, onBookmarkToggle }) {
   `
 }
 
-function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActiveId, closedTabs, setClosedTabs, sessionReady }) {
+const ASK_BROWSER_QUICK_PROMPTS = [
+  'Summarize this page',
+  'What are the key claims?',
+  'Explain this simply',
+  'What should I verify?'
+]
+
+export function AskBrowserPanel ({ rpc, C, activeTab, captureContext, onClose }) {
+  const [capabilities, setCapabilities] = useState(null)
+  const [capabilityError, setCapabilityError] = useState('')
+  const [model, setModel] = useState('')
+  const [draft, setDraft] = useState('')
+  const [turns, setTurns] = useState([])
+  const [stream, setStream] = useState(() => createInitialAskStreamState())
+  const [activeQuestion, setActiveQuestion] = useState('')
+  const [activeSource, setActiveSource] = useState(null)
+  const [stopping, setStopping] = useState(false)
+  const activeStreamRef = useRef('')
+  const activeQuestionRef = useRef('')
+  const activeSourceRef = useRef(null)
+  const committedStreamRef = useRef('')
+  const transcriptRef = useRef(null)
+  const runGenerationRef = useRef(0)
+  const conversationPageRef = useRef(`${activeTab?.id || ''}\n${activeTab?.url || ''}`)
+
+  const busy = ['starting', 'loading-model', 'streaming'].includes(stream.status)
+  const models = Array.isArray(capabilities?.models) ? capabilities.models : []
+  const selectedModel = models.find(item => item.alias === model) || null
+
+  useEffect(() => {
+    let disposed = false
+    setCapabilityError('')
+    rpc.request(C.CMD_ASK_BROWSER_CAPABILITIES).then((result) => {
+      if (disposed) return
+      setCapabilities(result)
+      const availableModels = Array.isArray(result?.models) ? result.models : []
+      const preferred = availableModels.find(item => item.recommended) ||
+        availableModels.find(item => item.provider === 'ollama') ||
+        availableModels[0]
+      setModel(current => availableModels.some(item => item.alias === current)
+        ? current
+        : (preferred?.alias || ''))
+    }).catch((err) => {
+      if (!disposed) setCapabilityError(err.message || 'Local AI runtime is unavailable')
+    })
+    return () => { disposed = true }
+  }, [rpc, C])
+
+  useEffect(() => {
+    const onStream = (event) => {
+      const payload = event.detail
+      if (!payload || payload.streamId !== activeStreamRef.current) return
+      setStream(previous => reduceAskStreamEvent(previous, payload))
+    }
+    rpc.addEventListener(`event:${C.EVT_ASK_BROWSER_STREAM}`, onStream)
+    return () => rpc.removeEventListener(`event:${C.EVT_ASK_BROWSER_STREAM}`, onStream)
+  }, [rpc, C])
+
+  useEffect(() => {
+    const terminal = ['done', 'cancelled', 'error'].includes(stream.status)
+    if (!terminal || !stream.streamId || committedStreamRef.current === stream.streamId) return
+    committedStreamRef.current = stream.streamId
+    const question = activeQuestionRef.current
+    if (question) {
+      setTurns(previous => [...previous, {
+        id: stream.streamId,
+        question,
+        answer: presentAskText(stream.text),
+        error: stream.error,
+        finishReason: stream.finishReason,
+        stats: stream.stats,
+        source: activeSourceRef.current
+      }].slice(-20))
+    }
+    if (stream.status === 'done') {
+      setCapabilities(previous => previous && {
+        ...previous,
+        models: (previous.models || []).map(item => item.alias === model ? { ...item, installed: true } : item)
+      })
+    }
+    activeStreamRef.current = ''
+    activeQuestionRef.current = ''
+    setActiveQuestion('')
+    setStopping(false)
+  }, [stream])
+
+  useEffect(() => {
+    const el = transcriptRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [turns, stream.text, stream.status])
+
+  useEffect(() => {
+    const pageKey = `${activeTab?.id || ''}\n${activeTab?.url || ''}`
+    if (conversationPageRef.current === pageKey) return
+    conversationPageRef.current = pageKey
+    runGenerationRef.current++
+    const streamId = activeStreamRef.current
+    if (streamId) rpc.request(C.CMD_ASK_BROWSER_CANCEL, { streamId }).catch(() => {})
+    activeStreamRef.current = ''
+    activeQuestionRef.current = ''
+    activeSourceRef.current = null
+    committedStreamRef.current = ''
+    setTurns([])
+    setStream(createInitialAskStreamState())
+    setActiveQuestion('')
+    setActiveSource(null)
+    setStopping(false)
+  }, [activeTab?.id, activeTab?.url, rpc, C])
+
+  useEffect(() => () => {
+    runGenerationRef.current++
+    const streamId = activeStreamRef.current
+    activeStreamRef.current = ''
+    if (streamId) rpc.request(C.CMD_ASK_BROWSER_CANCEL, { streamId }).catch(() => {})
+  }, [rpc, C])
+
+  const submit = async (event) => {
+    event?.preventDefault?.()
+    const question = draft.trim()
+    if (!question || busy || !model) return
+
+    const streamId = createAskStreamId()
+    const runGeneration = ++runGenerationRef.current
+    committedStreamRef.current = ''
+    activeStreamRef.current = streamId
+    activeQuestionRef.current = question
+    activeSourceRef.current = null
+    setActiveQuestion(question)
+    setActiveSource(null)
+    setStopping(false)
+    setDraft('')
+    setStream(createInitialAskStreamState(streamId))
+
+    try {
+      const page = await captureContext()
+      if (runGenerationRef.current !== runGeneration || activeStreamRef.current !== streamId) return
+      const pageSource = {
+        tabId: page.tabId,
+        url: page.url,
+        title: page.title,
+        textBytes: page.textBytes,
+        available: page.available,
+        truncated: page.truncated,
+        source: page.source
+      }
+      activeSourceRef.current = pageSource
+      setActiveSource(pageSource)
+      const history = turns
+        .filter(turn => turn.source?.tabId === page.tabId && turn.source?.url === page.url)
+        .slice(-3)
+        .flatMap(turn => {
+          const messages = [{ role: 'user', content: turn.question }]
+          if (turn.answer) messages.push({ role: 'assistant', content: turn.answer })
+          return messages
+        })
+      const started = await rpc.request(C.CMD_ASK_BROWSER_START, {
+        streamId,
+        model,
+        question,
+        history,
+        page,
+        maxTokens: 256,
+        temperature: 0.2
+      }, 30000)
+      if (runGenerationRef.current !== runGeneration || activeStreamRef.current !== streamId) {
+        rpc.request(C.CMD_ASK_BROWSER_CANCEL, { streamId }).catch(() => {})
+        return
+      }
+      const source = { ...pageSource, ...(started?.source || {}) }
+      activeSourceRef.current = source
+      setActiveSource(source)
+    } catch (err) {
+      if (runGenerationRef.current !== runGeneration || activeStreamRef.current !== streamId) return
+      setStream(previous => reduceAskStreamEvent(previous, {
+        streamId,
+        event: {
+          type: 'error',
+          code: err?.code || 'ask-browser-failed',
+          message: err?.message || 'Ask Browser failed'
+        }
+      }))
+    }
+  }
+
+  const stop = async () => {
+    const streamId = activeStreamRef.current
+    if (!streamId || stopping) return
+    runGenerationRef.current++
+    setStopping(true)
+    setStream(previous => reduceAskStreamEvent(previous, {
+      streamId,
+      event: { type: 'done', finishReason: 'cancelled' }
+    }))
+    try { await rpc.request(C.CMD_ASK_BROWSER_CANCEL, { streamId }) } catch {}
+  }
+
+  const clear = () => {
+    if (activeStreamRef.current) {
+      runGenerationRef.current++
+      const streamId = activeStreamRef.current
+      activeStreamRef.current = ''
+      activeQuestionRef.current = ''
+      setActiveQuestion('')
+      setStream(createInitialAskStreamState())
+      setStopping(false)
+      rpc.request(C.CMD_ASK_BROWSER_CANCEL, { streamId }).catch(() => {})
+    }
+    activeSourceRef.current = null
+    setActiveSource(null)
+    setTurns([])
+  }
+
+  const close = () => {
+    runGenerationRef.current++
+    const streamId = activeStreamRef.current
+    activeStreamRef.current = ''
+    if (streamId) rpc.request(C.CMD_ASK_BROWSER_CANCEL, { streamId }).catch(() => {})
+    onClose()
+  }
+
+  const visibleActiveAnswer = presentAskText(stream.text)
+  const sourceForCard = activeSource || turns[turns.length - 1]?.source || {
+    tabId: activeTab?.id || '',
+    url: activeTab?.url || '',
+    title: activeTab?.title || activeTab?.url || 'No active page'
+  }
+  const statusLabel = stopping
+    ? 'Stopping…'
+    : stream.status === 'starting'
+    ? 'Reading current page…'
+    : stream.status === 'loading-model'
+      ? `Loading model${Number.isFinite(stream.modelProgress) ? ` · ${Math.round(stream.modelProgress * 100)}%` : '…'}`
+      : stream.status === 'streaming'
+        ? 'Generating locally…'
+        : ''
+
+  return html`
+    <aside id="ask-browser-panel" className="ask-browser-panel" aria-label="Ask Browser" data-testid="ask-browser-panel">
+      <div className="ask-browser-header">
+        <div>
+          <div className="ask-browser-title">Ask Browser</div>
+          <div className="ask-browser-local"><span></span>Local only</div>
+        </div>
+        <div className="ask-browser-header-actions">
+          <button type="button" className="ask-browser-text-button" onClick=${clear} disabled=${turns.length === 0 && !busy}>Clear</button>
+          <button type="button" className="ask-browser-close" aria-label="Close Ask Browser" onClick=${close}>×</button>
+        </div>
+      </div>
+
+      <div className="ask-browser-model-row">
+        <label htmlFor="ask-browser-model">Model</label>
+        <select id="ask-browser-model" data-testid="ask-browser-model" value=${model} disabled=${busy || models.length === 0}
+          onChange=${event => setModel(event.target.value)}>
+          ${models.map(item => html`<option key=${item.alias} value=${item.alias}>${item.label || formatModelLabel(item.alias)}${item.expectedSize ? ` · ${formatAskBytes(item.expectedSize)}` : ''}</option>`)}
+        </select>
+        ${selectedModel && html`<div className="ask-browser-model-meta">${selectedModel.provider || 'local'}${selectedModel.quantization ? ` · ${selectedModel.quantization}` : ''}${selectedModel.installed ? ' · loaded' : ' · loads on first use'}</div>`}
+      </div>
+
+      <div className="ask-browser-source" title=${sourceForCard.url || ''}>
+        <div className="ask-browser-source-kicker">Source [1] · current tab</div>
+        <div className="ask-browser-source-title">${sourceForCard.title || sourceForCard.url || 'No active page'}</div>
+        <div className="ask-browser-source-url">${sourceForCard.url || 'Open a page to add context'}</div>
+        ${activeSource && html`<div className="ask-browser-source-meta">${activeSource.available || activeSource.hasText ? `${formatAskBytes(activeSource.textBytes || 0)} captured` : 'Metadata only'}${activeSource.truncated ? ' · truncated' : ''}</div>`}
+      </div>
+
+      <div className="ask-browser-transcript" ref=${transcriptRef}>
+        ${turns.length === 0 && !activeQuestion && html`
+          <div className="ask-browser-empty">
+            <div className="ask-browser-spark">✦</div>
+            <div className="ask-browser-empty-title">Ask about what you’re viewing</div>
+            <div className="ask-browser-empty-copy">Page context stays on this device and is sent only to the selected local model.</div>
+            <div className="ask-browser-quick-grid">
+              ${ASK_BROWSER_QUICK_PROMPTS.map(prompt => html`<button type="button" key=${prompt} onClick=${() => setDraft(prompt)}>${prompt}</button>`)}
+            </div>
+          </div>
+        `}
+        ${turns.map(turn => html`
+          <div className="ask-browser-turn" key=${turn.id}>
+            <div className="ask-browser-message ask-browser-user">${turn.question}</div>
+            <div className=${`ask-browser-message ask-browser-assistant${turn.error ? ' error' : ''}`}>
+              ${turn.error ? turn.error.message : (turn.answer || (turn.finishReason === 'cancelled' ? 'Stopped.' : 'No answer returned.'))}
+              ${turn.finishReason === 'cancelled' && turn.answer ? html`<span className="ask-browser-interrupted"> Response stopped.</span>` : null}
+            </div>
+            ${turn.source && html`<div className="ask-browser-turn-source">[1] ${turn.source.title || turn.source.url || 'Captured page'}</div>`}
+            ${turn.stats && html`<div className="ask-browser-stats">${Number.isFinite(turn.stats.tokensPerSecond) ? `${turn.stats.tokensPerSecond.toFixed(1)} tok/s` : ''}${turn.stats.backendDevice ? ` · ${turn.stats.backendDevice}` : ''}</div>`}
+          </div>
+        `)}
+        ${activeQuestion && html`
+          <div className="ask-browser-turn active">
+            <div className="ask-browser-message ask-browser-user">${activeQuestion}</div>
+            <div className="ask-browser-message ask-browser-assistant">
+              ${visibleActiveAnswer || html`<span className="ask-browser-thinking">${statusLabel || 'Thinking locally…'}</span>`}
+            </div>
+          </div>
+        `}
+      </div>
+
+      <form className="ask-browser-composer" onSubmit=${submit}>
+        <div className="ask-browser-live-status" role="status" aria-live="polite">${statusLabel}</div>
+        ${capabilityError && html`<div className="ask-browser-error">${capabilityError}</div>`}
+        ${capabilities && capabilities.available === false && html`<div className="ask-browser-error">${capabilities.reason || 'Local AI runtime is unavailable'}</div>`}
+        <textarea data-testid="ask-browser-input" value=${draft}
+          aria-label="Question about the current page"
+          onInput=${event => setDraft(event.target.value)}
+          onKeyDown=${event => {
+            if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) submit(event)
+          }}
+          placeholder="Ask about this page…" rows="3" disabled=${busy || !capabilities?.available}></textarea>
+        <div className="ask-browser-compose-row">
+          <span>⌘↵ to send</span>
+          ${busy
+            ? html`<button type="button" className="ask-browser-stop" data-testid="ask-browser-stop" onClick=${stop} disabled=${stopping}>${stopping ? 'Stopping…' : 'Stop'}</button>`
+            : html`<button type="submit" className="ask-browser-send" data-testid="ask-browser-send" disabled=${!draft.trim() || !model || !capabilities?.available}>Ask</button>`}
+        </div>
+      </form>
+    </aside>
+  `
+}
+
+// --- QVAC Local AI widget ----------------------------------------------------
+//
+// The chrome-owned "Local AI" widget for the blank new-tab surface. It shares
+// the Ask Browser RPC contract (capabilities/start/cancel + stream events)
+// but sends no page context — a quick ask is a plain question to a
+// browser-approved local model, streamed and generated entirely on-device.
+// The Ask Browser side panel stays the page-context surface; this widget is
+// the zero-context one, so the two never compete over provenance.
+
+const QVAC_WIDGET_QUICK_PROMPTS = [
+  'What is the peer-to-peer web?',
+  'Summarize what a Hyperdrive is',
+  'Draft a short intro post for peerit'
+]
+
+export function QvacWidget ({ rpc, C }) {
+  const [capabilities, setCapabilities] = useState(null)
+  const [capabilityError, setCapabilityError] = useState('')
+  const [model, setModel] = useState('')
+  const [draft, setDraft] = useState('')
+  const [turns, setTurns] = useState([])
+  const [stream, setStream] = useState(() => createInitialAskStreamState())
+  const [activeQuestion, setActiveQuestion] = useState('')
+  const [stopping, setStopping] = useState(false)
+  const activeStreamRef = useRef('')
+  const activeQuestionRef = useRef('')
+  const committedStreamRef = useRef('')
+  const transcriptRef = useRef(null)
+
+  const summary = useMemo(() => summarizeAiCapabilities(capabilities), [capabilities])
+  const busy = ['starting', 'loading-model', 'streaming'].includes(stream.status)
+  const models = summary.models
+  const selectedModel = models.find(item => item.alias === model) || null
+
+  useEffect(() => {
+    let disposed = false
+    setCapabilityError('')
+    rpc.request(C.CMD_ASK_BROWSER_CAPABILITIES).then((result) => {
+      if (disposed) return
+      setCapabilities(result)
+      const available = Array.isArray(result?.models) ? result.models : []
+      setModel(current => pickQuickAskModel(available, current))
+    }).catch((err) => {
+      if (!disposed) setCapabilityError(err.message || 'Local AI runtime is unavailable')
+    })
+    return () => { disposed = true }
+  }, [rpc, C])
+
+  useEffect(() => {
+    const onStream = (event) => {
+      const payload = event.detail
+      if (!payload || payload.streamId !== activeStreamRef.current) return
+      setStream(previous => reduceAskStreamEvent(previous, payload))
+    }
+    rpc.addEventListener(`event:${C.EVT_ASK_BROWSER_STREAM}`, onStream)
+    return () => rpc.removeEventListener(`event:${C.EVT_ASK_BROWSER_STREAM}`, onStream)
+  }, [rpc, C])
+
+  useEffect(() => {
+    const terminal = ['done', 'cancelled', 'error'].includes(stream.status)
+    if (!terminal || !stream.streamId || committedStreamRef.current === stream.streamId) return
+    committedStreamRef.current = stream.streamId
+    const question = activeQuestionRef.current
+    if (question) {
+      setTurns(previous => [...previous, {
+        id: stream.streamId,
+        question,
+        answer: presentAskText(stream.text),
+        error: stream.error,
+        finishReason: stream.finishReason,
+        stats: stream.stats
+      }].slice(-8))
+    }
+    if (stream.status === 'done') {
+      setCapabilities(previous => previous && {
+        ...previous,
+        models: (previous.models || []).map(item => item.alias === model ? { ...item, installed: true } : item)
+      })
+    }
+    activeStreamRef.current = ''
+    activeQuestionRef.current = ''
+    setActiveQuestion('')
+    setStopping(false)
+  }, [stream])
+
+  useEffect(() => {
+    const el = transcriptRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [turns, stream.text, stream.status])
+
+  useEffect(() => () => {
+    const streamId = activeStreamRef.current
+    activeStreamRef.current = ''
+    if (streamId) rpc.request(C.CMD_ASK_BROWSER_CANCEL, { streamId }).catch(() => {})
+  }, [rpc, C])
+
+  const submit = async (event) => {
+    event?.preventDefault?.()
+    const question = draft.trim()
+    if (!question || busy || !model) return
+
+    const streamId = createAskStreamId()
+    committedStreamRef.current = ''
+    activeStreamRef.current = streamId
+    activeQuestionRef.current = question
+    setActiveQuestion(question)
+    setStopping(false)
+    setDraft('')
+    setStream(createInitialAskStreamState(streamId))
+
+    try {
+      const history = turns.slice(-3).flatMap(turn => {
+        const messages = [{ role: 'user', content: turn.question }]
+        if (turn.answer) messages.push({ role: 'assistant', content: turn.answer })
+        return messages
+      })
+      await rpc.request(C.CMD_ASK_BROWSER_START, buildQuickAskRequest({
+        streamId,
+        model,
+        question,
+        history
+      }), 30000)
+    } catch (err) {
+      if (activeStreamRef.current !== streamId) return
+      setStream(previous => reduceAskStreamEvent(previous, {
+        streamId,
+        event: {
+          type: 'error',
+          code: err?.code || 'quick-ask-failed',
+          message: err?.message || 'Local AI request failed'
+        }
+      }))
+    }
+  }
+
+  const stop = async () => {
+    const streamId = activeStreamRef.current
+    if (!streamId || stopping) return
+    setStopping(true)
+    setStream(previous => reduceAskStreamEvent(previous, {
+      streamId,
+      event: { type: 'done', finishReason: 'cancelled' }
+    }))
+    try { await rpc.request(C.CMD_ASK_BROWSER_CANCEL, { streamId }) } catch {}
+  }
+
+  const clear = () => {
+    const streamId = activeStreamRef.current
+    activeStreamRef.current = ''
+    activeQuestionRef.current = ''
+    if (streamId) rpc.request(C.CMD_ASK_BROWSER_CANCEL, { streamId }).catch(() => {})
+    setTurns([])
+    setStream(createInitialAskStreamState())
+    setActiveQuestion('')
+    setStopping(false)
+  }
+
+  const visibleActiveAnswer = presentAskText(stream.text)
+  const statusLabel = stopping
+    ? 'Stopping…'
+    : stream.status === 'starting'
+    ? 'Starting locally…'
+    : stream.status === 'loading-model'
+      ? `Loading model${Number.isFinite(stream.modelProgress) ? ` · ${Math.round(stream.modelProgress * 100)}%` : '…'}`
+      : stream.status === 'streaming'
+        ? 'Generating locally…'
+        : ''
+
+  if (capabilityError || (capabilities && !summary.available)) {
+    return html`
+      <section className="qvac-widget unavailable" data-testid="qvac-widget" aria-label="Local AI">
+        <div className="qvac-widget-header">
+          <span className="qvac-widget-spark">✦</span>
+          <span className="qvac-widget-title">Local AI</span>
+          <span className="qvac-widget-badge">QVAC · on-device</span>
+        </div>
+        <div className="qvac-widget-status" data-testid="qvac-widget-status">
+          ${capabilityError || describeAiStatus(summary)}
+        </div>
+      </section>
+    `
+  }
+  if (!capabilities) return null
+
+  return html`
+    <section className="qvac-widget" data-testid="qvac-widget" aria-label="Local AI">
+      <div className="qvac-widget-header">
+        <span className="qvac-widget-spark">✦</span>
+        <span className="qvac-widget-title">Local AI</span>
+        <span className="qvac-widget-badge">QVAC · on-device</span>
+        <span className="qvac-widget-header-space"></span>
+        ${(turns.length > 0 || busy) && html`<button type="button" className="qvac-widget-text-button" onClick=${clear}>Clear</button>`}
+      </div>
+      <div className="qvac-widget-status" data-testid="qvac-widget-status">${describeAiStatus(summary)}</div>
+
+      ${(turns.length > 0 || activeQuestion) && html`
+        <div className="qvac-widget-transcript" ref=${transcriptRef} data-testid="qvac-widget-transcript">
+          ${turns.map(turn => html`
+            <div className="qvac-widget-turn" key=${turn.id}>
+              <div className="qvac-widget-question">${turn.question}</div>
+              <div className=${`qvac-widget-answer${turn.error ? ' error' : ''}`}>
+                ${turn.error ? turn.error.message : (turn.answer || (turn.finishReason === 'cancelled' ? 'Stopped.' : 'No answer returned.'))}
+              </div>
+              ${turn.stats && html`<div className="qvac-widget-stats">${Number.isFinite(turn.stats.tokensPerSecond) ? `${turn.stats.tokensPerSecond.toFixed(1)} tok/s` : ''}${turn.stats.backendDevice ? ` · ${turn.stats.backendDevice}` : ''}</div>`}
+            </div>
+          `)}
+          ${activeQuestion && html`
+            <div className="qvac-widget-turn active">
+              <div className="qvac-widget-question">${activeQuestion}</div>
+              <div className="qvac-widget-answer">
+                ${visibleActiveAnswer || html`<span className="qvac-widget-thinking">${statusLabel || 'Thinking locally…'}</span>`}
+              </div>
+            </div>
+          `}
+        </div>
+      `}
+
+      ${turns.length === 0 && !activeQuestion && html`
+        <div className="qvac-widget-quick-grid">
+          ${QVAC_WIDGET_QUICK_PROMPTS.map(prompt => html`<button type="button" key=${prompt} onClick=${() => setDraft(prompt)}>${prompt}</button>`)}
+        </div>
+      `}
+
+      <form className="qvac-widget-composer" onSubmit=${submit}>
+        <input
+          type="text"
+          data-testid="qvac-widget-input"
+          value=${draft}
+          aria-label="Ask the local model"
+          onInput=${event => setDraft(event.target.value)}
+          placeholder="Ask anything — answered on this device…"
+          disabled=${busy}
+        />
+        ${busy
+          ? html`<button type="button" className="qvac-widget-stop" data-testid="qvac-widget-stop" onClick=${stop} disabled=${stopping}>${stopping ? '…' : 'Stop'}</button>`
+          : html`<button type="submit" className="qvac-widget-send" data-testid="qvac-widget-send" disabled=${!draft.trim() || !model}>Ask</button>`}
+      </form>
+
+      <div className="qvac-widget-footer">
+        <select
+          className="qvac-widget-model"
+          data-testid="qvac-widget-model"
+          value=${model}
+          disabled=${busy || models.length === 0}
+          aria-label="Local model"
+          onChange=${event => setModel(event.target.value)}>
+          ${models.map(item => html`<option key=${item.alias} value=${item.alias}>${item.label || formatModelLabel(item.alias)}</option>`)}
+        </select>
+        ${selectedModel && html`<span className="qvac-widget-model-meta">${selectedModel.installed ? 'ready' : (selectedModel.expectedSize ? `${formatAskBytes(selectedModel.expectedSize)} · loads on first use` : 'loads on first use')}</span>`}
+        <span className="qvac-widget-live" role="status" aria-live="polite">${statusLabel}</span>
+      </div>
+    </section>
+  `
+}
+
+function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActiveId, closedTabs, setClosedTabs, sessionReady, onOpenSettings }) {
   // tabs[] + activeId are now lifted to App-level state and passed in
   // as props. This survives main-tab switches (Browse→Apps→Browse no
   // longer destroys your open tabs) and lets App persist them to
   // user-data settings for cross-launch session restore.
   const inputRef = useRef(null)
   const iframeRefs = useRef({})
+  const frameEpochRef = useRef({})
+  const activeIdRef = useRef(activeId)
   const autoLoadedRef = useRef(new Set())
   const [editingUrl, setEditingUrl] = useState('')
   // About-this-site modal — true when user clicked the (i) button.
   const [aboutOpen, setAboutOpen] = useState(false)
+  const [askOpen, setAskOpen] = useState(false)
   // URL bar autocomplete state (suggestions, dropdown visibility,
   // keyboard-selection index). Suggestions come from a single fetch
   // of bookmarks + history at focus time, then filtered locally as
@@ -475,6 +1165,79 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
   const autocompleteFetchedAt = useRef(0)
 
   const active = tabs.find((t) => t.id === activeId) || tabs[0]
+  activeIdRef.current = activeId
+
+  const captureActivePageContext = async () => {
+    const tab = tabs.find(item => item.id === activeIdRef.current) || active
+    if (!tab) return normalizePageContextResponse(null, {})
+    const frame = iframeRefs.current[tab.id]
+    const frameWindow = frame?.contentWindow
+    const epoch = frameEpochRef.current[tab.id] || 0
+
+    const domFallback = () => {
+      let text = ''
+      try { text = frame?.contentDocument?.body?.innerText || '' } catch {}
+      return normalizePageContextResponse({
+        tabId: tab.id,
+        text,
+        source: text ? 'renderer-dom' : 'metadata'
+      }, tab, { maxTextBytes: 5 * 1024 })
+    }
+
+    if (!frameWindow || !tab.contextToken || typeof MessageChannel === 'undefined') return domFallback()
+
+    let targetOrigin
+    try { targetOrigin = new URL(tab.src).origin } catch { return domFallback() }
+    const requestId = createAskStreamId()
+    const channel = new MessageChannel()
+
+    return await new Promise((resolve, reject) => {
+      let settled = false
+      const frameIsCurrent = () => activeIdRef.current === tab.id &&
+        iframeRefs.current[tab.id]?.contentWindow === frameWindow &&
+        (frameEpochRef.current[tab.id] || 0) === epoch
+      const finish = (err, response) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        try { channel.port1.close() } catch {}
+        if (err) reject(err)
+        else resolve(response)
+      }
+      const finishWithFallback = () => {
+        if (!frameIsCurrent()) {
+          finish(new Error('The active tab changed while Ask Browser was reading it'))
+          return
+        }
+        finish(null, domFallback())
+      }
+      const timer = setTimeout(finishWithFallback, 1500)
+      channel.port1.onmessage = (event) => {
+        const data = event.data
+        if (!data || data.type !== 'pearbrowser:context-response' || data.v !== 1 || data.requestId !== requestId) return
+        if (!frameIsCurrent()) {
+          finish(new Error('The active tab changed while Ask Browser was reading it'))
+          return
+        }
+        finish(null, normalizePageContextResponse({
+          ...data,
+          tabId: tab.id,
+          source: 'authenticated-page-context'
+        }, tab, { maxTextBytes: 5 * 1024 }))
+      }
+      channel.port1.start?.()
+      try {
+        frameWindow.postMessage({
+          type: 'pearbrowser:context-request',
+          v: 1,
+          requestId,
+          contextToken: tab.contextToken
+        }, targetOrigin, [channel.port2])
+      } catch {
+        finishWithFallback()
+      }
+    })
+  }
 
   // Sync active id once tabs are stable.
   useEffect(() => {
@@ -490,6 +1253,28 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
     if (t) setEditingUrl(t.displayUrl || '')
   }
 
+  const releaseOriginIfUnused = (driveKeyHex, remainingTabs) => {
+    if (!C.CMD_RELEASE_ORIGIN) return
+    if (!driveKeyHex || tabListUsesDriveKey(remainingTabs, driveKeyHex)) return
+    rpc.request(C.CMD_RELEASE_ORIGIN, { keyHex: driveKeyHex }).catch(() => {})
+  }
+
+  // Privacy-first: visit history and search indexing are opt-in (default OFF).
+  const [historyEnabled, setHistoryEnabled] = useState(false)
+  const [searchIndexEnabled, setSearchIndexEnabled] = useState(false)
+  useEffect(() => {
+    let disposed = false
+    rpc.request(C.CMD_USERDATA_GET_SETTINGS)
+      .then((res) => {
+        if (disposed) return
+        const s = unwrapSettings(res) || {}
+        setHistoryEnabled(s.historyEnabled === true)
+        setSearchIndexEnabled(s.searchIndexEnabled === true)
+      })
+      .catch(() => {})
+    return () => { disposed = true }
+  }, [rpc, C])
+
   // When the active tab changes, sync the URL input.
   useEffect(() => {
     if (active) setEditingUrl(active.displayUrl || '')
@@ -498,7 +1283,8 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
   const go = async (url, tabIdOverride, opts = {}) => {
     const id = tabIdOverride || activeId
     const recordHistory = opts.recordHistory !== false
-    const rememberVisit = opts.rememberVisit ?? recordHistory
+    // Persistent visit log is opt-in; session back/forward still uses in-memory tab.history.
+    const rememberVisit = historyEnabled && (opts.rememberVisit ?? recordHistory)
 
     // Naming Phase N1 — if the input is a bare name (e.g. "keet"), resolve it
     // against the local petname store (Tier 0) + curated floor (Tier 3) BEFORE
@@ -542,8 +1328,12 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
     if (!target) target = normalizeUrl(url)
     if (!target) return
 
-    updateTab(id, { status: `resolving ${prov ? prov.label : target}…`, displayUrl: target })
+    const nextTitle = prov ? prov.label : tabTitleForUrl(target)
+    updateTab(id, { status: `resolving ${nextTitle}…`, displayUrl: target, title: nextTitle })
     try {
+      const previousTab = tabs.find((t) => t.id === id)
+      const previousDriveKey = tabDriveKey(previousTab)
+      const nextDriveKey = driveKeyFromHyperRef(target)
       const res = await rpc.request(C.CMD_NAVIGATE, { url: target })
       setTabs((prev) => prev.map((t) => {
         if (t.id !== id) return t
@@ -556,30 +1346,39 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
         } else if (Number.isInteger(opts.historyIndex)) {
           histIdx = clampHistoryIndex(history, opts.historyIndex)
         }
+        const kind = res.kind || (isClearnetUrl(res.url || target) ? 'clearnet' : 'hyper')
+        const display = res.url || target
         return {
           ...t,
           src: res.localUrl,
           status: '',
           history,
           histIdx,
-          url: target,
-          displayUrl: target,
-          title: prov ? prov.label : target,
-          nameProv: prov   // { provenance, label, name } or null — drives the URL-bar provenance chip
+          url: display,
+          displayUrl: display,
+          title: nextTitle,
+          nameProv: prov, // { provenance, label, name } or null — drives the URL-bar provenance chip
+          contextToken: res.contextToken || null,
+          kind,
+          clearnetMode: res.mode || null,
+          shieldActive: res.shieldActive !== false && kind !== 'clearnet' ? true : !!res.shieldActive
         }
       }))
-      if (rememberVisit) rpc.request(C.CMD_USERDATA_ADD_HISTORY, { url: target, title: prov ? prov.label : target }).catch(() => {})
+      if (previousDriveKey && previousDriveKey !== nextDriveKey) {
+        releaseOriginIfUnused(previousDriveKey, tabs.filter((t) => t.id !== id))
+      }
+      if (rememberVisit) rpc.request(C.CMD_USERDATA_ADD_HISTORY, { url: target, title: nextTitle }).catch(() => {})
     } catch (err) {
       updateTab(id, { status: `error: ${err.message}` })
     }
   }
 
-  // Lighthouse Phase 0 — feed the local self-search index as you browse. On
-  // each hyper:// page load, extract title + visible text (same-origin via the
-  // proxy; degrades to title-only if blocked) and push it to CMD_SEARCH_INDEX.
-  // Fully best-effort — never throws into the render path.
+  // Lighthouse Phase 0 — optional local self-search index. Privacy-first:
+  // only runs when searchIndexEnabled is explicitly true (default OFF).
+  // Best-effort — never throws into the render path.
   const indexPage = (tab, el) => {
     try {
+      if (!searchIndexEnabled) return
       const u = (tab && (tab.url || tab.displayUrl)) || ''
       if (!/^hyper:\/\//i.test(u)) return // only index P2P content
       const rest = u.replace(/^hyper:\/\//i, '')
@@ -591,6 +1390,8 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
         const doc = el && el.contentDocument
         if (doc) { title = doc.title || ''; text = ((doc.body && doc.body.innerText) || '').slice(0, 200000) }
       } catch { /* cross-origin / not ready — index by url + title only */ }
+      const nextTitle = tabTitleFromPage(title, u)
+      if (nextTitle && nextTitle !== tab.title) updateTab(tab.id, { title: nextTitle })
       rpc.request(C.CMD_SEARCH_INDEX, { driveKey, path, title: title || u, text }).catch(() => {})
     } catch { /* never break browsing */ }
   }
@@ -627,7 +1428,7 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
   }
 
   const newTab = (url = '') => {
-    const t = makeTab(url)
+    const t = makeBrowserTab(url)
     setTabs((prev) => [...prev, t])
     setActiveId(t.id)
     setEditingUrl(url || '')
@@ -640,10 +1441,12 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
     const idx = tabs.findIndex((t) => t.id === id)
     if (idx === -1) return
     const remaining = tabs.filter((t) => t.id !== id)
+    releaseOriginIfUnused(tabDriveKey(closing), remaining)
     // Drop the iframe ref so it can GC.
     delete iframeRefs.current[id]
+    delete frameEpochRef.current[id]
     if (remaining.length === 0) {
-      const fresh = makeTab('')
+      const fresh = makeBrowserTab('')
       setTabs([fresh])
       setActiveId(fresh.id)
       setEditingUrl('')
@@ -738,7 +1541,7 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
       if (!sourceTab) return
 
       if (data.openInNewTab) {
-        const t = makeTab(url)
+        const t = makeBrowserTab(url)
         setTabs((prev) => [...prev, t])
         setActiveId(t.id)
         setEditingUrl(url)
@@ -755,22 +1558,25 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabs])
 
-  // Auto-load restored tabs on first activation without adding duplicate
-  // entries to the per-tab back/forward list.
+  // Preload every restored tab once the backend session is ready, without
+  // adding duplicate entries to the per-tab back/forward list. That makes
+  // PearBrowser reopen onto live pages instead of URL-only placeholders.
   useEffect(() => {
     if (!sessionReady) return
-    if (!active || active.src || !active.url) return
-    const key = `${active.id}:${active.url}`
-    if (autoLoadedRef.current.has(key)) return
-    autoLoadedRef.current.add(key)
-    const hasHistory = Array.isArray(active.history) && active.history.length > 0
-    go(active.url, active.id, {
-      recordHistory: !hasHistory,
-      rememberVisit: !hasHistory,
-      historyIndex: active.histIdx
-    })
+    for (const tab of tabs) {
+      if (!tab || tab.src || !tab.url) continue
+      const key = `${tab.id}:${tab.url}`
+      if (autoLoadedRef.current.has(key)) continue
+      autoLoadedRef.current.add(key)
+      const hasHistory = Array.isArray(tab.history) && tab.history.length > 0
+      go(tab.url, tab.id, {
+        recordHistory: !hasHistory,
+        rememberVisit: !hasHistory,
+        historyIndex: tab.histIdx
+      })
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionReady, active?.id, active?.url, active?.src])
+  }, [sessionReady, active?.id, tabs])
 
   // External navUrl prop (Apps tab → "open in Browse"). Open in a new
   // tab if the active tab already has an address; otherwise navigate the
@@ -789,7 +1595,7 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
       // Open a fresh tab AND navigate it. newTab() alone only sets .url, not
       // .src, so a second run-in-tab rendered the empty-state until a manual
       // reload — create the tab here and drive go() so it's one click every time.
-      const t = makeTab(navUrl)
+      const t = makeBrowserTab(navUrl)
       setTabs((prev) => [...prev, t])
       setActiveId(t.id)
       setEditingUrl(navUrl)
@@ -832,7 +1638,8 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
   }, [editingUrl, autocompleteSource])
 
   // Refresh the suggestion source from user-data Hyperbee, debounced
-  // by 30s — bookmarks/history rarely change in mid-typing.
+  // by 30s — bookmarks/history rarely change mid-typing. History suggestions
+  // stay empty when historyEnabled is off (backend returns []).
   const refreshAutocompleteSource = async () => {
     if (Date.now() - autocompleteFetchedAt.current < 30_000 && autocompleteSource.length > 0) return
     try {
@@ -892,15 +1699,14 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
             key=${t.id}
             className=${'tabchip' + (t.id === activeId ? ' active' : '') + (t.pinned ? ' pinned' : '')}
             onClick=${() => setActive(t.id)}
-            title=${t.displayUrl || 'New tab'}
+            title=${tabTooltip(t)}
           >
-            <span className="tabchip-favicon">${t.src ? '🌐' : '🆕'}</span>
             <span
               className=${'tabchip-pin' + (t.pinned ? ' on' : '')}
               title=${t.pinned ? 'Unpin tab' : 'Pin tab'}
               onClick=${(e) => { e.stopPropagation(); togglePinned(t.id) }}
             >${t.pinned ? '●' : '○'}</span>
-            <span className="tabchip-title">${t.title || (t.displayUrl ? t.displayUrl.replace(/^hyper:\/\//, '').slice(0, 28) : 'New tab')}</span>
+            <span className="tabchip-title">${visibleTabTitle(t)}</span>
             <span className="tabchip-close" onClick=${(e) => { e.stopPropagation(); closeTab(t.id) }}>×</span>
           </button>
         `)}
@@ -919,11 +1725,15 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
           onFocus=${() => { refreshAutocompleteSource(); setAutocompleteOpen(true); setAutocompleteIdx(-1) }}
           onBlur=${() => { setTimeout(() => setAutocompleteOpen(false), 120) }}
           onKeyDown=${onUrlKeyDown}
-          placeholder="hyper://<key>/path"
+          placeholder="hyper://… or https://… or example.com"
           spellCheck="false"
         />
         <button className="nav" onClick=${bookmark} disabled=${!editingUrl?.trim?.()} title="Bookmark this URL">☆</button>
         <button className="nav" onClick=${() => setAboutOpen(true)} disabled=${!active?.url} title="About this site">ⓘ</button>
+        <${ShieldStatusChip} rpc=${rpc} C=${C} activeUrl=${active?.url || editingUrl || ''} onOpenSettings=${onOpenSettings} />
+        <button className=${`nav ask-browser-toggle${askOpen ? ' active' : ''}`} data-testid="ask-browser-toggle"
+          aria-expanded=${askOpen} aria-controls="ask-browser-panel"
+          onClick=${() => setAskOpen(value => !value)} disabled=${!active?.url} title="Ask Browser about this page">✦ Ask</button>
         <button className="nav" onClick=${openDevtools} disabled=${!active?.src} title="Devtools (⌘⇧I)">⚙</button>
         <button className="nav go" onClick=${() => go(editingUrl)}>Go</button>
         ${autocompleteOpen && suggestions.length > 0 && html`
@@ -962,19 +1772,48 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
           <span className="name-prov-tier">${active.nameProv.provenance === 'petname' ? 'your saved name' : active.nameProv.provenance === 'registry' ? 'name registry' : active.nameProv.provenance === 'contact' ? `from ${active.nameProv.source || 'a contact'}` : 'curated'}</span>
         </div>
       `}
-      <div className="browse-stage">
-        ${tabs.map((t) =>
-          t.src
-            ? html`<iframe
-                key=${t.id}
-                ref=${(el) => { if (el) iframeRefs.current[t.id] = el }}
-                className=${'webview' + (t.id === activeId ? '' : ' hidden')}
-                src=${t.src}
-                onLoad=${(e) => indexPage(t, e.target)}
-                sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-pointer-lock"
-              ></iframe>`
-            : t.id === activeId
-              ? (t.url
+      <div className="browse-workspace">
+        <div className="browse-stage">
+          ${tabs.map((t) =>
+            t.src
+              ? (t.kind === 'clearnet' && t.clearnetMode === 'direct'
+                // Direct clearnet: prefer <webview> when Electron exposes it
+                // (partition isolates cookie jar); fall back to sandboxed iframe.
+                ? (typeof window !== 'undefined' && window.customElements?.get?.('webview')
+                  ? html`<webview
+                      key=${t.id}
+                      ref=${(el) => { if (el) iframeRefs.current[t.id] = el }}
+                      className=${'webview' + (t.id === activeId ? '' : ' hidden')}
+                      src=${t.src}
+                      partition=${'persist:clearnet-' + (() => { try { return new URL(t.url || t.src).hostname } catch { return 'site' } })()}
+                      allowpopups=${true}
+                      data-testid="clearnet-webview"
+                    ></webview>`
+                  : html`<iframe
+                      key=${t.id}
+                      ref=${(el) => { if (el) iframeRefs.current[t.id] = el }}
+                      className=${'webview' + (t.id === activeId ? '' : ' hidden')}
+                      src=${t.src}
+                      data-testid="clearnet-iframe-direct"
+                      onLoad=${(e) => {
+                        frameEpochRef.current[t.id] = (frameEpochRef.current[t.id] || 0) + 1
+                      }}
+                      sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-pointer-lock"
+                    ></iframe>`)
+                : html`<iframe
+                  key=${t.id}
+                  ref=${(el) => { if (el) iframeRefs.current[t.id] = el }}
+                  className=${'webview' + (t.id === activeId ? '' : ' hidden')}
+                  src=${t.src}
+                  data-testid=${t.kind === 'clearnet' ? 'clearnet-iframe-proxy' : 'hyper-iframe'}
+                  onLoad=${(e) => {
+                    frameEpochRef.current[t.id] = (frameEpochRef.current[t.id] || 0) + 1
+                    indexPage(t, e.target)
+                  }}
+                  sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-pointer-lock"
+                ></iframe>`)
+              : t.id === activeId
+                ? (t.url
                   // A tab with an address but no loaded content yet is mid-fetch —
                   // show a loading state, NOT the welcome/clickthrough (the default
                   // landing tab opens straight into the PearBrowser site).
@@ -988,7 +1827,9 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
                             </div>`
                           : html`<div className="browse-welcome-copy">
                               <h2>Loading…</h2>
-                              <p>Fetching <code>${t.url}</code> directly from its peers — first load of a cold drive can take a moment.</p>
+                              <p>${t.kind === 'clearnet'
+                                ? html`Fetching <code>${t.url}</code> over the clearnet proxy — shields and the privacy ladder apply.`
+                                : html`Fetching <code>${t.url}</code> directly from its peers — first load of a cold drive can take a moment.`}</p>
                             </div>`}
                         <div className="browse-welcome-actions">
                           <button className="btn primary" onClick=${() => go(t.url, t.id)}>${(t.status && /^error/i.test(t.status)) ? 'Retry' : 'Reload'}</button>
@@ -997,7 +1838,7 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
                       </div>
                     </div>`
                   // A truly blank tab (⌘T) gets the welcome + quick actions.
-                  : html`<div key=${t.id} className="browse-welcome">
+                    : html`<div key=${t.id} className="browse-welcome">
                       <div className="browse-welcome-inner">
                         <div className="browse-welcome-logo">🍐</div>
                         <h2>The peer-to-peer web starts here</h2>
@@ -1007,10 +1848,19 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
                           <button className="btn subtle" onClick=${() => { inputRef.current?.focus(); inputRef.current?.select?.() }}>Focus the URL bar</button>
                         </div>
                         <div className="browse-welcome-tip">Tip: <code>⌘T</code> opens a new tab, <code>⌘⇧T</code> reopens one, <code>⌘W</code> closes one, <code>⌘L</code> jumps to the URL bar, <code>⌘1</code>–<code>⌘9</code> switches between tabs.</div>
+                        <${QvacWidget} rpc=${rpc} C=${C} />
                       </div>
-                    </div>`)
-              : null
-        )}
+                      </div>`)
+                : null
+          )}
+        </div>
+        ${askOpen && html`<${AskBrowserPanel}
+          rpc=${rpc}
+          C=${C}
+          activeTab=${active}
+          captureContext=${captureActivePageContext}
+          onClose=${() => setAskOpen(false)}
+        />`}
       </div>
       ${aboutOpen && html`<${AboutSite}
         rpc=${rpc}
@@ -3066,8 +3916,10 @@ function SearchProvenanceBadges ({ meta }) {
 function Library ({ rpc, C, onBrowse }) {
   const [bookmarks, setBookmarks] = useState([])
   const [history, setHistory] = useState([])
+  const [historyEnabled, setHistoryEnabled] = useState(false)
+  const [searchIndexEnabled, setSearchIndexEnabled] = useState(false)
   const [err, setErr] = useState('')
-  // Lighthouse Phase 0 — local self-search over everything you've browsed.
+  // Lighthouse Phase 0 — local self-search (opt-in; default OFF).
   const [query, setQuery] = useState('')
   const [results, setResults] = useState(null) // null = not searched yet
   const [indexed, setIndexed] = useState(0)
@@ -3126,6 +3978,12 @@ function Library ({ rpc, C, onBrowse }) {
       setBookmarks(Array.isArray(b) ? b : (b?.bookmarks ?? []))
       const h = await rpc.request(C.CMD_USERDATA_LIST_HISTORY, { limit: 200 })
       setHistory(Array.isArray(h) ? h : (h?.history ?? []))
+      if (typeof h?.historyEnabled === 'boolean') setHistoryEnabled(h.historyEnabled)
+      const s = unwrapSettings(await rpc.request(C.CMD_USERDATA_GET_SETTINGS).catch(() => null))
+      if (s) {
+        setHistoryEnabled(s.historyEnabled === true)
+        setSearchIndexEnabled(s.searchIndexEnabled === true)
+      }
     } catch (e) {
       setErr(e.message)
     }
@@ -3155,11 +4013,13 @@ function Library ({ rpc, C, onBrowse }) {
   return html`
     <div className="library">
       <h1>Library</h1>
-      <p className="subtitle">Your saved bookmarks and recent browsing history, stored locally in your Hyperbee.</p>
+      <p className="subtitle">Bookmarks you choose to save, and optional history — all local on this device. No browse data is uploaded.</p>
       ${err && html`<div className="apps-error">${err}</div>`}
 
       <h2>Search your P2P content</h2>
-      <p className="subtitle">Full-text search over everything you've browsed, fully local — no query ever leaves your device.${indexed ? ` ${indexed} page(s) indexed.` : ''}</p>
+      <p className="subtitle">${searchIndexEnabled
+        ? html`Full-text search over pages you've opened, fully local — no query ever leaves your device.${indexed ? ` ${indexed} page(s) indexed.` : ''}`
+        : html`Local page indexing is OFF (privacy default). Enable it in Settings → Clearnet & privacy if you want Library search to learn from pages you open.`}</p>
       <div className="urlbar" style=${{ marginBottom: '12px' }}>
         <input
           type="text"
@@ -3208,22 +4068,24 @@ function Library ({ rpc, C, onBrowse }) {
           </div>`}
 
       <div className="library-history-head">
-        <h2>History (${history.length})</h2>
-        ${history.length > 0 && html`<button className="btn small subtle" onClick=${clearHistory}>Clear history</button>`}
+        <h2>History ${historyEnabled ? `(${history.length})` : '(off)'}</h2>
+        ${historyEnabled && history.length > 0 && html`<button className="btn small subtle" onClick=${clearHistory}>Clear history</button>`}
       </div>
-      ${history.length === 0
-        ? html`<p className="placeholder">No browsing history yet.</p>`
-        : html`<div className="library-list">
-            ${history.slice(0, 100).map((h, i) => html`
-              <div className="library-row" key=${(h.url || '') + ':' + i}>
-                <div className="library-row-main">
-                  <div className="library-title">${h.title || h.url}</div>
-                  <div className="library-url">${h.url} ${h.visitedAt ? '· ' + new Date(h.visitedAt).toLocaleString() : ''}</div>
+      ${!historyEnabled
+        ? html`<p className="placeholder" data-testid="history-disabled-note">Browsing history is OFF by default. Nothing is recorded. Turn it on in Settings → Clearnet &amp; privacy if you want a local visit log on this device only.</p>`
+        : history.length === 0
+          ? html`<p className="placeholder">No browsing history yet.</p>`
+          : html`<div className="library-list">
+              ${history.slice(0, 100).map((h, i) => html`
+                <div className="library-row" key=${(h.url || '') + ':' + i}>
+                  <div className="library-row-main">
+                    <div className="library-title">${h.title || h.url}</div>
+                    <div className="library-url">${h.url} ${h.visitedAt ? '· ' + new Date(h.visitedAt).toLocaleString() : ''}</div>
+                  </div>
+                  <button className="btn small" onClick=${() => onBrowse(h.url)}>Open</button>
                 </div>
-                <button className="btn small" onClick=${() => onBrowse(h.url)}>Open</button>
-              </div>
-            `)}
-          </div>`}
+              `)}
+            </div>`}
     </div>
   `
 }
@@ -3630,10 +4492,9 @@ function RelaysSection ({ rpc, C }) {
   }
   useEffect(() => { load() }, [])
 
-  // Probe each configured relay's /.well-known/hiverelay.json so we
-  // can show what version it's running + which transports it supports
-  // (`hyperswarm`, `dht-relay-ws`, etc). 6s timeout per relay; fail
-  // gracefully — a missing capability doc isn't a real error.
+  // Probe each configured relay's /.well-known/hiverelay.json via the
+  // backend relay client. Browser fetch would turn missing CORS headers
+  // into a generic "Failed to fetch" even when the relay is healthy.
   useEffect(() => {
     if (!config.relays.length) return
     let cancelled = false
@@ -3645,20 +4506,13 @@ function RelaysSection ({ rpc, C }) {
 
     config.relays.forEach(async (url) => {
       try {
-        const ctrl = new AbortController()
-        const timer = setTimeout(() => ctrl.abort(), 6000)
-        const res = await fetch(url.replace(/\/+$/, '') + '/.well-known/hiverelay.json', { signal: ctrl.signal })
-        clearTimeout(timer)
         if (cancelled) return
-        if (!res.ok) {
-          setCapabilities((p) => ({ ...p, [url]: { ok: false, error: 'HTTP ' + res.status } }))
-          return
-        }
-        const doc = await res.json()
-        setCapabilities((p) => ({ ...p, [url]: { ok: true, doc } }))
+        const cap = await rpc.request(C.CMD_CHECK_RELAY_CAPABILITY, { url }, 10000)
+        if (cancelled) return
+        setCapabilities((p) => ({ ...p, [url]: cap }))
       } catch (e) {
         if (cancelled) return
-        setCapabilities((p) => ({ ...p, [url]: { ok: false, error: e.name === 'AbortError' ? 'timeout' : (e.message || 'unreachable') } }))
+        setCapabilities((p) => ({ ...p, [url]: { ok: false, error: e.message || 'unreachable' } }))
       }
     })
     return () => { cancelled = true }
@@ -4168,6 +5022,334 @@ function DeviceSync ({ rpc, C }) {
   `
 }
 
+// Content Shield — browser-owned request filter + cosmetic hider
+// (docs/BROWSER_PARITY_PLAN.md Phases 1–3). Toggle, per-drive allowlist/
+// strict, named lists, and plugin kill-switches persist in user-data;
+// CMD_SHIELD_* / CMD_PLUGIN_* feed this panel and the urlbar chip.
+function ContentShieldSection ({ rpc, C, activeDriveKey = '' }) {
+  const [enabled, setEnabled] = useState(true)
+  const [status, setStatus] = useState(null)
+  const [plugins, setPlugins] = useState([])
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const driveKey = typeof activeDriveKey === 'string' && /^[0-9a-f]{64}$/i.test(activeDriveKey)
+    ? activeDriveKey.toLowerCase()
+    : ''
+
+  useEffect(() => {
+    let disposed = false
+    rpc.request(C.CMD_USERDATA_GET_SETTINGS)
+      .then((res) => {
+        if (disposed) return
+        const s = unwrapSettings(res)
+        setEnabled(s?.contentShield !== false)
+      })
+      .catch(() => {})
+    const refresh = () => {
+      const statusPayload = driveKey ? { driveKey } : {}
+      rpc.request(C.CMD_SHIELD_STATUS, statusPayload)
+        .then((result) => { if (!disposed) setStatus(result) })
+        .catch(() => {})
+      if (C.CMD_PLUGIN_LIST != null) {
+        rpc.request(C.CMD_PLUGIN_LIST)
+          .then((result) => { if (!disposed) setPlugins(result?.plugins || []) })
+          .catch(() => {})
+      }
+    }
+    refresh()
+    const timer = setInterval(refresh, 5000)
+    return () => { disposed = true; clearInterval(timer) }
+  }, [rpc, C, driveKey])
+
+  const toggle = async () => {
+    const next = !enabled
+    setBusy(true); setErr('')
+    try {
+      await rpc.request(C.CMD_USERDATA_SET_SETTINGS, { updates: { contentShield: next } })
+      setEnabled(next)
+      const result = await rpc.request(C.CMD_SHIELD_STATUS, driveKey ? { driveKey } : {}).catch(() => null)
+      if (result) setStatus(result)
+    } catch (e) { setErr(`save: ${e.message}`) }
+    finally { setBusy(false) }
+  }
+
+  const toggleAllow = async () => {
+    if (!driveKey || C.CMD_SHIELD_SET_ALLOW == null) return
+    setBusy(true); setErr('')
+    try {
+      const next = !(status && status.driveAllowlisted)
+      await rpc.request(C.CMD_SHIELD_SET_ALLOW, { driveKey, allow: next })
+      const result = await rpc.request(C.CMD_SHIELD_STATUS, { driveKey }).catch(() => null)
+      if (result) setStatus(result)
+    } catch (e) { setErr(`allowlist: ${e.message}`) }
+    finally { setBusy(false) }
+  }
+
+  const toggleStrict = async () => {
+    if (!driveKey || C.CMD_SHIELD_SET_STRICT == null) return
+    setBusy(true); setErr('')
+    try {
+      const next = !(status && status.driveStrict)
+      await rpc.request(C.CMD_SHIELD_SET_STRICT, { driveKey, strict: next })
+      const result = await rpc.request(C.CMD_SHIELD_STATUS, { driveKey }).catch(() => null)
+      if (result) setStatus(result)
+    } catch (e) { setErr(`strict: ${e.message}`) }
+    finally { setBusy(false) }
+  }
+
+  const togglePlugin = async (id, currentlyEnabled) => {
+    if (C.CMD_PLUGIN_SET_ENABLED == null) return
+    setBusy(true); setErr('')
+    try {
+      await rpc.request(C.CMD_PLUGIN_SET_ENABLED, { id, enabled: !currentlyEnabled })
+      const result = await rpc.request(C.CMD_PLUGIN_LIST).catch(() => null)
+      if (result) setPlugins(result.plugins || [])
+    } catch (e) { setErr(`plugin: ${e.message}`) }
+    finally { setBusy(false) }
+  }
+
+  const listNames = (status && (status.listDetails || status.lists)) || []
+  const listLabel = Array.isArray(listNames)
+    ? listNames.map((l) => (typeof l === 'string' ? l : l.name)).join(', ')
+    : ''
+
+  return html`
+    <div className="settings-card" data-testid="content-shield-card">
+      ${err && html`<div className="apps-error">${err}</div>`}
+      <div className="settings-row">
+        <div>
+          <div className="settings-label">Block ads and trackers</div>
+          <div className="settings-subtle">Requests matching the shield's filter rules are refused inside the browser before any peer or relay is contacted, and matching page elements are hidden. Counters only — the shield never keeps a log of what you visit. Named lists hot-swap and reload offline after first acquisition.</div>
+        </div>
+        <label className="login-scope${enabled ? ' on' : ''}">
+          <input type="checkbox" checked=${enabled} disabled=${busy}
+                 onChange=${toggle} data-testid="content-shield-toggle" />
+        </label>
+      </div>
+      ${status && html`
+        <div className="settings-row">
+          <div>
+            <div className="settings-label" data-testid="content-shield-counters">${status.blocked} blocked · ${status.allowed} allowed this session</div>
+            <div className="settings-subtle" data-testid="content-shield-lists">${status.blockRules} block · ${status.cosmeticRules} cosmetic · ${status.scriptletRules || 0} scriptlet · lists: ${listLabel || 'none'}</div>
+          </div>
+        </div>
+      `}
+      ${driveKey && html`
+        <div className="settings-row" data-testid="content-shield-drive-controls">
+          <div>
+            <div className="settings-label">This drive (${driveKey.slice(0, 12)}…)</div>
+            <div className="settings-subtle">Allowlist exempts only this drive from blocking. Strict mode injects a CSP that confines third-party subresources to the page origin.</div>
+          </div>
+          <div className="settings-inline-actions">
+            <label className="login-scope${status?.driveAllowlisted ? ' on' : ''}" title="Allowlist this drive">
+              <span className="settings-subtle">Allow</span>
+              <input type="checkbox" checked=${!!status?.driveAllowlisted} disabled=${busy}
+                     onChange=${toggleAllow} data-testid="content-shield-allow-toggle" />
+            </label>
+            <label className="login-scope${status?.driveStrict ? ' on' : ''}" title="Strict third-party mode">
+              <span className="settings-subtle">Strict</span>
+              <input type="checkbox" checked=${!!status?.driveStrict} disabled=${busy}
+                     onChange=${toggleStrict} data-testid="content-shield-strict-toggle" />
+            </label>
+          </div>
+        </div>
+      `}
+      ${status && Array.isArray(status.topRules) && status.topRules.length > 0 && html`
+        <div className="settings-subtle">Top rules: ${status.topRules.slice(0, 3).map(item => `${item.rule} (${item.hits})`).join(' · ')}</div>
+      `}
+      ${plugins.length > 0 && html`
+        <div className="settings-row" data-testid="content-shield-plugins">
+          <div style=${{ width: '100%' }}>
+            <div className="settings-label">Pear Plugins</div>
+            <div className="settings-subtle">Kill-switch disables a plugin's filter/style/script contributions without uninstalling it.</div>
+            ${plugins.map((p) => html`
+              <div className="settings-row" key=${p.id} data-testid=${'plugin-row-' + p.id}>
+                <div>
+                  <div className="settings-label">${p.name || p.id}</div>
+                  <div className="settings-subtle">${(p.capabilities || []).join(', ') || 'no capabilities'}</div>
+                </div>
+                <label className="login-scope${p.enabled ? ' on' : ''}">
+                  <input type="checkbox" checked=${!!p.enabled} disabled=${busy}
+                         onChange=${() => togglePlugin(p.id, p.enabled)} data-testid=${'plugin-enabled-' + p.id} />
+                </label>
+              </div>
+            `)}
+          </div>
+        </div>
+      `}
+    </div>
+  `
+}
+
+// Clearnet mode + privacy ladder (Phases 4–5). Settings persist under
+// user-data keys (httpsOnly, stripTrackingParams, …, clearnetMode) and are
+// applied live by the backend session bridge / clearnet proxy.
+function PrivacyClearnetSection ({ rpc, C }) {
+  const [privacy, setPrivacy] = useState({
+    httpsOnly: true,
+    stripTrackingParams: true,
+    blockThirdPartyCookies: true,
+    fingerprintFarbling: true,
+    clearnetMode: 'proxy',
+    historyEnabled: false,
+    searchIndexEnabled: false,
+    telemetryEnabled: false,
+    contentShield: true
+  })
+  const [session, setSession] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  useEffect(() => {
+    let disposed = false
+    rpc.request(C.CMD_USERDATA_GET_SETTINGS)
+      .then((res) => {
+        if (disposed) return
+        const s = unwrapSettings(res) || {}
+        setPrivacy((prev) => ({
+          ...prev,
+          httpsOnly: s.httpsOnly !== false,
+          stripTrackingParams: s.stripTrackingParams !== false,
+          blockThirdPartyCookies: s.blockThirdPartyCookies !== false,
+          fingerprintFarbling: s.fingerprintFarbling !== false,
+          clearnetMode: s.clearnetMode === 'direct' ? 'direct' : 'proxy',
+          historyEnabled: s.historyEnabled === true,
+          searchIndexEnabled: s.searchIndexEnabled === true,
+          telemetryEnabled: false,
+          contentShield: s.contentShield !== false
+        }))
+      })
+      .catch(() => {})
+    if (C.CMD_PRIVACY_STATUS != null) {
+      rpc.request(C.CMD_PRIVACY_STATUS)
+        .then((result) => { if (!disposed) setSession(result) })
+        .catch(() => {})
+    }
+    return () => { disposed = true }
+  }, [rpc, C])
+
+  const save = async (patch) => {
+    const next = { ...privacy, ...patch, telemetryEnabled: false }
+    setBusy(true); setErr('')
+    try {
+      await rpc.request(C.CMD_USERDATA_SET_SETTINGS, { updates: next })
+      setPrivacy(next)
+      if (C.CMD_PRIVACY_STATUS != null) {
+        const result = await rpc.request(C.CMD_PRIVACY_STATUS).catch(() => null)
+        if (result) setSession(result)
+      }
+    } catch (e) { setErr(`save: ${e.message}`) }
+    finally { setBusy(false) }
+  }
+
+  const toggle = (key) => {
+    if (key === 'telemetryEnabled') return // never on
+    save({ [key]: !privacy[key] })
+  }
+
+  return html`
+    <div className="settings-card" data-testid="privacy-clearnet-card">
+      ${err && html`<div className="apps-error">${err}</div>`}
+      <div className="settings-row" data-testid="privacy-zero-collection">
+        <div>
+          <div className="settings-label">Zero remote data collection</div>
+          <div className="settings-subtle">PearBrowser does not ship telemetry, crash beacons, usage analytics, or third-party trackers in the browser chrome. Nothing you browse is sent to a PearBrowser server — there is no PearBrowser server for that.</div>
+        </div>
+        <span className="settings-subtle" data-testid="privacy-telemetry-status">Telemetry: never</span>
+      </div>
+      ${[
+        ['historyEnabled', 'Save browsing history (opt-in)', 'OFF by default. When enabled, visited URLs are stored only on this device in your local Hyperbee. Disabling clears stored history.'],
+        ['searchIndexEnabled', 'Index pages for local search (opt-in)', 'OFF by default. When enabled, text from hyper:// pages you open is indexed on-device for Library search. No query ever leaves the device.'],
+        ['contentShield', 'Block ads and trackers', 'ON by default. Refuses known ad/tracker requests inside the browser before peers or the network are contacted.'],
+        ['httpsOnly', 'HTTPS-only mode', 'Upgrade http:// navigations to https:// before loading.'],
+        ['stripTrackingParams', 'Strip tracking parameters', 'Remove utm_*, fbclid, gclid and similar click-ids from URLs.'],
+        ['blockThirdPartyCookies', 'Block third-party cookies (proxy)', 'Drop Set-Cookie from proxied clearnet responses so sites cannot share a jar with hyper tabs.'],
+        ['fingerprintFarbling', 'Fingerprint farbling', 'Noise canvas/audio fingerprints on proxied pages (per-origin seed).']
+      ].map(([key, label, hint]) => html`
+        <div className="settings-row" key=${key}>
+          <div>
+            <div className="settings-label">${label}</div>
+            <div className="settings-subtle">${hint}</div>
+          </div>
+          <label className=${'login-scope' + (privacy[key] ? ' on' : '')}>
+            <input type="checkbox" checked=${!!privacy[key]} disabled=${busy}
+                   onChange=${() => toggle(key)} data-testid=${'privacy-' + key} />
+          </label>
+        </div>
+      `)}
+      <div className="settings-row">
+        <div>
+          <div className="settings-label">Clearnet mode</div>
+          <div className="settings-subtle">Proxy (default): https pages load through the browser proxy so Content Shield blocks ads/trackers. Direct: load the real https URL (shields need a future session bridge).</div>
+        </div>
+        <div className="theme-segmented" role="group" aria-label="Clearnet mode">
+          ${['proxy', 'direct'].map((mode) => html`
+            <button key=${mode} type="button"
+              className=${'theme-segment' + (privacy.clearnetMode === mode ? ' active' : '')}
+              data-testid=${'clearnet-mode-' + mode}
+              disabled=${busy}
+              onClick=${() => save({ clearnetMode: mode })}>
+              ${mode === 'proxy' ? 'Proxy + shield' : 'Direct'}
+            </button>
+          `)}
+        </div>
+      </div>
+      ${session && html`
+        <div className="settings-subtle" data-testid="privacy-session-status">
+          Data collection: telemetry=${String(session.dataCollection?.telemetry ?? false)}
+          · history=${String(session.dataCollection?.history ?? false)}
+          · searchIndex=${String(session.dataCollection?.searchIndex ?? false)}
+          · shield=${session.privacy?.contentShield !== false ? 'on' : 'off'}
+          ${session.session?.proxyPort ? ` · proxy :${session.session.proxyPort}` : ''}
+        </div>
+      `}
+    </div>
+  `
+}
+
+/** Urlbar chip: live blocked count + open shield details in Settings path. */
+function ShieldStatusChip ({ rpc, C, activeUrl, onOpenSettings }) {
+  const [status, setStatus] = useState(null)
+  const driveKey = useMemo(() => {
+    const m = String(activeUrl || '').match(/(?:hyper:\/\/|\/(?:hyper|app)\/)([0-9a-fA-F]{64})/)
+    return m ? m[1].toLowerCase() : ''
+  }, [activeUrl])
+
+  useEffect(() => {
+    if (!rpc || !C?.CMD_SHIELD_STATUS) return
+    let disposed = false
+    const refresh = () => {
+      rpc.request(C.CMD_SHIELD_STATUS, driveKey ? { driveKey } : {})
+        .then((result) => { if (!disposed) setStatus(result) })
+        .catch(() => {})
+    }
+    refresh()
+    const timer = setInterval(refresh, 4000)
+    return () => { disposed = true; clearInterval(timer) }
+  }, [rpc, C, driveKey])
+
+  if (!status) return null
+  const blocked = status.blocked || 0
+  const on = status.enabled !== false
+  const allowlisted = !!(driveKey && status.driveAllowlisted)
+  const label = !on ? 'Shield off' : allowlisted ? 'Allowlisted' : `${blocked}`
+  const title = !on
+    ? 'Content Shield is off'
+    : allowlisted
+      ? 'This drive is allowlisted — click for shield settings'
+      : `${blocked} blocked this session — click for shield settings`
+
+  return html`
+    <button
+      type="button"
+      className=${`nav shield-chip${on ? ' on' : ''}${allowlisted ? ' allowlisted' : ''}`}
+      data-testid="shield-status-chip"
+      title=${title}
+      onClick=${() => onOpenSettings && onOpenSettings()}
+    >🛡 ${label}</button>
+  `
+}
+
 // Experimental-features toggles. The backend enforces each flag server-side;
 // these are the user-facing switches (persisted in user-data settings):
 //   - experimentalAutobeeCatalogs  unlocks the create/load `autobee://` paths
@@ -4239,7 +5421,7 @@ function ExperimentalSection ({ rpc, C, onAutobeeChange, onDeviceSyncChange }) {
   `
 }
 
-function Settings ({ rpc, C, status, storagePath, log }) {
+function Settings ({ rpc, C, status, storagePath, log, appearanceTheme, onAppearanceThemeChange, activeDriveKey = '' }) {
   const [identity, setIdentity] = useState(null)
   const [seedPhrase, setSeedPhrase] = useState(null)
   const [err, setErr] = useState('')
@@ -4251,10 +5433,18 @@ function Settings ({ rpc, C, status, storagePath, log }) {
   // Whether the Device-sync section is shown — driven by the experimental flag,
   // toggled live from the Experimental card below.
   const [deviceSync, setDeviceSync] = useState(false)
+  // Device linking (blind-pairing): transfer THIS identity to a new device, or
+  // adopt an identity from another device — no 24-word typing.
+  const [linkInvite, setLinkInvite] = useState('')
+  const [showLinkJoin, setShowLinkJoin] = useState(false)
+  const [linkJoinInput, setLinkJoinInput] = useState('')
+  const [linkNotice, setLinkNotice] = useState('')
   const CMD_GET_IDENTITY = C?.CMD_GET_IDENTITY ?? 31
   const CMD_IDENTITY_EXPORT_PHRASE = C?.CMD_IDENTITY_EXPORT_PHRASE ?? 70
   const CMD_IDENTITY_IMPORT_PHRASE = C?.CMD_IDENTITY_IMPORT_PHRASE ?? 71
   const CMD_IDENTITY_VALIDATE_PHRASE = C?.CMD_IDENTITY_VALIDATE_PHRASE ?? 73
+  const CMD_DEVICE_LINK_CREATE_INVITE = C?.CMD_DEVICE_LINK_CREATE_INVITE ?? 76
+  const CMD_DEVICE_LINK_JOIN = C?.CMD_DEVICE_LINK_JOIN ?? 77
   const CMD_CLEAR_CACHE = C?.CMD_CLEAR_CACHE ?? 30
   const CMD_RESET_APP = C?.CMD_RESET_APP ?? 29
 
@@ -4315,6 +5505,35 @@ function Settings ({ rpc, C, status, storagePath, log }) {
     }
   }
 
+  // SOURCE device — mint a single-use invite. Share it (copy/QR) with your OWN
+  // new device; it's a bearer secret that hands over your identity, so treat it
+  // like the backup phrase and don't paste it anywhere public.
+  const createLinkInvite = async () => {
+    setErr(''); setLinkNotice(''); setBusy('link-invite')
+    try {
+      const res = await rpc.request(CMD_DEVICE_LINK_CREATE_INVITE, {}, 30000)
+      setLinkInvite(res.invite)
+    } catch (e) { setErr(`link: ${e.message}`) }
+    finally { setBusy(null) }
+  }
+
+  // TARGET device — adopt the identity advertised by an invite from your other
+  // device. Rewrites this device's identity, so warn like Restore does.
+  const joinLinkInvite = async () => {
+    const invite = linkJoinInput.trim()
+    if (!invite) return
+    if (!confirm('Linking will REPLACE this device\'s identity with the one from your other device.\n\nThis device\'s current identity is discarded (make sure its phrase is saved if you need it). Proceed?')) return
+    setErr(''); setLinkNotice(''); setBusy('link-join')
+    try {
+      await rpc.request(CMD_DEVICE_LINK_JOIN, { invite, device: 'this device' }, 120000)
+      setLinkJoinInput('')
+      setShowLinkJoin(false)
+      setLinkNotice('Device linked — your peer key has rotated. Restart PearBrowser for the linked identity to take effect.')
+      await refreshIdentity()
+    } catch (e) { setErr(`link: ${e.message}`) }
+    finally { setBusy(null) }
+  }
+
   const clearCache = async () => {
     if (!confirm('Clear all cached drives + proxy cache? Installed apps and your sites are NOT affected.')) return
     setErr(''); setBusy('cache')
@@ -4342,8 +5561,31 @@ function Settings ({ rpc, C, status, storagePath, log }) {
   return html`
     <div className="settings">
       <h1>Settings</h1>
-      <p className="subtitle">Identity, infrastructure, and diagnostics for your peer-to-peer browser.</p>
+      <p className="subtitle">Identity, appearance, infrastructure, and diagnostics for your peer-to-peer browser.</p>
       ${err && html`<div className="apps-error">${err}</div>`}
+
+      <h2>Appearance</h2>
+      <div className="settings-card">
+        <div className="settings-row">
+          <div>
+            <div className="settings-label">Browser theme</div>
+            <div className="settings-subtle">Choose the chrome appearance for tabs, toolbars, settings, and dialogs.</div>
+          </div>
+          <div className="theme-segmented" role="group" aria-label="Browser theme">
+            ${['light', 'dark'].map((mode) => html`
+              <button
+                key=${mode}
+                type="button"
+                className=${'theme-segment' + (appearanceTheme === mode ? ' active' : '')}
+                aria-pressed=${appearanceTheme === mode}
+                onClick=${() => onAppearanceThemeChange?.(mode)}
+              >
+                ${mode === 'light' ? 'Light' : 'Dark'}
+              </button>
+            `)}
+          </div>
+        </div>
+      </div>
 
       <h2>Identity</h2>
       <div className="settings-card">
@@ -4356,7 +5598,7 @@ function Settings ({ rpc, C, status, storagePath, log }) {
       </div>
 
       <h2>Moving to a new device?</h2>
-      <p className="subtitle">Your identity lives on this machine. To use the same identity on another computer or after a wipe, write down your 12-word backup phrase. Anyone with the phrase can sign in as you — store it like a password.</p>
+      <p className="subtitle">Your identity lives on this machine. To use the same identity on another computer or after a wipe, write down your backup phrase (or use <em>Link a device</em> below). Anyone with the phrase can sign in as you — store it like a password.</p>
       <div className="settings-card">
         <div className="settings-row">
           <div>
@@ -4404,6 +5646,55 @@ function Settings ({ rpc, C, status, storagePath, log }) {
         ${restoreNotice && html`<div className="apps-ok">${restoreNotice}</div>`}
       </div>
 
+      <h2>Link a device</h2>
+      <p className="subtitle">Move this identity to another device without typing your phrase. Devices pair directly over the P2P network (blind-pairing) — no server, no account. The invite is a one-time secret that hands over your identity, so only share it with your own device.</p>
+      <div className="settings-card">
+        <div className="settings-row">
+          <div>
+            <div className="settings-label">Link a new device</div>
+            <div className="settings-subtle">Generate an invite here, then paste it into <em>Link this device</em> on your other device to copy this identity across.</div>
+          </div>
+          <button className="btn" onClick=${createLinkInvite} disabled=${busy === 'link-invite' || !identity?.hasBackupPhrase}>
+            ${busy === 'link-invite' ? 'Creating…' : 'Create invite'}
+          </button>
+        </div>
+        ${linkInvite && html`
+          <pre className="seed-phrase">${linkInvite}</pre>
+          <div className="settings-warning">One-time invite — anyone who receives it can adopt your identity. Paste it into your other device now; it expires when you close this screen.</div>
+        `}
+        <div className="settings-row">
+          <div>
+            <div className="settings-label">Link this device</div>
+            <div className="settings-subtle">Paste an invite from your other device to adopt its identity here. Replaces this device's current identity.</div>
+          </div>
+          <button className="btn subtle" onClick=${() => { setShowLinkJoin((v) => !v); setLinkNotice(''); setErr('') }}
+                  disabled=${busy?.startsWith?.('link')}>
+            ${showLinkJoin ? 'Cancel' : 'Paste invite…'}
+          </button>
+        </div>
+        ${showLinkJoin && html`
+          <div className="restore-form">
+            <textarea
+              className="restore-textarea"
+              placeholder="Paste the invite from your other device"
+              value=${linkJoinInput}
+              rows="2"
+              spellCheck="false"
+              autoCapitalize="none"
+              onInput=${(e) => setLinkJoinInput(e.target.value)}
+            ></textarea>
+            <div className="restore-actions">
+              <button className="btn primary" onClick=${joinLinkInvite}
+                      disabled=${!linkJoinInput.trim() || busy === 'link-join'}>
+                ${busy === 'link-join' ? 'Linking…' : 'Link this device'}
+              </button>
+            </div>
+            <div className="settings-warning">This destroys the current identity on disk. Make sure you've saved its phrase first.</div>
+          </div>
+        `}
+        ${linkNotice && html`<div className="apps-ok">${linkNotice}</div>`}
+      </div>
+
       <h2>Profile</h2>
       <p className="subtitle">What apps see when you grant a sign-in. Each field is opt-in — leave blank to share nothing.</p>
       <${ProfileSection} rpc=${rpc} C=${C} />
@@ -4411,6 +5702,14 @@ function Settings ({ rpc, C, status, storagePath, log }) {
       <h2>Permission Center</h2>
       <p className="subtitle">Persistent app grants grouped by drive: sign-in, profile fields, contacts, and arbitrary swarm topics.</p>
       <${PermissionCenterSection} rpc=${rpc} C=${C} />
+
+      <h2>Content Shield</h2>
+      <p className="subtitle">Brave-style ad and tracker blocking, enforced inside the browser's own proxy — blocked requests never reach a peer, a relay, or the network. Named filter lists hot-swap offline; per-drive allowlist and strict mode live here; Pear Plugins feed the same engine with a kill switch.</p>
+      <${ContentShieldSection} rpc=${rpc} C=${C} activeDriveKey=${activeDriveKey} />
+
+      <h2>Clearnet &amp; privacy</h2>
+      <p className="subtitle">Browse https:// sites through the browser-owned clearnet proxy (shields on) or direct load. Privacy ladder: HTTPS-only upgrades, tracking-parameter stripping, referrer policy, fingerprint farbling, third-party cookie isolation in proxy mode.</p>
+      <${PrivacyClearnetSection} rpc=${rpc} C=${C} />
 
       <h2>Relays</h2>
       <p className="subtitle">HiveRelay endpoints used for fast first-paint and persistence. Hybrid mode falls back to pure P2P if a relay is down.</p>
@@ -4932,6 +6231,7 @@ function Sites ({ rpc, C, onBrowse }) {
 export function App ({ rpc, C, storagePath }) {
   const [tab, setTab] = useState('browse')
   const [navUrl, setNavUrl] = useState(null)
+  const [appearanceTheme, setAppearanceTheme] = useState(() => applyAppearanceTheme(readCachedAppearanceTheme()))
   const [status, setStatus] = useState({ stage: 'booting', peerCount: 0, dhtConnected: false, ready: false, proxyPort: null })
   const [log, setLog] = useState([])
   // Login consent ceremony — populated when EVT_LOGIN_REQUEST fires.
@@ -4955,7 +6255,7 @@ export function App ({ rpc, C, storagePath }) {
   // then p2pbuilders, then peerit. Restored session tabs stay behind those
   // defaults so an app homepage such as Dealroom cannot hijack the release
   // landing slot.
-  const [tabs, setTabs] = useState(() => [makeTab(DEFAULT_URL), makeTab(P2PBUILDERS_URL), makeTab(PEERIT_URL)])
+  const [tabs, setTabs] = useState(() => STARTUP_TABS.map((tab) => makeBrowserTab(tab.url, { title: tab.title })))
   const [browseActiveId, setBrowseActiveId] = useState(() => 'placeholder')
   const [closedTabs, setClosedTabs] = useState(() => [])
   // Tracks whether we've completed the one-time tabs-restore from
@@ -4978,6 +6278,7 @@ export function App ({ rpc, C, storagePath }) {
       // either show the onboarding (first launch) or skip it.
       rpc.request(C.CMD_USERDATA_GET_SETTINGS).then((res) => {
         const s = unwrapSettings(res)
+        setAppearanceTheme(applyAppearanceTheme(s?.[APPEARANCE_THEME_SETTING] || readCachedAppearanceTheme()))
         // Show the first-launch onboarding modal. The landing-page hyperdrive
         // (DEFAULT_URL) auto-loads in the default browse tab BEHIND the modal —
         // the auto-load effect runs once settings are ready, independent of
@@ -4990,7 +6291,7 @@ export function App ({ rpc, C, storagePath }) {
         // are preserved.
         const savedTabs = Array.isArray(s?.browseTabs) ? s.browseTabs : null
         if (savedTabs && savedTabs.length > 0) {
-          const restored = restoreStartupTabs(savedTabs, [DEFAULT_URL, P2PBUILDERS_URL, PEERIT_URL])
+          const restored = restoreStartupTabs(savedTabs, STARTUP_TABS)
           if (restored.tabs.length > 0) {
             setTabs(restored.tabs)
             setBrowseActiveId(restored.activeId)
@@ -5074,6 +6375,20 @@ export function App ({ rpc, C, storagePath }) {
     setTab('browse')
   }
 
+  const setAndPersistAppearanceTheme = (theme) => {
+    const next = applyAppearanceTheme(theme)
+    setAppearanceTheme(next)
+    rpc.request(C.CMD_USERDATA_SET_SETTINGS, {
+      updates: { [APPEARANCE_THEME_SETTING]: next }
+    }).catch((err) => {
+      setLog((l) => [...l.slice(-200), `[settings] theme save failed: ${err.message}`])
+    })
+  }
+
+  const toggleAppearanceTheme = () => {
+    setAndPersistAppearanceTheme(appearanceTheme === 'dark' ? 'light' : 'dark')
+  }
+
   const isReady = status.ready || !!status.proxyPort
   const statusClass = !isReady ? 'booting' : (status.dhtConnected ? 'ok' : 'err')
   const statusText = !isReady
@@ -5081,7 +6396,7 @@ export function App ({ rpc, C, storagePath }) {
     : `DHT · ${status.peerCount} peer${status.peerCount === 1 ? '' : 's'} · ${status.hiveRelays || 0} relay${status.hiveRelays === 1 ? '' : 's'} · proxy :${status.proxyPort}`
 
   return html`
-    <div className="app">
+    <div className=${`app theme-${appearanceTheme}`} data-theme=${appearanceTheme}>
       <div className="topbar">
         <div className="brand">
           <${Logo} size=${22} />
@@ -5090,20 +6405,33 @@ export function App ({ rpc, C, storagePath }) {
         <div className="tabs">
           ${Object.entries(TAB_META).map(([id, m]) => html`
             <button className=${'tab' + (tab === id ? ' active' : '')} onClick=${() => setTab(id)} key=${id}>
-              <span className="tab-icon">${m.icon}</span>
               <span className="tab-label">${m.label}</span>
             </button>
           `)}
         </div>
         <div className="topbar-spacer"></div>
+        <div className="topbar-tools">
+          <button
+            type="button"
+            className="theme-toggle"
+            aria-label=${appearanceTheme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+            aria-pressed=${appearanceTheme === 'dark'}
+            title=${appearanceTheme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+            onClick=${toggleAppearanceTheme}
+          >
+            <span className="theme-toggle-track" aria-hidden="true">
+              <span className="theme-toggle-thumb">${appearanceTheme === 'dark' ? '☾' : '☀'}</span>
+            </span>
+          </button>
+        </div>
       </div>
 
       <div className=${'panel' + (tab === 'browse' ? ' panel-browse' : '')}>
-        ${tab === 'browse' && html`<${Browse} rpc=${rpc} C=${C} navUrl=${navUrl} onNavigated=${() => setNavUrl(null)} tabs=${tabs} setTabs=${setTabs} activeId=${browseActiveId} setActiveId=${setBrowseActiveId} closedTabs=${closedTabs} setClosedTabs=${setClosedTabs} sessionReady=${tabsRestored} />`}
+        ${tab === 'browse' && html`<${Browse} rpc=${rpc} C=${C} navUrl=${navUrl} onNavigated=${() => setNavUrl(null)} tabs=${tabs} setTabs=${setTabs} activeId=${browseActiveId} setActiveId=${setBrowseActiveId} closedTabs=${closedTabs} setClosedTabs=${setClosedTabs} sessionReady=${tabsRestored} onOpenSettings=${() => setTab('settings')} />`}
         ${tab === 'apps' && html`<${Apps} rpc=${rpc} C=${C} onLaunch=${launchInBrowse} />`}
         ${tab === 'sites' && html`<${Sites} rpc=${rpc} C=${C} onBrowse=${launchInBrowse} />`}
         ${tab === 'library' && html`<${Library} rpc=${rpc} C=${C} onBrowse=${launchInBrowse} />`}
-        ${tab === 'settings' && html`<${Settings} rpc=${rpc} C=${C} status=${status} storagePath=${storagePath} log=${log} />`}
+        ${tab === 'settings' && html`<${Settings} rpc=${rpc} C=${C} status=${status} storagePath=${storagePath} log=${log} appearanceTheme=${appearanceTheme} onAppearanceThemeChange=${setAndPersistAppearanceTheme} activeDriveKey=${(tabs.find((t) => t.id === browseActiveId) && tabDriveKey(tabs.find((t) => t.id === browseActiveId))) || ''} />`}
       </div>
 
       <div className=${'status ' + statusClass}>

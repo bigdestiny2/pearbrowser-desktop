@@ -48,7 +48,7 @@ Primary user promise: download one native package, launch it normally, and let P
 - The native workflow now has two modes:
   - `package-proof`: manual default, permits ad-hoc macOS signing and unsigned Windows packages.
   - `public-trust`: required for announcement-ready assets, requires macOS Developer ID/notary credentials, notarized macOS DMG assets, Windows signing credentials, a published GitHub release, and post-upload native download verification.
-- Source installs are standalone because the HiveRelay packages install from npm at `^0.20.2` (published `0.20.2`). (Updated 2026-06-29: superseded vendoring `0.20.0` tarballs under `vendor/hiverelay`.)
+- Source installs are standalone because the HiveRelay packages install from npm at `^0.20.2` with lockfile `0.20.2`. The preinstall guard exits quietly for that registry line and validates `../../00-core/hiverelay` only when `file:` workspace deps are used. (Updated 2026-06-29: superseded vendoring `0.20.0` tarballs under `vendor/hiverelay`.)
 
 ## Distribution Model
 

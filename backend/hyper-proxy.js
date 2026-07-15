@@ -10,6 +10,7 @@
 
 const http = require('bare-http1')
 const crypto = require('bare-crypto')
+const { PAGE_CONTEXT_SHIM, PAGE_CONTEXT_SHIM_HASH, pageContextMeta } = require('./page-context-bridge.cjs')
 
 const USER_FRIENDLY_ERRORS = {
   'Invalid drive key': 'This link appears to be broken or incomplete',
@@ -45,6 +46,27 @@ function isLoopbackOrigin (origin) {
   } catch {
     return false
   }
+}
+
+function normalizeOrigin (origin) {
+  if (typeof origin !== 'string' || origin.length === 0) return null
+  return new URL(origin).origin
+}
+
+function originForPort (port) {
+  return `http://127.0.0.1:${port}`
+}
+
+function normalizeDriveKeyHex (keyHex) {
+  if (!isValidDriveKey(keyHex)) {
+    throw new Error('Invalid drive key format')
+  }
+  return keyHex.toLowerCase()
+}
+
+function normalizeUrlSuffix (path) {
+  const value = typeof path === 'string' && path.length > 0 ? path : '/'
+  return value.startsWith('/') ? value : '/' + value
 }
 
 const CONTENT_TYPES = {
@@ -176,13 +198,15 @@ function escapeHtml (str) {
 }
 
 class HyperProxy {
-  constructor (getDrive, onError, relayClient) {
+  constructor (getDrive, onError, relayClient, opts = {}) {
     this._getDrive = getDrive // async (keyHex) => Hyperdrive
     this._onError = onError || (() => {})
     this._relay = relayClient || null // RelayClient for fast-path
     this._httpBridge = null // HttpBridge for direct WebView API
     this._server = null
     this._port = 0
+    this._perDriveOrigins = !!opts.perDriveOrigins
+    this._driveOrigins = new Map() // driveKeyHex -> { server, port, ready, lastUsedAt }
     this._stats = { relayHits: 0, p2pHits: 0, total: 0 }
     // P2P-first relay race (privacy): wait this long for P2P before contacting
     // the relay. _relayFirst=true is the kill-switch back to the parallel race.
@@ -195,8 +219,12 @@ class HyperProxy {
     this._cacheMaxSize = 50 * 1024 * 1024 // 50MB
     this._cacheCurrentSize = 0
     this._cacheStats = { hits: 0, misses: 0 }
-    this._apiTokens = new Map() // token -> { driveKeyHex, issuedAt }
+    this._apiTokens = new Map() // token -> { driveKeyHex, origin, issuedAt }
     this._apiTokenTtlMs = 10 * 60 * 1000 // 10 minutes
+    // Separate least-privilege secret for the browser chrome's explicit
+    // current-page capture. It is never accepted by /api/* and is stable only
+    // for the lifetime of this drive's browser origin.
+    this._pageContextTokens = new Map()
     /**
      * String injected into the <head> of every served text/html response,
      * exposing window.pear.swarm.v1 to pages. Set by setPearSwarmShim();
@@ -228,10 +256,50 @@ class HyperProxy {
     // drive on every HTML response.
     this._anongptManifestCache = new Map()
     this._anongptManifestTtlMs = 60 * 1000
+    /**
+     * Content Shield (docs/BROWSER_PARITY_PLAN.md Phases 1–3). When set, every
+     * /hyper/* and /app/* request is checked before any P2P/relay fetch and
+     * HTML responses receive cosmetic CSS, optional strict-mode CSP, scriptlets,
+     * and plugin styles/scripts. Null keeps the proxy byte-identical to the
+     * pre-shield behavior.
+     */
+    this._contentShield = null
+    /**
+     * Privacy ladder settings for clearnet (/clearnet/*) handling.
+     * Updated live from user-data via setPrivacySettings().
+     */
+    this._privacySettings = null
+    this._clearnetHandler = null
   }
 
   setHttpBridge (bridge) {
     this._httpBridge = bridge
+  }
+
+  setContentShield (shield) {
+    this._contentShield = shield || null
+  }
+
+  setPrivacySettings (settings) {
+    this._privacySettings = settings || null
+  }
+
+  /**
+   * Optional injection of clearnet request handler (from clearnet-proxy.cjs).
+   * Defaults to requiring the module on first /clearnet/ hit.
+   */
+  setClearnetHandler (handler) {
+    this._clearnetHandler = typeof handler === 'function' ? handler : null
+  }
+
+  pageContextToken (driveKeyHex) {
+    const keyHex = normalizeDriveKeyHex(driveKeyHex)
+    let token = this._pageContextTokens.get(keyHex)
+    if (!token) {
+      token = crypto.randomBytes(32).toString('hex')
+      this._pageContextTokens.set(keyHex, token)
+    }
+    return token
   }
 
   /**
@@ -382,8 +450,9 @@ class HyperProxy {
    *                                  `/app/` vs `/hyper/` for <base>)
    * @returns {Buffer}                response body with the head block injected
    */
-  async _injectHtmlHead (content, driveKeyHex, reqPath) {
+  async _injectHtmlHead (content, driveKeyHex, reqPath, documentOrigin = null) {
     const html = (Buffer.isBuffer(content) ? content : Buffer.from(content)).toString('utf-8')
+    const keyHex = normalizeDriveKeyHex(driveKeyHex)
     const prefix = reqPath.startsWith('/app/') ? '/app/' : '/hyper/'
     // Host MUST match the document origin the page is navigated to (CMD_NAVIGATE
     // loads it from http://127.0.0.1:<port>). `localhost` and `127.0.0.1` are
@@ -393,19 +462,85 @@ class HyperProxy {
     // 'self'` CSP then refuses its OWN files: index.html renders but nothing
     // else loads (the "splash but never boots" bug). Keep this in lockstep with
     // the host used in index.js CMD_NAVIGATE.
-    const baseHref = `http://127.0.0.1:${this._port}${prefix}${driveKeyHex}/`
-    const apiToken = this.issueApiToken(driveKeyHex)
-    const includeAnongpt = await this._shouldInjectAnongptShim(driveKeyHex)
+    const origin = normalizeOrigin(documentOrigin || originForPort(this._port))
+    const baseHref = `${origin}${prefix}${keyHex}/`
+    const apiToken = this.issueApiToken(keyHex, { origin })
+    const contextToken = this.pageContextToken(keyHex)
+    const includeAnongpt = await this._shouldInjectAnongptShim(keyHex)
     if (includeAnongpt) {
-      console.log('[anongpt-gate] injecting shim for', driveKeyHex.slice(0, 12) + '…')
+      console.log('[anongpt-gate] injecting shim for', keyHex.slice(0, 12) + '…')
     }
+    // Cosmetic element hiding, scriptlets, plugin styles/scripts, and optional
+    // strict third-party CSP ride the same injection path as the browser shims.
+    // Style blocks need no CSP script hash; scriptlets/plugin scripts are
+    // hash-authorized exactly like the swarm/sync/anongpt shims.
+    const shieldOpts = { documentKey: keyHex }
+    const shieldCss = this._contentShield
+      ? this._contentShield.cosmeticCssFor(keyHex, shieldOpts)
+      : ''
+    const pluginCss = this._contentShield && typeof this._contentShield.pluginStylesFor === 'function'
+      ? this._contentShield.pluginStylesFor(keyHex, shieldOpts)
+      : ''
+    const scriptlets = this._contentShield && typeof this._contentShield.scriptletsFor === 'function'
+      ? this._contentShield.scriptletsFor(keyHex, shieldOpts)
+      : []
+    const pluginScripts = this._contentShield && typeof this._contentShield.pluginScriptsFor === 'function'
+      ? this._contentShield.pluginScriptsFor(keyHex, shieldOpts)
+      : []
+
+    const scriptletTags = []
+    const scriptletHashes = []
+    for (const entry of scriptlets) {
+      const tag = `<script data-pear-scriptlet="${escapeHtml(entry.name || 'scriptlet')}">${entry.body}</script>`
+      const hash = sha256ScriptBody(tag)
+      if (hash) {
+        scriptletTags.push(tag)
+        scriptletHashes.push(hash)
+      }
+    }
+    const pluginScriptTags = []
+    const pluginScriptHashes = []
+    for (const entry of pluginScripts) {
+      const tag = `<script data-pear-plugin="${escapeHtml(entry.pluginId || 'plugin')}">${entry.body}</script>`
+      const hash = sha256ScriptBody(tag)
+      if (hash) {
+        pluginScriptTags.push(tag)
+        pluginScriptHashes.push(hash)
+      }
+    }
+
+    const strictMode = this._contentShield &&
+      typeof this._contentShield.isStrict === 'function' &&
+      this._contentShield.isStrict(keyHex)
+    // Collect every script hash we will inject so strict CSP (and page CSP
+    // rewriting) authorizes them. Order matches headInjection below.
+    const hashesToAuthorize = []
+    if (HYPER_LINK_BRIDGE_SHIM_HASH) hashesToAuthorize.push(HYPER_LINK_BRIDGE_SHIM_HASH)
+    if (PAGE_CONTEXT_SHIM_HASH) hashesToAuthorize.push(PAGE_CONTEXT_SHIM_HASH)
+    if (this._pearSwarmShim && this._pearSwarmShimHash) hashesToAuthorize.push(this._pearSwarmShimHash)
+    if (this._pearSyncShim && this._pearSyncShimHash) hashesToAuthorize.push(this._pearSyncShimHash)
+    if (includeAnongpt && this._anongptShimHash) hashesToAuthorize.push(this._anongptShimHash)
+    for (const h of scriptletHashes) hashesToAuthorize.push(h)
+    for (const h of pluginScriptHashes) hashesToAuthorize.push(h)
+
+    const strictMeta = strictMode
+      ? `<meta http-equiv="Content-Security-Policy" content="${this._contentShield.strictCspContent(hashesToAuthorize)}" data-pear-shield-strict="1">`
+      : ''
+
     const headInjection =
       `<base href="${baseHref}">` +
       `<meta name="pear-api-token" content="${apiToken}">` +
+      pageContextMeta(contextToken) +
+      strictMeta +
       HYPER_LINK_BRIDGE_SHIM +
+      PAGE_CONTEXT_SHIM +
       (this._pearSwarmShim || '') +
       (this._pearSyncShim || '') +
-      (includeAnongpt ? this._anongptShim : '')
+      (includeAnongpt ? this._anongptShim : '') +
+      scriptletTags.join('') +
+      pluginScriptTags.join('') +
+      (shieldCss ? `<style data-pear-shield>${shieldCss}</style>` : '') +
+      (pluginCss ? `<style data-pear-plugin-style>${pluginCss}</style>` : '')
     let injected = html.includes('<head>')
       ? html.replace('<head>', `<head>${headInjection}`)
       : html.replace(/<html>/i, `<html><head>${headInjection}</head>`)
@@ -421,11 +556,6 @@ class HyperProxy {
     // We do NOT add 'unsafe-inline' (that would weaken the page's
     // protection against XSS); we add only the exact hashes of the
     // exact scripts we (the authorized runtime) inject.
-    const hashesToAuthorize = []
-    if (HYPER_LINK_BRIDGE_SHIM_HASH) hashesToAuthorize.push(HYPER_LINK_BRIDGE_SHIM_HASH)
-    if (this._pearSwarmShim && this._pearSwarmShimHash) hashesToAuthorize.push(this._pearSwarmShimHash)
-    if (this._pearSyncShim && this._pearSyncShimHash) hashesToAuthorize.push(this._pearSyncShimHash)
-    if (includeAnongpt && this._anongptShimHash) hashesToAuthorize.push(this._anongptShimHash)
     if (hashesToAuthorize.length > 0) {
       injected = injectCspShimHashes(injected, hashesToAuthorize)
     }
@@ -434,6 +564,73 @@ class HyperProxy {
   }
 
   get port () { return this._port }
+
+  get perDriveOrigins () { return this._perDriveOrigins }
+
+  async localOriginForDrive (driveKeyHex) {
+    const keyHex = normalizeDriveKeyHex(driveKeyHex)
+    if (!this._perDriveOrigins) return originForPort(this._port)
+    try {
+      const entry = await this._ensureDriveOrigin(keyHex)
+      return originForPort(entry.port)
+    } catch (err) {
+      console.warn('[origin-isolation] per-drive origin failed for', keyHex.slice(0, 12) + '…', '-', err && err.message)
+      return originForPort(this._port)
+    }
+  }
+
+  async localUrlForDrive (driveKeyHex, mode, path = '/') {
+    const keyHex = normalizeDriveKeyHex(driveKeyHex)
+    const prefix = mode === 'app' ? '/app/' : '/hyper/'
+    const origin = await this.localOriginForDrive(keyHex)
+    return `${origin}${prefix}${keyHex}${normalizeUrlSuffix(path)}`
+  }
+
+  async _ensureDriveOrigin (driveKeyHex) {
+    const keyHex = normalizeDriveKeyHex(driveKeyHex)
+    let entry = this._driveOrigins.get(keyHex)
+    if (entry) {
+      entry.lastUsedAt = Date.now()
+      return entry.ready
+    }
+
+    entry = {
+      server: null,
+      port: 0,
+      ready: null,
+      lastUsedAt: Date.now()
+    }
+    entry.server = http.createServer((req, res) => this._handle(req, res, {
+      boundDriveKeyHex: keyHex,
+      port: entry.port
+    }))
+    entry.ready = new Promise((resolve, reject) => {
+      const onError = (err) => {
+        this._driveOrigins.delete(keyHex)
+        reject(err)
+      }
+      entry.server.once('error', onError)
+      entry.server.listen(0, '127.0.0.1', () => {
+        entry.server.removeListener('error', onError)
+        entry.port = entry.server.address().port
+        resolve(entry)
+      })
+    })
+    this._driveOrigins.set(keyHex, entry)
+    return entry.ready
+  }
+
+  async releaseDriveOrigin (driveKeyHex) {
+    const keyHex = normalizeDriveKeyHex(driveKeyHex)
+    this._pageContextTokens.delete(keyHex)
+    const entry = this._driveOrigins.get(keyHex)
+    if (!entry) return false
+    this._driveOrigins.delete(keyHex)
+    try { await entry.ready } catch {}
+    if (!entry.server) return true
+    await new Promise(resolve => entry.server.close(() => resolve()))
+    return true
+  }
 
   async start () {
     this._server = http.createServer((req, res) => this._handle(req, res))
@@ -448,11 +645,24 @@ class HyperProxy {
   }
 
   async stop () {
-    if (!this._server) return
-    return new Promise(resolve => this._server.close(() => resolve()))
+    const closers = []
+    if (this._server) {
+      const server = this._server
+      this._server = null
+      closers.push(new Promise(resolve => server.close(() => resolve())))
+    }
+    for (const entry of this._driveOrigins.values()) {
+      if (!entry.server) continue
+      closers.push(new Promise(resolve => entry.server.close(() => resolve())))
+    }
+    this._driveOrigins.clear()
+    this._pageContextTokens.clear()
+    await Promise.all(closers)
   }
 
-  async _handle (req, res) {
+  async _handle (req, res, context = {}) {
+    const serverPort = context.port || this._port
+    const documentOrigin = originForPort(serverPort)
     // Validate origin - only allow strict loopback origins
     const origin = req.headers.origin
     if (origin && !isLoopbackOrigin(origin)) {
@@ -462,7 +672,7 @@ class HyperProxy {
     }
 
     // Set CORS headers for valid origins
-    res.setHeader('Access-Control-Allow-Origin', origin || 'http://127.0.0.1')
+    res.setHeader('Access-Control-Allow-Origin', origin || documentOrigin)
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Pear-Token')
 
@@ -472,12 +682,12 @@ class HyperProxy {
         res.statusCode = 403
         return res.end('Invalid origin')
       }
-      res.setHeader('Access-Control-Allow-Origin', origin || 'http://127.0.0.1')
+      res.setHeader('Access-Control-Allow-Origin', origin || documentOrigin)
       res.statusCode = 204
       return res.end()
     }
 
-    const url = new URL(req.url, `http://localhost:${this._port}`)
+    const url = new URL(req.url, documentOrigin)
     const path = url.pathname
 
     // HTTP Bridge — direct API for WebView apps (bypasses RN relay)
@@ -491,6 +701,17 @@ class HyperProxy {
       res.statusCode = 200
       res.setHeader('Content-Type', 'application/json')
       return res.end(JSON.stringify({ ok: true }))
+    }
+
+    // Clearnet proxy (Phase 4) — browser-owned https/http fetch with shield
+    if (path.startsWith('/clearnet/')) {
+      const handle = this._clearnetHandler || require('./clearnet-proxy.cjs').handleClearnetRequest
+      return handle(req, res, url, {
+        contentShield: this._contentShield,
+        privacy: this._privacySettings,
+        proxyOrigin: documentOrigin,
+        port: serverPort
+      })
     }
 
     try {
@@ -518,11 +739,36 @@ class HyperProxy {
         res.statusCode = 400
         return res.end('Invalid drive key format')
       }
+      driveKeyHex = driveKeyHex.toLowerCase()
+
+      if (context.boundDriveKeyHex && driveKeyHex !== context.boundDriveKeyHex) {
+        res.statusCode = 403
+        return res.end('Forbidden for this origin')
+      }
 
       // SECURITY: Validate file path to prevent directory traversal
       if (filePath.includes('..') || filePath.includes('\x00')) {
         res.statusCode = 400
         return res.end('Invalid file path')
+      }
+
+      // Content Shield: decide before any cache/P2P/relay work so a blocked
+      // subresource never costs swarm bandwidth or leaks to a relay.
+      // Per-drive allowlist (documentKey) exempts the whole drive.
+      if (this._contentShield) {
+        const verdict = this._contentShield.shouldBlockUrl(
+          `hyper://${driveKeyHex}${filePath}`,
+          { documentKey: driveKeyHex }
+        )
+        if (verdict.blocked) {
+          res.statusCode = 403
+          res.setHeader('Content-Type', 'text/plain')
+          res.setHeader('X-Pear-Shield', 'blocked')
+          return res.end('Blocked by PearBrowser Shield')
+        }
+        if (verdict.allowlisted) {
+          res.setHeader('X-Pear-Shield', 'allowlisted')
+        }
       }
 
       this._stats.total++
@@ -569,7 +815,7 @@ class HyperProxy {
         // injection HTML would leak tokens across requests, so we
         // re-inject on every HIT instead.
         if (cached.contentType.includes('text/html')) {
-          const injected = await this._injectHtmlHead(cached.content, driveKeyHex, path)
+          const injected = await this._injectHtmlHead(cached.content, driveKeyHex, path, documentOrigin)
           res.statusCode = 200
           return res.end(injected)
         }
@@ -604,7 +850,7 @@ class HyperProxy {
       // the gate passes. Logic lives in _injectHtmlHead() so cache HIT
       // and cache MISS use the identical injection path.
       if (contentType.includes('text/html')) {
-        const injected = await this._injectHtmlHead(content, driveKeyHex, path)
+        const injected = await this._injectHtmlHead(content, driveKeyHex, path, documentOrigin)
         res.statusCode = 200
         return res.end(injected)
       }
@@ -891,13 +1137,13 @@ class HyperProxy {
     this._cacheStats.misses = 0
   }
 
-  issueApiToken (driveKeyHex) {
-    if (!isValidDriveKey(driveKeyHex)) {
-      throw new Error('Invalid drive key format')
-    }
+  issueApiToken (driveKeyHex, opts = {}) {
+    const keyHex = normalizeDriveKeyHex(driveKeyHex)
+    const origin = opts && opts.origin ? normalizeOrigin(opts.origin) : null
+    if (origin && !isLoopbackOrigin(origin)) throw new Error('Invalid token origin')
     this._cleanupExpiredApiTokens()
     const token = crypto.randomBytes(32).toString('hex')
-    this._apiTokens.set(token, { driveKeyHex, issuedAt: Date.now() })
+    this._apiTokens.set(token, { driveKeyHex: keyHex, origin, kind: 'drive', issuedAt: Date.now() })
     return token
   }
 
@@ -906,7 +1152,12 @@ class HyperProxy {
     this._cleanupExpiredApiTokens()
     const entry = this._apiTokens.get(token)
     if (!entry) return null
-    return entry.driveKeyHex
+    return {
+      driveKeyHex: entry.driveKeyHex,
+      origin: entry.origin || null,
+      kind: entry.kind || 'drive',
+      issuedAt: entry.issuedAt
+    }
   }
 
   _cleanupExpiredApiTokens () {

@@ -252,7 +252,7 @@ function installNoteFor (platform, name) {
     return 'Open the DMG and drag PearBrowser.app to /Applications.'
   }
   if (platform === 'macos') {
-    return 'Unzip the archive, move PearBrowser.app to /Applications, then open it from Finder.'
+    return 'Unzip the archive, move PearBrowser.app to /Applications, then open it from Finder. Package-proof builds may require the macOS Privacy & Security "Open Anyway" flow after checksum verification.'
   }
   if (platform === 'windows' && /\.msix$/i.test(name)) {
     return 'Open the MSIX package and follow the Windows installer prompts.'
@@ -336,7 +336,7 @@ function printInstallGuide (report) {
   if (report.trustMode === 'public-trust') {
     console.log('These are public-trust desktop builds. macOS and Windows packages are expected to be signed where the OS supports it, and every package keeps a matching SHA-256 sidecar for independent byte verification.')
   } else {
-    console.log('These are package-proof desktop builds. Linux uses checksums only. macOS is ad-hoc signed but not notarized, and Windows packages are unsigned until the public-trust signing credentials are configured. Treat macOS/Windows OS trust prompts as expected for this release lane, not as the final public-trust experience.')
+    console.log('These are package-proof desktop builds. Linux uses checksums only. macOS is ad-hoc signed but not notarized, and Windows packages are unsigned until the public-trust signing credentials are configured. Treat macOS/Windows OS trust prompts as expected for this release lane, not as the final public-trust experience. On macOS, Gatekeeper may say Apple could not verify that PearBrowser is free of malware until a signed and notarized DMG is published.')
   }
   console.log()
   console.log('## Choose A Package')
@@ -411,7 +411,9 @@ function printInstallGuide (report) {
   } else {
     console.log('1. Unzip the `.app.zip`.')
     console.log('2. Move `PearBrowser.app` to `/Applications`.')
-    console.log('3. Open it from Finder. For package-proof builds, macOS may show an unidentified developer warning. Use Control-click -> Open only if you intentionally trust this package and its checksum.')
+    console.log('3. Verify the SHA-256 sidecar for the downloaded archive before first launch.')
+    console.log('4. Open it from Finder. For package-proof builds, macOS may show an unidentified developer or malware-verification warning because the app is not notarized.')
+    console.log('5. If the first launch is blocked, use Control-click `PearBrowser.app` -> Open -> Open, or open System Settings -> Privacy & Security and choose Open Anyway for PearBrowser. Continue only if you intentionally trust this package and its checksum.')
   }
   console.log()
   console.log('Windows:')

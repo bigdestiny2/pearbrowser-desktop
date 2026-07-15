@@ -2,6 +2,9 @@ import Runtime from 'pear-electron'
 import Bridge from 'pear-bridge'
 import ws from 'bare-ws'
 import http from 'bare-http1'
+import fs from 'bare-fs'
+import path from 'bare-path'
+import env from 'bare-env'
 // ESM-only modules the backend needs but can't dynamic-import from CJS:
 // Bare/Pear's import() resolver has no referrer URL when called from a
 // CommonJS file, so all forms of import() from backend/*.js fail with
@@ -9,6 +12,12 @@ import http from 'bare-http1'
 // ESM entry point and hand them to the backend through bootBackend().
 import { ServiceRegistry, ServiceProtocol } from 'p2p-hiverelay/core/services/index.js'
 import { bootBackend } from './backend/pear-adapter.cjs'
+import { createLazyQvacService } from './backend/ai/qvac-host.mjs'
+import { QVAC_MODEL_CATALOG } from './backend/ai/qvac-model-catalog.mjs'
+import { discoverOllamaQwenModels } from './backend/ai/qvac-ollama-catalog.mjs'
+import rpcWebSocketAuth from './backend/rpc-websocket-auth.cjs'
+
+const { authorizeRpcWebSocket, DiagnosticRpcRouter } = rpcWebSocketAuth
 
 // Renderer scans 9876-9880 in order. Backend binds the first one
 // that's free. Handles the common case where a zombie pear-runtime
@@ -16,6 +25,9 @@ import { bootBackend } from './backend/pear-adapter.cjs'
 // grabs the next port instead of failing with EADDRINUSE.
 const RPC_PORT_BASE = 9876
 const RPC_PORT_COUNT = 5
+const rpcSessionToken = String(Pear.config?.startId || '')
+const diagnosticToken = String(env.PEARBROWSER_RPC_DIAGNOSTIC_TOKEN || '')
+if (!rpcSessionToken) throw new Error('Pear runtime did not provide a per-launch RPC session token')
 
 // --- 1. Boot the backend in this Bare main process. ---
 //
@@ -30,6 +42,30 @@ const RPC_PORT_COUNT = 5
 // event so the UI can render a clear error. The dev logs also get a
 // loud banner that makes the cause obvious in `pear run --dev` output.
 const storagePath = (Pear.config?.storage || '.') + '/pearbrowser-storage'
+const ollamaModels = env.PEARBROWSER_QVAC_OLLAMA === '0'
+  ? {}
+  : discoverOllamaQwenModels({
+      fs,
+      path,
+      homeDir: env.HOME,
+      modelsRoot: env.OLLAMA_MODELS,
+      device: env.PEARBROWSER_QVAC_DEVICE
+    })
+const qvacModels = Object.freeze({ ...QVAC_MODEL_CATALOG, ...ollamaModels })
+if (Object.keys(ollamaModels).length) {
+  console.log('[qvac] approved local models:', Object.keys(ollamaModels).join(', '))
+}
+// Release native model RAM after a quiet period; the next request reloads
+// through the normal ensureModel path with progress events. 0 disables.
+const idleUnloadRaw = Number(env.PEARBROWSER_QVAC_IDLE_UNLOAD_MS)
+const qvacIdleUnloadMs = Number.isFinite(idleUnloadRaw) && idleUnloadRaw >= 0
+  ? idleUnloadRaw
+  : 15 * 60 * 1000
+const aiService = createLazyQvacService({
+  homeDir: storagePath,
+  models: qvacModels,
+  idleUnloadMs: qvacIdleUnloadMs
+})
 let backendPipe = null
 let bootError = null
 try {
@@ -38,7 +74,7 @@ try {
     // Hand statically-imported ESM modules down to the CJS backend so
     // it can build a ServiceProtocol stack for anonGPT's seller dial
     // without paying Bare's CJS-→-ESM dynamic-import penalty.
-    esmModules: { ServiceRegistry, ServiceProtocol }
+    esmModules: { ServiceRegistry, ServiceProtocol, aiService }
   })
 } catch (err) {
   bootError = err
@@ -71,13 +107,16 @@ try {
 let client = null
 const diagnostics = new Set()
 const eventBuffer = []
+const diagnosticRouter = new DiagnosticRpcRouter({
+  forward: (frame) => backendPipe?.write(frame)
+})
 
 if (backendPipe) {
   backendPipe.on('data', (chunk) => {
     if (client) client.write(chunk)
     else eventBuffer.push(chunk)
-    for (const socket of diagnostics) {
-      try { socket.write(chunk) } catch {}
+    try { diagnosticRouter.routeBackend(chunk) } catch (err) {
+      console.error('[rpc] diagnostic response routing failed:', err.message)
     }
   })
 }
@@ -91,16 +130,19 @@ function frameEvent (event, data) {
   return json.length.toString(16).padStart(8, '0') + json
 }
 
-const onDiagnosticSocket = (socket) => {
-  console.log('[rpc] diagnostic connected')
+const onDiagnosticSocket = (socket, access) => {
+  console.log(`[rpc] ${access.full ? 'operator' : 'read-only'} diagnostic connected`)
   diagnostics.add(socket)
+  diagnosticRouter.add(socket, { full: access.full })
   socket.on('close', () => {
     console.log('[rpc] diagnostic disconnected')
     diagnostics.delete(socket)
+    diagnosticRouter.remove(socket)
   })
   socket.on('error', (err) => {
     console.error('[rpc] diagnostic error:', err.message)
     diagnostics.delete(socket)
+    diagnosticRouter.remove(socket)
   })
 
   if (bootError) {
@@ -115,13 +157,26 @@ const onDiagnosticSocket = (socket) => {
   }
 
   socket.on('data', (data) => {
-    try { backendPipe?.write(data) } catch {}
+    try {
+      diagnosticRouter.receive(socket, data)
+    } catch (err) {
+      console.error('[rpc] rejecting malformed diagnostic frame:', err.message)
+      try { socket.end() } catch {}
+    }
   })
 }
 
 const onSocket = (socket, req) => {
-  if (req?.url && req.url.split('?')[0] === '/status-smoke') {
-    return onDiagnosticSocket(socket)
+  const access = authorizeRpcWebSocket({ url: req?.url, headers: req?.headers }, {
+    sessionToken: rpcSessionToken,
+    diagnosticToken
+  })
+  if (!access.allowed) {
+    console.error('[rpc] rejected unauthenticated socket:', access.reason)
+    return socket.end()
+  }
+  if (access.kind === 'diagnostic') {
+    return onDiagnosticSocket(socket, access)
   }
 
   if (client) {

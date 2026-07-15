@@ -1,0 +1,1460 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PearBrowser Next Release UI Preview</title>
+    <link rel="stylesheet" href="../ui/theme/pear-ui.css" />
+    <style>
+      :root {
+        color-scheme: light;
+        --canvas: #f6f8f7;
+        --surface: #ffffff;
+        --surface-soft: #eef3f1;
+        --surface-warm: #fff7f1;
+        --line: #dde6e2;
+        --line-strong: #c9d6d0;
+        --text: #17211b;
+        --muted: #65736c;
+        --quiet: #8a9790;
+        --pear: #16834f;
+        --pear-soft: #e5f5ec;
+        --teal: #0f766e;
+        --coral: #e45d45;
+        --amber: #b97812;
+        --shadow: 0 18px 48px rgba(24, 36, 30, 0.10);
+        --radius: 8px;
+      }
+
+      * { box-sizing: border-box; }
+
+      html,
+      body {
+        width: 100%;
+        min-height: 100%;
+        margin: 0;
+      }
+
+      body {
+        background: var(--canvas);
+        color: var(--text);
+        font: 13px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      button,
+      input {
+        font: inherit;
+      }
+
+      button {
+        color: inherit;
+      }
+
+      .preview-app {
+        min-height: 100vh;
+        display: grid;
+        grid-template-columns: 236px minmax(0, 1fr);
+        background: var(--canvas);
+      }
+
+      .sidebar {
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+        padding: 18px 14px;
+        background: rgba(255, 255, 255, 0.82);
+        border-right: 1px solid var(--line);
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 6px 8px 14px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .mark {
+        width: 30px;
+        height: 30px;
+        color: var(--pear);
+        flex: 0 0 auto;
+      }
+
+      .brand-copy {
+        min-width: 0;
+      }
+
+      .brand-name {
+        font-size: 14px;
+        font-weight: 700;
+        letter-spacing: 0;
+      }
+
+      .brand-tag {
+        color: var(--quiet);
+        font-size: 11px;
+      }
+
+      .nav-group {
+        display: grid;
+        gap: 3px;
+      }
+
+      .rail-item,
+      .icon-button,
+      .tab-action,
+      .chip-button {
+        border: 1px solid transparent;
+        background: transparent;
+        cursor: pointer;
+        transition: background 140ms ease, border-color 140ms ease, color 140ms ease, transform 140ms ease;
+      }
+
+      .rail-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-height: 38px;
+        width: 100%;
+        padding: 0 10px;
+        border-radius: var(--radius);
+        color: var(--muted);
+        text-align: left;
+      }
+
+      .rail-item svg {
+        width: 17px;
+        height: 17px;
+        stroke-width: 1.8;
+      }
+
+      .rail-item:hover {
+        background: var(--surface-soft);
+        color: var(--text);
+      }
+
+      .rail-item.active {
+        background: var(--pear-soft);
+        border-color: rgba(22, 131, 79, 0.16);
+        color: var(--pear);
+        font-weight: 650;
+      }
+
+      .sidebar-footer {
+        margin-top: auto;
+        display: grid;
+        gap: 10px;
+      }
+
+      .identity-card {
+        padding: 10px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--surface);
+      }
+
+      .identity-top {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+      }
+
+      .avatar {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        background: var(--surface-warm);
+        color: var(--coral);
+        font-weight: 800;
+        flex: 0 0 auto;
+      }
+
+      .identity-name {
+        font-weight: 650;
+      }
+
+      .identity-key {
+        color: var(--quiet);
+        font: 11px/1.3 ui-monospace, "SF Mono", Menlo, monospace;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .mini-meter {
+        height: 5px;
+        margin-top: 10px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: var(--surface-soft);
+      }
+
+      .mini-meter span {
+        display: block;
+        height: 100%;
+        width: 42%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, var(--pear), var(--teal));
+      }
+
+      .main {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .window-bar {
+        height: 44px;
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 14px;
+        padding: 0 16px;
+        background: rgba(255, 255, 255, 0.72);
+        border-bottom: 1px solid var(--line);
+        backdrop-filter: blur(18px);
+      }
+
+      .traffic {
+        display: flex;
+        gap: 7px;
+      }
+
+      .traffic span {
+        width: 11px;
+        height: 11px;
+        border-radius: 50%;
+        border: 1px solid rgba(0, 0, 0, 0.08);
+      }
+
+      .traffic span:nth-child(1) { background: #ff6159; }
+      .traffic span:nth-child(2) { background: #ffbd2e; }
+      .traffic span:nth-child(3) { background: #28c840; }
+
+      .tab-strip {
+        min-width: 0;
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        overflow: hidden;
+      }
+
+      .browser-tab {
+        min-width: 116px;
+        max-width: 212px;
+        height: 30px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0 9px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: rgba(255, 255, 255, 0.72);
+        color: var(--muted);
+      }
+
+      .browser-tab.active {
+        background: var(--surface);
+        color: var(--text);
+        border-color: var(--line-strong);
+        box-shadow: 0 1px 0 rgba(255, 255, 255, 0.9);
+      }
+
+      .tab-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--pear);
+        flex: 0 0 auto;
+      }
+
+      .browser-tab:nth-child(2) .tab-dot { background: var(--teal); }
+      .browser-tab:nth-child(3) .tab-dot { background: var(--coral); }
+
+      .tab-title {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 12px;
+      }
+
+      .tab-close {
+        margin-left: auto;
+        color: var(--quiet);
+        font-size: 16px;
+        line-height: 1;
+      }
+
+      .tab-action,
+      .icon-button {
+        width: 30px;
+        height: 30px;
+        display: grid;
+        place-items: center;
+        border-radius: var(--radius);
+        color: var(--muted);
+      }
+
+      .tab-action:hover,
+      .icon-button:hover {
+        background: var(--surface-soft);
+        color: var(--text);
+      }
+
+      .release-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        height: 26px;
+        padding: 0 10px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        color: var(--muted);
+        background: var(--surface);
+        font-size: 11px;
+        white-space: nowrap;
+      }
+
+      .release-pill::before {
+        content: "";
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--pear);
+        box-shadow: 0 0 0 3px var(--pear-soft);
+      }
+
+      .toolbar {
+        display: grid;
+        grid-template-columns: auto minmax(240px, 760px) auto;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 18px;
+        background: var(--surface);
+        border-bottom: 1px solid var(--line);
+      }
+
+      .toolbar-group {
+        display: flex;
+        gap: 4px;
+        align-items: center;
+      }
+
+      .address {
+        min-width: 0;
+        height: 38px;
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding: 0 10px 0 12px;
+        border: 1px solid var(--line-strong);
+        border-radius: var(--radius);
+        background: var(--canvas);
+      }
+
+      .address svg {
+        width: 16px;
+        height: 16px;
+        color: var(--pear);
+        flex: 0 0 auto;
+      }
+
+      .address input {
+        min-width: 0;
+        width: 100%;
+        border: 0;
+        outline: 0;
+        background: transparent;
+        color: var(--text);
+        font: 12px/1.2 ui-monospace, "SF Mono", Menlo, monospace;
+      }
+
+      .address input::selection {
+        background: rgba(22, 131, 79, 0.18);
+      }
+
+      .route-chip {
+        display: inline-flex;
+        align-items: center;
+        height: 22px;
+        padding: 0 8px;
+        border-radius: 999px;
+        background: var(--pear-soft);
+        color: var(--pear);
+        font-size: 11px;
+        font-weight: 650;
+        white-space: nowrap;
+      }
+
+      .content {
+        flex: 1;
+        min-height: 0;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 292px;
+        gap: 14px;
+        padding: 14px;
+      }
+
+      .stage,
+      .side-panel,
+      .view-panel {
+        min-width: 0;
+      }
+
+      .stage {
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--surface);
+        box-shadow: var(--shadow);
+        overflow: hidden;
+      }
+
+      .view-panel {
+        display: none;
+        min-height: 100%;
+      }
+
+      .view-panel.active {
+        display: block;
+      }
+
+      .page-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 18px;
+        padding: 24px 26px 18px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .page-kicker {
+        color: var(--quiet);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+
+      h1 {
+        margin-top: 4px;
+        font-size: clamp(24px, 3vw, 36px);
+        line-height: 1.04;
+        font-weight: 760;
+        letter-spacing: 0;
+      }
+
+      .page-subtitle {
+        max-width: 520px;
+        margin-top: 8px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .page-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+      }
+
+      .command {
+        margin: 22px 26px 0;
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 10px;
+        min-height: 54px;
+        padding: 0 8px 0 16px;
+        border: 1px solid var(--line-strong);
+        border-radius: var(--radius);
+        background: var(--canvas);
+      }
+
+      .command input {
+        min-width: 0;
+        border: 0;
+        outline: 0;
+        background: transparent;
+        color: var(--text);
+        font-size: 15px;
+      }
+
+      .command input::placeholder {
+        color: var(--quiet);
+      }
+
+      .command-key {
+        display: inline-flex;
+        align-items: center;
+        height: 24px;
+        padding: 0 8px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        color: var(--quiet);
+        background: var(--surface);
+        font: 11px/1 ui-monospace, "SF Mono", Menlo, monospace;
+      }
+
+      .grid-section {
+        padding: 22px 26px 26px;
+      }
+
+      .section-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+
+      h2 {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 750;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+
+      .card-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .site-card,
+      .app-card,
+      .setting-row,
+      .activity-row {
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--surface);
+      }
+
+      .site-card,
+      .app-card {
+        min-height: 144px;
+        padding: 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+
+      .card-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .site-icon {
+        width: 36px;
+        height: 36px;
+        display: grid;
+        place-items: center;
+        border-radius: var(--radius);
+        color: #fff;
+        font-weight: 800;
+        background: var(--pear);
+      }
+
+      .site-card:nth-child(2) .site-icon { background: var(--teal); }
+      .site-card:nth-child(3) .site-icon { background: var(--coral); }
+
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        height: 22px;
+        padding: 0 8px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        color: var(--muted);
+        background: var(--canvas);
+        font-size: 11px;
+        white-space: nowrap;
+      }
+
+      .badge.good {
+        color: var(--pear);
+        background: var(--pear-soft);
+        border-color: rgba(22, 131, 79, 0.16);
+      }
+
+      .badge.hot {
+        color: var(--coral);
+        background: #fff0ed;
+        border-color: rgba(228, 93, 69, 0.18);
+      }
+
+      .card-title {
+        font-size: 15px;
+        font-weight: 730;
+      }
+
+      .card-copy {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .mono-line {
+        margin-top: auto;
+        color: var(--quiet);
+        font: 11px/1.3 ui-monospace, "SF Mono", Menlo, monospace;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .chip-button {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        min-height: 30px;
+        padding: 0 10px;
+        border-color: var(--line);
+        border-radius: var(--radius);
+        background: var(--surface);
+        color: var(--muted);
+      }
+
+      .chip-button:hover {
+        background: var(--surface-soft);
+        color: var(--text);
+      }
+
+      .chip-button.primary {
+        color: #fff;
+        background: var(--pear);
+        border-color: var(--pear);
+        font-weight: 700;
+      }
+
+      .chip-button.primary:hover {
+        background: #116c41;
+      }
+
+      .side-panel {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+
+      .panel-card {
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: rgba(255, 255, 255, 0.82);
+        box-shadow: 0 10px 28px rgba(24, 36, 30, 0.06);
+        overflow: hidden;
+      }
+
+      .panel-title {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 13px 14px;
+        border-bottom: 1px solid var(--line);
+        font-weight: 730;
+      }
+
+      .status-dot {
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: var(--pear);
+        box-shadow: 0 0 0 4px var(--pear-soft);
+      }
+
+      .metric-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .metric {
+        padding: 13px 14px;
+      }
+
+      .metric:nth-child(odd) {
+        border-right: 1px solid var(--line);
+      }
+
+      .metric-value {
+        font-size: 21px;
+        font-weight: 780;
+        line-height: 1;
+      }
+
+      .metric-label {
+        margin-top: 4px;
+        color: var(--quiet);
+        font-size: 11px;
+      }
+
+      .activity-list {
+        display: grid;
+      }
+
+      .activity-row {
+        border-width: 0 0 1px;
+        border-radius: 0;
+        padding: 12px 14px;
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .activity-row:last-child {
+        border-bottom: 0;
+      }
+
+      .activity-icon {
+        width: 26px;
+        height: 26px;
+        display: grid;
+        place-items: center;
+        border-radius: 50%;
+        background: var(--surface-soft);
+        color: var(--teal);
+      }
+
+      .activity-title {
+        font-weight: 650;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .activity-sub {
+        color: var(--quiet);
+        font-size: 11px;
+      }
+
+      .app-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+        padding: 24px 26px 26px;
+      }
+
+      .app-card {
+        min-height: 120px;
+      }
+
+      .app-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .app-icon {
+        width: 42px;
+        height: 42px;
+        border-radius: var(--radius);
+        display: grid;
+        place-items: center;
+        color: #fff;
+        font-weight: 800;
+        background: var(--pear);
+        flex: 0 0 auto;
+      }
+
+      .app-card:nth-child(2) .app-icon { background: var(--coral); }
+      .app-card:nth-child(3) .app-icon { background: var(--teal); }
+      .app-card:nth-child(4) .app-icon { background: var(--amber); }
+
+      .list-view {
+        padding: 24px 26px 26px;
+        display: grid;
+        gap: 8px;
+      }
+
+      .setting-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 14px;
+        padding: 13px 14px;
+      }
+
+      .row-title {
+        font-weight: 700;
+      }
+
+      .row-sub {
+        color: var(--muted);
+        font-size: 12px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .toggle {
+        width: 38px;
+        height: 22px;
+        display: inline-flex;
+        align-items: center;
+        padding: 2px;
+        border-radius: 999px;
+        background: var(--pear);
+      }
+
+      .toggle::after {
+        content: "";
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        background: #fff;
+        transform: translateX(16px);
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.16);
+      }
+
+      .site-list {
+        padding: 24px 26px 26px;
+        display: grid;
+        gap: 10px;
+      }
+
+      .wide-card {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 12px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        padding: 14px;
+      }
+
+      .icon-button svg,
+      .tab-action svg,
+      .chip-button svg {
+        width: 16px;
+        height: 16px;
+        stroke-width: 1.8;
+      }
+
+      .hidden {
+        display: none !important;
+      }
+
+      @media (max-width: 1120px) {
+        .preview-app {
+          grid-template-columns: 78px minmax(0, 1fr);
+        }
+
+        .brand-copy,
+        .rail-item span,
+        .identity-name,
+        .identity-key,
+        .mini-meter {
+          display: none;
+        }
+
+        .brand,
+        .rail-item {
+          justify-content: center;
+        }
+
+        .sidebar {
+          padding: 16px 10px;
+        }
+
+        .card-grid {
+          grid-template-columns: 1fr 1fr;
+        }
+      }
+
+      @media (max-width: 900px) {
+        .content {
+          grid-template-columns: 1fr;
+          overflow: auto;
+        }
+
+        .side-panel {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+        }
+      }
+
+      @media (max-width: 720px) {
+        .preview-app {
+          display: flex;
+          flex-direction: column;
+        }
+
+        .sidebar {
+          flex-direction: row;
+          align-items: center;
+          overflow-x: auto;
+          border-right: 0;
+          border-bottom: 1px solid var(--line);
+        }
+
+        .brand {
+          border-bottom: 0;
+          border-right: 1px solid var(--line);
+          padding: 0 14px 0 4px;
+        }
+
+        .nav-group {
+          display: flex;
+          gap: 4px;
+        }
+
+        .rail-item {
+          width: 38px;
+          flex: 0 0 auto;
+        }
+
+        .sidebar-footer {
+          display: none;
+        }
+
+        .window-bar {
+          grid-template-columns: auto minmax(0, 1fr);
+        }
+
+        .release-pill {
+          display: none;
+        }
+
+        .toolbar {
+          grid-template-columns: auto minmax(0, 1fr);
+        }
+
+        .toolbar-group.right {
+          grid-column: 1 / -1;
+          justify-content: flex-end;
+        }
+
+        .page-head,
+        .command,
+        .grid-section,
+        .app-grid,
+        .list-view,
+        .site-list {
+          margin-left: 0;
+          margin-right: 0;
+          padding-left: 16px;
+          padding-right: 16px;
+        }
+
+        .command {
+          grid-template-columns: auto minmax(0, 1fr);
+        }
+
+        .command-key {
+          display: none;
+        }
+
+        .command .chip-button {
+          grid-column: 1 / -1;
+          justify-content: center;
+          width: 100%;
+        }
+
+        .card-grid,
+        .app-grid,
+        .side-panel {
+          grid-template-columns: 1fr;
+        }
+
+        .wide-card,
+        .setting-row {
+          grid-template-columns: auto minmax(0, 1fr);
+        }
+
+        .wide-card .chip-button,
+        .setting-row .chip-button,
+        .setting-row .toggle {
+          grid-column: 1 / -1;
+          justify-self: start;
+        }
+      }
+    </style>
+  </head>
+  <body class="pear-ui">
+    <div class="preview-app">
+      <aside class="sidebar" aria-label="PearBrowser sections">
+        <div class="brand">
+          <svg class="mark" viewBox="0 0 48 48" aria-hidden="true">
+            <path d="M25 6c4 1 6 4 6 8 7 3 11 10 11 18 0 8-7 13-18 13S6 40 6 32c0-8 4-15 11-18 1-4 3-7 8-8Z" fill="currentColor" opacity="0.14"/>
+            <path d="M24 9c3 0 5 3 5 7 7 2 10 9 10 16 0 7-6 10-15 10S9 39 9 32c0-7 4-14 10-16 0-4 2-7 5-7Z" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/>
+            <path d="M26 10c4-5 9-5 12-2-2 5-7 7-12 2Z" fill="currentColor"/>
+            <circle cx="18" cy="28" r="2.3" fill="currentColor"/>
+            <circle cx="30" cy="28" r="2.3" fill="currentColor"/>
+            <path d="M19 35c3 2 7 2 10 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          <div class="brand-copy">
+            <div class="brand-name">PearBrowser</div>
+            <div class="brand-tag">Release UI preview</div>
+          </div>
+        </div>
+
+        <nav class="nav-group" aria-label="Primary">
+          <button class="rail-item active" type="button" data-view="browse" aria-label="Browse">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+              <circle cx="12" cy="12" r="8"></circle>
+              <path d="M4 12h16M12 4c2 2 3 5 3 8s-1 6-3 8M12 4c-2 2-3 5-3 8s1 6 3 8"></path>
+            </svg>
+            <span>Browse</span>
+          </button>
+          <button class="rail-item" type="button" data-view="apps" aria-label="Apps">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+              <rect x="4" y="4" width="6" height="6" rx="1.4"></rect>
+              <rect x="14" y="4" width="6" height="6" rx="1.4"></rect>
+              <rect x="4" y="14" width="6" height="6" rx="1.4"></rect>
+              <rect x="14" y="14" width="6" height="6" rx="1.4"></rect>
+            </svg>
+            <span>Apps</span>
+          </button>
+          <button class="rail-item" type="button" data-view="sites" aria-label="Sites">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+              <path d="M5 20V6.5A2.5 2.5 0 0 1 7.5 4H19v16H7.5A2.5 2.5 0 0 1 5 17.5"></path>
+              <path d="M8 8h8M8 12h7M8 16h5"></path>
+            </svg>
+            <span>P2P Sites</span>
+          </button>
+          <button class="rail-item" type="button" data-view="library" aria-label="Library">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+              <path d="M7 4h10a2 2 0 0 1 2 2v15l-7-4-7 4V6a2 2 0 0 1 2-2Z"></path>
+            </svg>
+            <span>Library</span>
+          </button>
+          <button class="rail-item" type="button" data-view="settings" aria-label="Settings">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+              <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"></path>
+              <path d="M19 12a7.6 7.6 0 0 0-.1-1l2-1.5-2-3.5-2.4 1a8.5 8.5 0 0 0-1.7-1L14.5 3h-5L9.2 6a8.5 8.5 0 0 0-1.7 1L5.1 6l-2 3.5 2 1.5a7.6 7.6 0 0 0 0 2l-2 1.5 2 3.5 2.4-1c.5.4 1.1.7 1.7 1l.3 3h5l.3-3c.6-.3 1.2-.6 1.7-1l2.4 1 2-3.5-2-1.5c.1-.3.1-.7.1-1Z"></path>
+            </svg>
+            <span>Settings</span>
+          </button>
+        </nav>
+
+        <div class="sidebar-footer">
+          <div class="identity-card">
+            <div class="identity-top">
+              <div class="avatar">P</div>
+              <div>
+                <div class="identity-name">Local identity</div>
+                <div class="identity-key">pk_8fb2...c91a</div>
+              </div>
+            </div>
+            <div class="mini-meter" aria-label="Storage usage"><span></span></div>
+          </div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <div class="window-bar">
+          <div class="traffic" aria-hidden="true">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+          <div class="tab-strip" aria-label="Open tabs">
+            <div class="browser-tab active">
+              <span class="tab-dot"></span>
+              <span class="tab-title">PearBrowser Home</span>
+              <span class="tab-close">x</span>
+            </div>
+            <div class="browser-tab">
+              <span class="tab-dot"></span>
+              <span class="tab-title">p2pbuilders</span>
+              <span class="tab-close">x</span>
+            </div>
+            <div class="browser-tab">
+              <span class="tab-dot"></span>
+              <span class="tab-title">peerit</span>
+              <span class="tab-close">x</span>
+            </div>
+            <button class="tab-action" type="button" aria-label="New tab" title="New tab">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                <path d="M12 5v14M5 12h14"></path>
+              </svg>
+            </button>
+          </div>
+          <div class="release-pill">Next release concept</div>
+        </div>
+
+        <div class="toolbar">
+          <div class="toolbar-group">
+            <button class="icon-button" type="button" aria-label="Back" title="Back">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                <path d="m15 18-6-6 6-6"></path>
+              </svg>
+            </button>
+            <button class="icon-button" type="button" aria-label="Forward" title="Forward">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                <path d="m9 18 6-6-6-6"></path>
+              </svg>
+            </button>
+            <button class="icon-button" type="button" aria-label="Reload" title="Reload">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                <path d="M20 12a8 8 0 1 1-2.3-5.7"></path>
+                <path d="M20 4v6h-6"></path>
+              </svg>
+            </button>
+          </div>
+
+          <label class="address" aria-label="Address">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+              <path d="M12 3 5 6v5c0 5 3 8 7 10 4-2 7-5 7-10V6l-7-3Z"></path>
+              <path d="M9 12l2 2 4-5"></path>
+            </svg>
+            <input value="pear://explore" aria-label="Address value" />
+            <span class="route-chip">hybrid</span>
+          </label>
+
+          <div class="toolbar-group right">
+            <button class="icon-button" type="button" aria-label="Bookmark" title="Bookmark">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                <path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9L12 3Z"></path>
+              </svg>
+            </button>
+            <button class="icon-button" type="button" aria-label="Site details" title="Site details">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                <circle cx="12" cy="12" r="9"></circle>
+                <path d="M12 11v5M12 8h.01"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="content">
+          <section class="stage">
+            <div class="view-panel active" data-panel="browse">
+              <header class="page-head">
+                <div>
+                  <div class="page-kicker">Browse</div>
+                  <h1>Peer web</h1>
+                  <p class="page-subtitle">Trusted names, local history, and live hyper:// destinations in one quiet surface.</p>
+                </div>
+                <div class="page-actions">
+                  <button class="chip-button" type="button">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                      <path d="M5 12h14"></path>
+                      <path d="M12 5v14"></path>
+                    </svg>
+                    New
+                  </button>
+                  <button class="chip-button primary" type="button">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                      <path d="M5 12h14"></path>
+                      <path d="m13 6 6 6-6 6"></path>
+                    </svg>
+                    Open
+                  </button>
+                </div>
+              </header>
+
+              <label class="command">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                  <circle cx="11" cy="11" r="7"></circle>
+                  <path d="m16 16 4 4"></path>
+                </svg>
+                <input placeholder="Search, paste hyper://, or type a pearname" value="" />
+                <span class="command-key">Cmd K</span>
+              </label>
+
+              <div class="grid-section">
+                <div class="section-row">
+                  <h2>Live destinations</h2>
+                  <span class="badge good">3 relays reachable</span>
+                </div>
+                <div class="card-grid">
+                  <article class="site-card">
+                    <div class="card-top">
+                      <div class="site-icon">PB</div>
+                      <span class="badge good">pinned</span>
+                    </div>
+                    <div>
+                      <div class="card-title">PearBrowser Home</div>
+                      <p class="card-copy">Release notes, starter sites, and current network entry points.</p>
+                    </div>
+                    <div class="mono-line">hyper://1868916a...9e25d/</div>
+                  </article>
+                  <article class="site-card">
+                    <div class="card-top">
+                      <div class="site-icon">HN</div>
+                      <span class="badge">42 peers</span>
+                    </div>
+                    <div>
+                      <div class="card-title">p2pbuilders</div>
+                      <p class="card-copy">Posts and links from builders shipping on the peer web.</p>
+                    </div>
+                    <div class="mono-line">pearname://p2pbuilders</div>
+                  </article>
+                  <article class="site-card">
+                    <div class="card-top">
+                      <div class="site-icon">PI</div>
+                      <span class="badge hot">new</span>
+                    </div>
+                    <div>
+                      <div class="card-title">peerit</div>
+                      <p class="card-copy">A front page for community threads and published drives.</p>
+                    </div>
+                    <div class="mono-line">pearname://peerit</div>
+                  </article>
+                </div>
+              </div>
+            </div>
+
+            <div class="view-panel" data-panel="apps">
+              <header class="page-head">
+                <div>
+                  <div class="page-kicker">Apps</div>
+                  <h1>Apps</h1>
+                  <p class="page-subtitle">A quieter catalog view with stronger hierarchy and launch state.</p>
+                </div>
+                <button class="chip-button primary" type="button">Open catalog</button>
+              </header>
+              <div class="app-grid">
+                <article class="app-card">
+                  <div class="app-row">
+                    <div class="app-icon">K</div>
+                    <div>
+                      <div class="card-title">Keet</div>
+                      <p class="card-copy">Encrypted P2P chat and calls.</p>
+                    </div>
+                  </div>
+                  <div class="mono-line">pear://oeeoz3...jzpo</div>
+                </article>
+                <article class="app-card">
+                  <div class="app-row">
+                    <div class="app-icon">A</div>
+                    <div>
+                      <div class="card-title">anonGPT</div>
+                      <p class="card-copy">Private pay-per-inference chat.</p>
+                    </div>
+                  </div>
+                  <div class="mono-line">pear://rpzh3f...b6wo</div>
+                </article>
+                <article class="app-card">
+                  <div class="app-row">
+                    <div class="app-icon">P</div>
+                    <div>
+                      <div class="card-title">PearPass</div>
+                      <p class="card-copy">Local-first password manager.</p>
+                    </div>
+                  </div>
+                  <div class="mono-line">pear://tywsat...mtzo</div>
+                </article>
+                <article class="app-card">
+                  <div class="app-row">
+                    <div class="app-icon">PC</div>
+                    <div>
+                      <div class="card-title">Peercord</div>
+                      <p class="card-copy">Community chat over peers.</p>
+                    </div>
+                  </div>
+                  <div class="mono-line">pear://wmir47...mouy</div>
+                </article>
+              </div>
+            </div>
+
+            <div class="view-panel" data-panel="sites">
+              <header class="page-head">
+                <div>
+                  <div class="page-kicker">P2P Sites</div>
+                  <h1>Published sites</h1>
+                  <p class="page-subtitle">Drafts, pins, and live drive status collected into one publish surface.</p>
+                </div>
+                <button class="chip-button primary" type="button">Publish</button>
+              </header>
+              <div class="site-list">
+                <article class="wide-card">
+                  <div class="site-icon">PB</div>
+                  <div>
+                    <div class="row-title">PearBrowser Home</div>
+                    <div class="row-sub">Pinned on 3 relays - 18 peers - updated today</div>
+                  </div>
+                  <button class="chip-button" type="button">Open</button>
+                </article>
+                <article class="wide-card">
+                  <div class="site-icon" style="background: var(--amber)">D</div>
+                  <div>
+                    <div class="row-title">Draft: Release notes</div>
+                    <div class="row-sub">Local draft - not published</div>
+                  </div>
+                  <button class="chip-button" type="button">Edit</button>
+                </article>
+              </div>
+            </div>
+
+            <div class="view-panel" data-panel="library">
+              <header class="page-head">
+                <div>
+                  <div class="page-kicker">Library</div>
+                  <h1>Library</h1>
+                  <p class="page-subtitle">Bookmarks, recent drives, and local index results with less visual weight.</p>
+                </div>
+                <button class="chip-button" type="button">Sync</button>
+              </header>
+              <div class="list-view">
+                <article class="setting-row">
+                  <div>
+                    <div class="row-title">PearBrowser Home</div>
+                    <div class="row-sub">hyper://1868916a7a282ff0...709e25d/</div>
+                  </div>
+                  <span class="badge good">bookmark</span>
+                </article>
+                <article class="setting-row">
+                  <div>
+                    <div class="row-title">p2pbuilders</div>
+                    <div class="row-sub">pearname://p2pbuilders</div>
+                  </div>
+                  <span class="badge">history</span>
+                </article>
+                <article class="setting-row">
+                  <div>
+                    <div class="row-title">Keet app bundle</div>
+                    <div class="row-sub">pear://oeeoz3w6...zpo</div>
+                  </div>
+                  <span class="badge">app</span>
+                </article>
+              </div>
+            </div>
+
+            <div class="view-panel" data-panel="settings">
+              <header class="page-head">
+                <div>
+                  <div class="page-kicker">Settings</div>
+                  <h1>Settings</h1>
+                  <p class="page-subtitle">Identity, relays, and experimental flags grouped into compact rows.</p>
+                </div>
+              </header>
+              <div class="list-view">
+                <article class="setting-row">
+                  <div>
+                    <div class="row-title">Hybrid relay fetch</div>
+                    <div class="row-sub">Fallback to pure P2P when relays are unavailable</div>
+                  </div>
+                  <span class="toggle" aria-hidden="true"></span>
+                </article>
+                <article class="setting-row">
+                  <div>
+                    <div class="row-title">Device sync</div>
+                    <div class="row-sub">Encrypted bookmarks paired across this identity</div>
+                  </div>
+                  <span class="toggle" aria-hidden="true"></span>
+                </article>
+                <article class="setting-row">
+                  <div>
+                    <div class="row-title">Storage</div>
+                    <div class="row-sub">438 MB used locally</div>
+                  </div>
+                  <button class="chip-button" type="button">Manage</button>
+                </article>
+              </div>
+            </div>
+          </section>
+
+          <aside class="side-panel" aria-label="Session details">
+            <section class="panel-card">
+              <div class="panel-title">
+                <span>Network</span>
+                <span class="status-dot" aria-label="Connected"></span>
+              </div>
+              <div class="metric-grid">
+                <div class="metric">
+                  <div class="metric-value">28</div>
+                  <div class="metric-label">Peers</div>
+                </div>
+                <div class="metric">
+                  <div class="metric-value">3</div>
+                  <div class="metric-label">Relays</div>
+                </div>
+                <div class="metric">
+                  <div class="metric-value">12ms</div>
+                  <div class="metric-label">Proxy</div>
+                </div>
+                <div class="metric">
+                  <div class="metric-value">42%</div>
+                  <div class="metric-label">Cache</div>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel-card">
+              <div class="panel-title">
+                <span>Activity</span>
+                <span class="badge">live</span>
+              </div>
+              <div class="activity-list">
+                <div class="activity-row">
+                  <div class="activity-icon">OK</div>
+                  <div>
+                    <div class="activity-title">Landing page resolved</div>
+                    <div class="activity-sub">hybrid fetch - 18 peers</div>
+                  </div>
+                  <span class="activity-sub">now</span>
+                </div>
+                <div class="activity-row">
+                  <div class="activity-icon">UP</div>
+                  <div>
+                    <div class="activity-title">peerit opened</div>
+                    <div class="activity-sub">pearname registry</div>
+                  </div>
+                  <span class="activity-sub">2m</span>
+                </div>
+                <div class="activity-row">
+                  <div class="activity-icon">ON</div>
+                  <div>
+                    <div class="activity-title">Catalog updated</div>
+                    <div class="activity-sub">PearBrowser Network</div>
+                  </div>
+                  <span class="activity-sub">8m</span>
+                </div>
+              </div>
+            </section>
+          </aside>
+        </div>
+      </main>
+    </div>
+
+    <script>
+      const buttons = document.querySelectorAll('[data-view]')
+      const panels = document.querySelectorAll('[data-panel]')
+      const address = document.querySelector('.address input')
+      const title = document.querySelector('.browser-tab.active .tab-title')
+      const addresses = {
+        browse: 'pear://explore',
+        apps: 'hyperbee://pearbrowser-network/apps',
+        sites: 'pear://sites',
+        library: 'pear://library',
+        settings: 'pear://settings'
+      }
+      const titles = {
+        browse: 'PearBrowser Home',
+        apps: 'Apps',
+        sites: 'Published sites',
+        library: 'Library',
+        settings: 'Settings'
+      }
+
+      buttons.forEach((button) => {
+        button.addEventListener('click', () => {
+          const view = button.dataset.view
+          buttons.forEach((item) => item.classList.toggle('active', item === button))
+          panels.forEach((panel) => panel.classList.toggle('active', panel.dataset.panel === view))
+          if (address) address.value = addresses[view] || 'pear://explore'
+          if (title) title.textContent = titles[view] || 'PearBrowser'
+        })
+      })
+    </script>
+  </body>
+</html>

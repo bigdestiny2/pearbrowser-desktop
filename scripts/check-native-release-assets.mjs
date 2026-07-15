@@ -35,7 +35,8 @@ const report = verifyRelease(release, {
   tag,
   version,
   requirePublished: args.requirePublished,
-  requirePublicTrust: args.requirePublicTrust
+  requirePublicTrust: args.requirePublicTrust,
+  requireBackfillFormats: args.requireBackfillFormats
 })
 
 if (args.json) printJson(report)
@@ -50,7 +51,8 @@ function parseArgs (argv) {
     fixture: '',
     json: false,
     requirePublished: false,
-    requirePublicTrust: false
+    requirePublicTrust: false,
+    requireBackfillFormats: false
   }
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
@@ -60,6 +62,7 @@ function parseArgs (argv) {
     else if (arg === '--json') parsed.json = true
     else if (arg === '--require-published') parsed.requirePublished = true
     else if (arg === '--require-public-trust') parsed.requirePublicTrust = true
+    else if (arg === '--require-backfill-formats') parsed.requireBackfillFormats = true
     else if (arg === '-h' || arg === '--help') usage(0)
     else usage(2, `unknown argument: ${arg}`)
   }
@@ -74,8 +77,8 @@ function requireValue (argv, index, flag) {
 
 function usage (code, message = '') {
   if (message) console.error(`error: ${message}`)
-  console.error('usage: node scripts/check-native-release-assets.mjs [--tag v0.5.0] [--repo owner/repo] [--require-published] [--require-public-trust] [--json]')
-  console.error('       node scripts/check-native-release-assets.mjs --fixture release.json [--tag v0.5.0] [--require-public-trust] [--json]')
+  console.error('usage: node scripts/check-native-release-assets.mjs [--tag v0.5.0] [--repo owner/repo] [--require-published] [--require-public-trust] [--require-backfill-formats] [--json]')
+  console.error('       node scripts/check-native-release-assets.mjs --fixture release.json [--tag v0.5.0] [--require-public-trust] [--require-backfill-formats] [--json]')
   process.exit(code)
 }
 
@@ -236,6 +239,13 @@ function verifyPlatform (platform, assets, names, version, errors, options = {})
         errors.push(`missing public-trust macOS DMG for ${platform}/${arch}`)
       }
     }
+    if (options.requireBackfillFormats) {
+      const required = requiredBackfillFormat(platform)
+      const archArtifacts = artifactsByArch.get(arch) || []
+      if (!archArtifacts.some((asset) => required.pattern.test(asset.name))) {
+        errors.push(`missing required v0.5.0 backfill ${required.label} for ${platform}/${arch}`)
+      }
+    }
   }
 
   const sidecars = []
@@ -300,6 +310,13 @@ function isPrimaryArtifact (platform, name, version) {
   if (platform === 'windows') return /\.(?:msix|exe|msi|zip)$/i.test(name)
   if (platform === 'linux') return /\.(?:AppImage|deb|rpm|snap|tar\.gz|tgz|tar\.xz|zip)$/i.test(name)
   return false
+}
+
+function requiredBackfillFormat (platform) {
+  if (platform === 'macos') return { label: 'macOS .app.zip artifact', pattern: /\.app\.zip$/i }
+  if (platform === 'windows') return { label: 'Windows .msix artifact', pattern: /\.msix$/i }
+  if (platform === 'linux') return { label: 'Linux .AppImage artifact', pattern: /\.AppImage$/i }
+  return { label: `${platform} artifact`, pattern: /./ }
 }
 
 function escapeRegex (value) {

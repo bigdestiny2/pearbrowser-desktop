@@ -1,0 +1,196 @@
+/*
+ * Pear UI desktop entrypoint.
+ * Keep token values in sync with ../../../design-system/platform/css/pear-ui.css.
+ */
+
+:root,
+.pear-ui {
+  color-scheme: light;
+  --pear-color-canvas: #f6f8f7;
+  --pear-color-surface: #ffffff;
+  --pear-color-surface-soft: #eef3f1;
+  --pear-color-surface-warm: #fff7f1;
+  --pear-color-line: #dde6e2;
+  --pear-color-line-strong: #c9d6d0;
+  --pear-color-text: #17211b;
+  --pear-color-muted: #65736c;
+  --pear-color-quiet: #8a9790;
+  --pear-color-accent: #16834f;
+  --pear-color-accent-hover: #116c41;
+  --pear-color-accent-soft: #e5f5ec;
+  --pear-color-teal: #0f766e;
+  --pear-color-teal-soft: #e2f3f1;
+  --pear-color-coral: #e45d45;
+  --pear-color-coral-soft: #fff0ed;
+  --pear-color-amber: #b97812;
+  --pear-color-amber-soft: #fff4dc;
+  --pear-color-success: #16834f;
+  --pear-color-warning: #b97812;
+  --pear-color-error: #c2412f;
+  --pear-color-link: #0f766e;
+  --pear-color-chrome: rgba(255, 255, 255, 0.86);
+  --pear-color-chrome-soft: rgba(255, 255, 255, 0.78);
+  --pear-color-chrome-muted: rgba(255, 255, 255, 0.68);
+  --pear-color-floating: rgba(255, 255, 255, 0.92);
+  --pear-color-gradient-fill: #ffffff;
+  --pear-color-webview: #ffffff;
+  --pear-shadow-dropdown: 0 12px 32px -8px rgba(23, 33, 27, 0.42);
+
+  --pear-space-1: 2px;
+  --pear-space-2: 4px;
+  --pear-space-3: 6px;
+  --pear-space-4: 8px;
+  --pear-space-5: 10px;
+  --pear-space-6: 12px;
+  --pear-space-7: 14px;
+  --pear-space-8: 16px;
+  --pear-space-9: 18px;
+  --pear-space-10: 22px;
+  --pear-space-11: 24px;
+  --pear-space-12: 26px;
+  --pear-space-13: 32px;
+  --pear-space-14: 40px;
+
+  --pear-radius-control: 8px;
+  --pear-radius-card: 8px;
+  --pear-radius-panel: 8px;
+  --pear-radius-pill: 999px;
+
+  --pear-font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  --pear-font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --pear-text-caption: 11px;
+  --pear-text-small: 12px;
+  --pear-text-body: 13px;
+  --pear-text-body-large: 14px;
+  --pear-text-title: 15px;
+  --pear-text-heading: 24px;
+  --pear-text-display: 36px;
+  --pear-line-body: 1.45;
+  --pear-weight-medium: 650;
+  --pear-weight-semibold: 700;
+  --pear-weight-bold: 730;
+  --pear-weight-display: 760;
+
+  --pear-shadow-panel: 0 18px 48px rgba(24, 36, 30, 0.10);
+  --pear-shadow-soft: 0 10px 28px rgba(24, 36, 30, 0.06);
+}
+
+:root[data-theme="dark"],
+.pear-ui[data-theme="dark"],
+.theme-dark {
+  color-scheme: dark;
+  --pear-color-canvas: #0f1512;
+  --pear-color-surface: #171f1a;
+  --pear-color-surface-soft: #202a23;
+  --pear-color-surface-warm: #261d17;
+  --pear-color-line: #2f3d35;
+  --pear-color-line-strong: #45564c;
+  --pear-color-text: #eef7f1;
+  --pear-color-muted: #a2b1a8;
+  --pear-color-quiet: #74857b;
+  --pear-color-accent: #45d58b;
+  --pear-color-accent-hover: #6ee7a8;
+  --pear-color-accent-soft: #173527;
+  --pear-color-teal: #3fd0c2;
+  --pear-color-teal-soft: #143331;
+  --pear-color-coral: #ff8a75;
+  --pear-color-coral-soft: #3b211d;
+  --pear-color-amber: #f2bd5c;
+  --pear-color-amber-soft: #352816;
+  --pear-color-success: #45d58b;
+  --pear-color-warning: #f2bd5c;
+  --pear-color-error: #ff806b;
+  --pear-color-link: #3fd0c2;
+  --pear-color-chrome: rgba(15, 21, 18, 0.88);
+  --pear-color-chrome-soft: rgba(23, 31, 26, 0.84);
+  --pear-color-chrome-muted: rgba(23, 31, 26, 0.72);
+  --pear-color-floating: rgba(23, 31, 26, 0.94);
+  --pear-color-gradient-fill: #171f1a;
+  --pear-color-webview: #0b100d;
+  --pear-shadow-panel: 0 18px 48px rgba(0, 0, 0, 0.36);
+  --pear-shadow-soft: 0 10px 28px rgba(0, 0, 0, 0.24);
+  --pear-shadow-dropdown: 0 18px 42px -10px rgba(0, 0, 0, 0.62);
+}
+
+.pear-ui {
+  background: var(--pear-color-canvas);
+  color: var(--pear-color-text);
+  font: var(--pear-text-body) / var(--pear-line-body) var(--pear-font-ui);
+  letter-spacing: 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+.pear-ui .pear-card,
+.pear-card {
+  background: var(--pear-color-surface);
+  border: 1px solid var(--pear-color-line);
+  border-radius: var(--pear-radius-card);
+}
+
+.pear-ui .pear-panel,
+.pear-panel {
+  background: var(--pear-color-surface);
+  border: 1px solid var(--pear-color-line);
+  border-radius: var(--pear-radius-panel);
+  box-shadow: var(--pear-shadow-panel);
+}
+
+.pear-ui .pear-button,
+.pear-button {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--pear-space-3);
+  padding: 0 var(--pear-space-5);
+  border: 1px solid var(--pear-color-line);
+  border-radius: var(--pear-radius-control);
+  background: var(--pear-color-surface);
+  color: var(--pear-color-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--pear-text-small);
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+
+.pear-ui .pear-button:hover,
+.pear-button:hover {
+  background: var(--pear-color-surface-soft);
+  color: var(--pear-color-text);
+}
+
+.pear-ui .pear-button-primary,
+.pear-button-primary {
+  background: var(--pear-color-surface);
+  border-color: var(--pear-color-text);
+  color: var(--pear-color-text);
+  font-weight: var(--pear-weight-semibold);
+}
+
+.pear-ui .pear-button-primary:hover,
+.pear-button-primary:hover {
+  background: var(--pear-color-surface-soft);
+  border-color: var(--pear-color-text);
+  color: var(--pear-color-text);
+}
+
+.pear-ui .pear-badge,
+.pear-badge {
+  min-height: 22px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--pear-space-4);
+  border: 1px solid var(--pear-color-line);
+  border-radius: var(--pear-radius-pill);
+  background: var(--pear-color-canvas);
+  color: var(--pear-color-muted);
+  font-size: var(--pear-text-caption);
+  white-space: nowrap;
+}
+
+.pear-ui .pear-badge-good,
+.pear-badge-good {
+  background: var(--pear-color-accent-soft);
+  border-color: rgba(22, 131, 79, 0.16);
+  color: var(--pear-color-accent);
+}

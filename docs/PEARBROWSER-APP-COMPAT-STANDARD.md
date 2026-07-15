@@ -113,7 +113,7 @@ PearBrowser apps fall into three deployable shapes. The single number that matte
 
 - **PB-MANIFEST-2 (MUST, mobile).** Guarantee `/index.html` is present **and replicable from a cold node** before publishing. Mobile install gates on `drive.entry('/index.html')` (30s timeout that resolves anyway; a drive with `version > 0` short-circuits the check). A missing/misnamed entry yields a broken "installed" app.
 
-- **PB-MANIFEST-3 (MUST, both).** Use **relative** URLs (`href="style.css"`, `src="./app.js"`) for all assets and links. **Never** use root-absolute paths (`/style.css`). The proxy injects `<base href="http://localhost:PORT/app/<driveKey>/">`; absolute-root URLs escape your prefix and 404. *(The injected base origin is `localhost`, not `127.0.0.1`; both loopback variants are allowed.)*
+- **PB-MANIFEST-3 (MUST, both).** Use **relative** URLs (`href="style.css"`, `src="./app.js"`) for all assets and links. **Never** use root-absolute paths (`/style.css`). The desktop proxy injects `<base href="http://127.0.0.1:PORT/app/<driveKey>/">`; absolute-root URLs escape your prefix and 404. *(The generated desktop base origin is `127.0.0.1`, not `localhost`, because those are different browser origins and strict `script-src 'self'` / `style-src 'self'` pages break when their document and base origins differ.)*
 
 - **PB-MANIFEST-4 (MUST, both).** Make every navigable route a real file in the drive, or use hash routing (`#/route`). The only rewrite is trailing-slash/empty → `index.html`; there is **no SPA catch-all**. Extensionless server-style paths (`/settings`) 404 on deep-link/refresh.
 
@@ -277,7 +277,7 @@ Full-GUI app expecting tab embedding; HTTP status for control flow; multi-frame/
 
 - **PB-BRIDGECAPABILITIES-2 (MUST, desktop).** Do **not** depend on the rich object on desktop. Desktop client-side injects only `window.pear.swarm.v1` (+ gated `anongpt.infer`). For sync/identity/login/contacts on desktop, call the `/api/*` REST routes via `fetch()`. Write a `/api/*` fallback for any capability beyond swarm.
 
-- **PB-BRIDGECAPABILITIES-3 (MUST, both).** Read the per-page token from `<meta name="pear-api-token">` and send it as the `X-Pear-Token` header on every `/api/*` call. For the SSE endpoint `/api/swarm/events` only (which cannot set headers), pass `?token=`. Re-read the meta token on every load.
+- **PB-BRIDGECAPABILITIES-3 (MUST, both).** Read the per-page token from `<meta name="pear-api-token">` and send it as the `X-Pear-Token` header on every `/api/*` call. For EventSource streams, call header-authenticated `POST /api/swarm/ticket` first, then open `/api/swarm/events?...&ticket=<one-time-ticket>`; do not put bearer tokens in the stream URL. Re-read the meta token on every load.
 
 - **PB-BRIDGECAPABILITIES-4 (MUST, both — rationale corrected).** Do **not** persist/cache/hardcode/share the token; acquire it fresh from the meta tag each load. **Correction:** tokens are not only dropped on worklet restart — they carry a **hard 10-minute TTL** and a fresh token is re-minted on **every** HTML response. A reused token 401s after 10 min with no restart. Issue all `/api/*` calls same-origin so the request `Origin` is the loopback proxy origin; a cross-origin `Origin` is rejected 403 *"Invalid origin"* (the check only fires when an `Origin` header is present).
 
@@ -332,7 +332,7 @@ Targeting the Pear Runtime global; top-of-script `await window.pear.X` with no g
 ### Requirements
 
 - **PB-SECURITYSTORAGEUI-1 (MUST, both).** Relative URLs everywhere; never hardcode origin/scheme/port/host/driveKey. The loopback port is ephemeral (`listen(0)`); rely on the injected `<base href>`.
-- **PB-SECURITYSTORAGEUI-2 (MUST, both).** Read the token from `<meta name="pear-api-token">` at call time; send `X-Pear-Token` on every privileged `/api/*` call. Do not persist/log/reuse it or send it off-loopback. *(Note: the runtime's own SSE shim passes the token via `?token=` for EventSource — loopback-only and origin-scoped — so the "never in a URL" rule is about **your** code, not the sanctioned SSE path.)*
+- **PB-SECURITYSTORAGEUI-2 (MUST, both).** Read the token from `<meta name="pear-api-token">` at call time; send `X-Pear-Token` on every privileged `/api/*` call. Do not persist/log/reuse it, send it off-loopback, or place it in URLs. EventSource cannot set headers, so use the runtime ticket flow: mint a one-time SSE ticket through `/api/swarm/ticket`, then open `/api/swarm/events?...&ticket=...`.
 - **PB-SECURITYSTORAGEUI-3 (MUST, both).** Feature-detect every privileged surface; treat empty/missing token, missing `window.pear.*`, and 401/403 as "runtime unavailable" → render a read-only/offline fallback, never hang.
 - **PB-SECURITYSTORAGEUI-4 (MUST, both).** No ambient privilege: `login()` and arbitrary-topic `swarm.v1.join()` surface a deniable consent modal. Always handle denial/cancel and keep functioning. (Tier A/B swarm joins resolve without UI.)
 - **PB-SECURITYSTORAGEUI-5 (MUST, both).** Request minimum login scopes and function on a partial/empty grant (the user can deselect scopes before approving).
@@ -570,7 +570,7 @@ Run before release. Grouped by tier; **Tier A items are the universal floor**.
 
 ### Bridge & consent (any tier using `window.pear`)
 
-- [ ] `/api/*` calls send `X-Pear-Token` read from the meta tag **at call time** (never cached/persisted); only `/api/swarm/events` uses `?token=`.
+- [ ] `/api/*` calls send `X-Pear-Token` read from the meta tag **at call time** (never cached/persisted); EventSource first requests a one-time ticket with `POST /api/swarm/ticket`, then opens `/api/swarm/events?...&ticket=...`.
 - [ ] Login requests **minimal** scopes (no `pay`); functions on partial/empty grant; reads `attestation.scopes`/`profile` (may be null).
 - [ ] Login denial (403) and 2-min timeout handled with a retry affordance; no loop/hang.
 - [ ] `contacts.*` only after a `contacts:read` grant.

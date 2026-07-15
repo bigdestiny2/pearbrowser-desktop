@@ -64,7 +64,7 @@ covered by `npm test`.
 | Command | Classification |
 | --- | --- |
 | `node scripts/runtime-rpc-smoke.mjs --timeout 20000 --max-storage-percent 100 --json` | Diagnostic WebSocket smoke against an already-running app. Requires PearBrowser to be launched first; public smoke should fail if the profile is over quota |
-| `node scripts/release-rpc-story-smoke.mjs --timeout 60000 --request-timeout 80000 --local-stories --site-story --json` | Nonvisual story preflight against an already-running app. Loads the release catalogues, fetches the PearBrowser homepage through the local proxy, validates featured catalogue rows, confirms Peercord remains window-only, proves local search first-paint, curated/petname naming, bookmark/session round-trips, and with `--site-story` publishes/fetches/deletes a temporary site with HiveRelay unseed cleanup. It does not launch third-party apps or approve trust prompts |
+| `PEARBROWSER_RPC_DIAGNOSTIC_TOKEN=<random> node scripts/release-rpc-story-smoke.mjs --timeout 60000 --request-timeout 80000 --desktop-gui-stories --site-story --json` | Nonvisual story preflight against an app launched with the same `PEARBROWSER_RPC_DIAGNOSTIC_TOKEN`. Loads the release catalogues, fetches/reloads the PearBrowser homepage through the local proxy, verifies drive-info/site metadata, validates featured catalogue rows, confirms Peercord remains window-only, proves catalogue search/action rows, opens a safe catalogue-row Hyperdrive app through Browse, proves local search first-paint, curated/petname naming, bookmark/session round-trips with diagnostic reconnect, runs the Nostr trusted-contact proof, and emits release-evidence row suggestions. With `--site-story` it publishes/fetches/deletes a temporary site with HiveRelay unseed cleanup. It does not launch third-party Pear apps or approve trust prompts |
 | `npm run start` | Interactive Pear dev launch: `pear run --dev .` |
 | `npm run run` | Interactive Pear launch: `pear run .` |
 | `pear run pear://tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty` | Production browser launch/manual smoke gate |
@@ -154,12 +154,14 @@ The release scripts are operational gates, not ordinary tests:
 - `npm run package:macos-dmg -- --tag v0.5.0` creates the public-trust macOS
   drag-to-Applications DMG from the built `.app`; in CI it runs after app
   notarization and before artifact collection.
-- `npm run check:native-release-assets -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop`
+- `npm run check:native-release-assets -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --require-backfill-formats`
   verifies the attached GitHub release asset set after upload: macOS, Windows,
   and Linux native artifacts, one checksum index and manifest per
   platform/architecture pair, and one `.sha256` sidecar per installer/package
-  file. Add `--require-public-trust` to require a macOS DMG for each macOS
-  architecture before announcement.
+  file. The backfill-format gate requires macOS `.app.zip`, Windows `.msix`,
+  and Linux `.AppImage` assets for every detected architecture. Add
+  `--require-public-trust` to require a macOS DMG for each macOS architecture
+  before announcement.
 - `npm run verify:native-downloads -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --all`
   downloads the recommended native package for each supported desktop target and
   verifies the streamed bytes against the attached `.sha256` sidecar.
@@ -188,8 +190,8 @@ The release scripts are operational gates, not ordinary tests:
   package-proof assets. The WinGet draft license defaults to the root
   `package.json` SPDX expression unless `--license` is supplied.
 - `npm run check:public-trust-readiness -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --source-ref <merged-main-commit> --signing-secret-source github`
-  aggregates the public-trust signing preflight, published asset check,
-  byte-level download verifier, Linux AppImage metadata checker,
+  aggregates the public-trust signing preflight, published asset check with the
+  backfill-format gate, byte-level download verifier, Linux AppImage metadata checker,
   clean-install smoke-plan generator, package-manager draft dry-run, and release
   evidence checker. The `--source-ref` value is forwarded to the nested
   clean-install smoke-plan generator. It should exit non-zero until
@@ -201,7 +203,10 @@ The release scripts are operational gates, not ordinary tests:
   the release evidence handoff, and evidence-log verification.
 - `npm run -s generate:release-evidence-handoff` formats the current operator
   evidence log into grouped incomplete/failing rows with expected outcomes and
-  copy-ready `PASS`/`DEFER` table templates. It exits non-zero until the
+  copy-ready `PASS`/`DEFER` table templates. Add
+  `-- --story-smoke-json <story-smoke.json>` after a
+  `release-rpc-story-smoke.mjs --desktop-gui-stories --json` run to prefill
+  matching desktop GUI rows from the smoke output. It exits non-zero until the
   evidence log is complete, matching `check:release-evidence`.
 - `.github/workflows/desktop-native-release.yml` is the cross-platform release
   asset backfill path. It must be present on the default branch, and manual
@@ -212,15 +217,19 @@ The release scripts are operational gates, not ordinary tests:
   Release-published and tag-triggered runs default to `public-trust`. Latest proof: run
   `https://github.com/bigdestiny2/pearbrowser-desktop/actions/runs/28321639492`
   succeeded from `main` after the macOS Intel release-target merge and refreshed
-  20 `v0.5.0` assets, including macOS arm64/x64; the release asset checker now
-  runs after upload in the workflow.
+  20 `v0.5.0` assets, including macOS arm64/x64; the workflow now checks for
+  macOS `.app.zip`, Windows `.msix`, Linux `.AppImage`, sidecars, checksum
+  indexes, and manifests before upload, then reruns the release asset checker
+  with `--require-backfill-formats` after upload.
 - Fresh-peer verification should be run off the publisher box when possible.
-- Desktop source install pulls HiveRelay from npm at `^0.20.2` (published
-  `0.20.2`), confirmed by the warn-only `scripts/check-hiverelay-layout.mjs`
-  during `npm install`. (Updated 2026-06-29: superseded vendored tarballs.)
+- Desktop source install pulls HiveRelay from npm at `^0.20.2` (lockfile
+  `0.20.2`), confirmed by `scripts/check-hiverelay-layout.mjs` during
+  `npm install`. The guard exits quietly for the registry line and fails if the
+  dependency or lockfile drifts.
 - A standalone clone of `pearbrowser-desktop` is sufficient for `npm install`;
   the sibling `../../00-core/hiverelay` checkout is optional development
-  context until compatible relay packages are published to npm.
+  context, validated only when all three HiveRelay deps are explicit `file:`
+  workspace specs.
 
 ## Recommended Next Edge
 

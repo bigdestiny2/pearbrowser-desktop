@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PearBrowser Runtime Shell Preview</title>
+    <link rel="stylesheet" href="../styles.css" />
+  </head>
+  <body class="pear-ui">
+    <div id="app">
+      <div class="app">
+        <div class="topbar">
+          <div class="brand">
+            <div class="wordmark">
+              <span class="wordmark-bold">Pear</span><span class="wordmark-light">Browser</span>
+            </div>
+          </div>
+          <div class="tabs">
+            <button class="tab active"><span class="tab-label">Browse</span></button>
+            <button class="tab"><span class="tab-label">Apps</span></button>
+            <button class="tab"><span class="tab-label">P2P Sites</span></button>
+            <button class="tab"><span class="tab-label">Library</span></button>
+            <button class="tab"><span class="tab-label">Settings</span></button>
+          </div>
+          <div class="topbar-spacer"></div>
+        </div>
+
+        <div class="panel panel-browse">
+          <div class="browse">
+            <div class="tabstrip">
+              <button class="tabchip active"><span class="tabchip-pin on">●</span><span class="tabchip-title">PearBrowser Network</span><span class="tabchip-close">×</span></button>
+              <button class="tabchip pinned"><span class="tabchip-pin on">●</span><span class="tabchip-title">peerit</span><span class="tabchip-close">×</span></button>
+              <button class="tabchip-new">+</button>
+            </div>
+            <div class="urlbar">
+              <button class="nav">◀</button>
+              <button class="nav">▶</button>
+              <button class="nav">⟳</button>
+              <input value="hyper://03f0060a35451cfb6b68ad1dda1b8474ebb43fd9100071ccf7d67679a83ebb4f/" />
+              <button class="nav">☆</button>
+              <button class="nav">ⓘ</button>
+              <button class="nav go">Go</button>
+            </div>
+            <div class="browse-stage">
+              <div class="browse-welcome">
+                <div class="browse-welcome-inner">
+                  <div class="browse-welcome-logo">PearBrowser</div>
+                  <h2>Local-first P2P browser</h2>
+                  <p>Browse Hyperdrive sites, launch Pear apps, publish your own pages, and see relay state in one compact shell.</p>
+                  <div class="browse-welcome-actions">
+                    <button class="btn primary">Open catalog</button>
+                    <button class="btn">Publish site</button>
+                    <button class="btn subtle">Settings</button>
+                  </div>
+                  <div class="browse-welcome-tip"><strong>DHT · 7 peers · 7 relays</strong></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h1>Apps</h1>
+          <p class="subtitle">PearBrowser Network catalogue</p>
+          <div class="catalog-filter">
+            <input class="catalog-search" value="peer" />
+          </div>
+          <div class="app-grid">
+            <div class="app-card">
+              <div class="app-icon app-icon-fallback">P</div>
+              <div class="app-info">
+                <div class="app-name">peerit <span class="app-badge">HYPERSITE</span></div>
+                <div class="app-desc">The front page of the P2P internet, pinned and launchable from the catalogue.</div>
+                <div class="app-meta">hyper://ec6e2d6d... · 9 peers</div>
+              </div>
+              <div class="app-actions">
+                <button class="btn primary">Run in tab</button>
+                <button class="btn subtle">Details</button>
+              </div>
+            </div>
+            <div class="app-card">
+              <div class="app-icon app-icon-fallback">K</div>
+              <div class="app-info">
+                <div class="app-name">Keet</div>
+                <div class="app-desc">End-to-end encrypted P2P chat, voice, and video.</div>
+                <div class="app-meta">pear://oeeoz3... · standalone</div>
+              </div>
+              <div class="app-actions">
+                <button class="btn primary">Open</button>
+              </div>
+            </div>
+          </div>
+          <div class="settings-card">
+            <div class="settings-row">
+              <div>
+                <div class="settings-label">Relays</div>
+                <div class="settings-subtle">Hybrid fetch enabled with live capability badges.</div>
+              </div>
+              <span class="relay-cap-pill">hyperswarm</span>
+              <span class="relay-cap-pill relay-cap-pill-new">dht-relay-ws</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="status ok"><span class="dot"></span>DHT · 7 peers · 7 relays · proxy :18788</div>
+      </div>
+    </div>
+  </body>
+</html>

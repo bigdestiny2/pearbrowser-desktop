@@ -2,31 +2,32 @@
  * Identity — user's root keypair with BIP-39 seed phrase backup.
  *
  * Phase 1 ticket 3 of the Holepunch alignment plan. Matches the Keet-style
- * identity model: one root keypair per user that can be exported as a 12-word
+ * identity model: one root keypair per user that can be exported as a seed
  * phrase and restored on a new device.
  *
  * Storage:
- *   - The seed (raw 16 bytes for BIP-39 128-bit entropy) is persisted at
- *     `<storagePath>/identity.json`. Not encrypted at rest — we're inside
- *     the app's sandbox. A future improvement is to use the OS keystore.
+ *   - The entropy (raw 16/32 bytes for BIP-39 128/256-bit) is persisted at
+ *     `<storagePath>/identity.json`. Not encrypted at rest by default — we're
+ *     inside the app's sandbox — but SEC0 (see below) can wrap it in an
+ *     argon2id+secretbox vault.
  *   - The derived keypair is ed25519 (matches noise-curve25519 / Hyperswarm
  *     keypair shape).
  *
- * BIP-39 layer:
- *   - 128-bit entropy → 12-word mnemonic
- *   - Word list is the canonical English BIP-39 list (2048 words)
- *   - Checksum is the first 4 bits of SHA-256(entropy)
- *   - No passphrase support in Phase 1 (can be added)
- *
- * We avoid npm dependencies (no `bip39`, no `@scure/bip39`) because they use
- * Node's `crypto` module or `pbkdf2` which aren't available inside Bare.
+ * BIP-39 layer (v2, 2026-07 — standards-compliant):
+ *   - 256-bit entropy → 24-word mnemonic, via Holepunch's `bip39-mnemonic`
+ *     (pure JS over sodium-universal, so it runs under Bare).
+ *   - The seed is the REAL BIP-39 PBKDF2-HMAC-SHA512 output (not the pre-v2
+ *     SHA-512(entropy) shortcut), so a phrase minted here restores in Keet,
+ *     hardware wallets, and any BIP-39 tool. Portable by construction.
+ *   - HARD CUTOVER from v1: the same phrase now derives DIFFERENT pubkeys than
+ *     the old SHA-512 path, so pre-v2 identities must be regenerated.
  */
 
 const fs = require('bare-fs')
 const path = require('bare-path')
 const crypto = require('bare-crypto')
 const b4a = require('b4a')
-const WORDLIST = require('./bip39-wordlist.js')
+const bip39 = require('bip39-mnemonic')
 
 // sodium-universal is already in the dependency graph via hyperswarm /
 // autobase. We use it for ed25519 detached signing so pages can sign
@@ -34,82 +35,41 @@ const WORDLIST = require('./bip39-wordlist.js')
 let sodium = null
 try { sodium = require('sodium-universal') } catch (_) { /* optional */ }
 
-if (!Array.isArray(WORDLIST) || WORDLIST.length !== 2048) {
-  throw new Error('BIP-39 wordlist integrity check failed')
-}
-
-// --- BIP-39 helpers ---
+// --- BIP-39 helpers (standards-compliant, via Holepunch bip39-mnemonic) ------
+//
+// Thin wrappers so the rest of the file (and external importers) keep the same
+// names, but every call now routes through the canonical BIP-39 implementation
+// used by Keet/keet-identity-key. Mnemonics interoperate with any BIP-39 tool.
 
 function entropyToMnemonic (entropyBytes) {
   if (!b4a.isBuffer(entropyBytes) && !(entropyBytes instanceof Uint8Array)) {
     throw new TypeError('entropy must be a Buffer/Uint8Array')
   }
-  if (entropyBytes.length !== 16 && entropyBytes.length !== 32) {
-    throw new RangeError('entropy must be 16 bytes (12 words) or 32 bytes (24 words)')
-  }
-  const entBits = entropyBytes.length * 8
-  const csBits = entBits / 32
-  // Compute checksum
-  const hash = crypto.createHash('sha256').update(entropyBytes).digest()
-  // Build a big binary string (entropy + checksum first-csBits bits)
-  let bits = ''
-  for (let i = 0; i < entropyBytes.length; i++) {
-    bits += entropyBytes[i].toString(2).padStart(8, '0')
-  }
-  const firstByte = hash[0]
-  const csBinary = firstByte.toString(2).padStart(8, '0').slice(0, csBits)
-  bits += csBinary
-  // Split into 11-bit groups
-  const words = []
-  for (let i = 0; i < bits.length; i += 11) {
-    const index = parseInt(bits.slice(i, i + 11), 2)
-    words.push(WORDLIST[index])
-  }
-  return words.join(' ')
+  return bip39.entropyToMnemonic(b4a.from(entropyBytes))
 }
 
 function mnemonicToEntropy (mnemonic) {
   if (typeof mnemonic !== 'string') throw new TypeError('mnemonic must be a string')
-  const words = mnemonic.trim().toLowerCase().split(/\s+/)
-  if (words.length !== 12 && words.length !== 24) {
-    throw new Error('mnemonic must be 12 or 24 words')
-  }
-  // Map words to indices
-  const bits = words.map((w) => {
-    const idx = WORDLIST.indexOf(w)
-    if (idx === -1) throw new Error(`invalid word in mnemonic: "${w}"`)
-    return idx.toString(2).padStart(11, '0')
-  }).join('')
-  const entBits = (words.length * 11 * 32) / 33
-  const csBits = entBits / 32
-  const entropyBits = bits.slice(0, entBits)
-  const checksumBits = bits.slice(entBits)
-  // Reconstruct entropy bytes
-  const entropy = b4a.alloc(entBits / 8)
-  for (let i = 0; i < entropy.length; i++) {
-    entropy[i] = parseInt(entropyBits.slice(i * 8, i * 8 + 8), 2)
-  }
-  // Verify checksum
-  const hash = crypto.createHash('sha256').update(entropy).digest()
-  const expectedChecksum = hash[0].toString(2).padStart(8, '0').slice(0, csBits)
-  if (expectedChecksum !== checksumBits) {
-    throw new Error('mnemonic checksum invalid — phrase is corrupted')
-  }
-  return entropy
+  // bip39-mnemonic normalizes + validates the checksum, throwing on a bad phrase.
+  return b4a.from(bip39.mnemonicToEntropy(mnemonic))
 }
 
 function validateMnemonic (mnemonic) {
-  try { mnemonicToEntropy(mnemonic); return true } catch (_) { return false }
+  try { return bip39.validateMnemonic(mnemonic) } catch (_) { return false }
 }
 
 /**
- * Derive a seed suitable for a 32-byte keypair from the BIP-39 entropy.
- * We use SHA-512 of the entropy (a simplified derivation — not the BIP-39
- * PBKDF2 path, but produces a deterministic 32-byte seed from the phrase
- * which is sufficient for our purposes since we don't derive HD wallets).
+ * Derive the 32-byte ed25519 seed from BIP-39 entropy — the REAL BIP-39 path:
+ * entropy → mnemonic → PBKDF2-HMAC-SHA512 → 64-byte seed, of which we take the
+ * first 32 bytes as the ed25519 / Corestore-namespace seed.
+ *
+ * ASYNC (PBKDF2 is intentionally slow). Callers cache the result on this._seed
+ * so getSeed()/getAppKeypair()/sign() stay synchronous once ready() resolves.
  */
-function entropyToSeed (entropyBytes) {
-  return crypto.createHash('sha512').update(entropyBytes).digest().slice(0, 32)
+async function entropyToSeed (entropyBytes) {
+  const mnemonic = bip39.entropyToMnemonic(b4a.from(entropyBytes))
+  const seed = await bip39.mnemonicToSeed(mnemonic)
+  return b4a.from(seed).slice(0, 32)
 }
 
 // --- Identity manager ---
@@ -150,7 +110,7 @@ class Identity {
         if (this._entropy.length !== 16 && this._entropy.length !== 32) {
           throw new Error('Persisted entropy has invalid length')
         }
-        this._seed = entropyToSeed(this._entropy)
+        this._seed = await entropyToSeed(this._entropy)
         return
       }
     } catch (err) {
@@ -158,9 +118,9 @@ class Identity {
         console.warn('[Identity] load failed, regenerating:', err.message)
       }
     }
-    // Generate fresh 128-bit entropy
-    this._entropy = crypto.randomBytes(16)
-    this._seed = entropyToSeed(this._entropy)
+    // Generate fresh 256-bit entropy (24-word mnemonic — the Keet standard).
+    this._entropy = crypto.randomBytes(32)
+    this._seed = await entropyToSeed(this._entropy)
     this._persist()
   }
 
@@ -201,13 +161,13 @@ class Identity {
    * Unlock an encrypted-at-rest identity with `passphrase`. Fails CLOSED (throws)
    * on the wrong passphrase. No-op if already unlocked.
    */
-  unlock (passphrase) {
+  async unlock (passphrase) {
     if (!this._locked) return true
     const sv = require('./seed-vault.cjs')
     const entropy = sv.decryptEntropy(this._encryptedVault, passphrase)
     if (entropy.length !== 16 && entropy.length !== 32) throw new Error('decrypted entropy has invalid length')
     this._entropy = entropy
-    this._seed = entropyToSeed(entropy)
+    this._seed = await entropyToSeed(entropy)
     this._passphrase = passphrase
     this._locked = false
     this._encryptedVault = null
@@ -517,10 +477,10 @@ class Identity {
    * The caller is responsible for closing the current Corestore and reopening
    * a new one after this — data stored under the old identity is NOT migrated.
    */
-  restoreFromMnemonic (mnemonic) {
+  async restoreFromMnemonic (mnemonic) {
     const entropy = mnemonicToEntropy(mnemonic)
     this._entropy = entropy
-    this._seed = entropyToSeed(entropy)
+    this._seed = await entropyToSeed(entropy)
     this._persist()
   }
 
@@ -528,9 +488,9 @@ class Identity {
    * Generate a fresh identity and replace the persisted one.
    * Same caveat as restoreFromMnemonic — data from old identity is orphaned.
    */
-  rotate () {
-    this._entropy = crypto.randomBytes(16)
-    this._seed = entropyToSeed(this._entropy)
+  async rotate () {
+    this._entropy = crypto.randomBytes(32)
+    this._seed = await entropyToSeed(this._entropy)
     this._persist()
   }
 }
@@ -540,6 +500,7 @@ module.exports = {
   entropyToMnemonic,
   mnemonicToEntropy,
   validateMnemonic,
-  entropyToSeed,
-  WORDLIST,
+  entropyToSeed, // NOTE: now async (standards-compliant BIP-39 PBKDF2)
+  mnemonicToSeed: bip39.mnemonicToSeed,
+  generateMnemonic: bip39.generateMnemonic,
 }

@@ -25,6 +25,13 @@ jobs:
           ref: de85d420c942d433905324c3e098acc34458a23a
           path: pear-ecosystem/01-browser/PearBrowser
 
+      - name: Checkout HiveRelay release contract
+        uses: actions/checkout@v4
+        with:
+          repository: bigdestiny2/P2P-Hiverelay
+          ref: v0.20.2
+          path: pear-ecosystem/00-core/hiverelay
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -32,9 +39,26 @@ jobs:
           cache: npm
           cache-dependency-path: pear-ecosystem/01-browser/pearbrowser-desktop/package-lock.json
 
-      - name: Verify HiveRelay layout
+      - name: Guard HiveRelay 0.20.2 workspace layout
         working-directory: pear-ecosystem/01-browser/pearbrowser-desktop
-        run: node scripts/check-hiverelay-layout.mjs
+        run: |
+          node scripts/check-hiverelay-layout.mjs
+          node - <<'NODE'
+          const { readFileSync } = require('node:fs')
+          const { join } = require('node:path')
+          const expected = [
+            ['p2p-hiverelay', '0.20.2', 'pear-ecosystem/00-core/hiverelay/packages/core/package.json'],
+            ['p2p-hiverelay-client', '0.20.2', 'pear-ecosystem/00-core/hiverelay/packages/client/package.json'],
+            ['p2p-hiverelay-verifier', '0.20.2', 'pear-ecosystem/00-core/hiverelay/packages/verifier/package.json']
+          ]
+          for (const [name, version, rel] of expected) {
+            const pkg = JSON.parse(readFileSync(join(process.env.GITHUB_WORKSPACE, rel), 'utf8'))
+            if (pkg.name !== name || pkg.version !== version) {
+              throw new Error(`${rel} expected ${name}@${version}, found ${pkg.name || '(missing)'}@${pkg.version || '(missing)'}`)
+            }
+            console.log(`ok ${name}@${version}`)
+          }
+          NODE
 
       - name: Verify HiveRelay packages are published to npm
         working-directory: pear-ecosystem/01-browser/pearbrowser-desktop

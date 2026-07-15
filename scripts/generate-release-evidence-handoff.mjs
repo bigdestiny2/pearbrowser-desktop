@@ -17,6 +17,7 @@ export function buildEvidenceHandoff (markdown, options = {}) {
   const file = options.file || DEFAULT_LOG.pathname
   const analysis = analyzeReleaseEvidence(markdown)
   const rows = indexEvidenceRows(markdown)
+  const automatedRows = indexAutomatedEvidenceRows(options.storySmoke)
   const blockers = mergeDuplicateBlockers([
     ...analysis.incomplete.map((item) => ({ ...item, status: 'incomplete' })),
     ...analysis.failures.map((item) => ({ ...item, status: 'failure' }))
@@ -25,6 +26,7 @@ export function buildEvidenceHandoff (markdown, options = {}) {
 
   for (const blocker of blockers) {
     const row = findIndexedRow(rows, blocker)
+    const automatedEvidence = findAutomatedEvidenceRow(automatedRows, blocker)
     const item = {
       section: blocker.section,
       item: blocker.item,
@@ -35,7 +37,8 @@ export function buildEvidenceHandoff (markdown, options = {}) {
       result: row?.result || '',
       evidence: row?.evidence || '',
       answer: row?.answer || '',
-      template: row ? templateForRow(row, blocker) : ''
+      automatedEvidence,
+      template: row ? templateForRow(row, blocker, automatedEvidence) : ''
     }
     if (!groupsBySection.has(item.section)) {
       groupsBySection.set(item.section, { section: item.section, items: [] })
@@ -85,6 +88,9 @@ export function formatEvidenceHandoffMarkdown (handoff) {
         if (item.expected) out.push(`  - Expected: ${item.expected}`)
         if (item.result || item.evidence || item.answer) {
           out.push(`  - Current: ${currentStateFor(item)}`)
+        }
+        if (item.automatedEvidence) {
+          out.push(`  - Automated evidence: ${item.automatedEvidence.result} - ${item.automatedEvidence.evidence}`)
         }
         if (item.template) {
           out.push('  - Fill:')
@@ -207,7 +213,7 @@ function mergeReasons (...reasons) {
   return [...new Set(reasons.flatMap((reason) => String(reason || '').split(/\s*;\s*/)).filter(Boolean))].join('; ')
 }
 
-function templateForRow (row, blocker) {
+function templateForRow (row, blocker, automatedEvidence = null) {
   if (row.kind === 'metadata') {
     return `| ${row.item} | <record value> |`
   }
@@ -215,11 +221,45 @@ function templateForRow (row, blocker) {
     return `| ${row.originalQuestion || row.item} | ${decisionTemplateValue(row, blocker)} |`
   }
   if (row.kind === 'gate') {
-    const status = PASS_STATUSES.has(row.result) ? row.result : '<PASS|DEFER>'
-    const evidence = row.evidence || '<evidence path, URL, or terminal excerpt>'
+    const status = automatedEvidence?.result || (PASS_STATUSES.has(row.result) ? row.result : '<PASS|DEFER>')
+    const evidence = automatedEvidence?.evidence || row.evidence || '<evidence path, URL, or terminal excerpt>'
     return `| ${row.item} | ${row.expected || '<expected result>'} | ${status} | ${evidence} |`
   }
   return ''
+}
+
+function indexAutomatedEvidenceRows (storySmoke) {
+  const report = normalizeStorySmokeReport(storySmoke)
+  const rawRows = Array.isArray(report?.releaseEvidence?.rows)
+    ? report.releaseEvidence.rows
+    : Array.isArray(report?.evidenceRows)
+        ? report.evidenceRows
+        : []
+  const rows = []
+
+  for (const row of rawRows) {
+    const section = normalize(row.section || '')
+    const item = normalize(row.gate || row.item || '')
+    const result = normalizeUpper(row.result || 'PASS')
+    const evidence = normalize(row.evidence || '')
+    if (!section || !item || !PASS_STATUSES.has(result) || !evidence) continue
+    rows.push({ section, item, result, evidence })
+  }
+
+  return rows
+}
+
+function normalizeStorySmokeReport (storySmoke) {
+  if (!storySmoke) return null
+  if (typeof storySmoke === 'string') {
+    try { return JSON.parse(storySmoke) } catch { return null }
+  }
+  if (typeof storySmoke === 'object') return storySmoke
+  return null
+}
+
+function findAutomatedEvidenceRow (rows, blocker) {
+  return rows.find((row) => row.section === blocker.section && row.item === blocker.item) || null
 }
 
 function decisionTemplateValue (row, blocker) {
@@ -259,12 +299,14 @@ function normalizeFormat (value) {
 function parseArgs (argv) {
   const parsed = {
     file: DEFAULT_LOG,
-    format: 'markdown'
+    format: 'markdown',
+    storySmokeFile: null
   }
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
     if (arg === '--file') parsed.file = new URL(requireValue(argv, ++i, arg), pathToFileURL(process.cwd() + '/'))
     else if (arg === '--format') parsed.format = normalizeFormat(requireValue(argv, ++i, arg))
+    else if (arg === '--story-smoke-json') parsed.storySmokeFile = new URL(requireValue(argv, ++i, arg), pathToFileURL(process.cwd() + '/'))
     else if (arg === '--json') parsed.format = 'json'
     else if (arg === '-h' || arg === '--help') usage(0)
     else usage(2, `unknown option: ${arg}`)
@@ -280,14 +322,15 @@ function requireValue (argv, index, flag) {
 
 function usage (code, message = '') {
   if (message) console.error('error:', message)
-  console.error('usage: node scripts/generate-release-evidence-handoff.mjs [--file docs/RELEASE_SMOKE_EVIDENCE_LOG_2026-06-23.md] [--format markdown|json] [--json]')
+  console.error('usage: node scripts/generate-release-evidence-handoff.mjs [--file docs/RELEASE_SMOKE_EVIDENCE_LOG_2026-06-23.md] [--story-smoke-json story-smoke.json] [--format markdown|json] [--json]')
   process.exit(code)
 }
 
 function main () {
   const args = parseArgs(process.argv.slice(2))
   const markdown = readFileSync(args.file, 'utf8')
-  const handoff = buildEvidenceHandoff(markdown, { file: args.file.pathname })
+  const storySmoke = args.storySmokeFile ? JSON.parse(readFileSync(args.storySmokeFile, 'utf8')) : null
+  const handoff = buildEvidenceHandoff(markdown, { file: args.file.pathname, storySmoke })
   if (args.format === 'json') console.log(JSON.stringify(handoff, null, 2))
   else console.log(formatEvidenceHandoffMarkdown(handoff))
   process.exit(handoff.ok ? 0 : 1)
