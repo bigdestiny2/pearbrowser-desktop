@@ -1,9 +1,11 @@
 # PearBrowser Desktop v0.6.0 — operator release runbook
 
-Date: 2026-07-13  
+Date: 2026-07-15
 Tag: `v0.6.0`  
 Repo: `bigdestiny2/pearbrowser-desktop`  
 Production link: `pear://tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty` (stable; length advances on release)
+Release source merge: `4e0f56adadf7e33f0c7686be563349fe56f3985a`
+Released Pear length: `63158`
 
 This document is the **release schedule/routine** for shipping this version. It
 compresses `docs/MANUAL_RELEASE_SMOKE_2026-06-23.md`, `docs/NATIVE_RELEASE_PACKAGING.md`,
@@ -158,31 +160,32 @@ Do **not** announce if:
 ## 8. Post-release
 
 - [ ] Publish draft GitHub release
-- [ ] Update README “Current release” with **new length** + “fresh-peer verified”
-- [ ] Commit length record (pattern: “Record v0.6.0 Pear release length”)
+- [x] Update README “Current release” with **new length** + precise fresh-peer/replication evidence
+- [x] Commit length record (pattern: “Record v0.6.0 Pear release length”)
 - [ ] Optional: package-manager drafts (`generate:package-manager-manifests`)
 - [ ] Announce (Discord/community) with install guide + pear:// fallback
 
 ## Status of this run
 
-Filled while preparing the candidate (2026-07-13):
+Filled while preparing and releasing the desktop preview (2026-07-15):
 
 | Step | Status |
 |------|--------|
 | Version bump 0.6.0 (package, lock, CMake, AppStream) | **done** |
 | CHANGELOG v0.6.0 | **done** |
 | README / install docs retargeted to v0.6.0 | **done** |
-| `npm test` | **640/640 pass** |
+| `npm test` | **640/640 pass** (including sibling mobile source-contract checks) |
 | `git diff --check` | **clean** |
 | `npm audit --audit-level=high` | **0 vulnerabilities** |
 | `check:appling-release --tag v0.6.0` | **ok** (PearBrowser 0.6.0 → production key) |
 | `check:linux-appimage-metadata` | **ok** |
-| `check-relays.js` | **ok** (1 unique DHT relay, 10 live connections) |
-| Production `pear info` baseline | **release/length 45758** (pre-v0.6.0; advances after `release-prod.sh`) |
-| Merge to main | **operator** |
-| `./scripts/release-prod.sh` | **operator** (publishes production drive; do not skip pin in production) |
+| `check-relays.js` | **ok** (1 unique DHT relay, 11 live connections) |
+| Production `pear info` | **release/length 63158** (advanced from 45758) |
+| Merge to main | **done** (`4e0f56adadf7e33f0c7686be563349fe56f3985a`; main CI green) |
+| `./scripts/release-prod.sh` | **done** (five pin acceptances; durable seeder observed five remote peers) |
 | `gh release create v0.6.0` + native workflow | **operator** |
-| Evidence log + announcement | **operator** |
+| Production stable-address runtime/story evidence | **done** (DHT/proxy/relay and first-party desktop stories pass) |
+| Evidence log + announcement | **in progress** |
 
 Preflight log (this machine): capture under implementer scratch
 `release-v0.6.0-preflight.log`.

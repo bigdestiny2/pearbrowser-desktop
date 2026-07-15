@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.6.0 — 2026-07-13
+## v0.6.0 — 2026-07-15
 
 Privacy-first browser release: Content Shield (Brave-grade ad/tracker blocking for `hyper://` and proxied clearnet), Pear Plugins foundation, optional history, zero telemetry, and on-device Ask Browser / QVAC AI kept operational.
 
@@ -28,6 +28,7 @@ Privacy-first browser release: Content Shield (Brave-grade ad/tracker blocking f
 
 ### Distribution scope and known limits
 
+- Released the stable Pear production key at length `63158` (from `45758`), verified a fresh-peer metadata/content scan of `8515` entries, received five HiveRelay pin acceptances, and observed five live remote replication peers. A publisher-side fresh-peer blob listing timed out behind the local NAT, so no same-box blob-sample claim is made.
 - `v0.6.0` is a **desktop-only preview** release. Mobile signing, store validation, and real-device certification are outside this cut.
 - Native desktop packages remain package-proof preview artifacts until macOS Developer ID notarization and Windows public-trust signing are verified; operating systems may show trust warnings.
 - Peercord remains a third-party standalone Pear target. Its catalogue/launch-mode contract is verified, but this release does not automate or persist a human trust approval and does not claim a fresh manual Peercord launch.
