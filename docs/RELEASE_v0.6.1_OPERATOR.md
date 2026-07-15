@@ -68,11 +68,23 @@ Additionally verify:
 ## Final record
 
 - Runtime publication source: `d71ba5eed973706bc02eeeab1e7b62898870e566`
-- Release source/tag target: pending final record merge
+- Release source/tag target: `d5511bbbd2f9d7b58f018624180c96ade9a17eb7`
 - Stable Pear length: `63165` (from `63158`); fresh-peer exact-length and
   `/index.html` read passed with five peers, plus five HiveRelay pin acceptances
-- GitHub release: pending
-- Native workflow: pending
-- Live catalogue length: pending
-- Website deployment: pending
-- Website Hyperdrive publication: pending
+- GitHub release: <https://github.com/bigdestiny2/pearbrowser-desktop/releases/tag/v0.6.1>;
+  published as latest with 16 checksum-verifiable assets
+- Native workflow: package-proof run `29428784689` passed for macOS arm64/x64,
+  Windows x64, and Linux x64; public download verification passed for all four
+  primary artifacts. The automatic public-trust run `29430716284` failed closed
+  on the intentionally missing macOS/Windows signing credentials and was
+  cancelled after that expected gate.
+- Live catalogue length: `290`; fresh reader reported PearBrowser `0.6.1`, the
+  stable Pear link, current website Hyperdrive, 14 apps, and four peers
+- Website deployment: `bigdestiny2/pearbrowser-com` merge
+  `d62fa5ebce2db16864163ec4da8df2dd6c3ed660`; production
+  `pearbrowser.com` returned `v0.6.1`, length `63165`, and the exact native asset
+  filenames, sizes, and SHA-256 values
+- Website Hyperdrive publication: stable key
+  `03f0060a35451cfb6b68ad1dda1b8474ebb43fd9100071ccf7d67679a83ebb4f`,
+  length `79`; five HiveRelay pin acceptances, followed by a cold extraction and
+  a fresh-peer `index.html` read with ten connected peers
