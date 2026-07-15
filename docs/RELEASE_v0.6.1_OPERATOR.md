@@ -67,8 +67,10 @@ Additionally verify:
 
 ## Final record
 
-- Release source: pending
-- Stable Pear length: pending
+- Runtime publication source: `d71ba5eed973706bc02eeeab1e7b62898870e566`
+- Release source/tag target: pending final record merge
+- Stable Pear length: `63165` (from `63158`); fresh-peer exact-length and
+  `/index.html` read passed with five peers, plus five HiveRelay pin acceptances
 - GitHub release: pending
 - Native workflow: pending
 - Live catalogue length: pending
