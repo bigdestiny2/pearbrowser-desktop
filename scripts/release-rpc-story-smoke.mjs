@@ -499,32 +499,49 @@ async function runSearchStory (ws, args, token) {
   const title = `Release Smoke Search ${token}`
   const body = `PearBrowser release smoke local search probe ${token}`
   const driveKey = new URL(args.homepageUrl).hostname.toLowerCase()
-  const indexed = await requestRpc(ws, C.CMD_SEARCH_INDEX, {
-    driveKey,
-    path,
-    title,
-    body,
-    publishedAt: Date.now()
-  }, args.requestTimeout)
+  const before = await requestRpc(ws, C.CMD_USERDATA_GET_SETTINGS, {}, args.requestTimeout)
+  const previousSettings = before?.settings && typeof before.settings === 'object' ? before.settings : {}
+  const previousSearchIndex = previousSettings.searchIndexEnabled === true
 
-  if (!indexed?.ok || typeof indexed.docId !== 'string') {
-    throw new Error('search story failed to index a local document')
-  }
+  try {
+    // Search indexing is privacy-first and defaults OFF. The release probe opts
+    // in only for this local round-trip, then restores the user's prior choice.
+    if (!previousSearchIndex) {
+      await requestRpc(ws, C.CMD_USERDATA_SET_SETTINGS, { updates: { searchIndexEnabled: true } }, args.requestTimeout)
+    }
 
-  const found = await requestRpc(ws, C.CMD_SEARCH, { query: token, limit: 5 }, args.requestTimeout)
-  const results = Array.isArray(found?.results) ? found.results : []
-  const hit = results.find((row) => row?.docId === indexed.docId || row?.path === path)
-  if (found?.phase !== 'first-paint') throw new Error(`search story phase mismatch: ${found?.phase || '(missing)'}`)
-  if (found?.federating !== false) throw new Error('search story unexpectedly entered federated mode')
-  if (!hit) throw new Error('search story did not return the indexed local document')
+    const indexed = await requestRpc(ws, C.CMD_SEARCH_INDEX, {
+      driveKey,
+      path,
+      title,
+      body,
+      publishedAt: Date.now()
+    }, args.requestTimeout)
 
-  return {
-    token,
-    docId: indexed.docId,
-    phase: found.phase,
-    federating: found.federating,
-    results: results.length,
-    hitTitle: hit.title || null
+    if (!indexed?.ok || typeof indexed.docId !== 'string') {
+      throw new Error('search story failed to index a local document')
+    }
+
+    const found = await requestRpc(ws, C.CMD_SEARCH, { query: token, limit: 5 }, args.requestTimeout)
+    const results = Array.isArray(found?.results) ? found.results : []
+    const hit = results.find((row) => row?.docId === indexed.docId || row?.path === path)
+    if (found?.phase !== 'first-paint') throw new Error(`search story phase mismatch: ${found?.phase || '(missing)'}`)
+    if (found?.federating !== false) throw new Error('search story unexpectedly entered federated mode')
+    if (!hit) throw new Error('search story did not return the indexed local document')
+
+    return {
+      token,
+      docId: indexed.docId,
+      phase: found.phase,
+      federating: found.federating,
+      results: results.length,
+      hitTitle: hit.title || null,
+      restoredSearchIndexSetting: !previousSearchIndex
+    }
+  } finally {
+    if (!previousSearchIndex) {
+      try { await requestRpc(ws, C.CMD_USERDATA_SET_SETTINGS, { updates: { searchIndexEnabled: false } }, args.requestTimeout) } catch {}
+    }
   }
 }
 

@@ -26,6 +26,13 @@ Privacy-first browser release: Content Shield (Brave-grade ad/tracker blocking f
 - Visit history and search indexing refuse writes unless explicitly enabled; disabling history clears stored visits.
 - No telemetry pipeline; `telemetryEnabled` cannot be turned on.
 
+### Distribution scope and known limits
+
+- `v0.6.0` is a **desktop-only preview** release. Mobile signing, store validation, and real-device certification are outside this cut.
+- Native desktop packages remain package-proof preview artifacts until macOS Developer ID notarization and Windows public-trust signing are verified; operating systems may show trust warnings.
+- Peercord remains a third-party standalone Pear target. Its catalogue/launch-mode contract is verified, but this release does not automate or persist a human trust approval and does not claim a fresh manual Peercord launch.
+- Fresh-peer production-drive and catalogue reachability passed before release. Signed HiveRelay storage proof remains unavailable on the observed relay route, so reachability and replication evidence—not a fleet storage-proof receipt—back the preview release.
+
 ## v0.5.2 — 2026-07-01
 
 Logo hotfix for the live Pear app, public website, and refreshed native installer packages.

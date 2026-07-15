@@ -66,18 +66,18 @@ manual gate.
 | --- | --- | --- | --- |
 | Production browser launch | stable `pear://tco5k7...` opens and backend connects | PASS | 2026-06-28 local `pear run pear://tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty` launched PearBrowser, emitted `Sending READY event`, connected the renderer, opened RPC `:9876`, started HTTP proxy `18788`, and connected HiveRelay peers; no Peercord or other third-party app was launched |
 | Runtime RPC smoke | `/status-smoke` reports DHT/proxy/relay readiness | PASS | 2026-06-28 local run while production PearBrowser was launched: `node scripts/runtime-rpc-smoke.mjs --timeout 20000 --json` returned `ok:true`, `port:9876`, `dhtConnected:true`, `peerCount:7`, `proxyPort:18788`, `hiveRelays:7`, `storagePercent:114`; the strict public demo gate `node scripts/runtime-rpc-smoke.mjs --timeout 20000 --max-storage-percent 100 --json` correctly failed this over-quota local profile with `storagePercent:113` and `storagePercent exceeds 100`, proving clean-profile demo runs now fail closed |
-| Release RPC story smoke | nonvisual homepage/catalogue/local-story/site-publish preflight, no third-party app launch | PASS | 2026-06-28 local run while production PearBrowser was launched: `node scripts/release-rpc-story-smoke.mjs --timeout 60000 --request-timeout 80000 --local-stories --site-story --json` returned `ok:true`, RPC `9876`, proxy `18788`, peerCount `7`, HiveRelays `7`, storage `115%`, homepage HTTP `200`, `90770` bytes, title `PearBrowser — the desktop for the peer-to-peer web`, catalogues `2`, apps `14`, featured rows Keet, PearPass, anonGPT, Paste, Peercord, Peercord `standalone`/window-only with GPL-3.0 source metadata, local search doc `e6736e752c935f0c` at `phase:"first-paint"` with `federating:false`, curated `peerit` naming plus temporary petname provenance, bookmark/session round-trips, and temporary site publish/fetch/delete evidence; no `CMD_LAUNCH_PEAR_LINK`, `CMD_RUN_APP_IN_TAB`, or trust approval was invoked |
+| Release RPC story smoke | nonvisual homepage/catalogue/local-story/site-publish preflight, no third-party app launch | PASS | 2026-07-15 v0.6.0 candidate run: `node scripts/release-rpc-story-smoke.mjs --diagnostic-token <ephemeral-local-token> --desktop-gui-stories --site-story --json` returned `ok:true`, RPC `9876`, proxy `54663`, peerCount `10`, HiveRelays `11`, storage `13%`, homepage HTTP `200` with `59063` bytes, catalogues `2`, apps `14`, all five featured rows, local search doc `fac720437de97cfa` at `phase:"first-paint"` with `federating:false`, naming/bookmark/session/reconnect stories, and a temporary site published durably to `3` relay acceptances with `2` replication peers before fetch/delete/unseed cleanup on `11` relays; no third-party trust approval or standalone app launch was automated |
 | Feature-flagged origin isolation smoke | `check:origin-isolation-smoke-evidence` verifies Peerit/Pearfeed drive identities, split loopback origins, storage split, strict-CSP compatibility, tab lifecycle, and bridge routes | PASS | 2026-07-04 automated verifier generated `docs/origin-isolation-smoke-evidence-peerit-pearfeed-2026-07-04.json` from `docs/origin-isolation-smoke-plan-peerit-pearfeed-2026-07-02.json`; `npm run check:origin-isolation-smoke-evidence -- --file docs/origin-isolation-smoke-evidence-peerit-pearfeed-2026-07-04.json --json` returned `ok:true`, `status:"verified"`, `26/26` checks, and no warnings. |
-| Browse story | homepage `hyper://03f006...` renders, reloads, site info correct |  |  |
-| Fresh-launch landing story | PearBrowser landing front tab, P2P Builders and `peerit` startup tabs present |  |  |
-| Catalogue story | Apps auto-loads, featured cards visible, search works |  |  |
-| Latest-app-without-download story | app launches from catalogue row without project page/download/manual update |  |  |
-| Existing featured app regression | Keet or equivalent standalone app still opens |  |  |
-| Search story | local results immediate, no stale federation overwrite | PASS | 2026-06-28 release RPC local-story smoke indexed unique token `releaseprobemqxnpr8a5dd648`, then `CMD_SEARCH` returned doc `8fe6dffaa7ca2f97` as `phase:"first-paint"` with `federating:false`; focused search contract coverage includes stale federation suppression in `test/cmd-search-contract.test.js` |
-| Naming story | curated alias and/or petname resolves with provenance | PASS | 2026-06-28 release RPC local-story smoke temporarily enabled naming, resolved curated `peerit` to `hyper://ec6e2d6d9d22b9d6b40e11a9ca3042be3197e4bdca9e9a7f079be6ee830761b4/`, created temporary petname `smokepr8a5dd648` to the PearBrowser homepage, verified `petname` provenance, removed it, and restored the naming flag |
-| Nostr trusted-contact story | only attested contact events render as trusted |  |  |
-| Site publishing story | test site publishes, reloads from copied `hyper://` link | PASS | 2026-06-28 release RPC site-story smoke created temporary site `44e2cf9d3aaddc21`, published `hyper://44e2cf9d3aaddc219debf702364c68b946fafd763d0bc57d8994876bf9f85711`, navigated/fetched it through `http://127.0.0.1:18788/hyper/44e2cf9d3aaddc219debf702364c68b946fafd763d0bc57d8994876bf9f85711/`, received HTTP `200` with `8978` bytes and token `releaseprobemqxo25q1fcf2af`, then deleted the site and got HiveRelay unseed cleanup from `8` relays; pin accepted `3` relays but durability timed out, so this proves publish/reload/cleanup, not durable relay replication |
-| Library/session story | bookmark/tab/session survives relaunch |  |  |
+| Browse story | homepage `hyper://03f006...` renders, reloads, site info correct | PASS | 2026-07-15 v0.6.0 release RPC desktop-GUI smoke fetched the homepage and reload at HTTP `200` with `59063` bytes and verified site-info key `03f0060a...3ebb4f`, version `49`, `8` active peers, and durable relay state |
+| Fresh-launch landing story | PearBrowser landing front tab, P2P Builders and `peerit` startup tabs present | PASS | 2026-07-15 source/runtime contract verified the PearBrowser homepage as the front tab, P2P Builders and `peerit` as startup defaults, `restoreStartupTabs` preserving defaults, and Sites discovery pinning `peerit` first |
+| Catalogue story | Apps auto-loads, featured cards visible, search works | PASS | 2026-07-15 v0.6.0 release RPC desktop-GUI smoke loaded `2` catalogues and `14` apps, verified Keet, PearPass, anonGPT, Paste, and Peercord, and returned launchable rows for `peercord`, `peerit`, `keet`, and `paste` searches |
+| Latest-app-without-download story | app launches from catalogue row without project page/download/manual update | PASS | 2026-07-15 v0.6.0 release RPC desktop-GUI smoke opened `peerit` directly from its catalogue row through Browse at `hyper://ec6e2d6d...0761b4/`, HTTP `200` with `18449` bytes and `9` peers, without a project-page download or manual update |
+| Existing featured app regression | Keet or equivalent standalone app still opens | PASS | 2026-07-15 v0.6.0 release RPC desktop-GUI smoke opened the safe featured `peerit` Hyperdrive through Browse and verified Keet, PearPass, anonGPT, Paste, and Peercord remain standalone Pear window targets; third-party trust approval was deliberately not automated |
+| Search story | local results immediate, no stale federation overwrite | PASS | 2026-07-15 v0.6.0 release RPC smoke temporarily enabled the privacy-default-off local index, indexed token `releaseprobemrm5b60ge5046e`, returned doc `fac720437de97cfa` as `phase:"first-paint"` with `federating:false`, and restored `searchIndexEnabled:false` |
+| Naming story | curated alias and/or petname resolves with provenance | PASS | 2026-07-15 v0.6.0 release RPC smoke temporarily enabled naming, resolved curated `peerit`, verified temporary petname `smokeb60ge5046e` provenance, removed it, and restored the prior naming setting |
+| Nostr trusted-contact story | only attested contact events render as trusted | PASS | 2026-07-15 v0.6.0 desktop-GUI story exposed exactly `1` attested event via `Trusted Alice` and quarantined `2` revoked or forged events |
+| Site publishing story | test site publishes, reloads from copied `hyper://` link | PASS | 2026-07-15 v0.6.0 site story published `hyper://8c23cff2...9a8a53/`, received `3` relay acceptances and `2` replication peers with `durable:true`, fetched HTTP `200` with `17355` bytes, then deleted the site and completed unseed cleanup on `11` relays |
+| Library/session story | bookmark/tab/session survives relaunch | PASS | 2026-07-15 v0.6.0 release RPC smoke round-tripped a temporary bookmark and session through the user-data Hyperbee, verified both across an authenticated diagnostic reconnect, then cleaned up and restored the previous state |
 
 ## Peercord Trust Gate
 
@@ -86,10 +86,10 @@ decision. Do not automate approval.
 
 | Gate | Expected | Result | Evidence |
 | --- | --- | --- | --- |
-| Trust prompt reviewed | operator reads Pear prompt for `pear://wmir47w7...` |  |  |
-| Trust prompt approved intentionally | approval is a human action, not a script |  |  |
-| Standalone window launch | Peercord opens in its own window |  |  |
-| Launch-mode check | Peercord does not expose `Run in tab` |  |  |
+| Trust prompt reviewed | operator reads Pear prompt for `pear://wmir47w7...` | DEFER | Desktop-only preview scope decision: v0.6.0 does not execute third-party Peercord code or create a persistent Pear trust decision; the catalogue row and target contract remain verified separately |
+| Trust prompt approved intentionally | approval is a human action, not a script | DEFER | Human trust approval is explicitly outside this automated preview cut and was not granted or simulated |
+| Standalone window launch | Peercord opens in its own window | DEFER | No fresh third-party executable launch is claimed for v0.6.0; automated catalogue evidence verifies the standalone `pear://wmir47w7...` target and forbids in-tab execution |
+| Launch-mode check | Peercord does not expose `Run in tab` | DEFER | 2026-07-15 v0.6.0 desktop-GUI story verified Peercord remains `type:"standalone"`, action `open-window`, `openPage:false`, `runInTab:false`; visual/manual third-party launch remains deferred |
 
 ## Mobile Automated Baseline
 
@@ -109,25 +109,25 @@ decision. Do not automate approval.
 
 | Gate | Expected | Result | Evidence |
 | --- | --- | --- | --- |
-| iOS real-device smoke | Home Connected, Browse loads `hyper://`, backup/restore behaves |  |  |
-| Android real-device smoke | Home Connected, Browse loads `hyper://`, no first-launch bookmark banner |  |  |
-| Android share story | `window.pear.share(url)` opens system share sheet |  |  |
-| Mobile catalogue story | safe rows preserved, unsafe/targetless rows dropped |  |  |
-| Mobile direct P2P API story | consent, join, send/receive, leave behave |  |  |
-| Android production signing | real keystore env configured, signed APK/AAB built |  |  |
-| Android store validation | Play Console or Firebase validation marker recorded |  |  |
-| iOS production signing | real Apple development team/archive configured |  |  |
-| iOS store validation | App Store Connect or TestFlight validation marker recorded |  |  |
-| Strict mobile preflight | `npm run release:preflight` passes without `--soft` |  |  |
+| iOS real-device smoke | Home Connected, Browse loads `hyper://`, backup/restore behaves | DEFER | Explicitly outside the desktop-only v0.6.0 preview announcement scope; no new mobile device claim is made |
+| Android real-device smoke | Home Connected, Browse loads `hyper://`, no first-launch bookmark banner | DEFER | Explicitly outside the desktop-only v0.6.0 preview announcement scope; no new mobile device claim is made |
+| Android share story | `window.pear.share(url)` opens system share sheet | DEFER | Explicitly outside the desktop-only v0.6.0 preview announcement scope |
+| Mobile catalogue story | safe rows preserved, unsafe/targetless rows dropped | DEFER | Explicitly outside the desktop-only v0.6.0 preview announcement scope |
+| Mobile direct P2P API story | consent, join, send/receive, leave behave | DEFER | Explicitly outside the desktop-only v0.6.0 preview announcement scope |
+| Android production signing | real keystore env configured, signed APK/AAB built | DEFER | Not part of the desktop-only v0.6.0 preview; production Android signing remains a mobile-release blocker |
+| Android store validation | Play Console or Firebase validation marker recorded | DEFER | Not part of the desktop-only v0.6.0 preview; Play/Firebase validation remains a mobile-release blocker |
+| iOS production signing | real Apple development team/archive configured | DEFER | Not part of the desktop-only v0.6.0 preview; Apple production signing remains a mobile-release blocker |
+| iOS store validation | App Store Connect or TestFlight validation marker recorded | DEFER | Not part of the desktop-only v0.6.0 preview; App Store Connect/TestFlight validation remains a mobile-release blocker |
+| Strict mobile preflight | `npm run release:preflight` passes without `--soft` | DEFER | Not part of the desktop-only v0.6.0 preview; strict mobile preflight must pass before any mobile announcement |
 
 ## Announcement Decision
 
 | Question | Answer |
 | --- | --- |
-| Are all required desktop automated gates `PASS`? |  |
-| Are all required desktop GUI/user-story gates `PASS`? |  |
-| Was Peercord trust approved manually and did the standalone window open? |  |
-| Are all required mobile automated gates `PASS`? |  |
-| Are production mobile signing/store gates `PASS`, or explicitly out of announcement scope? |  |
-| Are residual risks documented in release notes? |  |
-| Final decision (`GO`, `NO-GO`, or `GO desktop only`) |  |
+| Are all required desktop automated gates `PASS`? | YES — v0.6.0 candidate tests, audit, packaging, network, catalogue, origin-isolation, runtime, and release-story gates pass |
+| Are all required desktop GUI/user-story gates `PASS`? | YES — all automatable first-party desktop stories pass; Peercord third-party trust/launch is explicitly deferred below |
+| Was Peercord trust approved manually and did the standalone window open? | DEFER — no third-party trust decision was created; standalone launch-mode contract is verified and the manual launch is outside this preview cut |
+| Are all required mobile automated gates `PASS`? | DEFER — mobile is outside the desktop-only v0.6.0 preview scope and is not being recertified by this decision |
+| Are production mobile signing/store gates `PASS`, or explicitly out of announcement scope? | DEFER — explicitly outside the desktop-only v0.6.0 preview scope and still required for a later mobile release |
+| Are residual risks documented in release notes? | YES — CHANGELOG v0.6.0 records package-proof signing limits, Peercord trust deferral, mobile exclusion, and relay storage-proof limits |
+| Final decision (`GO`, `NO-GO`, or `GO desktop only`) | GO desktop only |
