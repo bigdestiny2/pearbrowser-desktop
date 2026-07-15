@@ -5,6 +5,7 @@ Tag: `v0.6.0`
 Repo: `bigdestiny2/pearbrowser-desktop`  
 Production link: `pear://tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty` (stable; length advances on release)
 Release source merge: `4e0f56adadf7e33f0c7686be563349fe56f3985a`
+Tag target: `74e0af8e7fac1feb9144c59bd665a1686995eef6`
 Released Pear length: `63158`
 
 This document is the **release schedule/routine** for shipping this version. It
@@ -159,9 +160,10 @@ Do **not** announce if:
 
 ## 8. Post-release
 
-- [ ] Publish draft GitHub release
+- [x] Publish GitHub release after package-proof asset and public-download verification
 - [x] Update README “Current release” with **new length** + precise fresh-peer/replication evidence
 - [x] Commit length record (pattern: “Record v0.6.0 Pear release length”)
+- [x] Update and deploy `pearbrowser.com` release/download metadata
 - [ ] Optional: package-manager drafts (`generate:package-manager-manifests`)
 - [ ] Announce (Discord/community) with install guide + pear:// fallback
 
@@ -183,9 +185,12 @@ Filled while preparing and releasing the desktop preview (2026-07-15):
 | Production `pear info` | **release/length 63158** (advanced from 45758) |
 | Merge to main | **done** (`4e0f56adadf7e33f0c7686be563349fe56f3985a`; main CI green) |
 | `./scripts/release-prod.sh` | **done** (five pin acceptances; durable seeder observed five remote peers) |
-| `gh release create v0.6.0` + native workflow | **operator** |
+| `gh release create v0.6.0` + native workflow | **done** (public release; package-proof run `29423320986`; 18 assets) |
 | Production stable-address runtime/story evidence | **done** (DHT/proxy/relay and first-party desktop stories pass) |
-| Evidence log + announcement | **in progress** |
+| Public download verification | **done** (macOS arm64/x64, Windows x64, Linux x64 match sidecars) |
+| `pearbrowser.com` release surface | **done** (PR #1 merged; Vercel and live metadata verified) |
+| Evidence log | **done** |
+| Discord/community announcement | **operator** (target/account not supplied in this run) |
 
 Preflight log (this machine): capture under implementer scratch
 `release-v0.6.0-preflight.log`.
