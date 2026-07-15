@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.6.1 — 2026-07-15
+
+Corrective distribution release aligning the catalogue, Linux package, website,
+GitHub release, and stable Pear channel on one verified version.
+
+### Fixed
+
+- Updated the PearBrowser catalogue row from the stale `0.4.5` label to `0.6.1`
+  and aligned its homepage with the current `pearbrowser.com` Hyperdrive mirror.
+- Excluded the CMake-generated AppImageTool utility from release collection so
+  the normalized Linux download contains PearBrowser itself.
+- Made Linux packaging, metadata inspection, release-asset checks, and download
+  resolution fail closed when more than one product AppImage is present.
+- Made live-catalogue verification assert the PearBrowser version, stable Pear
+  link, and public homepage from the versioned source contract.
+
+### Distribution note
+
+- The normalized Linux AppImage attached to `v0.6.0` contained AppImageTool and
+  is superseded by the verified `v0.6.1` PearBrowser AppImage. macOS, Windows,
+  and stable-Pear users should also use `v0.6.1` so every public surface agrees.
+
 ## v0.6.0 — 2026-07-15
 
 Privacy-first browser release: Content Shield (Brave-grade ad/tracker blocking for `hyper://` and proxied clearnet), Pear Plugins foundation, optional history, zero telemetry, and on-device Ask Browser / QVAC AI kept operational.

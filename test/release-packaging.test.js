@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
+import { createRequire } from 'node:module'
 import { execFileSync, spawnSync } from 'node:child_process'
 import {
   copyFileSync,
@@ -17,8 +18,11 @@ import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
+const require = createRequire(import.meta.url)
 const packageLock = JSON.parse(readFileSync(new URL('../package-lock.json', import.meta.url), 'utf8'))
 const pearConfig = JSON.parse(readFileSync(new URL('../pear.json', import.meta.url), 'utf8'))
+const catalogSource = JSON.parse(readFileSync(new URL('../catalog-source/pearbrowser-network.catalog.json', import.meta.url), 'utf8'))
+const { SEED_APPS } = require('../backend/catalogue-seed.js')
 const rootLicense = readFileSync(new URL('../LICENSE', import.meta.url), 'utf8')
 const applingPkg = JSON.parse(readFileSync(new URL('../appling/package.json', import.meta.url), 'utf8'))
 const applingLock = JSON.parse(readFileSync(new URL('../appling/package-lock.json', import.meta.url), 'utf8'))
@@ -266,6 +270,24 @@ test('Pear stage ignore excludes local release/operator scratch files', () => {
   assert.ok(ignored.includes('/test'))
 })
 
+test('PearBrowser catalogue release row stays in sync with package and public addresses', () => {
+  const source = catalogSource.apps.find((app) => app.id === 'pearbrowser-desktop')
+  const seed = SEED_APPS.find((app) => app.name === 'PearBrowser Desktop')
+  const homepageKey = '03f0060a35451cfb6b68ad1dda1b8474ebb43fd9100071ccf7d67679a83ebb4f'
+
+  assert.ok(source, 'catalogue source row missing')
+  assert.ok(seed, 'offline catalogue seed row missing')
+  assert.equal(source.version, pkg.version)
+  assert.equal(source.pearLink, pearConfig.links.production)
+  assert.equal(source.link, pearConfig.links.production)
+  assert.equal(source.driveKey, homepageKey)
+  assert.equal(source.homepage, `hyper://${homepageKey}/`)
+  assert.equal(seed.version, source.version)
+  assert.equal(seed.link, source.link)
+  assert.equal(seed.driveKey, source.driveKey)
+  assert.equal(seed.homepage, source.homepage)
+})
+
 test('release script purges ignored files from previous Pear stages', () => {
   assert.match(releaseScript, /pear stage --purge/)
 })
@@ -488,6 +510,9 @@ test('Linux AppImage metadata checker is exposed for desktop integration gates',
   assert.match(linuxAppImageMetadata, /io\.github\.bigdestiny2\.pearbrowser\.metainfo\.xml/)
   assert.match(linuxAppImageMetadata, /metadata_license/)
   assert.match(linuxAppImageMetadata, /--build-dir/)
+  assert.match(linuxAppImageMetadata, /isProductAppImage/)
+  assert.match(linuxAppImageMetadata, /exactly one PearBrowser AppImage/)
+  assert.doesNotMatch(linuxAppImageMetadata, /if \(appDirs\.length\) \{[\s\S]*?return\n\s*\}/)
   assert.match(linuxMetainfo, /<component type="desktop-application">/)
   assert.match(linuxMetainfo, /<launchable type="desktop-id">PearBrowser\.desktop<\/launchable>/)
   assert.match(linuxMetainfo, /<binary>pearbrowser<\/binary>/)
@@ -771,6 +796,9 @@ test('native release workflow builds and attaches appling artifacts for every de
   assert.match(nativeReleaseWorkflow, /npm run --prefix appling build/)
   assert.match(nativeReleaseWorkflow, /Verify Linux AppImage metadata/)
   assert.match(nativeReleaseWorkflow, /check:linux-appimage-metadata -- --build-dir appling\/build/)
+  assert.match(nativeReleaseWorkflow, /-name 'PearBrowser\.AppImage'/)
+  assert.match(nativeReleaseWorkflow, /Expected exactly one PearBrowser\.AppImage/)
+  assert.doesNotMatch(nativeReleaseWorkflow, /AppImage' -type f \| head -n1/)
   assert.match(nativeReleaseWorkflow, /actions\/upload-artifact@v4/)
   assert.match(nativeReleaseWorkflow, /actions\/download-artifact@v4/)
   assert.match(nativeReleaseWorkflow, /release-platform: macos/)
@@ -990,6 +1018,37 @@ test('appling artifact collector emits normalized assets and checksum manifests'
     assert.equal(manifest.artifacts.length, 1)
     assert.equal(manifest.artifacts[0].name, `PearBrowser-${releaseVersion}-windows-x64.exe`)
     assert.equal(manifest.artifacts[0].source, 'appling/build/nested/PearBrowser Setup.exe')
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
+})
+
+test('appling artifact collector excludes AppImageTool and packages PearBrowser', () => {
+  const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'pear-linux-appling-release-')))
+  try {
+    const buildDir = join(fixture, 'appling', 'build', 'nested')
+    mkdirSync(buildDir, { recursive: true })
+    writeFileSync(join(buildDir, 'appimagetool-x86_64.AppImage'), 'packaging tool bytes')
+    writeFileSync(join(buildDir, 'PearBrowser.AppImage'), 'pearbrowser product bytes')
+
+    execFileSync(process.execPath, [
+      applingArtifactCollectorPath,
+      '--tag',
+      releaseTag,
+      '--platform',
+      'linux',
+      '--arch',
+      'x64',
+      '--build-dir',
+      join(fixture, 'appling', 'build')
+    ], { cwd: fixture, encoding: 'utf8' })
+
+    const outDir = join(fixture, 'dist', 'appling-release', releaseTag, 'linux')
+    const assetName = `PearBrowser-${releaseVersion}-linux-x64.AppImage`
+    assert.equal(readFileSync(join(outDir, assetName), 'utf8'), 'pearbrowser product bytes')
+    const manifest = JSON.parse(readFileSync(join(outDir, 'manifest-linux-x64.json'), 'utf8'))
+    assert.equal(manifest.artifacts.length, 1)
+    assert.equal(manifest.artifacts[0].source, 'appling/build/nested/PearBrowser.AppImage')
   } finally {
     rmSync(fixture, { recursive: true, force: true })
   }
@@ -1232,8 +1291,6 @@ test('native release asset resolver chooses the recommended package for each des
         'PearBrowser-0.5.0-windows-x64.msix.sha256',
         'PearBrowser-0.5.0-windows-x64.exe',
         'PearBrowser-0.5.0-windows-x64.exe.sha256',
-        'PearBrowser-0.5.0-linux-x64-PearBrowser.AppImage',
-        'PearBrowser-0.5.0-linux-x64-PearBrowser.AppImage.sha256',
         'PearBrowser-0.5.0-linux-x64.AppImage',
         'PearBrowser-0.5.0-linux-x64.AppImage.sha256'
       ].map((name, i) => ({
@@ -1266,6 +1323,53 @@ test('native release asset resolver chooses the recommended package for each des
     assert.equal(resolve('macos', 'arm64').asset.name, 'PearBrowser-0.5.0-macos-arm64.dmg')
     assert.equal(resolve('windows', 'x64').asset.name, 'PearBrowser-0.5.0-windows-x64.exe')
     assert.equal(resolve('linux', 'x64').asset.name, 'PearBrowser-0.5.0-linux-x64.AppImage')
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
+})
+
+test('native release asset resolver rejects ambiguous equally preferred packages', () => {
+  const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'pear-native-resolver-ambiguous-')))
+  try {
+    const releasePath = join(fixture, 'release.json')
+    writeFileSync(releasePath, JSON.stringify({
+      tagName: 'v0.5.0',
+      isDraft: false,
+      isPrerelease: false,
+      assets: [
+        'PearBrowser-0.5.0-linux-x64.AppImage',
+        'PearBrowser-0.5.0-linux-x64.AppImage.sha256',
+        'PearBrowser-0.5.0-linux-x64-PearBrowser.AppImage',
+        'PearBrowser-0.5.0-linux-x64-PearBrowser.AppImage.sha256'
+      ].map((name, i) => ({ name, size: i + 1 }))
+    }, null, 2))
+
+    const assetCheck = spawnSync(process.execPath, [
+      nativeReleaseAssetCheckPath,
+      '--fixture',
+      releasePath,
+      '--tag',
+      'v0.5.0',
+      '--json'
+    ], { encoding: 'utf8' })
+    assert.notEqual(assetCheck.status, 0)
+    assert.ok(JSON.parse(assetCheck.stdout).errors.some((error) => error.includes('expected exactly one Linux .AppImage')))
+
+    const result = spawnSync(process.execPath, [
+      nativeReleaseAssetResolverPath,
+      '--fixture',
+      releasePath,
+      '--tag',
+      'v0.5.0',
+      '--platform',
+      'linux',
+      '--arch',
+      'x64',
+      '--json'
+    ], { encoding: 'utf8' })
+
+    assert.notEqual(result.status, 0)
+    assert.match(JSON.parse(result.stdout).error, /ambiguous linux\/x64 native artifacts/)
   } finally {
     rmSync(fixture, { recursive: true, force: true })
   }
@@ -2139,7 +2243,10 @@ test('release story smoke covers browse, catalogue, local stories, and opt-in si
   assert.doesNotMatch(releaseStorySmoke, /CMD_RUN_APP_IN_TAB/)
 })
 
-test('live catalogue verifier asserts Peercord provenance metadata', () => {
+test('live catalogue verifier asserts PearBrowser release contract and Peercord provenance metadata', () => {
+  assert.match(liveCatalogVerifier, /PearBrowser version mismatch/)
+  assert.match(liveCatalogVerifier, /PearBrowser link mismatch/)
+  assert.match(liveCatalogVerifier, /PearBrowser homepage mismatch/)
   assert.match(liveCatalogVerifier, /Peercord sourceUrl mismatch/)
   assert.match(liveCatalogVerifier, /https:\/\/git\.churchofmalware\.org\/mastercodeon\/Peercord/)
   assert.match(liveCatalogVerifier, /Peercord license mismatch/)

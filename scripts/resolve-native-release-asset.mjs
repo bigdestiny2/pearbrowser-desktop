@@ -155,6 +155,12 @@ function resolveReleaseAsset (release, options) {
     throw new Error(`no ${options.platform}/${options.arch} native artifact found for ${options.tag}`)
   }
 
+  const bestRank = artifactRank(options.platform, candidates[0].name)
+  const equallyPreferred = candidates.filter((candidate) => artifactRank(options.platform, candidate.name) === bestRank)
+  if (equallyPreferred.length > 1) {
+    throw new Error(`ambiguous ${options.platform}/${options.arch} native artifacts for ${options.tag}: ${equallyPreferred.map((candidate) => candidate.name).join(', ')}`)
+  }
+
   const asset = candidates[0]
   if (asset.size <= 0) throw new Error(`${asset.name} is empty or missing a size`)
 

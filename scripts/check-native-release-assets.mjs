@@ -246,6 +246,12 @@ function verifyPlatform (platform, assets, names, version, errors, options = {})
         errors.push(`missing required v0.5.0 backfill ${required.label} for ${platform}/${arch}`)
       }
     }
+    if (platform === 'linux') {
+      const appImages = (artifactsByArch.get(arch) || []).filter((asset) => /\.AppImage$/i.test(asset.name))
+      if (appImages.length !== 1) {
+        errors.push(`expected exactly one Linux .AppImage for ${platform}/${arch}, found ${appImages.length}: ${appImages.map((asset) => asset.name).join(', ') || '(none)'}`)
+      }
+    }
   }
 
   const sidecars = []

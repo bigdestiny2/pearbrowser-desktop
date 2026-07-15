@@ -10,7 +10,7 @@
       "name": "PearBrowser Desktop",
       "description": "P2P browser, decentralized app store, and site publisher. macOS / Windows / Linux. Talks to peers directly over Hyperswarm. Pinned 24/7 on HiveRelay.",
       "author": "bigdestiny2",
-      "version": "0.4.5",
+      "version": "0.6.1",
       "categories": [
         "browser",
         "tools",
@@ -83,8 +83,11 @@
         "featured"
       ],
       "publishedAt": "2026-06-23T00:00:00Z",
+      "type": "hypersite",
+      "link": "hyper://ac1977a75cc84b46af0af8bb559cd4ebbe10507eb0f51d863e289d09635f6d74/",
       "url": "hyper://ac1977a75cc84b46af0af8bb559cd4ebbe10507eb0f51d863e289d09635f6d74/",
       "driveKey": "ac1977a75cc84b46af0af8bb559cd4ebbe10507eb0f51d863e289d09635f6d74",
+      "homepage": "hyper://ac1977a75cc84b46af0af8bb559cd4ebbe10507eb0f51d863e289d09635f6d74/",
       "source": "pear-ecosystem/02-apps/p2pbuilders",
       "license": "MIT",
       "verification": "relay-listed"
