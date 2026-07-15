@@ -56,6 +56,12 @@ if (artifacts.length === 0) {
   console.error('       run `npm run --prefix appling generate` and `npm run --prefix appling build` first')
   process.exit(1)
 }
+if (platform === 'linux') {
+  const appImages = artifacts.filter((artifact) => /\.AppImage$/i.test(artifact.path))
+  if (appImages.length > 1) {
+    fail(`expected exactly one PearBrowser AppImage under ${buildDir}, found ${appImages.length}: ${appImages.map((artifact) => relative(resolve('.'), artifact.path)).join(', ')}`)
+  }
+}
 
 const outputs = []
 const extCounts = new Map()
@@ -195,7 +201,7 @@ function findArtifacts (root, targetPlatform) {
         }
         if (shouldSkipDir(entry.name)) continue
         walk(path)
-      } else if (entry.isFile() && isReleaseFile(entry.name, targetPlatform) && !isRawWindowsLauncher(entry.name, targetPlatform)) {
+      } else if (entry.isFile() && isReleaseFile(entry.name, targetPlatform) && !isPackagingToolArtifact(entry.name, targetPlatform) && !isRawWindowsLauncher(entry.name, targetPlatform)) {
         const stats = statSync(path)
         if (stats.size > 0) found.push({ kind: 'file', path })
       }
@@ -209,6 +215,14 @@ function shouldSkipDir (name) {
 
 function isReleaseFile (name, targetPlatform) {
   return filePatterns[targetPlatform].some((pattern) => pattern.test(name))
+}
+
+// cmake-pear builds AppImageTool as an implementation detail beside the actual
+// PearBrowser image. It is executable and ends in .AppImage, but it is not an
+// application release artifact. Collecting it previously made the tool image
+// the normalized Linux download because it sorted before PearBrowser.AppImage.
+function isPackagingToolArtifact (name, targetPlatform) {
+  return targetPlatform === 'linux' && /^(?:appimagetool|linuxdeploy)(?:[-_.].*)?\.AppImage$/i.test(name)
 }
 
 // The bare-pear Windows build emits a raw "<AppName>.exe" launcher next to the

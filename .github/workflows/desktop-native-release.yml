@@ -237,8 +237,9 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           set -euo pipefail
-          rel="$(find appling/build -maxdepth 5 -name '*.AppImage' -type f | head -n1)"
-          [ -n "$rel" ] || { echo "::error::No .AppImage found to bundle"; exit 1; }
+          mapfile -t product_images < <(find appling/build -maxdepth 5 -name 'PearBrowser.AppImage' -type f -not -path '*/_deps/*')
+          [ "${#product_images[@]}" -eq 1 ] || { echo "::error::Expected exactly one PearBrowser.AppImage, found ${#product_images[@]}"; printf '%s\n' "${product_images[@]}"; exit 1; }
+          rel="${product_images[0]}"
           abs="$PWD/$rel"; chmod +x "$abs"
           work="$RUNNER_TEMP/appimage-gtk"; rm -rf "$work"; mkdir -p "$work"
           ( cd "$work" && "$abs" --appimage-extract >/dev/null )
@@ -248,8 +249,9 @@ jobs:
           chmod +x "$tools/linuxdeploy" "$tools/linuxdeploy-plugin-gtk.sh"
           export PATH="$tools:$PATH"
           ( cd "$work" && linuxdeploy --appimage-extract-and-run --appdir squashfs-root --plugin gtk --output appimage )
-          out="$(find "$work" -maxdepth 1 -name '*.AppImage' -type f | head -n1)"
-          [ -n "$out" ] || { echo "::error::linuxdeploy did not produce an AppImage"; exit 1; }
+          mapfile -t bundled_images < <(find "$work" -maxdepth 1 -name '*.AppImage' -type f)
+          [ "${#bundled_images[@]}" -eq 1 ] || { echo "::error::Expected exactly one bundled AppImage, found ${#bundled_images[@]}"; printf '%s\n' "${bundled_images[@]}"; exit 1; }
+          out="${bundled_images[0]}"
           mv -f "$out" "$abs"; chmod +x "$abs"
 
       # Deterministic gate: assert libgtk-4 is now inside the image, in a clean
@@ -259,7 +261,9 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           set -euo pipefail
-          rel="$(find appling/build -maxdepth 5 -name '*.AppImage' -type f | head -n1)"
+          mapfile -t product_images < <(find appling/build -maxdepth 5 -name 'PearBrowser.AppImage' -type f -not -path '*/_deps/*')
+          [ "${#product_images[@]}" -eq 1 ] || { echo "::error::Expected exactly one PearBrowser.AppImage, found ${#product_images[@]}"; printf '%s\n' "${product_images[@]}"; exit 1; }
+          rel="${product_images[0]}"
           docker run --rm -v "$PWD:/w" -w /w ubuntu:22.04 bash -lc '
             set -e
             apt-get update -qq && apt-get install -y -qq libfuse2 >/dev/null

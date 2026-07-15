@@ -75,17 +75,21 @@ function validateBuildDir (buildDir) {
   }
 
   const appDirs = findPaths(buildDir, (path) => path.endsWith('.AppDir') && isDirectory(path))
-  if (appDirs.length) {
-    for (const appDir of appDirs) validateAppDir(appDir, 'build-dir')
-    return
-  }
+  for (const appDir of appDirs) validateAppDir(appDir, 'build-dir')
 
-  const appImages = findPaths(buildDir, (path) => /\.AppImage$/i.test(path) && isFile(path))
-  if (appImages.length === 0) {
+  const appImages = findPaths(buildDir, (path) => isProductAppImage(path) && isFile(path))
+  if (appDirs.length === 0 && appImages.length === 0) {
     errors.push(`Linux build directory has no .AppDir or .AppImage to inspect: ${buildDir}`)
     return
   }
+  if (appImages.length > 1) {
+    errors.push(`Linux build directory must contain exactly one PearBrowser AppImage, found ${appImages.length}: ${appImages.join(', ')}`)
+  }
   for (const appImage of appImages) validateAppImage(appImage)
+}
+
+function isProductAppImage (path) {
+  return /^PearBrowser(?:[-_.].*)?\.AppImage$/i.test(basename(path))
 }
 
 function validateAppImage (appImage) {

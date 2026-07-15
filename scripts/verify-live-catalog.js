@@ -15,12 +15,17 @@ import Corestore from 'corestore'
 import Hyperswarm from 'hyperswarm'
 import Hyperbee from 'hyperbee'
 import b4a from 'b4a'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { readCatalogBee } from './lib/catalog-bee.js'
 
 const DEFAULT_KEY = 'f5fb7500bccd60a976d2b1d24246108f4444a210b9ca591533114dffc089934d'
+const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
+const pearConfig = JSON.parse(readFileSync(new URL('../pear.json', import.meta.url), 'utf8'))
+const catalogSource = JSON.parse(readFileSync(new URL('../catalog-source/pearbrowser-network.catalog.json', import.meta.url), 'utf8'))
+const browserSource = catalogSource.apps.find((app) => app.id === 'pearbrowser-desktop')
+if (!browserSource) throw new Error('catalogue source is missing pearbrowser-desktop')
 const PEER_TIMEOUT_MS = 30_000
 const UPDATE_TIMEOUT_MS = 20_000
 const READ_TIMEOUT_MS = 20_000
@@ -30,7 +35,10 @@ function parseArgs (argv) {
     key: DEFAULT_KEY,
     expectApps: [],
     expectCount: 14,
-    expectName: 'PearBrowser Network'
+    expectName: 'PearBrowser Network',
+    expectBrowserVersion: pkg.version,
+    expectBrowserLink: pearConfig.links.production,
+    expectBrowserHomepage: browserSource.homepage
   }
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
@@ -38,6 +46,9 @@ function parseArgs (argv) {
     else if (arg === '--expect-app') args.expectApps.push(argv[++i])
     else if (arg === '--expect-count') args.expectCount = Number(argv[++i])
     else if (arg === '--expect-name') args.expectName = argv[++i]
+    else if (arg === '--expect-browser-version') args.expectBrowserVersion = argv[++i]
+    else if (arg === '--expect-browser-link') args.expectBrowserLink = argv[++i]
+    else if (arg === '--expect-browser-homepage') args.expectBrowserHomepage = argv[++i]
   }
   return args
 }
@@ -111,6 +122,18 @@ async function main () {
     if (!byId.has(id)) fail(`missing expected app: ${id}`)
   }
 
+  const pearbrowser = byId.get('pearbrowser-desktop')
+  if (!pearbrowser) fail('missing expected app: pearbrowser-desktop')
+  if (pearbrowser.version !== args.expectBrowserVersion) {
+    fail(`PearBrowser version mismatch: expected ${args.expectBrowserVersion}, got ${pearbrowser.version || '(missing)'}`)
+  }
+  if (pearbrowser.link !== args.expectBrowserLink) {
+    fail(`PearBrowser link mismatch: expected ${args.expectBrowserLink}, got ${pearbrowser.link || '(missing)'}`)
+  }
+  if (pearbrowser.homepage !== args.expectBrowserHomepage) {
+    fail(`PearBrowser homepage mismatch: expected ${args.expectBrowserHomepage}, got ${pearbrowser.homepage || '(missing)'}`)
+  }
+
   const peercord = byId.get('peercord')
   if (peercord) {
     if (peercord.link !== 'pear://wmir47w7mai3b1skj66mx7fzso6k6o91kipaney7gtt69npimouy') fail('Peercord link mismatch')
@@ -135,6 +158,7 @@ async function main () {
 
   console.log('   → signed meta signature:', signedMeta.value.signature.slice(0, 16) + '…')
   console.log('   → catalogue:', data.name, '· apps:', data.apps.length)
+  console.log('   → PearBrowser:', pearbrowser.version, '·', pearbrowser.link, '·', pearbrowser.homepage)
   if (peercord) console.log('   → Peercord:', peercord.type, '·', peercord.sourceUrl, '·', peercord.license)
   console.log('   → expected apps:', args.expectApps.length ? args.expectApps.join(', ') : '(none)')
   console.log()
