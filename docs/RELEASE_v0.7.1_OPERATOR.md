@@ -45,8 +45,11 @@ Hyperdrive mirror all advertise `v0.7.1` and pass their fresh-reader checks.
 
 ## Final record
 
-- Source merge: PR [#65](https://github.com/bigdestiny2/pearbrowser-desktop/pull/65),
-  merge commit `3afe35c0337daa4f3ebce7270842b563f066bd55`.
+- Source merge/tag: hotfix PR
+  [#65](https://github.com/bigdestiny2/pearbrowser-desktop/pull/65) / merge
+  `3afe35c0337daa4f3ebce7270842b563f066bd55`; publication record PR
+  [#66](https://github.com/bigdestiny2/pearbrowser-desktop/pull/66) / tagged commit
+  `d2db5f028c1b307a3cb65e141494078c57f85577`.
 - Stable Pear length: `92835` (from `78006`); five relays accepted the seed
   request. A fresh peer found seven peers, reached the exact length, and read
   `/index.html` (451 bytes). A signed HiveRelay storage proof was unavailable
@@ -56,6 +59,19 @@ Hyperdrive mirror all advertise `v0.7.1` and pass their fresh-reader checks.
   `8`); five relays accepted the seed request. A fresh reader found five peers,
   verified the signed metadata, all 14 application rows, PearBrowser `0.7.1`,
   and the expected Peercord, peerit, and HiveWorm entries.
-- GitHub release/workflow: pending
-- Website deploy: pending
-- Website Hyperdrive length: pending (from `126`)
+- GitHub release/workflow:
+  [v0.7.1](https://github.com/bigdestiny2/pearbrowser-desktop/releases/tag/v0.7.1);
+  package-proof [run 29503613273](https://github.com/bigdestiny2/pearbrowser-desktop/actions/runs/29503613273)
+  passed all four targets and attached 16 assets with zero structural warnings.
+  All four product packages were downloaded and matched their SHA-256 sidecars
+  and advertised byte sizes.
+- Website deploy: [pearbrowser.com PR #5](https://github.com/bigdestiny2/pearbrowser-com/pull/5) /
+  `4609dc7caf415cef65aecd4aae563a552855b477`; Vercel and Pages deployment
+  checks passed, and production HTML plus byte-identical `downloads.json`
+  returned `v0.7.1`, length `92835`, and the verified package metadata.
+- Website Hyperdrive length: `140` (from `126`); five relays accepted the seed
+  request. A fresh peer found five peers, read `/index.html` (42,177 bytes),
+  and extracted exactly 14 tracked files (171.8 KB). The extracted tree matched
+  the publish tree byte-for-byte, its sync check passed, and `/.git` was absent.
+  A signed relay storage proof was unavailable because the connected relay did
+  not expose the storage-proof service; direct fresh-peer verification passed.
