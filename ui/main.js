@@ -54,25 +54,42 @@ try {
       failed=${true} />`)
   })
 
-  // Only steal the splash screen for pre-mount failures. After the
-  // App mounts, the status pill at the bottom of the real UI handles
-  // disconnect/reconnect state without yanking the user to a splash.
+  // A renderer reload or transient local WebSocket failure should not leave
+  // the mounted app issuing requests into a dead pipe. Show an explicit
+  // reconnect state and remount once the authenticated socket is restored.
   let mounted = false
-  pipe.on('open', () => {
-    if (!mounted && !bootFailedShown) root.render(html`<${Splash} message="Handshake OK · waiting for DHT…" />`)
-  })
-  pipe.on('error', () => {
-    if (!mounted && !bootFailedShown) root.render(html`<${Splash} message="Backend unreachable" detail="ws://127.0.0.1:9876 — is the main process running?" failed=${true} />`)
-  })
-  pipe.on('close', () => {
-    if (!mounted && !bootFailedShown) root.render(html`<${Splash} message="Backend disconnected" detail="The WebSocket closed unexpectedly. Restart the app." failed=${true} />`)
-  })
-
-  setTimeout(() => {
-    if (bootFailedShown) return  // never mount the app on a dead backend
+  const mountApp = () => {
+    if (bootFailedShown || mounted || !pipe.connected) return
     mounted = true
     root.render(html`<${App} rpc=${rpc} C=${C} storagePath=${storagePath} />`)
-  }, 250)
+  }
+  pipe.on('open', () => {
+    if (bootFailedShown) return
+    root.render(html`<${Splash} message="Handshake restored · resuming…" />`)
+    setTimeout(mountApp, 50)
+  })
+  pipe.on('error', (err) => {
+    console.error('Backend RPC connection error:', err)
+  })
+  pipe.on('close', () => {
+    if (bootFailedShown) return
+    mounted = false
+    root.render(html`<${Splash} message="Backend connection lost · reconnecting…" />`)
+  })
+  pipe.on('reconnecting', ({ attempt } = {}) => {
+    if (bootFailedShown) return
+    root.render(html`<${Splash} message=${`Reconnecting to backend${attempt ? ` · attempt ${attempt}` : ''}…`} />`)
+  })
+  pipe.on('reconnect-failed', () => {
+    if (bootFailedShown) return
+    mounted = false
+    root.render(html`<${Splash}
+      message="Backend disconnected"
+      detail="Automatic reconnect failed. Fully quit and relaunch PearBrowser; your profile and application storage are safe."
+      failed=${true} />`)
+  })
+
+  setTimeout(mountApp, 250)
 } catch (err) {
   console.error('Boot failed:', err)
   root.render(html`<${Splash} message="Boot failed" detail=${err.stack || err.message} failed=${true} />`)

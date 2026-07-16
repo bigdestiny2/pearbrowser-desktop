@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.7.1 — 2026-07-16
+
+Corrective desktop transport release. The backend RPC handlers were healthy,
+but a renderer WebSocket interrupted during a reload or live-update handoff
+left the mounted UI writing into a dead pipe; unrelated Settings calls then
+surfaced as independent 30-second command timeouts.
+
+### Fixed
+
+- Pending renderer RPC calls now reject immediately when the WebSocket closes
+  or errors, and new calls fail clearly while the backend is reconnecting.
+- The authenticated renderer can reconnect during an eight-second grace period
+  without losing the backend, Corestore session, or buffered backend events.
+- Failed initial port candidates are explicitly destroyed, preventing a late
+  connection from claiming the single renderer slot.
+- The desktop shell now shows a real reconnect/resume screen and remounts the
+  application after the handshake is restored; exhausted retries give a safe
+  relaunch instruction without suggesting profile deletion.
+
+### Verification
+
+- The complete desktop suite passes `681/681`, including five new transport
+  lifecycle tests.
+- A controlled Pear renderer reload exercised the backend handoff and recorded
+  an authenticated reconnect inside the grace window. Afterward, identity,
+  profile, permissions, and relay RPCs all answered in `1–2 ms`.
+
 ## v0.7.0 — 2026-07-16
 
 Swarm-distributed browser protections and extensions. Content Shield lists,
