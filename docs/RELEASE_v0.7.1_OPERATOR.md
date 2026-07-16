@@ -45,9 +45,17 @@ Hyperdrive mirror all advertise `v0.7.1` and pass their fresh-reader checks.
 
 ## Final record
 
-- Source merge/tag: pending
-- Stable Pear length: pending (from `78006`)
-- Live catalogue length/version: pending (from length `307`, version `8`)
+- Source merge: PR [#65](https://github.com/bigdestiny2/pearbrowser-desktop/pull/65),
+  merge commit `3afe35c0337daa4f3ebce7270842b563f066bd55`.
+- Stable Pear length: `92835` (from `78006`); five relays accepted the seed
+  request. A fresh peer found seven peers, reached the exact length, and read
+  `/index.html` (451 bytes). A signed HiveRelay storage proof was unavailable
+  because the relay returned `ROUTE_NOT_FOUND: storage-proof.prove`; the direct
+  fresh-peer content check passed.
+- Live catalogue length/version: `324`, version `9` (from length `307`, version
+  `8`); five relays accepted the seed request. A fresh reader found five peers,
+  verified the signed metadata, all 14 application rows, PearBrowser `0.7.1`,
+  and the expected Peercord, peerit, and HiveWorm entries.
 - GitHub release/workflow: pending
 - Website deploy: pending
 - Website Hyperdrive length: pending (from `126`)
