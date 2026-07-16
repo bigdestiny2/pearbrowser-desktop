@@ -11,6 +11,7 @@
 const http = require('bare-http1')
 const crypto = require('bare-crypto')
 const { PAGE_CONTEXT_SHIM, PAGE_CONTEXT_SHIM_HASH, pageContextMeta } = require('./page-context-bridge.cjs')
+const { escapeStyleText } = require('./html-raw-text.cjs')
 
 const USER_FRIENDLY_ERRORS = {
   'Invalid drive key': 'This link appears to be broken or incomplete',
@@ -50,7 +51,11 @@ function isLoopbackOrigin (origin) {
 
 function normalizeOrigin (origin) {
   if (typeof origin !== 'string' || origin.length === 0) return null
-  return new URL(origin).origin
+  const parsed = new URL(origin)
+  // Bare's URL implementation exposes protocol + host but not `origin`.
+  // Building it explicitly keeps injected <base> URLs and token bindings
+  // valid in the packaged runtime as well as in Node-based tests.
+  return `${parsed.protocol}//${parsed.host}`
 }
 
 function originForPort (port) {
@@ -539,8 +544,8 @@ class HyperProxy {
       (includeAnongpt ? this._anongptShim : '') +
       scriptletTags.join('') +
       pluginScriptTags.join('') +
-      (shieldCss ? `<style data-pear-shield>${shieldCss}</style>` : '') +
-      (pluginCss ? `<style data-pear-plugin-style>${pluginCss}</style>` : '')
+      (shieldCss ? `<style data-pear-shield>${escapeStyleText(shieldCss)}</style>` : '') +
+      (pluginCss ? `<style data-pear-plugin-style>${escapeStyleText(pluginCss)}</style>` : '')
     let injected = html.includes('<head>')
       ? html.replace('<head>', `<head>${headInjection}`)
       : html.replace(/<html>/i, `<html><head>${headInjection}</head>`)
@@ -1218,5 +1223,6 @@ li{padding:8px 0;border-bottom:1px solid #333}a{color:#4dabf7;text-decoration:no
 module.exports = { 
   HyperProxy, 
   getUserFriendlyError,
-  USER_FRIENDLY_ERRORS 
+  USER_FRIENDLY_ERRORS,
+  escapeStyleText
 }

@@ -1,0 +1,14 @@
+{
+  "name": "Pear Dark Reader",
+  "version": "1.0.0",
+  "description": "Applies a dark, high-contrast theme to every hyper:// page. Styles only — requests nothing else.",
+  "author": "PearBrowser examples",
+  "pear": {
+    "plugin": {
+      "capabilities": ["pear.content.styles"],
+      "content": {
+        "styles": { "matches": ["*"], "path": "/style.css" }
+      }
+    }
+  }
+}

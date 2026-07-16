@@ -12,6 +12,7 @@ const Hyperdrive = require('hyperdrive')
 const b4a = require('b4a')
 const z32 = require('z32')
 const fs = require('bare-fs')
+const crypto = require('bare-crypto')
 
 // Normalize a Hyperdrive key from either 64-char hex or
 // 52-char z-base-32 (Vinjari-style) into lowercase hex.
@@ -37,6 +38,9 @@ const { PearBridge, PEAR_SWARM_V1_SHIM, PEAR_SYNC_SHIM, PEAR_ANONGPT_SHIM } = re
 const { HttpBridge } = require('./http-bridge.js')
 const { AskBrowserService } = require('./ai/ask-browser-service.cjs')
 const { ContentShield } = require('./content-shield.cjs')
+const { ShieldListSync } = require('./shield-list-sync.cjs')
+const { PluginDriveLoader } = require('./plugin-drive-loader.cjs')
+const { PluginCatalog } = require('./plugin-catalog.cjs')
 const { PearPluginRegistry } = require('./pear-plugins.cjs')
 const { SessionBridge } = require('./session-bridge.cjs')
 const {
@@ -129,6 +133,9 @@ let swarmGrants = null
 let aiService = null
 let contentShield = null // Content Shield — request filter + cosmetic hiding (BROWSER_PARITY_PLAN.md)
 let pearPlugins = null // Pear Plugins registry (Phase 3)
+let shieldListSync = null // P2P filter-list subscriptions (Phase 2 gate)
+let pluginDriveLoader = null // Plugin installs from drives (Phase 3 gate)
+let pluginCatalog = null // Plugin discovery: builtin seed + subscribed catalogue drives
 let sessionBridge = null // Clearnet session bridge facade (Phase 4)
 let privacySettings = { ...DEFAULT_PRIVACY }
 /** Map<requestId, { resolve, reject, timer }> for login() ceremonies. */
@@ -232,7 +239,7 @@ rpc.handle(C.CMD_NAVIGATE, async (data = {}) => {
     ? await proxy.localUrlForDrive(key, 'hyper', pathAndSearch)
     : `http://127.0.0.1:${proxy.port}/hyper/${key}${pathAndSearch}`
   const apiToken = validKey && proxy?.issueApiToken
-    ? proxy.issueApiToken(key, { origin: new URL(localUrl).origin })
+    ? proxy.issueApiToken(key, { origin: localUrl })
     : null
   const contextToken = validKey && proxy?.pageContextToken
     ? proxy.pageContextToken(key)
@@ -339,6 +346,7 @@ rpc.handle(C.CMD_SHIELD_STATUS, async (data = {}) => {
     stats.driveAllowlisted = contentShield.isAllowlisted(driveKey)
     stats.driveStrict = contentShield.isStrict(driveKey)
   }
+  stats.subscriptions = shieldListSync ? shieldListSync.subscriptions() : []
   return stats
 })
 
@@ -457,6 +465,121 @@ function rememberPluginPayload (data) {
   }
 }
 
+// --- P2P distribution: filter-list drives + plugin drives ---
+//
+// Rule text and plugin payloads are durable through persistShieldState();
+// these commands own the drive-sourced lifecycle (subscribe/refresh/install/
+// update) so lists and plugins keep working offline after first sync and
+// hot-swap when their drives update.
+
+rpc.handle(C.CMD_SHIELD_SUBSCRIBE_LIST, async (data = {}) => {
+  await whenReady()
+  if (!shieldListSync) throw new Error('Shield list sync not available')
+  const result = await shieldListSync.subscribe(data.driveKey)
+  await persistShieldState()
+  return { ...result, subscriptions: shieldListSync.subscriptions() }
+})
+
+rpc.handle(C.CMD_SHIELD_UNSUBSCRIBE_LIST, async (data = {}) => {
+  await whenReady()
+  if (!shieldListSync) throw new Error('Shield list sync not available')
+  const result = await shieldListSync.unsubscribe(data.driveKey)
+  await persistShieldState()
+  return { ...result, subscriptions: shieldListSync.subscriptions() }
+})
+
+rpc.handle(C.CMD_SHIELD_REFRESH_LISTS, async (data = {}) => {
+  await whenReady()
+  if (!shieldListSync) throw new Error('Shield list sync not available')
+  const outcomes = data.driveKey
+    ? [{ driveKey: String(data.driveKey).toLowerCase(), ok: true, ...(await shieldListSync.refresh(data.driveKey, { force: !!data.force })) }]
+    : await shieldListSync.refreshAll({ force: !!data.force })
+  await persistShieldState()
+  return { outcomes, subscriptions: shieldListSync.subscriptions() }
+})
+
+rpc.handle(C.CMD_PLUGIN_INSTALL_DRIVE, async (data = {}) => {
+  await whenReady()
+  if (!pluginDriveLoader) throw new Error('Plugin drive loader not available')
+  const result = await pluginDriveLoader.installFromDrive(data.driveKey, {
+    grantedCapabilities: data.granted,
+    reviewedFingerprint: data.reviewedFingerprint
+  })
+  await persistShieldState()
+  return result
+})
+
+rpc.handle(C.CMD_PLUGIN_UPDATE_DRIVE, async (data = {}) => {
+  await whenReady()
+  if (!pluginDriveLoader) throw new Error('Plugin drive loader not available')
+  const result = await pluginDriveLoader.updateFromDrive(data.driveKey, {
+    grantedCapabilities: data.granted,
+    reviewedFingerprint: data.reviewedFingerprint
+  })
+  await persistShieldState()
+  return result
+})
+
+rpc.handle(C.CMD_PLUGIN_UNINSTALL, async (data = {}) => {
+  await whenReady()
+  if (!pluginDriveLoader) throw new Error('Plugin drive loader not available')
+  const result = await pluginDriveLoader.uninstall(data.driveKey)
+  if (result.driveKey) delete persistShieldState._pluginPayloads[result.driveKey]
+  await persistShieldState()
+  return result
+})
+
+// Plugin discovery. The catalogue is metadata-only: installing still runs
+// through the drive loader's grant + escalation path, and `kind: "app"`
+// entries (anonGPT) simply open as hyper:// apps.
+rpc.handle(C.CMD_PLUGIN_CATALOG, async () => {
+  await whenReady()
+  if (!pluginCatalog) return { entries: [], sources: [] }
+  const installed = new Set(pearPlugins ? pearPlugins.list().map(p => p.id) : [])
+  return {
+    entries: pluginCatalog.entries().map(entry => ({
+      ...entry,
+      installed: !!(entry.driveKey && installed.has(entry.driveKey))
+    })),
+    sources: pluginCatalog.sources()
+  }
+})
+
+rpc.handle(C.CMD_PLUGIN_CATALOG_LOAD_DRIVE, async (data = {}) => {
+  await whenReady()
+  if (!pluginCatalog) throw new Error('Plugin catalogue not available')
+  const result = await pluginCatalog.loadFromDrive(data.driveKey)
+  await persistPluginCatalog()
+  return { ...result, sources: pluginCatalog.sources() }
+})
+
+rpc.handle(C.CMD_PLUGIN_CATALOG_REMOVE_SOURCE, async (data = {}) => {
+  await whenReady()
+  if (!pluginCatalog) throw new Error('Plugin catalogue not available')
+  const removed = pluginCatalog.removeSource(data.driveKey)
+  await persistPluginCatalog()
+  return { removed, sources: pluginCatalog.sources() }
+})
+
+function persistPluginCatalog () {
+  if (!pluginCatalog || !userData) return Promise.resolve()
+  return userData.setSettings({ contentShieldPluginCatalog: pluginCatalog.exportState() }).catch(() => {})
+}
+
+function persistPluginInstallRecords () {
+  if (!pluginDriveLoader || !userData) return Promise.resolve()
+  const records = {}
+  for (const record of pluginDriveLoader.installs()) {
+    records[record.driveKey] = {
+      granted: record.granted,
+      version: record.version,
+      installedAt: record.installedAt,
+      escalated: record.escalated
+    }
+  }
+  return userData.setSettings({ contentShieldPluginInstalls: records }).catch(() => {})
+}
+
 rpc.handle(C.CMD_GET_IDENTITY, async () => {
   return {
     publicKey: swarm ? swarm.keyPair.publicKey.toString('hex') : null,
@@ -569,7 +692,7 @@ rpc.handle(C.CMD_LAUNCH_APP, async (data) => {
     appId: data.id,
     name: app.name,
     driveKey,
-    apiToken: proxy?.issueApiToken ? proxy.issueApiToken(driveKey, { origin: new URL(localUrl).origin }) : null,
+    apiToken: proxy?.issueApiToken ? proxy.issueApiToken(driveKey, { origin: localUrl }) : null,
     contextToken: proxy?.pageContextToken ? proxy.pageContextToken(driveKey) : null
   }
 })
@@ -3050,8 +3173,80 @@ async function boot () {
         try { pearPlugins.register(payload) } catch {}
       }
     }
+
+    // P2P distribution (Phase 2/3 gates). Rule text and plugin payloads were
+    // already rehydrated above, so both work fully offline; these two own
+    // the drive-sourced metadata and the hot-swap lifecycle.
+    const sha256Hex = (buf) => crypto.createHash('sha256').update(buf).digest('hex')
+    const refreshDistributionDrive = async (keyHex) => {
+      const drive = await getDriveForProxy(keyHex)
+      if (!drive) return
+      const before = drive.version
+      await updateDriveBestEffort(drive, 8000)
+      if (drive.version !== before && proxy && typeof proxy.invalidateCache === 'function') {
+        proxy.invalidateCache(keyHex)
+      }
+    }
+    shieldListSync = new ShieldListSync({
+      shield: contentShield,
+      fetchDriveFile: (keyHex, path) => proxy._hybridFetch(keyHex, path),
+      refreshDrive: refreshDistributionDrive,
+      sha256Hex,
+      persistMeta: async (meta) => {
+        if (userData) await userData.setSettings({ contentShieldListSync: meta })
+      }
+    })
+    if (shieldSettings && shieldSettings.contentShieldListSync) {
+      shieldListSync.restore(shieldSettings.contentShieldListSync)
+    }
+    pluginDriveLoader = new PluginDriveLoader({
+      registry: pearPlugins,
+      fetchDriveFile: (keyHex, path) => proxy._hybridFetch(keyHex, path),
+      refreshDrive: refreshDistributionDrive,
+      sha256Hex,
+      persistInstall: async (id, payload) => {
+        if (payload === null) {
+          delete persistShieldState._pluginPayloads[id]
+        } else if (payload.__recordPatch) {
+          const existing = persistShieldState._pluginPayloads[id]
+          if (existing) existing.enabled = false // escalation guard disabled it
+        } else {
+          persistShieldState._pluginPayloads[id] = {
+            id,
+            manifest: payload.manifest,
+            contribution: payload.contribution,
+            enabled: payload.enabled !== false
+          }
+        }
+        await persistPluginInstallRecords()
+      }
+    })
+    if (shieldSettings && shieldSettings.contentShieldPluginInstalls) {
+      pluginDriveLoader.restore(shieldSettings.contentShieldPluginInstalls)
+    }
+    pluginCatalog = new PluginCatalog({
+      fetchDriveFile: (keyHex, path) => proxy._hybridFetch(keyHex, path),
+      refreshDrive: refreshDistributionDrive
+    })
+    if (shieldSettings && shieldSettings.contentShieldPluginCatalog) {
+      pluginCatalog.restore(shieldSettings.contentShieldPluginCatalog)
+    }
   } catch {}
   proxy.setContentShield(contentShield)
+
+  // Background list refresh: first sweep shortly after boot (drives need the
+  // swarm), then periodic hot-swap checks. Failures never disturb browsing.
+  if (shieldListSync) {
+    const firstSweep = setTimeout(() => {
+      shieldListSync.refreshAll()
+        .then((outcomes) => {
+          if (outcomes.some(o => o.ok && o.changed)) return persistShieldState()
+        })
+        .catch(() => {})
+    }, 30 * 1000)
+    if (typeof firstSweep?.unref === 'function') firstSweep.unref()
+    shieldListSync.startAutoRefresh(30 * 60 * 1000)
+  }
 
   // Session bridge + privacy ladder (Phases 4–5). Clearnet navigations route
   // through the browser-owned /clearnet/* proxy by default so Content Shield
@@ -3195,6 +3390,7 @@ async function ensureDevCatalogue () {
 
 async function shutdown () {
   if (storageTimer) { clearInterval(storageTimer); storageTimer = null }
+  try { shieldListSync?.stop() } catch {}
   try { await askBrowserService.close() } catch {}
   if (aiService) { try { await aiService.close() } catch {}; aiService = null }
   if (swarmBridge) { try { await swarmBridge.destroy() } catch {} swarmBridge = null }

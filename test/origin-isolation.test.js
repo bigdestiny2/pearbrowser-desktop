@@ -148,6 +148,29 @@ test('HyperProxy assigns distinct feature-flagged loopback origins per drive', a
   })
 })
 
+test('HyperProxy injects a valid base URL when URL.origin is unavailable in Bare', async () => {
+  const NativeURL = globalThis.URL
+  class BareLikeURL extends NativeURL {
+    get origin () { return undefined }
+  }
+
+  globalThis.URL = BareLikeURL
+  try {
+    const proxy = new HyperProxy(async () => null, () => {})
+    proxy._port = 43210
+    const html = (await proxy._injectHtmlHead(
+      '<html><head></head><body></body></html>',
+      driveA,
+      `/hyper/${driveA}/index.html`
+    )).toString('utf8')
+
+    assert.ok(html.includes(`<base href="http://127.0.0.1:43210/hyper/${driveA}/">`))
+    assert.doesNotMatch(html, /<base href="undefined\//)
+  } finally {
+    globalThis.URL = NativeURL
+  }
+})
+
 test('HyperProxy per-drive listeners serve only their bound drive key', async (t) => {
   const proxy = new HyperProxy(async () => null, () => {}, null, {
     perDriveOrigins: true

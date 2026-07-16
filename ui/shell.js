@@ -1827,9 +1827,9 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
                             </div>`
                           : html`<div className="browse-welcome-copy">
                               <h2>Loading…</h2>
-                              <p>${t.kind === 'clearnet'
-                                ? html`Fetching <code>${t.url}</code> over the clearnet proxy — shields and the privacy ladder apply.`
-                                : html`Fetching <code>${t.url}</code> directly from its peers — first load of a cold drive can take a moment.`}</p>
+                              <p>Fetching <code>${t.url}</code> ${t.kind === 'clearnet'
+                                ? 'over the clearnet proxy — shields and the privacy ladder apply.'
+                                : 'directly from its peers — first load of a cold drive can take a moment.'}</p>
                             </div>`}
                         <div className="browse-welcome-actions">
                           <button className="btn primary" onClick=${() => go(t.url, t.id)}>${(t.status && /^error/i.test(t.status)) ? 'Retry' : 'Reload'}</button>
@@ -5026,12 +5026,18 @@ function DeviceSync ({ rpc, C }) {
 // (docs/BROWSER_PARITY_PLAN.md Phases 1–3). Toggle, per-drive allowlist/
 // strict, named lists, and plugin kill-switches persist in user-data;
 // CMD_SHIELD_* / CMD_PLUGIN_* feed this panel and the urlbar chip.
-function ContentShieldSection ({ rpc, C, activeDriveKey = '' }) {
+function ContentShieldSection ({ rpc, C, activeDriveKey = '', onBrowse }) {
   const [enabled, setEnabled] = useState(true)
   const [status, setStatus] = useState(null)
   const [plugins, setPlugins] = useState([])
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const [subscribeKey, setSubscribeKey] = useState('')
+  const [installKey, setInstallKey] = useState('')
+  const [pendingInstall, setPendingInstall] = useState(null)
+  const [escalation, setEscalation] = useState(null)
+  const [catalog, setCatalog] = useState({ entries: [], sources: [] })
+  const [catalogSourceKey, setCatalogSourceKey] = useState('')
   const driveKey = typeof activeDriveKey === 'string' && /^[0-9a-f]{64}$/i.test(activeDriveKey)
     ? activeDriveKey.toLowerCase()
     : ''
@@ -5053,6 +5059,11 @@ function ContentShieldSection ({ rpc, C, activeDriveKey = '' }) {
       if (C.CMD_PLUGIN_LIST != null) {
         rpc.request(C.CMD_PLUGIN_LIST)
           .then((result) => { if (!disposed) setPlugins(result?.plugins || []) })
+          .catch(() => {})
+      }
+      if (C.CMD_PLUGIN_CATALOG != null) {
+        rpc.request(C.CMD_PLUGIN_CATALOG)
+          .then((result) => { if (!disposed && result) setCatalog({ entries: result.entries || [], sources: result.sources || [] }) })
           .catch(() => {})
       }
     }
@@ -5108,6 +5119,120 @@ function ContentShieldSection ({ rpc, C, activeDriveKey = '' }) {
     finally { setBusy(false) }
   }
 
+  const refreshStatusAndPlugins = async () => {
+    const result = await rpc.request(C.CMD_SHIELD_STATUS, driveKey ? { driveKey } : {}).catch(() => null)
+    if (result) setStatus(result)
+    const listed = await rpc.request(C.CMD_PLUGIN_LIST).catch(() => null)
+    if (listed) setPlugins(listed.plugins || [])
+    if (C.CMD_PLUGIN_CATALOG != null) {
+      const listing = await rpc.request(C.CMD_PLUGIN_CATALOG).catch(() => null)
+      if (listing) setCatalog({ entries: listing.entries || [], sources: listing.sources || [] })
+    }
+  }
+
+  const subscribeList = async () => {
+    const key = subscribeKey.trim().toLowerCase()
+    if (!/^[0-9a-f]{64}$/.test(key) || C.CMD_SHIELD_SUBSCRIBE_LIST == null) return
+    setBusy(true); setErr('')
+    try {
+      await rpc.request(C.CMD_SHIELD_SUBSCRIBE_LIST, { driveKey: key }, 30000)
+      setSubscribeKey('')
+      await refreshStatusAndPlugins()
+    } catch (e) { setErr(`subscribe: ${e.message}`) }
+    finally { setBusy(false) }
+  }
+
+  const unsubscribeList = async (key) => {
+    if (C.CMD_SHIELD_UNSUBSCRIBE_LIST == null) return
+    setBusy(true); setErr('')
+    try {
+      await rpc.request(C.CMD_SHIELD_UNSUBSCRIBE_LIST, { driveKey: key })
+      await refreshStatusAndPlugins()
+    } catch (e) { setErr(`unsubscribe: ${e.message}`) }
+    finally { setBusy(false) }
+  }
+
+  const refreshLists = async (key) => {
+    if (C.CMD_SHIELD_REFRESH_LISTS == null) return
+    setBusy(true); setErr('')
+    try {
+      await rpc.request(C.CMD_SHIELD_REFRESH_LISTS, key ? { driveKey: key, force: true } : {}, 30000)
+      await refreshStatusAndPlugins()
+    } catch (e) { setErr(`refresh: ${e.message}`) }
+    finally { setBusy(false) }
+  }
+
+  const installPluginByKey = async (key, review = null) => {
+    const normalized = String(key || '').trim().toLowerCase()
+    if (!/^[0-9a-f]{64}$/.test(normalized) || C.CMD_PLUGIN_INSTALL_DRIVE == null) return
+    setBusy(true); setErr('')
+    try {
+      const payload = { driveKey: normalized }
+      if (review) {
+        payload.granted = review.requested || []
+        payload.reviewedFingerprint = review.fingerprint
+      }
+      const outcome = await rpc.request(C.CMD_PLUGIN_INSTALL_DRIVE, payload, 30000)
+      setPendingInstall(outcome && outcome.consentRequired ? outcome : null)
+      await refreshStatusAndPlugins()
+    } catch (e) { setErr(`install: ${e.message}`) }
+    finally { setBusy(false) }
+  }
+
+  const installPlugin = async () => {
+    await installPluginByKey(installKey)
+    setInstallKey('')
+  }
+
+  const loadCatalogSource = async () => {
+    const key = catalogSourceKey.trim().toLowerCase()
+    if (!/^[0-9a-f]{64}$/.test(key) || C.CMD_PLUGIN_CATALOG_LOAD_DRIVE == null) return
+    setBusy(true); setErr('')
+    try {
+      await rpc.request(C.CMD_PLUGIN_CATALOG_LOAD_DRIVE, { driveKey: key }, 30000)
+      setCatalogSourceKey('')
+      await refreshStatusAndPlugins()
+    } catch (e) { setErr(`catalog: ${e.message}`) }
+    finally { setBusy(false) }
+  }
+
+  const removeCatalogSource = async (key) => {
+    if (C.CMD_PLUGIN_CATALOG_REMOVE_SOURCE == null) return
+    setBusy(true); setErr('')
+    try {
+      await rpc.request(C.CMD_PLUGIN_CATALOG_REMOVE_SOURCE, { driveKey: key })
+      await refreshStatusAndPlugins()
+    } catch (e) { setErr(`catalog: ${e.message}`) }
+    finally { setBusy(false) }
+  }
+
+  const updatePlugin = async (id, review = null) => {
+    if (C.CMD_PLUGIN_UPDATE_DRIVE == null) return
+    setBusy(true); setErr('')
+    try {
+      const payload = { driveKey: id }
+      if (review) {
+        payload.granted = review.capabilities || []
+        payload.reviewedFingerprint = review.fingerprint
+      }
+      const outcome = await rpc.request(C.CMD_PLUGIN_UPDATE_DRIVE, payload, 30000)
+      setEscalation(outcome && outcome.escalated ? { driveKey: id, ...outcome } : null)
+      await refreshStatusAndPlugins()
+    } catch (e) { setErr(`update: ${e.message}`) }
+    finally { setBusy(false) }
+  }
+
+  const uninstallPlugin = async (id) => {
+    if (C.CMD_PLUGIN_UNINSTALL == null) return
+    setBusy(true); setErr('')
+    try {
+      await rpc.request(C.CMD_PLUGIN_UNINSTALL, { driveKey: id })
+      if (escalation?.driveKey === id) setEscalation(null)
+      await refreshStatusAndPlugins()
+    } catch (e) { setErr(`uninstall: ${e.message}`) }
+    finally { setBusy(false) }
+  }
+
   const listNames = (status && (status.listDetails || status.lists)) || []
   const listLabel = Array.isArray(listNames)
     ? listNames.map((l) => (typeof l === 'string' ? l : l.name)).join(', ')
@@ -5157,26 +5282,132 @@ function ContentShieldSection ({ rpc, C, activeDriveKey = '' }) {
       ${status && Array.isArray(status.topRules) && status.topRules.length > 0 && html`
         <div className="settings-subtle">Top rules: ${status.topRules.slice(0, 3).map(item => `${item.rule} (${item.hits})`).join(' · ')}</div>
       `}
-      ${plugins.length > 0 && html`
-        <div className="settings-row" data-testid="content-shield-plugins">
-          <div style=${{ width: '100%' }}>
-            <div className="settings-label">Pear Plugins</div>
-            <div className="settings-subtle">Kill-switch disables a plugin's filter/style/script contributions without uninstalling it.</div>
-            ${plugins.map((p) => html`
-              <div className="settings-row" key=${p.id} data-testid=${'plugin-row-' + p.id}>
-                <div>
-                  <div className="settings-label">${p.name || p.id}</div>
-                  <div className="settings-subtle">${(p.capabilities || []).join(', ') || 'no capabilities'}</div>
-                </div>
+
+      <div className="settings-row" data-testid="content-shield-list-sync">
+        <div style=${{ width: '100%' }}>
+          <div className="settings-label">Filter lists from the swarm</div>
+          <div className="settings-subtle">Subscribe to a filter-list Hyperdrive by key. Rules sync peer-to-peer, hot-swap when the publisher updates, and keep working offline — no CDN, no list-fetch fingerprint.</div>
+          <div className="settings-row">
+            <div className="profile-field" style=${{ flex: 1 }}>
+              <input className="profile-input" placeholder="64-hex filter-list drive key" value=${subscribeKey}
+                     data-testid="content-shield-subscribe-input"
+                     onInput=${(e) => setSubscribeKey(e.target.value)}
+                     onKeyDown=${(e) => e.key === 'Enter' && subscribeList()} />
+            </div>
+            <button className="btn" data-testid="content-shield-subscribe" onClick=${subscribeList}
+                    disabled=${busy || !/^[0-9a-f]{64}$/i.test(subscribeKey.trim())}>Subscribe</button>
+            <button className="btn subtle" onClick=${() => refreshLists()} disabled=${busy || !(status?.subscriptions?.length)}>Refresh all</button>
+          </div>
+          ${(status?.subscriptions || []).map((sub) => html`
+            <div className="settings-row" key=${sub.driveKey} data-testid=${'shield-list-row-' + sub.driveKey}>
+              <div>
+                <div className="settings-label">${sub.name || sub.driveKey.slice(0, 12) + '…'}${sub.version ? ` · v${sub.version}` : ''}</div>
+                <div className="settings-subtle">${sub.rules || 0} rules · ${sub.driveKey.slice(0, 16)}…</div>
+              </div>
+              <div className="settings-inline-actions">
+                <button className="btn small subtle" onClick=${() => refreshLists(sub.driveKey)} disabled=${busy}>Refresh</button>
+                <button className="btn small subtle danger" onClick=${() => unsubscribeList(sub.driveKey)} disabled=${busy}>Remove</button>
+              </div>
+            </div>
+          `)}
+        </div>
+      </div>
+
+      <div className="settings-row" data-testid="plugin-catalog">
+        <div style=${{ width: '100%' }}>
+          <div className="settings-label">Plugin catalog</div>
+          <div className="settings-subtle">Curated plugins and AI add-ons you can add yourself. Installing a plugin shows its declared capabilities and records your grant; app entries open as ordinary P2P apps gated by their own manifests. Load more catalogues from a drive key below.</div>
+          ${catalog.entries.map((entry) => html`
+            <div className="settings-row" key=${entry.id} data-testid=${'catalog-entry-' + entry.id}>
+              <div>
+                <div className="settings-label">${entry.name}${entry.source === 'builtin' && entry.verified ? html`<span title="Curated entry" style=${{ marginLeft: '5px', color: '#3fb950', fontSize: '12px' }}>✦</span>` : ''}</div>
+                <div className="settings-subtle">${entry.description}</div>
+                <div className="settings-subtle">${entry.kind === 'app' ? 'P2P app' : 'plugin'}${entry.capabilities?.length ? ` · ${entry.capabilities.join(', ')}` : ''}${entry.source !== 'builtin' ? ` · from ${String(entry.source).slice(0, 8)}…` : ''}</div>
+              </div>
+              <div className="settings-inline-actions">
+                ${entry.kind === 'app' && entry.driveKey && html`
+                  <button className="btn small" data-testid=${'catalog-open-' + entry.id}
+                          onClick=${() => onBrowse && onBrowse(`hyper://${entry.driveKey}/`)}
+                          disabled=${busy || !onBrowse}>Open</button>
+                `}
+                ${entry.kind === 'plugin' && entry.driveKey && !entry.installed && html`
+                  <button className="btn small" data-testid=${'catalog-install-' + entry.id}
+                          onClick=${() => installPluginByKey(entry.driveKey)} disabled=${busy}>Install</button>
+                `}
+                ${entry.kind === 'plugin' && entry.installed && html`<span className="settings-subtle">Installed</span>`}
+                ${entry.kind === 'plugin' && !entry.driveKey && html`<span className="settings-subtle" title=${entry.unpublished ? `Publish ${entry.unpublished} to enable` : ''}>Publish pending</span>`}
+              </div>
+            </div>
+          `)}
+          <div className="settings-row">
+            <div className="profile-field" style=${{ flex: 1 }}>
+              <input className="profile-input" placeholder="64-hex catalogue drive key" value=${catalogSourceKey}
+                     data-testid="plugin-catalog-source-input"
+                     onInput=${(e) => setCatalogSourceKey(e.target.value)}
+                     onKeyDown=${(e) => e.key === 'Enter' && loadCatalogSource()} />
+            </div>
+            <button className="btn subtle" data-testid="plugin-catalog-load" onClick=${loadCatalogSource}
+                    disabled=${busy || !/^[0-9a-f]{64}$/i.test(catalogSourceKey.trim())}>Load catalogue</button>
+          </div>
+          ${catalog.sources.map((source) => html`
+            <div className="settings-row" key=${source.driveKey}>
+              <div className="settings-subtle">${source.name} · ${source.entryCount} entries · ${source.driveKey.slice(0, 16)}…</div>
+              <button className="btn small subtle danger" onClick=${() => removeCatalogSource(source.driveKey)} disabled=${busy}>Remove</button>
+            </div>
+          `)}
+        </div>
+      </div>
+
+      <div className="settings-row" data-testid="content-shield-plugins">
+        <div style=${{ width: '100%' }}>
+          <div className="settings-label">Pear Plugins</div>
+          <div className="settings-subtle">Plugins are Hyperdrives with declared capabilities. An update that requests new capabilities is disabled automatically until you re-approve it. Kill-switch disables a plugin's filter/style/script contributions without uninstalling it.</div>
+          <div className="settings-row">
+            <div className="profile-field" style=${{ flex: 1 }}>
+              <input className="profile-input" placeholder="64-hex plugin drive key" value=${installKey}
+                     data-testid="plugin-install-input"
+                     onInput=${(e) => setInstallKey(e.target.value)}
+                     onKeyDown=${(e) => e.key === 'Enter' && installPlugin()} />
+            </div>
+            <button className="btn" data-testid="plugin-install" onClick=${installPlugin}
+                    disabled=${busy || !/^[0-9a-f]{64}$/i.test(installKey.trim())}>Install</button>
+          </div>
+          ${pendingInstall && html`
+            <div className="apps-error" data-testid="plugin-install-consent">
+              ${pendingInstall.name} ${pendingInstall.version ? `v${pendingInstall.version}` : ''} requests:
+              ${(pendingInstall.requested || []).join(', ') || 'no capabilities'}.
+              Review this grant before installing; catalogue labels are not trusted permissions.
+              <button className="btn small" onClick=${() => installPluginByKey(pendingInstall.driveKey, pendingInstall)} disabled=${busy}>Grant and install</button>
+              <button className="btn small subtle" onClick=${() => setPendingInstall(null)} disabled=${busy}>Cancel</button>
+            </div>
+          `}
+          ${escalation && html`
+            <div className="apps-error" data-testid="plugin-escalation">
+              Update for ${escalation.driveKey.slice(0, 12)}… requests new capabilities: ${escalation.added.join(', ')}.
+              ${escalation.changedSinceReview ? ' The plugin changed after the previous review; inspect this new request.' : ''}
+              <button className="btn small" onClick=${() => updatePlugin(escalation.driveKey, escalation)} disabled=${busy}>Accept and re-enable</button>
+            </div>
+          `}
+          ${plugins.map((p) => html`
+            <div className="settings-row" key=${p.id} data-testid=${'plugin-row-' + p.id}>
+              <div>
+                <div className="settings-label">${p.name || p.id}</div>
+                <div className="settings-subtle">${(p.capabilities || []).join(', ') || 'no capabilities'}${p.version ? ` · v${p.version}` : ''}</div>
+              </div>
+              <div className="settings-inline-actions">
+                ${/^[0-9a-f]{64}$/.test(p.id) && html`
+                  <button className="btn small subtle" data-testid=${'plugin-update-' + p.id} onClick=${() => updatePlugin(p.id)} disabled=${busy}>Update</button>
+                  <button className="btn small subtle danger" data-testid=${'plugin-uninstall-' + p.id} onClick=${() => uninstallPlugin(p.id)} disabled=${busy}>Uninstall</button>
+                `}
                 <label className="login-scope${p.enabled ? ' on' : ''}">
                   <input type="checkbox" checked=${!!p.enabled} disabled=${busy}
                          onChange=${() => togglePlugin(p.id, p.enabled)} data-testid=${'plugin-enabled-' + p.id} />
                 </label>
               </div>
-            `)}
-          </div>
+            </div>
+          `)}
         </div>
-      `}
+      </div>
     </div>
   `
 }
@@ -5421,7 +5652,7 @@ function ExperimentalSection ({ rpc, C, onAutobeeChange, onDeviceSyncChange }) {
   `
 }
 
-function Settings ({ rpc, C, status, storagePath, log, appearanceTheme, onAppearanceThemeChange, activeDriveKey = '' }) {
+function Settings ({ rpc, C, status, storagePath, log, appearanceTheme, onAppearanceThemeChange, activeDriveKey = '', onBrowse }) {
   const [identity, setIdentity] = useState(null)
   const [seedPhrase, setSeedPhrase] = useState(null)
   const [err, setErr] = useState('')
@@ -5705,7 +5936,7 @@ function Settings ({ rpc, C, status, storagePath, log, appearanceTheme, onAppear
 
       <h2>Content Shield</h2>
       <p className="subtitle">Brave-style ad and tracker blocking, enforced inside the browser's own proxy — blocked requests never reach a peer, a relay, or the network. Named filter lists hot-swap offline; per-drive allowlist and strict mode live here; Pear Plugins feed the same engine with a kill switch.</p>
-      <${ContentShieldSection} rpc=${rpc} C=${C} activeDriveKey=${activeDriveKey} />
+      <${ContentShieldSection} rpc=${rpc} C=${C} activeDriveKey=${activeDriveKey} onBrowse=${onBrowse} />
 
       <h2>Clearnet &amp; privacy</h2>
       <p className="subtitle">Browse https:// sites through the browser-owned clearnet proxy (shields on) or direct load. Privacy ladder: HTTPS-only upgrades, tracking-parameter stripping, referrer policy, fingerprint farbling, third-party cookie isolation in proxy mode.</p>
@@ -6431,7 +6662,7 @@ export function App ({ rpc, C, storagePath }) {
         ${tab === 'apps' && html`<${Apps} rpc=${rpc} C=${C} onLaunch=${launchInBrowse} />`}
         ${tab === 'sites' && html`<${Sites} rpc=${rpc} C=${C} onBrowse=${launchInBrowse} />`}
         ${tab === 'library' && html`<${Library} rpc=${rpc} C=${C} onBrowse=${launchInBrowse} />`}
-        ${tab === 'settings' && html`<${Settings} rpc=${rpc} C=${C} status=${status} storagePath=${storagePath} log=${log} appearanceTheme=${appearanceTheme} onAppearanceThemeChange=${setAndPersistAppearanceTheme} activeDriveKey=${(tabs.find((t) => t.id === browseActiveId) && tabDriveKey(tabs.find((t) => t.id === browseActiveId))) || ''} />`}
+        ${tab === 'settings' && html`<${Settings} rpc=${rpc} C=${C} status=${status} storagePath=${storagePath} log=${log} appearanceTheme=${appearanceTheme} onAppearanceThemeChange=${setAndPersistAppearanceTheme} activeDriveKey=${(tabs.find((t) => t.id === browseActiveId) && tabDriveKey(tabs.find((t) => t.id === browseActiveId))) || ''} onBrowse=${launchInBrowse} />`}
       </div>
 
       <div className=${'status ' + statusClass}>

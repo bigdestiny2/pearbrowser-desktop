@@ -21,6 +21,7 @@ const {
   referrerPolicyMeta,
   normalizePrivacySettings
 } = require('./privacy-policy.cjs')
+const { escapeStyleText } = require('./html-raw-text.cjs')
 
 const MAX_BODY_BYTES = 8 * 1024 * 1024 // 8 MiB response cap for proxy mode
 const FETCH_TIMEOUT_MS = 20000
@@ -194,8 +195,10 @@ function rewriteHtmlForProxy (html, documentUrl, proxyOrigin) {
 
   // Inject <base> pointing at proxy document root so any leftover relative
   // resolution still hits our host; we also set a pear-clearnet meta.
+  // Bare's URL implementation exposes protocol + host but not `.origin`.
+  const documentOrigin = `${base.protocol}//${base.host}`
   const headBits =
-    `<meta name="pear-clearnet-origin" content="${escapeHtml(base.origin)}">` +
+    `<meta name="pear-clearnet-origin" content="${escapeHtml(documentOrigin)}">` +
     `<base href="${escapeHtml(origin)}/clearnet/${encodeClearnetTarget(base.toString())}">`
 
   if (/<head[^>]*>/i.test(out)) {
@@ -241,7 +244,7 @@ function buildClearnetInjections (opts = {}) {
     const css = contentShield.cosmeticCssFor
       ? contentShield.cosmeticCssFor(host, {})
       : ''
-    if (css) fragments.push(`<style data-pear-shield>${css}</style>`)
+    if (css) fragments.push(`<style data-pear-shield>${escapeStyleText(css)}</style>`)
 
     if (typeof contentShield.scriptletsFor === 'function') {
       for (const entry of contentShield.scriptletsFor(host, {})) {
@@ -253,7 +256,7 @@ function buildClearnetInjections (opts = {}) {
     }
     if (typeof contentShield.pluginStylesFor === 'function') {
       const pcss = contentShield.pluginStylesFor(host, {})
-      if (pcss) fragments.push(`<style data-pear-plugin-style>${pcss}</style>`)
+      if (pcss) fragments.push(`<style data-pear-plugin-style>${escapeStyleText(pcss)}</style>`)
     }
     if (typeof contentShield.pluginScriptsFor === 'function') {
       for (const entry of contentShield.pluginScriptsFor(host, {})) {

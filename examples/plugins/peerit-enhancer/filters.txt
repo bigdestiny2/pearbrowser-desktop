@@ -1,0 +1,5 @@
+! peerit Enhancer filter contribution (pear.net.filter).
+! Namespaced under plugin:<drive-key> by the shield; the kill switch
+! or uninstall removes these rules instantly.
+ec6e2d6d9d22b9d6b40e11a9ca3042be3197e4bdca9e9a7f079be6ee830761b4##.promoted-post
+ec6e2d6d9d22b9d6b40e11a9ca3042be3197e4bdca9e9a7f079be6ee830761b4##.self-promo-banner

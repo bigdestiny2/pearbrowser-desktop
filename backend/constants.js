@@ -203,6 +203,19 @@ const CMD_PLUGIN_LIST = 235        // → { plugins: [...] }
 const CMD_PLUGIN_SET_ENABLED = 236 // { id, enabled } → kill-switch without uninstall
 const CMD_PLUGIN_REGISTER = 237   // { id, manifest, contribution?, enabled? } → fixture/install path
 
+// P2P distribution (Phase 2/3 gates): filter lists and plugins arrive as
+// Hyperdrives. Subscriptions and installs are durable and work offline
+// after first sync; updates hot-swap with a capability-escalation guard.
+const CMD_SHIELD_SUBSCRIBE_LIST = 239   // { driveKey } → subscribe to a filter-list drive
+const CMD_SHIELD_UNSUBSCRIBE_LIST = 240 // { driveKey }
+const CMD_SHIELD_REFRESH_LISTS = 241    // { driveKey?, force? } → refresh one or all subscriptions
+const CMD_PLUGIN_INSTALL_DRIVE = 242    // preview {driveKey}; accept {driveKey, granted, reviewedFingerprint}
+const CMD_PLUGIN_UPDATE_DRIVE = 243     // update/preview escalation; accept with grant + reviewedFingerprint
+const CMD_PLUGIN_UNINSTALL = 244        // { driveKey }
+const CMD_PLUGIN_CATALOG = 245          // → { entries, sources } (builtin seed + subscribed catalogue drives)
+const CMD_PLUGIN_CATALOG_LOAD_DRIVE = 246   // { driveKey } → subscribe to a catalogue drive (/plugins.json)
+const CMD_PLUGIN_CATALOG_REMOVE_SOURCE = 247 // { driveKey }
+
 // Privacy ladder + clearnet session bridge status (Phases 4–5).
 const CMD_PRIVACY_STATUS = 238
 
@@ -322,6 +335,9 @@ module.exports = {
   CMD_SHIELD_STATUS, CMD_SHIELD_LOAD_LIST, CMD_SHIELD_REMOVE_LIST,
   CMD_SHIELD_SET_ALLOW, CMD_SHIELD_SET_STRICT,
   CMD_PLUGIN_LIST, CMD_PLUGIN_SET_ENABLED, CMD_PLUGIN_REGISTER,
+  CMD_SHIELD_SUBSCRIBE_LIST, CMD_SHIELD_UNSUBSCRIBE_LIST, CMD_SHIELD_REFRESH_LISTS,
+  CMD_PLUGIN_INSTALL_DRIVE, CMD_PLUGIN_UPDATE_DRIVE, CMD_PLUGIN_UNINSTALL,
+  CMD_PLUGIN_CATALOG, CMD_PLUGIN_CATALOG_LOAD_DRIVE, CMD_PLUGIN_CATALOG_REMOVE_SOURCE,
   CMD_PRIVACY_STATUS,
   CMD_BRIDGE,
   CMD_STOP,

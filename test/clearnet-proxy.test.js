@@ -44,7 +44,7 @@ test('rewriteHtmlForProxy rewrites href/src to proxy paths', () => {
   </body></html>`
   const out = rewriteHtmlForProxy(html, 'https://example.com/page', 'http://127.0.0.1:9')
   assert.match(out, /\/clearnet\//)
-  assert.match(out, /pear-clearnet-origin/)
+  assert.match(out, /<meta name="pear-clearnet-origin" content="https:\/\/example\.com">/)
   assert.doesNotMatch(out, /href="\/next"/)
   // Absolute CDN URL is base64url-encoded into the proxy path
   assert.match(out, /clearnet\/[A-Za-z0-9_-]+/)
@@ -65,6 +65,25 @@ test('buildClearnetInjections adds shield CSS, scriptlets, farbling', () => {
   assert.match(htmlFragment, /data-pear-scriptlet/)
   assert.match(htmlFragment, /data-pear-farbling/)
   assert.ok(scriptBodies.length >= 2)
+})
+
+test('clearnet injection contains style-only plugin CSS inside its style element', () => {
+  const payload = '</style><script>window.__clearnetBreakout=1</script><style>'
+  const shield = new ContentShield({ builtinList: false })
+  shield.applyPluginContribution('style-only', {
+    styles: { matches: ['*'], css: payload }
+  }, ['pear.content.styles'])
+
+  const { htmlFragment } = buildClearnetInjections({
+    contentShield: shield,
+    documentUrl: 'https://news.example/',
+    privacy: {}
+  })
+  const style = htmlFragment.match(/<style data-pear-plugin-style>([\s\S]*?)<\/style>/)
+  assert.ok(style)
+  assert.equal(style[1].includes('</style>'), false)
+  assert.equal(htmlFragment.includes('<script>window.__clearnetBreakout=1</script>'), false)
+  assert.match(style[1], /\\3c \/style>/)
 })
 
 test('handleClearnetRequest blocks before fetch when shield matches', async () => {

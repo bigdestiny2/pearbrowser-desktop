@@ -1,0 +1,26 @@
+{
+  "name": "peerit Enhancer",
+  "version": "1.0.0",
+  "description": "Quality-of-life tweaks for peerit (the front page of the P2P internet): compact post rows, a reading-width cap, keyboard hint chrome, and a small filter contribution. Scoped to the peerit drive only.",
+  "author": "PearBrowser examples",
+  "pear": {
+    "plugin": {
+      "capabilities": [
+        "pear.content.styles",
+        "pear.content.scripts",
+        "pear.net.filter"
+      ],
+      "content": {
+        "styles": {
+          "matches": ["ec6e2d6d9d22b9d6b40e11a9ca3042be3197e4bdca9e9a7f079be6ee830761b4"],
+          "path": "/style.css"
+        },
+        "scripts": {
+          "matches": ["ec6e2d6d9d22b9d6b40e11a9ca3042be3197e4bdca9e9a7f079be6ee830761b4"],
+          "path": "/content.js"
+        },
+        "filters": "/filters.txt"
+      }
+    }
+  }
+}
