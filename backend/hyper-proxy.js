@@ -11,6 +11,7 @@
 const http = require('bare-http1')
 const crypto = require('bare-crypto')
 const { PAGE_CONTEXT_SHIM, PAGE_CONTEXT_SHIM_HASH, pageContextMeta } = require('./page-context-bridge.cjs')
+const { escapeStyleText } = require('./html-raw-text.cjs')
 
 const USER_FRIENDLY_ERRORS = {
   'Invalid drive key': 'This link appears to be broken or incomplete',
@@ -199,15 +200,6 @@ function escapeHtml (str) {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;')
     .replace(/`/g, '&#96;')
-}
-
-// A <style> element is an HTML raw-text container: the HTML parser will end it
-// on a literal "</style" even when those bytes came from otherwise-valid CSS.
-// Escape every less-than sign as a CSS code point before embedding third-party
-// filter/plugin CSS so a style-only capability can never become script markup.
-function escapeStyleText (css) {
-  if (typeof css !== 'string') return ''
-  return css.replace(/</g, '\\3c ')
 }
 
 class HyperProxy {

@@ -67,6 +67,25 @@ test('buildClearnetInjections adds shield CSS, scriptlets, farbling', () => {
   assert.ok(scriptBodies.length >= 2)
 })
 
+test('clearnet injection contains style-only plugin CSS inside its style element', () => {
+  const payload = '</style><script>window.__clearnetBreakout=1</script><style>'
+  const shield = new ContentShield({ builtinList: false })
+  shield.applyPluginContribution('style-only', {
+    styles: { matches: ['*'], css: payload }
+  }, ['pear.content.styles'])
+
+  const { htmlFragment } = buildClearnetInjections({
+    contentShield: shield,
+    documentUrl: 'https://news.example/',
+    privacy: {}
+  })
+  const style = htmlFragment.match(/<style data-pear-plugin-style>([\s\S]*?)<\/style>/)
+  assert.ok(style)
+  assert.equal(style[1].includes('</style>'), false)
+  assert.equal(htmlFragment.includes('<script>window.__clearnetBreakout=1</script>'), false)
+  assert.match(style[1], /\\3c \/style>/)
+})
+
 test('handleClearnetRequest blocks before fetch when shield matches', async () => {
   const shield = new ContentShield({ builtinList: false })
   shield.addList('t', '||evil-ads.example^')
