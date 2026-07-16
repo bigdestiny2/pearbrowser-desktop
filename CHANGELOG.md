@@ -1,5 +1,51 @@
 # Changelog
 
+## v0.7.0 — 2026-07-16
+
+Swarm-distributed browser protections and extensions. Content Shield lists,
+Pear Plugins, and the plugin catalogue now travel as ordinary Hyperdrives:
+checksum-verified, pinned on HiveRelay, hot-swappable, and usable offline.
+
+### Added
+
+- **P2P filter-list subscriptions** — add a drive key in Settings, verify the
+  manifest and SHA-256 before activation, refresh in place, and restore cached
+  rules without a network connection. The default `pear-default` list is
+  published and pinned at `842fb9e6…`.
+- **Drive-installed Pear Plugins** — install styles, scripts, and filter
+  contributions from Hyperdrives with explicit capabilities, hash-authorized
+  injection, a per-plugin kill switch, update/uninstall controls, and a
+  fail-closed capability-escalation prompt.
+- **P2P plugin catalogue** — one-click Install/Open actions, a built-in anonGPT
+  app entry, and support for extra `/plugins.json` catalogue drives. The public
+  catalogue is pinned at `01b74736…`.
+- **Published examples** — Pear Dark Reader (`bbde8330…`) and peerit Enhancer
+  (`1b21d8a6…`) are live, pinned, and fresh-peer verified.
+
+### Changed
+
+- Content Shield Settings now expose list subscriptions, forced refresh,
+  per-drive allowlist/strict controls, plugin lifecycle controls, and catalogue
+  sources from one browser-owned surface.
+- Cosmetic rules, supported scriptlets, and plugin content contributions use
+  the CSP-safe hash-authorized injection path.
+- Native release and embedded catalogue metadata advance to `0.7.0`.
+
+### Security / privacy
+
+- A list checksum mismatch, malformed/oversized drive, missing capability, or
+  silent plugin capability increase fails closed before any contribution runs.
+- Blocking remains browser-owned: denied requests never reach peers, relays, or
+  clearnet, and cached lists keep working offline.
+
+### Distribution scope
+
+- The stable Pear app, live catalogue, GitHub source/assets, `pearbrowser.com`,
+  and the website Hyperdrive must all agree on `v0.7.0` before announcement.
+- Native packages remain package-proof previews until macOS notarization and
+  Windows public-trust signing credentials are available; verify SHA-256
+  sidecars and expect operating-system trust prompts.
+
 ## v0.6.1 — 2026-07-15
 
 Corrective distribution release aligning the catalogue, Linux package, website,

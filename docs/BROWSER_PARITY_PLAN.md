@@ -1,6 +1,6 @@
 # PearBrowser → mainstream-browser parity plan
 
-Status: Phases 1–3 shipped with gates closed; Phase 4 clearnet proxy + session-bridge facade shipped; Phase 5 privacy ladder shipped (HTTPS-only, tracking strip, farbling, cookie isolation in proxy mode). P2P distribution live 2026-07-16: filter-list drive subscriptions (`shield-list-sync.cjs`) and plugin installs from drives (`plugin-drive-loader.cjs` with the capability-escalation guard), plus the plugin catalogue (`plugin-catalog.cjs`, anonGPT in the builtin seed). All four distribution drives published, pinned, and fresh-peer verified — keys in `filter-lists/README.md`. Remaining: the native pear-electron session.webRequest bridge for direct-mode shields.  
+Status: Phases 1–3 shipped with gates closed; Phase 4 clearnet proxy + session-bridge facade shipped; Phase 5 privacy ladder shipped (HTTPS-only, tracking strip, farbling, cookie isolation in proxy mode). P2P distribution live 2026-07-16: filter-list drive subscriptions (`shield-list-sync.cjs`) and plugin installs from drives (`plugin-drive-loader.cjs` with the capability-escalation guard), plus the plugin catalogue (`plugin-catalog.cjs`, anonGPT in the builtin seed). All four distribution drives published, pinned, and fresh-peer verified — keys in `filter-lists/README.md`. Remaining: the native pear-electron session.webRequest bridge for direct-mode shields.
 Date: 2026-07-16
 
 The goal: make PearBrowser as capable a daily browser as Brave — ad blocking,

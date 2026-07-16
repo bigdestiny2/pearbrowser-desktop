@@ -107,6 +107,6 @@ Publish the curated catalogue:
 node scripts/publish-and-pin.js catalogues/pear-plugins --name pear-plugins-catalog
 ```
 
-After publishing the two example plugin drives, paste their keys into the
-`driveKey` fields of `plugins.json` and re-publish the catalogue — every
-subscriber's Install buttons light up on their next load.
+The published example keys are already recorded in `plugins.json`. When an
+example is replaced, publish the new drive, update its `driveKey`, and
+re-publish the catalogue with the original catalogue key and publisher storage.
