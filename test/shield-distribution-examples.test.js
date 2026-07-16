@@ -35,16 +35,25 @@ function makeHarness (dir) {
   const loader = new PluginDriveLoader({
     registry,
     fetchDriveFile: driveFromDirectory(dir),
+    sha256Hex: (input) => createHash('sha256').update(input).digest('hex'),
     persistInstall: async () => {}
   })
   return { shield, registry, loader }
+}
+
+async function approveInstall (loader, key) {
+  const preview = await loader.installFromDrive(key)
+  return loader.installFromDrive(key, {
+    grantedCapabilities: preview.requested,
+    reviewedFingerprint: preview.fingerprint
+  })
 }
 
 test('dark-reader example installs and styles every host', async () => {
   const key = 'a'.repeat(64)
   const { shield, loader } = makeHarness('examples/plugins/dark-reader')
 
-  const result = await loader.installFromDrive(key)
+  const result = await approveInstall(loader, key)
   assert.equal(result.ok, true)
   assert.deepEqual(result.granted, ['pear.content.styles'])
 
@@ -58,7 +67,7 @@ test('peerit-enhancer example installs scoped to the peerit drive', async () => 
   const key = 'b'.repeat(64)
   const { shield, loader } = makeHarness('examples/plugins/peerit-enhancer')
 
-  const result = await loader.installFromDrive(key)
+  const result = await approveInstall(loader, key)
   assert.equal(result.ok, true)
   assert.deepEqual(result.granted, ['pear.content.styles', 'pear.content.scripts', 'pear.net.filter'])
 

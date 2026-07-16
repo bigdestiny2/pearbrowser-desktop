@@ -10,15 +10,15 @@ A local-first peer-to-peer browser, app store, search engine, naming layer, Nost
 
 ## Install it
 
-Primary desktop distribution is now native GitHub release packages. The current
-`v0.6.1` release has attached macOS, Windows, and Linux assets with SHA-256
-sidecars and platform manifests. Download from the
-[`v0.6.1` release](https://github.com/bigdestiny2/pearbrowser-desktop/releases/tag/v0.6.1),
+Primary desktop distribution is now native GitHub release packages. The
+`v0.7.0` release targets macOS, Windows, and Linux assets with SHA-256 sidecars
+and platform manifests. Download from the
+[`v0.7.0` release](https://github.com/bigdestiny2/pearbrowser-desktop/releases/tag/v0.7.0),
 follow the [native install guide](./docs/INSTALL_NATIVE_PACKAGES.md), or resolve
 the recommended asset for your machine from a source checkout:
 
 ```sh
-npm run resolve:native-release -- --tag v0.6.1 --repo bigdestiny2/pearbrowser-desktop
+npm run resolve:native-release -- --tag v0.7.0 --repo bigdestiny2/pearbrowser-desktop
 ```
 
 The current package targets match the `cmake-pear` appling toolchain:
@@ -224,29 +224,29 @@ node scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --
 
 ## Distribution
 
-The `appling/` directory contains the multi-architecture native shell — Bare + CMake builds for macOS / Windows / Linux. GitHub release assets are produced by `.github/workflows/desktop-native-release.yml`, which builds the appling on hosted macOS, Windows, and Linux runners, collects the native artifacts, writes SHA-256 sidecars, and attaches them to the matching release tag. Run the workflow manually with tag `v0.6.1` and `source_ref` set to the release commit to produce or refresh the attached release assets.
+The `appling/` directory contains the multi-architecture native shell — Bare + CMake builds for macOS / Windows / Linux. GitHub release assets are produced by `.github/workflows/desktop-native-release.yml`, which builds the appling on hosted macOS, Windows, and Linux runners, collects the native artifacts, writes SHA-256 sidecars, and attaches them to the matching release tag. Run the workflow manually with tag `v0.7.0` and `source_ref` set to the release commit to produce or refresh the attached release assets.
 
 Current generated artifacts are `.app.zip` on macOS, `.msix` on Windows, and `.AppImage` on Linux. The workflow uses `npm ci --prefix appling`, so update `appling/package-lock.json` deliberately when the native wrapper toolchain changes.
 
 ```sh
-npm run check:appling-release -- --tag v0.6.1
+npm run check:appling-release -- --tag v0.7.0
 npm run check:linux-appimage-metadata
-npm run resolve:native-release -- --tag v0.6.1 --repo bigdestiny2/pearbrowser-desktop
-npm run -s generate:native-signing-secret-plan -- --repo bigdestiny2/pearbrowser-desktop --tag v0.6.1 --source-ref <release-commit>
-npm run -s generate:native-install-snippet -- --tag v0.6.1 --repo bigdestiny2/pearbrowser-desktop
-npm run -s generate:native-install-guide -- --tag v0.6.1 --repo bigdestiny2/pearbrowser-desktop
-npm run -s generate:native-install-smoke-plan -- --tag v0.6.1 --repo bigdestiny2/pearbrowser-desktop --source-ref <release-commit>
-npm run generate:package-manager-manifests -- --tag v0.6.1 --repo bigdestiny2/pearbrowser-desktop --trust-mode package-proof
+npm run resolve:native-release -- --tag v0.7.0 --repo bigdestiny2/pearbrowser-desktop
+npm run -s generate:native-signing-secret-plan -- --repo bigdestiny2/pearbrowser-desktop --tag v0.7.0 --source-ref <release-commit>
+npm run -s generate:native-install-snippet -- --tag v0.7.0 --repo bigdestiny2/pearbrowser-desktop
+npm run -s generate:native-install-guide -- --tag v0.7.0 --repo bigdestiny2/pearbrowser-desktop
+npm run -s generate:native-install-smoke-plan -- --tag v0.7.0 --repo bigdestiny2/pearbrowser-desktop --source-ref <release-commit>
+npm run generate:package-manager-manifests -- --tag v0.7.0 --repo bigdestiny2/pearbrowser-desktop --trust-mode package-proof
 npm run check:native-signing -- --require-public-trust --secret-source github --repo bigdestiny2/pearbrowser-desktop
-npm run check:public-trust-readiness -- --tag v0.6.1 --repo bigdestiny2/pearbrowser-desktop --source-ref <release-commit> --signing-secret-source github
-npm run -s generate:public-trust-operator-report -- --tag v0.6.1 --repo bigdestiny2/pearbrowser-desktop --source-ref <release-commit> --signing-secret-source github
+npm run check:public-trust-readiness -- --tag v0.7.0 --repo bigdestiny2/pearbrowser-desktop --source-ref <release-commit> --signing-secret-source github
+npm run -s generate:public-trust-operator-report -- --tag v0.7.0 --repo bigdestiny2/pearbrowser-desktop --source-ref <release-commit> --signing-secret-source github
 npm run -s generate:release-evidence-handoff
 cd appling
 npm ci
 npm run generate
 npm run build
 cd ..
-npm run package:appling -- --tag v0.6.1
+npm run package:appling -- --tag v0.7.0
 ```
 
 Code signing is per-platform:

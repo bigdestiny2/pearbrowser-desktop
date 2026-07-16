@@ -89,6 +89,7 @@ test('catalogue UI lists entries with install/open actions and a source loader',
 test('escalation guard is fail-closed in the loader source', () => {
   const loader = readFileSync(join(root, 'backend/plugin-drive-loader.cjs'), 'utf8')
   assert.match(loader, /setEnabled\(key, false\)/)
-  assert.match(loader, /acceptEscalation/)
+  assert.match(loader, /reviewedFingerprint/)
+  assert.match(loader, /acceptedSnapshot/)
   assert.match(loader, /escalated: true/)
 })

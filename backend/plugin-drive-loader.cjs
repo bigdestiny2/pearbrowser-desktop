@@ -54,6 +54,8 @@ class PluginDriveLoader {
    * @param {object} opts
    * @param {object} opts.registry — PearPluginRegistry
    * @param {function} opts.fetchDriveFile — async (driveKeyHex, path) => { content: Buffer } | null
+   * @param {function} opts.sha256Hex — cryptographic snapshot hash for consent binding
+   * @param {function} [opts.refreshDrive] — async (driveKeyHex) => advance cached drive state
    * @param {function} [opts.persistInstall] — async (id, payload|null) => void; null clears
    * @param {function} [opts.now]
    */
@@ -64,8 +66,13 @@ class PluginDriveLoader {
     if (typeof opts.fetchDriveFile !== 'function') {
       throw new TypeError('PluginDriveLoader requires a fetchDriveFile transport')
     }
+    if (typeof opts.sha256Hex !== 'function') {
+      throw new TypeError('PluginDriveLoader requires a sha256Hex function')
+    }
     this._registry = opts.registry
     this._fetch = opts.fetchDriveFile
+    this._sha256Hex = opts.sha256Hex
+    this._refreshDrive = typeof opts.refreshDrive === 'function' ? opts.refreshDrive : async () => {}
     this._persistInstall = typeof opts.persistInstall === 'function' ? opts.persistInstall : async () => {}
     this._now = typeof opts.now === 'function' ? opts.now : Date.now
     this._installs = new Map() // driveKeyHex -> { granted, version, escalated: {added}|null }
@@ -83,7 +90,12 @@ class PluginDriveLoader {
         version: cleanString(record.version),
         installedAt: Number.isFinite(record.installedAt) ? record.installedAt : 0,
         escalated: record.escalated && Array.isArray(record.escalated.added)
-          ? { added: normalizeCapabilityList(record.escalated.added) }
+          ? {
+              added: normalizeCapabilityList(record.escalated.added),
+              capabilities: normalizeCapabilityList(record.escalated.capabilities),
+              version: cleanString(record.escalated.version),
+              fingerprint: normalizeFingerprint(record.escalated.fingerprint)
+            }
           : null
       })
       restored++
@@ -101,9 +113,10 @@ class PluginDriveLoader {
   }
 
   /**
-   * Install a plugin from its drive. The user's grant is the manifest's
-   * capability set at install time (the consent surface shows exactly this
-   * list before calling install).
+   * Install through a two-step consent handshake. The first call returns the
+   * requested capabilities and a cryptographic snapshot fingerprint without
+   * registering anything. Acceptance must echo that fingerprint and an
+   * explicit grant, binding consent to the exact bytes the user reviewed.
    */
   async installFromDrive (driveKey, opts = {}) {
     const key = normalizeDriveKey(driveKey)
@@ -111,9 +124,11 @@ class PluginDriveLoader {
 
     const loaded = await this._load(key)
     const requested = loaded.capabilities
-    const granted = opts.grantedCapabilities !== undefined
-      ? normalizeCapabilityList(opts.grantedCapabilities).filter(cap => requested.includes(cap))
-      : requested
+    const reviewedFingerprint = normalizeFingerprint(opts.reviewedFingerprint)
+    if (!reviewedFingerprint || reviewedFingerprint !== loaded.fingerprint || opts.grantedCapabilities === undefined) {
+      return consentPreview(key, loaded, reviewedFingerprint ? 'plugin-changed' : 'consent-required')
+    }
+    const granted = normalizeCapabilityList(opts.grantedCapabilities).filter(cap => requested.includes(cap))
 
     const result = this._registry.register({
       id: key,
@@ -148,7 +163,8 @@ class PluginDriveLoader {
    * Update an installed plugin from its drive. Fail-closed on capability
    * escalation: the plugin is disabled, the escalation is recorded, and the
    * caller gets the added capabilities to show in a re-consent prompt.
-   * Passing `acceptEscalation: true` re-grants to the new capability set.
+   * Acceptance must echo the reviewed snapshot fingerprint and complete
+   * capability set; changed bytes produce a new warning instead of a grant.
    */
   async updateFromDrive (driveKey, opts = {}) {
     const key = normalizeDriveKey(driveKey)
@@ -158,17 +174,31 @@ class PluginDriveLoader {
     const loaded = await this._load(key)
     const added = loaded.capabilities.filter(cap => !record.granted.includes(cap))
 
-    if (added.length > 0 && !opts.acceptEscalation) {
-      this._registry.setEnabled(key, false)
-      record.escalated = { added }
-      await this._persistRecordOnly(key, record)
-      return {
-        ok: false,
-        escalated: true,
-        driveKey: key,
-        added,
-        version: loaded.version,
-        message: 'Update requests new capabilities; plugin disabled pending re-consent'
+    if (added.length > 0) {
+      const reviewedFingerprint = normalizeFingerprint(opts.reviewedFingerprint)
+      const acceptedCapabilities = normalizeCapabilityList(opts.grantedCapabilities)
+      const pending = record.escalated
+      const acceptedSnapshot = pending &&
+        reviewedFingerprint &&
+        pending.fingerprint === reviewedFingerprint &&
+        loaded.fingerprint === reviewedFingerprint &&
+        arraysEqual(acceptedCapabilities, pending.capabilities) &&
+        arraysEqual(loaded.capabilities, pending.capabilities)
+
+      if (!acceptedSnapshot) {
+        this._registry.setEnabled(key, false)
+        record.escalated = escalationSnapshot(loaded, added)
+        await this._persistRecordOnly(key, record)
+        return {
+          ok: false,
+          escalated: true,
+          driveKey: key,
+          ...record.escalated,
+          changedSinceReview: !!reviewedFingerprint,
+          message: reviewedFingerprint
+            ? 'Plugin changed since review; inspect the new capabilities before re-consenting'
+            : 'Update requests new capabilities; plugin disabled pending re-consent'
+        }
       }
     }
 
@@ -208,6 +238,7 @@ class PluginDriveLoader {
   }
 
   async _load (key) {
+    await this._refreshDrive(key)
     const manifestFile = await this._fetch(key, '/manifest.json')
     const manifestBytes = manifestFile && manifestFile.content ? manifestFile.content : null
     if (!manifestBytes || manifestBytes.length === 0) {
@@ -246,11 +277,16 @@ class PluginDriveLoader {
       contribution.filters = await this._readAsset(key, content.filters, MAX_FILTER_BYTES)
     }
 
+    const version = cleanString(manifest.version) || '0.0.0'
+    const fingerprint = normalizeFingerprint(this._sha256Hex(Buffer.from(JSON.stringify({ manifest, contribution }))))
+    if (!fingerprint) throw new PluginDriveError('fingerprint-failed', 'Could not fingerprint the plugin snapshot')
     return {
       manifest,
       capabilities,
       contribution,
-      version: cleanString(manifest.version) || '0.0.0'
+      version,
+      fingerprint,
+      name: cleanString(manifest.name) || `plugin ${key.slice(0, 8)}…`
     }
   }
 
@@ -287,6 +323,37 @@ class PluginDriveLoader {
       })
     } catch {}
   }
+}
+
+function consentPreview (driveKey, loaded, reason) {
+  return {
+    ok: false,
+    consentRequired: true,
+    reason,
+    driveKey,
+    name: loaded.name,
+    version: loaded.version,
+    requested: loaded.capabilities,
+    fingerprint: loaded.fingerprint
+  }
+}
+
+function escalationSnapshot (loaded, added) {
+  return {
+    added: normalizeCapabilityList(added),
+    capabilities: [...loaded.capabilities],
+    version: loaded.version,
+    fingerprint: loaded.fingerprint
+  }
+}
+
+function normalizeFingerprint (value) {
+  const text = typeof value === 'string' ? value.trim().toLowerCase() : ''
+  return /^[0-9a-f]{64}$/.test(text) ? text : ''
+}
+
+function arraysEqual (a, b) {
+  return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((value, index) => value === b[index])
 }
 
 function withCapabilities (manifest, capabilities) {

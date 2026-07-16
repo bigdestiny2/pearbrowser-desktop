@@ -93,8 +93,9 @@ class PluginCatalog {
     }
     this._fetch = opts.fetchDriveFile
     this._builtin = (Array.isArray(opts.builtin) ? opts.builtin : BUILTIN_PLUGIN_CATALOG)
-      .map(entry => validateCatalogEntry(entry))
+      .map(entry => validateCatalogEntry(entry, { trusted: true }))
       .filter(Boolean)
+    this._refreshDrive = typeof opts.refreshDrive === 'function' ? opts.refreshDrive : async () => {}
     this._sources = new Map() // driveKeyHex -> { name, entries, loadedAt }
     this._now = typeof opts.now === 'function' ? opts.now : Date.now
   }
@@ -130,6 +131,7 @@ class PluginCatalog {
     const key = normalizeDriveKey(driveKey)
     if (!key) throw new PluginCatalogError('invalid-drive-key', 'A 64-hex catalogue drive key is required')
 
+    await this._refreshDrive(key)
     const fetched = await this._fetch(key, '/plugins.json')
     const content = fetched && fetched.content ? fetched.content : null
     if (!content || content.length === 0) {
@@ -225,7 +227,9 @@ function validateCatalogEntry (entry, opts = {}) {
     description: cleanString(entry.description, 500),
     author: cleanString(entry.author, 120),
     capabilities,
-    verified: entry.verified === true,
+    // Only browser-shipped entries may carry the curated trust mark. Drive
+    // catalogues are untrusted discovery metadata, including after restore.
+    verified: opts.trusted === true && entry.verified === true,
     ...(typeof entry.unpublished === 'string' && entry.unpublished ? { unpublished: cleanString(entry.unpublished, 200) } : {})
   }
 }

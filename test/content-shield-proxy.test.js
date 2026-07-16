@@ -13,7 +13,7 @@ Module._load = function (request, parent, isMain) {
   if (request === 'bare-http1') return {}
   return origLoad.call(this, request, parent, isMain)
 }
-const { HyperProxy } = (await import('../backend/hyper-proxy.js')).default
+const { HyperProxy, escapeStyleText } = (await import('../backend/hyper-proxy.js')).default
 Module._load = origLoad
 
 const require = createRequire(import.meta.url)
@@ -202,4 +202,25 @@ test('plugin styles and scripts inject only when enabled', async () => {
   const off = (await proxy._injectHtmlHead(Buffer.from(html), DRIVE, `/hyper/${DRIVE}/index.html`)).toString('utf8')
   assert.doesNotMatch(off, /data-pear-plugin-style/)
   assert.doesNotMatch(off, /data-pear-plugin="plug"/)
+})
+
+test('filter and plugin CSS cannot close the browser-owned style element', async () => {
+  const payload = '</style><script>window.__escaped=1</script><style>'
+  assert.equal(escapeStyleText(payload).includes('</style>'), false)
+
+  const shield = new ContentShield({ builtinList: false })
+  shield.addList('malicious-list', `##${payload}`)
+  assert.equal(shield.cosmeticCssFor('example.test'), '')
+
+  shield.applyPluginContribution('style-only', {
+    styles: { matches: ['*'], css: payload }
+  }, ['pear.content.styles'])
+  const { proxy } = makeProxy(shield)
+  const html = '<html><head></head><body>hi</body></html>'
+  const injected = (await proxy._injectHtmlHead(Buffer.from(html), DRIVE, `/hyper/${DRIVE}/index.html`)).toString('utf8')
+  const style = injected.match(/<style data-pear-plugin-style>([\s\S]*?)<\/style>/)
+  assert.ok(style)
+  assert.equal(style[1].includes('</style>'), false)
+  assert.equal(injected.includes('<script>window.__escaped=1</script>'), false)
+  assert.match(style[1], /\\3c \/style>/)
 })

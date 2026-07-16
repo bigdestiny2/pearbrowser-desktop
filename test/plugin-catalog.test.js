@@ -46,26 +46,29 @@ test('builtin seed lists anonGPT with its production drive key, installable by t
 
 test('a catalogue drive loads, validates entries, and merges after builtin', async () => {
   const pluginKey = 'ab'.repeat(32)
+  const refreshes = []
   const catalog = makeCatalog({
     '/plugins.json': JSON.stringify({
       name: 'Community Plugins',
       plugins: [
-        { driveKey: pluginKey, name: 'Community Styler', kind: 'plugin', capabilities: ['pear.content.styles'], description: 'x' },
+        { driveKey: pluginKey, name: 'Community Styler', kind: 'plugin', capabilities: ['pear.content.styles'], description: 'x', verified: true },
         { driveKey: 'not-a-key', name: 'Broken entry' },
         { name: 'No key at all' },
         { driveKey: ANONGPT_DRIVE_KEY, name: 'anonGPT shadow attempt', kind: 'app' },
         42
       ]
     })
-  })
+  }, { refreshDrive: async (key) => { refreshes.push(key) } })
 
   const result = await catalog.loadFromDrive(CAT_KEY)
+  assert.deepEqual(refreshes, [CAT_KEY])
   assert.equal(result.name, 'Community Plugins')
   assert.equal(result.entryCount, 2) // styler + shadow attempt survive validation
 
   const entries = catalog.entries()
   const styler = entries.find(entry => entry.driveKey === pluginKey)
   assert.equal(styler.source, CAT_KEY)
+  assert.equal(styler.verified, false, 'community sources cannot mint the curated trust mark')
 
   // Builtin wins the dedupe: the shadow entry cannot replace anonGPT.
   const anongpt = entries.filter(entry => entry.driveKey === ANONGPT_DRIVE_KEY)

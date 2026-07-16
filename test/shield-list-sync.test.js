@@ -25,21 +25,23 @@ function fakeDrive (files) {
 
 function makeSync ({ files, shield } = {}) {
   const persisted = []
+  const refreshes = []
   const drive = fakeDrive(files || {})
   const engine = shield || new ContentShield({ builtinList: false })
   const sync = new ShieldListSync({
     shield: engine,
     fetchDriveFile: drive.fetch,
+    refreshDrive: async (driveKey) => { refreshes.push(driveKey) },
     sha256Hex,
     persistMeta: async (meta) => { persisted.push(structuredClone(meta)) },
     now: () => 1234
   })
-  return { sync, shield: engine, drive, persisted }
+  return { sync, shield: engine, drive, persisted, refreshes }
 }
 
 test('subscribe fetches, verifies, registers, and persists a drive list', async () => {
   const filters = '||ads.example.com^\n##.promo\n'
-  const { sync, shield, persisted } = makeSync({
+  const { sync, shield, persisted, refreshes } = makeSync({
     files: {
       '/manifest.json': JSON.stringify({ name: 'pear-default', version: '3', sha256: sha256Hex(filters) }),
       '/filters.txt': filters
@@ -47,6 +49,7 @@ test('subscribe fetches, verifies, registers, and persists a drive list', async 
   })
 
   const result = await sync.subscribe(KEY)
+  assert.deepEqual(refreshes, [KEY])
   assert.equal(result.changed, true)
   assert.equal(result.name, 'pear-default')
   assert.equal(result.version, '3')

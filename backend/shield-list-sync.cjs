@@ -38,6 +38,7 @@ class ShieldListSync {
    * @param {object} opts
    * @param {object} opts.shield — ContentShield (addList/removeList)
    * @param {function} opts.fetchDriveFile — async (driveKeyHex, path) => { content: Buffer } | null
+   * @param {function} [opts.refreshDrive] — async (driveKeyHex) => advance cached drive state
    * @param {function} [opts.sha256Hex] — (bufferOrString) => hex string; required to verify checksums
    * @param {function} [opts.persistMeta] — async (metaByKey) => void
    * @param {function} [opts.now] — clock injection for tests
@@ -51,6 +52,7 @@ class ShieldListSync {
     }
     this._shield = opts.shield
     this._fetch = opts.fetchDriveFile
+    this._refreshDrive = typeof opts.refreshDrive === 'function' ? opts.refreshDrive : async () => {}
     this._sha256Hex = typeof opts.sha256Hex === 'function' ? opts.sha256Hex : null
     this._persistMeta = typeof opts.persistMeta === 'function' ? opts.persistMeta : async () => {}
     this._now = typeof opts.now === 'function' ? opts.now : Date.now
@@ -157,6 +159,7 @@ class ShieldListSync {
   }
 
   async _pull (key, { force }) {
+    await this._refreshDrive(key)
     const manifest = await this._readManifest(key)
     const existing = this._meta.get(key)
 

@@ -18,6 +18,8 @@ Highlights:
   restore.
 - Pear Plugins for scoped styles, scripts, and network filters.
 - Capability-escalation protection: updates cannot silently gain permissions.
+- Snapshot-bound install consent and safe CSS embedding across list/plugin
+  boundaries; community catalogues cannot forge the curated trust mark.
 - One-click P2P catalogue discovery, including anonGPT as an app entry.
 - Per-drive shield allowlists and strict mode through the browser-owned proxy.
 

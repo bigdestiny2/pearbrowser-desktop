@@ -35,6 +35,9 @@ checksum-verified, pinned on HiveRelay, hot-swappable, and usable offline.
 
 - A list checksum mismatch, malformed/oversized drive, missing capability, or
   silent plugin capability increase fails closed before any contribution runs.
+- Plugin install/re-consent grants are bound to the exact reviewed manifest and
+  asset snapshot; community catalogues cannot mint the browser's curated mark,
+  and third-party CSS cannot break out of its browser-owned style element.
 - Blocking remains browser-owned: denied requests never reach peers, relays, or
   clearnet, and cached lists keep working offline.
 

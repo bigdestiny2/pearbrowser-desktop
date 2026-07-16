@@ -201,6 +201,15 @@ function escapeHtml (str) {
     .replace(/`/g, '&#96;')
 }
 
+// A <style> element is an HTML raw-text container: the HTML parser will end it
+// on a literal "</style" even when those bytes came from otherwise-valid CSS.
+// Escape every less-than sign as a CSS code point before embedding third-party
+// filter/plugin CSS so a style-only capability can never become script markup.
+function escapeStyleText (css) {
+  if (typeof css !== 'string') return ''
+  return css.replace(/</g, '\\3c ')
+}
+
 class HyperProxy {
   constructor (getDrive, onError, relayClient, opts = {}) {
     this._getDrive = getDrive // async (keyHex) => Hyperdrive
@@ -543,8 +552,8 @@ class HyperProxy {
       (includeAnongpt ? this._anongptShim : '') +
       scriptletTags.join('') +
       pluginScriptTags.join('') +
-      (shieldCss ? `<style data-pear-shield>${shieldCss}</style>` : '') +
-      (pluginCss ? `<style data-pear-plugin-style>${pluginCss}</style>` : '')
+      (shieldCss ? `<style data-pear-shield>${escapeStyleText(shieldCss)}</style>` : '') +
+      (pluginCss ? `<style data-pear-plugin-style>${escapeStyleText(pluginCss)}</style>` : '')
     let injected = html.includes('<head>')
       ? html.replace('<head>', `<head>${headInjection}`)
       : html.replace(/<html>/i, `<html><head>${headInjection}</head>`)
@@ -1222,5 +1231,6 @@ li{padding:8px 0;border-bottom:1px solid #333}a{color:#4dabf7;text-decoration:no
 module.exports = { 
   HyperProxy, 
   getUserFriendlyError,
-  USER_FRIENDLY_ERRORS 
+  USER_FRIENDLY_ERRORS,
+  escapeStyleText
 }

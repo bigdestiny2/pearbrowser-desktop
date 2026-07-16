@@ -5034,7 +5034,8 @@ function ContentShieldSection ({ rpc, C, activeDriveKey = '', onBrowse }) {
   const [err, setErr] = useState('')
   const [subscribeKey, setSubscribeKey] = useState('')
   const [installKey, setInstallKey] = useState('')
-  const [escalation, setEscalation] = useState(null) // { driveKey, added: [] }
+  const [pendingInstall, setPendingInstall] = useState(null)
+  const [escalation, setEscalation] = useState(null)
   const [catalog, setCatalog] = useState({ entries: [], sources: [] })
   const [catalogSourceKey, setCatalogSourceKey] = useState('')
   const driveKey = typeof activeDriveKey === 'string' && /^[0-9a-f]{64}$/i.test(activeDriveKey)
@@ -5161,12 +5162,18 @@ function ContentShieldSection ({ rpc, C, activeDriveKey = '', onBrowse }) {
     finally { setBusy(false) }
   }
 
-  const installPluginByKey = async (key) => {
+  const installPluginByKey = async (key, review = null) => {
     const normalized = String(key || '').trim().toLowerCase()
     if (!/^[0-9a-f]{64}$/.test(normalized) || C.CMD_PLUGIN_INSTALL_DRIVE == null) return
     setBusy(true); setErr('')
     try {
-      await rpc.request(C.CMD_PLUGIN_INSTALL_DRIVE, { driveKey: normalized }, 30000)
+      const payload = { driveKey: normalized }
+      if (review) {
+        payload.granted = review.requested || []
+        payload.reviewedFingerprint = review.fingerprint
+      }
+      const outcome = await rpc.request(C.CMD_PLUGIN_INSTALL_DRIVE, payload, 30000)
+      setPendingInstall(outcome && outcome.consentRequired ? outcome : null)
       await refreshStatusAndPlugins()
     } catch (e) { setErr(`install: ${e.message}`) }
     finally { setBusy(false) }
@@ -5199,12 +5206,17 @@ function ContentShieldSection ({ rpc, C, activeDriveKey = '', onBrowse }) {
     finally { setBusy(false) }
   }
 
-  const updatePlugin = async (id, acceptEscalation = false) => {
+  const updatePlugin = async (id, review = null) => {
     if (C.CMD_PLUGIN_UPDATE_DRIVE == null) return
     setBusy(true); setErr('')
     try {
-      const outcome = await rpc.request(C.CMD_PLUGIN_UPDATE_DRIVE, { driveKey: id, acceptEscalation }, 30000)
-      setEscalation(outcome && outcome.escalated ? { driveKey: id, added: outcome.added || [] } : null)
+      const payload = { driveKey: id }
+      if (review) {
+        payload.granted = review.capabilities || []
+        payload.reviewedFingerprint = review.fingerprint
+      }
+      const outcome = await rpc.request(C.CMD_PLUGIN_UPDATE_DRIVE, payload, 30000)
+      setEscalation(outcome && outcome.escalated ? { driveKey: id, ...outcome } : null)
       await refreshStatusAndPlugins()
     } catch (e) { setErr(`update: ${e.message}`) }
     finally { setBusy(false) }
@@ -5308,7 +5320,7 @@ function ContentShieldSection ({ rpc, C, activeDriveKey = '', onBrowse }) {
           ${catalog.entries.map((entry) => html`
             <div className="settings-row" key=${entry.id} data-testid=${'catalog-entry-' + entry.id}>
               <div>
-                <div className="settings-label">${entry.name}${entry.verified ? html`<span title="Curated entry" style=${{ marginLeft: '5px', color: '#3fb950', fontSize: '12px' }}>✦</span>` : ''}</div>
+                <div className="settings-label">${entry.name}${entry.source === 'builtin' && entry.verified ? html`<span title="Curated entry" style=${{ marginLeft: '5px', color: '#3fb950', fontSize: '12px' }}>✦</span>` : ''}</div>
                 <div className="settings-subtle">${entry.description}</div>
                 <div className="settings-subtle">${entry.kind === 'app' ? 'P2P app' : 'plugin'}${entry.capabilities?.length ? ` · ${entry.capabilities.join(', ')}` : ''}${entry.source !== 'builtin' ? ` · from ${String(entry.source).slice(0, 8)}…` : ''}</div>
               </div>
@@ -5360,10 +5372,20 @@ function ContentShieldSection ({ rpc, C, activeDriveKey = '', onBrowse }) {
             <button className="btn" data-testid="plugin-install" onClick=${installPlugin}
                     disabled=${busy || !/^[0-9a-f]{64}$/i.test(installKey.trim())}>Install</button>
           </div>
+          ${pendingInstall && html`
+            <div className="apps-error" data-testid="plugin-install-consent">
+              ${pendingInstall.name} ${pendingInstall.version ? `v${pendingInstall.version}` : ''} requests:
+              ${(pendingInstall.requested || []).join(', ') || 'no capabilities'}.
+              Review this grant before installing; catalogue labels are not trusted permissions.
+              <button className="btn small" onClick=${() => installPluginByKey(pendingInstall.driveKey, pendingInstall)} disabled=${busy}>Grant and install</button>
+              <button className="btn small subtle" onClick=${() => setPendingInstall(null)} disabled=${busy}>Cancel</button>
+            </div>
+          `}
           ${escalation && html`
             <div className="apps-error" data-testid="plugin-escalation">
               Update for ${escalation.driveKey.slice(0, 12)}… requests new capabilities: ${escalation.added.join(', ')}.
-              <button className="btn small" onClick=${() => updatePlugin(escalation.driveKey, true)} disabled=${busy}>Accept and re-enable</button>
+              ${escalation.changedSinceReview ? ' The plugin changed after the previous review; inspect this new request.' : ''}
+              <button className="btn small" onClick=${() => updatePlugin(escalation.driveKey, escalation)} disabled=${busy}>Accept and re-enable</button>
             </div>
           `}
           ${plugins.map((p) => html`

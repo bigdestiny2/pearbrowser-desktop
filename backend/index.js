@@ -12,6 +12,7 @@ const Hyperdrive = require('hyperdrive')
 const b4a = require('b4a')
 const z32 = require('z32')
 const fs = require('bare-fs')
+const crypto = require('bare-crypto')
 
 // Normalize a Hyperdrive key from either 64-char hex or
 // 52-char z-base-32 (Vinjari-style) into lowercase hex.
@@ -501,7 +502,8 @@ rpc.handle(C.CMD_PLUGIN_INSTALL_DRIVE, async (data = {}) => {
   await whenReady()
   if (!pluginDriveLoader) throw new Error('Plugin drive loader not available')
   const result = await pluginDriveLoader.installFromDrive(data.driveKey, {
-    grantedCapabilities: data.granted
+    grantedCapabilities: data.granted,
+    reviewedFingerprint: data.reviewedFingerprint
   })
   await persistShieldState()
   return result
@@ -511,7 +513,8 @@ rpc.handle(C.CMD_PLUGIN_UPDATE_DRIVE, async (data = {}) => {
   await whenReady()
   if (!pluginDriveLoader) throw new Error('Plugin drive loader not available')
   const result = await pluginDriveLoader.updateFromDrive(data.driveKey, {
-    acceptEscalation: !!data.acceptEscalation
+    grantedCapabilities: data.granted,
+    reviewedFingerprint: data.reviewedFingerprint
   })
   await persistShieldState()
   return result
@@ -3174,10 +3177,20 @@ async function boot () {
     // P2P distribution (Phase 2/3 gates). Rule text and plugin payloads were
     // already rehydrated above, so both work fully offline; these two own
     // the drive-sourced metadata and the hot-swap lifecycle.
-    const sha256Hex = (buf) => require('crypto').createHash('sha256').update(buf).digest('hex')
+    const sha256Hex = (buf) => crypto.createHash('sha256').update(buf).digest('hex')
+    const refreshDistributionDrive = async (keyHex) => {
+      const drive = await getDriveForProxy(keyHex)
+      if (!drive) return
+      const before = drive.version
+      await updateDriveBestEffort(drive, 8000)
+      if (drive.version !== before && proxy && typeof proxy.invalidateCache === 'function') {
+        proxy.invalidateCache(keyHex)
+      }
+    }
     shieldListSync = new ShieldListSync({
       shield: contentShield,
       fetchDriveFile: (keyHex, path) => proxy._hybridFetch(keyHex, path),
+      refreshDrive: refreshDistributionDrive,
       sha256Hex,
       persistMeta: async (meta) => {
         if (userData) await userData.setSettings({ contentShieldListSync: meta })
@@ -3189,6 +3202,8 @@ async function boot () {
     pluginDriveLoader = new PluginDriveLoader({
       registry: pearPlugins,
       fetchDriveFile: (keyHex, path) => proxy._hybridFetch(keyHex, path),
+      refreshDrive: refreshDistributionDrive,
+      sha256Hex,
       persistInstall: async (id, payload) => {
         if (payload === null) {
           delete persistShieldState._pluginPayloads[id]
@@ -3210,7 +3225,8 @@ async function boot () {
       pluginDriveLoader.restore(shieldSettings.contentShieldPluginInstalls)
     }
     pluginCatalog = new PluginCatalog({
-      fetchDriveFile: (keyHex, path) => proxy._hybridFetch(keyHex, path)
+      fetchDriveFile: (keyHex, path) => proxy._hybridFetch(keyHex, path),
+      refreshDrive: refreshDistributionDrive
     })
     if (shieldSettings && shieldSettings.contentShieldPluginCatalog) {
       pluginCatalog.restore(shieldSettings.contentShieldPluginCatalog)

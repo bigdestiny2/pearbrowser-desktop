@@ -731,7 +731,9 @@ function parseFilterList (text) {
       if (!/[\s#]/.test(rawHostPart)) {
         const hostPart = normalizeHost(rawHostPart)
         const selector = line.slice(cosmeticIndex + 2).trim()
-        if (selector && !selector.includes('{') && !selector.includes('}')) {
+        // Selectors are embedded into a browser-owned <style> block. Reject
+        // markup delimiters here and also escape style text at the proxy sink.
+        if (selector && !/[{}<>]/.test(selector)) {
           cosmetic.push({ host: hostPart || null, selector })
         }
         continue

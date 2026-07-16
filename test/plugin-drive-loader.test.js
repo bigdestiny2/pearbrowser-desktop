@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
+import { createHash } from 'node:crypto'
 
 const require = createRequire(import.meta.url)
 const { ContentShield } = require('../backend/content-shield.cjs')
@@ -22,23 +23,35 @@ function makeLoader (files) {
   const registry = new PearPluginRegistry({ shield })
   const persisted = new Map()
   const store = { ...files }
+  const refreshes = []
   const loader = new PluginDriveLoader({
     registry,
     fetchDriveFile: async (driveKey, path) => {
       const value = store[path]
       return value == null ? null : { content: Buffer.from(value) }
     },
+    refreshDrive: async (driveKey) => { refreshes.push(driveKey) },
+    sha256Hex: (input) => createHash('sha256').update(input).digest('hex'),
     persistInstall: async (id, payload) => {
       if (payload === null) persisted.delete(id)
       else persisted.set(id, structuredClone(payload))
     },
     now: () => 99
   })
-  return { loader, registry, shield, persisted, store }
+  return { loader, registry, shield, persisted, store, refreshes }
+}
+
+async function approveInstall (loader, key = KEY, granted) {
+  const preview = await loader.installFromDrive(key)
+  assert.equal(preview.consentRequired, true)
+  return loader.installFromDrive(key, {
+    grantedCapabilities: granted === undefined ? preview.requested : granted,
+    reviewedFingerprint: preview.fingerprint
+  })
 }
 
 test('install from a drive fetches assets and applies the contribution', async () => {
-  const { loader, registry, shield, persisted } = makeLoader({
+  const { loader, registry, shield, persisted, refreshes } = makeLoader({
     '/manifest.json': pluginManifest(
       ['pear.content.styles', 'pear.content.scripts', 'pear.net.filter'],
       {
@@ -52,7 +65,16 @@ test('install from a drive fetches assets and applies the contribution', async (
     '/filters.txt': '||fixture-ads.example.com^'
   })
 
-  const result = await loader.installFromDrive(KEY)
+  const preview = await loader.installFromDrive(KEY)
+  assert.equal(preview.consentRequired, true)
+  assert.deepEqual(refreshes, [KEY])
+  assert.deepEqual(preview.requested, ['pear.content.styles', 'pear.content.scripts', 'pear.net.filter'])
+  assert.equal(registry.list().length, 0)
+  const result = await loader.installFromDrive(KEY, {
+    grantedCapabilities: preview.requested,
+    reviewedFingerprint: preview.fingerprint
+  })
+  assert.deepEqual(refreshes, [KEY, KEY])
   assert.equal(result.ok, true)
   assert.equal(result.version, '1.0.0')
   assert.deepEqual(result.granted, ['pear.content.styles', 'pear.content.scripts', 'pear.net.filter'])
@@ -83,7 +105,7 @@ test('a narrower explicit grant strips ungranted capabilities before the engine'
     '/filters.txt': '||fixture-ads.example.com^'
   })
 
-  const result = await loader.installFromDrive(KEY, { grantedCapabilities: ['pear.content.styles'] })
+  const result = await approveInstall(loader, KEY, ['pear.content.styles'])
   assert.deepEqual(result.granted, ['pear.content.styles'])
 
   // Styles applied, network filter NOT applied (capability was not granted).
@@ -98,7 +120,7 @@ test('an update that escalates capabilities disables the plugin pending re-conse
     }),
     '/style.css': '.fixture-hide { display: none }'
   })
-  await loader.installFromDrive(KEY)
+  await approveInstall(loader)
 
   // The drive updates itself over the swarm: same plugin, new powers.
   store['/manifest.json'] = pluginManifest(
@@ -121,11 +143,57 @@ test('an update that escalates capabilities disables the plugin pending re-conse
   assert.equal(loader.installRecord(KEY).escalated.added[0], 'pear.content.scripts')
 
   // Explicit re-consent accepts the escalation and re-enables.
-  const accepted = await loader.updateFromDrive(KEY, { acceptEscalation: true })
+  const accepted = await loader.updateFromDrive(KEY, {
+    grantedCapabilities: outcome.capabilities,
+    reviewedFingerprint: outcome.fingerprint
+  })
   assert.equal(accepted.ok, true)
   assert.equal(accepted.escalationAccepted, true)
   assert.deepEqual(accepted.granted, ['pear.content.styles', 'pear.content.scripts'])
   assert.equal(registry.list().find(item => item.id === KEY).enabled, true)
+})
+
+test('install and escalation consent are bound to the exact reviewed snapshot', async () => {
+  const { loader, registry, store } = makeLoader({
+    '/manifest.json': pluginManifest(['pear.content.styles'], {
+      styles: { matches: ['*'], path: '/style.css' }
+    }),
+    '/style.css': '.v1 { color: red }'
+  })
+
+  const installPreview = await loader.installFromDrive(KEY)
+  store['/style.css'] = '.v2 { color: blue }'
+  const changedInstall = await loader.installFromDrive(KEY, {
+    grantedCapabilities: installPreview.requested,
+    reviewedFingerprint: installPreview.fingerprint
+  })
+  assert.equal(changedInstall.consentRequired, true)
+  assert.equal(changedInstall.reason, 'plugin-changed')
+  assert.equal(registry.list().length, 0)
+
+  await approveInstall(loader)
+  store['/manifest.json'] = pluginManifest(['pear.content.styles', 'pear.content.scripts'], {
+    styles: { matches: ['*'], path: '/style.css' },
+    scripts: { matches: ['*'], path: '/content.js' }
+  }, '2.0.0')
+  store['/content.js'] = 'window.__v2 = true'
+  const warning = await loader.updateFromDrive(KEY)
+
+  // Publisher changes the reviewed snapshot before the user accepts it.
+  store['/manifest.json'] = pluginManifest(['pear.content.styles', 'pear.content.scripts', 'pear.net.filter'], {
+    styles: { matches: ['*'], path: '/style.css' },
+    scripts: { matches: ['*'], path: '/content.js' },
+    filters: '/filters.txt'
+  }, '2.1.0')
+  store['/filters.txt'] = '||new-power.example^'
+  const raced = await loader.updateFromDrive(KEY, {
+    grantedCapabilities: warning.capabilities,
+    reviewedFingerprint: warning.fingerprint
+  })
+  assert.equal(raced.escalated, true)
+  assert.equal(raced.changedSinceReview, true)
+  assert.deepEqual(raced.added, ['pear.content.scripts', 'pear.net.filter'])
+  assert.equal(registry.list().find(item => item.id === KEY).enabled, false)
 })
 
 test('a same-capability update hot-swaps without consent friction', async () => {
@@ -135,7 +203,7 @@ test('a same-capability update hot-swaps without consent friction', async () => 
     }),
     '/style.css': '.v1 { display: none }'
   })
-  await loader.installFromDrive(KEY)
+  await approveInstall(loader)
 
   store['/manifest.json'] = pluginManifest(['pear.content.styles'], {
     styles: { matches: ['*'], path: '/style.css' }
@@ -189,7 +257,7 @@ test('uninstall removes the registration and the durable payload', async () => {
     '/style.css': '.fixture-hide { display: none }',
     '/filters.txt': '||fixture-ads.example.com^'
   })
-  await loader.installFromDrive(KEY)
+  await approveInstall(loader)
   assert.equal(shield.shouldBlockUrl('https://fixture-ads.example.com/x.js').blocked, true)
 
   const removed = await loader.uninstall(KEY)
