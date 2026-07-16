@@ -49,9 +49,11 @@ npm run check:linux-appimage-metadata -- --json
 
 - Full desktop test suite, high-severity npm audit, diff check, appling metadata,
   and Linux metadata pass on the tagged source.
-- Stable Pear exact length and sampled content are reachable from a fresh peer;
-  HiveRelay pin acceptance/replication is recorded without claiming unavailable
-  signed storage proof.
+- Stable Pear exact length is reachable from a cold metadata reader. On the
+  firewalled publisher host, the known same-NAT blob-probe false negative is
+  replaced by the durable-seeder gate: a fresh announce plus live remote peers
+  actively pulling release bytes. HiveRelay pin acceptance is recorded without
+  claiming unavailable signed storage proof.
 - Live catalogue reports PearBrowser `0.7.0`, the stable Pear link, and the
   current website Hyperdrive homepage.
 - GitHub release exposes one product package per supported target plus matching
@@ -61,9 +63,9 @@ npm run check:linux-appimage-metadata -- --json
 
 ## Final record
 
-- Source PR/merge: pending
-- Stable Pear length: pending
-- Live catalogue length: pending
+- Source PR/merge: [#62](https://github.com/bigdestiny2/pearbrowser-desktop/pull/62) / `924823b88363797f2cff24bd57391086f16d938e`
+- Stable Pear length: `78006` (from `63165`); cold metadata read matched, two pin refreshes received five relay acceptances each, and the durable seeder re-announced with 4–6 live remote peers pulling more than 2 GB after restart
+- Live catalogue length: `307` (catalogue version `8`); signed metadata and all 14 rows verified from four fresh-network peers
 - GitHub release/workflow: pending
 - Website deploy: pending
 - Website Hyperdrive length: pending
