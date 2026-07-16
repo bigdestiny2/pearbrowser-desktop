@@ -13,15 +13,29 @@ export class RpcClient extends EventTarget {
     this._nextId = 1
     this._pending = new Map()
     this._buffer = ''
+    this._connected = pipe.connected !== false
 
     pipe.on('data', (chunk) => this._onData(chunk))
-    pipe.on('close', () => this.dispatchEvent(new CustomEvent('close')))
-    pipe.on('error', (err) => this.dispatchEvent(new CustomEvent('error', { detail: err })))
+    pipe.on('open', () => {
+      this._connected = true
+      this.dispatchEvent(new CustomEvent('open'))
+    })
+    pipe.on('close', () => {
+      this._disconnect('RPC connection closed')
+      this.dispatchEvent(new CustomEvent('close'))
+    })
+    pipe.on('error', (err) => {
+      this._disconnect('RPC connection failed')
+      this.dispatchEvent(new CustomEvent('error', { detail: err }))
+    })
   }
 
   request (cmd, data = {}, timeout = 30000) {
     if (cmd === undefined || cmd === null) {
       return Promise.reject(new Error('RPC command is missing. Renderer constants are out of sync with backend/constants.js.'))
+    }
+    if (!this._connected) {
+      return Promise.reject(new Error(`RPC unavailable: ${cmd} (backend disconnected; reconnecting)`))
     }
 
     return new Promise((resolve, reject) => {
@@ -33,7 +47,13 @@ export class RpcClient extends EventTarget {
         }
       }, timeout)
       this._pending.set(id, { resolve, reject, timer })
-      this._send({ id, cmd, data })
+      try {
+        this._send({ id, cmd, data })
+      } catch (err) {
+        clearTimeout(timer)
+        this._pending.delete(id)
+        reject(err)
+      }
     })
   }
 
@@ -45,7 +65,18 @@ export class RpcClient extends EventTarget {
   _send (msg) {
     const json = JSON.stringify(msg)
     const frame = json.length.toString(16).padStart(8, '0') + json
-    this._pipe.write(frame)
+    if (this._pipe.write(frame) === false) {
+      throw new Error('RPC connection is not writable')
+    }
+  }
+
+  _disconnect (message) {
+    this._connected = false
+    for (const pending of this._pending.values()) {
+      clearTimeout(pending.timer)
+      pending.reject(new Error(message))
+    }
+    this._pending.clear()
   }
 
   _onData (chunk) {

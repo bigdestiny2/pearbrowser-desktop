@@ -179,39 +179,114 @@ const C = {
   EVT_ASK_BROWSER_STREAM: 111
 }
 
-class WsPipe {
-  constructor (url) {
-    this._listeners = { data: [], close: [], error: [], open: [] }
+export class WsPipe {
+  constructor (url, opts = {}) {
+    this._listeners = { data: [], close: [], error: [], open: [], reconnecting: [], 'reconnect-failed': [] }
+    this._url = url
     this._connected = false
-    this._outgoing = []
-    console.log('[ws] connecting to', url)
-    this._ws = new WebSocket(url)
-    this._ws.binaryType = 'arraybuffer'
+    this._connecting = false
+    this._destroyed = false
+    this._reconnectEnabled = false
+    this._reconnectTimer = null
+    this._reconnectAttempt = 0
+    this._maxReconnectAttempts = Number.isInteger(opts.maxReconnectAttempts) ? opts.maxReconnectAttempts : 8
+    this._reconnectBaseMs = Number.isFinite(opts.reconnectBaseMs) ? opts.reconnectBaseMs : 100
+    this._reconnectMaxMs = Number.isFinite(opts.reconnectMaxMs) ? opts.reconnectMaxMs : 1000
+    this._failedSocket = null
+    this._ws = null
+    this._connect()
+  }
 
-    this._ws.addEventListener('open', () => {
+  get connected () {
+    return this._connected
+  }
+
+  enableReconnect () {
+    if (this._destroyed) return
+    this._reconnectEnabled = true
+    if (!this._connected && !this._connecting) this._scheduleReconnect()
+  }
+
+  destroy () {
+    this._destroyed = true
+    this._reconnectEnabled = false
+    this._connected = false
+    this._connecting = false
+    if (this._reconnectTimer) clearTimeout(this._reconnectTimer)
+    this._reconnectTimer = null
+    const socket = this._ws
+    this._ws = null
+    try { socket?.close() } catch {}
+  }
+
+  _emit (event, detail) {
+    for (const fn of this._listeners[event] || []) fn(detail)
+  }
+
+  _connect () {
+    if (this._destroyed || this._connecting || this._connected) return
+    this._connecting = true
+    console.log('[ws] connecting to', this._url)
+    const socket = new WebSocket(this._url)
+    this._ws = socket
+    this._failedSocket = null
+    socket.binaryType = 'arraybuffer'
+
+    socket.addEventListener('open', () => {
+      if (this._destroyed || socket !== this._ws) {
+        try { socket.close() } catch {}
+        return
+      }
       console.log('[ws] open')
+      this._connecting = false
       this._connected = true
-      for (const fn of this._listeners.open) fn()
-      for (const frame of this._outgoing) this._ws.send(frame)
-      this._outgoing.length = 0
+      this._reconnectAttempt = 0
+      this._emit('open')
     })
 
-    this._ws.addEventListener('message', (e) => {
+    socket.addEventListener('message', (e) => {
+      if (socket !== this._ws || !this._connected) return
       const text = typeof e.data === 'string'
         ? e.data
         : new TextDecoder().decode(e.data)
-      for (const fn of this._listeners.data) fn(text)
+      this._emit('data', text)
     })
 
-    this._ws.addEventListener('close', (e) => {
+    socket.addEventListener('close', (e) => {
       console.log('[ws] close', e.code, e.reason)
-      for (const fn of this._listeners.close) fn()
+      this._handleDisconnect(socket)
     })
 
-    this._ws.addEventListener('error', (e) => {
+    socket.addEventListener('error', (e) => {
       console.error('[ws] error', e)
-      for (const fn of this._listeners.error) fn(e)
+      this._handleDisconnect(socket, e)
+      try { socket.close() } catch {}
     })
+  }
+
+  _handleDisconnect (socket, error = null) {
+    if (this._destroyed || socket !== this._ws || this._failedSocket === socket) return
+    this._failedSocket = socket
+    this._connected = false
+    this._connecting = false
+    if (error) this._emit('error', error)
+    this._emit('close')
+    this._scheduleReconnect()
+  }
+
+  _scheduleReconnect () {
+    if (!this._reconnectEnabled || this._destroyed || this._connected || this._connecting || this._reconnectTimer) return
+    if (this._reconnectAttempt >= this._maxReconnectAttempts) {
+      this._emit('reconnect-failed', { attempts: this._reconnectAttempt })
+      return
+    }
+    const attempt = ++this._reconnectAttempt
+    const delay = Math.min(this._reconnectBaseMs * (2 ** (attempt - 1)), this._reconnectMaxMs)
+    this._emit('reconnecting', { attempt, delay })
+    this._reconnectTimer = setTimeout(() => {
+      this._reconnectTimer = null
+      this._connect()
+    }, delay)
   }
 
   on (event, fn) {
@@ -220,8 +295,9 @@ class WsPipe {
   }
 
   write (frame) {
-    if (this._connected) this._ws.send(frame)
-    else this._outgoing.push(frame)
+    if (!this._connected || !this._ws) throw new Error('WebSocket RPC connection is not open')
+    this._ws.send(frame)
+    return true
   }
 }
 
@@ -301,10 +377,22 @@ function tryConnect (url, timeoutMs) {
   return probeBackend(url, timeoutMs).then(() => new Promise((resolve, reject) => {
     const pipe = new WsPipe(url)
     let settled = false
-    const t = setTimeout(() => { if (!settled) { settled = true; reject(new Error('timeout')) } }, timeoutMs)
-    pipe.on('open', () => { if (!settled) { settled = true; clearTimeout(t); resolve(pipe) } })
-    pipe.on('error', () => { if (!settled) { settled = true; clearTimeout(t); reject(new Error('ws error')) } })
-    pipe.on('close', () => { if (!settled) { settled = true; clearTimeout(t); reject(new Error('ws closed')) } })
+    const finish = (err = null) => {
+      if (settled) return
+      settled = true
+      clearTimeout(t)
+      if (err) {
+        pipe.destroy()
+        reject(err)
+      } else {
+        pipe.enableReconnect()
+        resolve(pipe)
+      }
+    }
+    const t = setTimeout(() => finish(new Error('timeout')), timeoutMs)
+    pipe.on('open', () => finish())
+    pipe.on('error', () => finish(new Error('ws error')))
+    pipe.on('close', () => finish(new Error('ws closed')))
   }))
 }
 

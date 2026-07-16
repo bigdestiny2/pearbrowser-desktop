@@ -2185,6 +2185,10 @@ test('runtime smoke is authenticated, status-only by default, and does not becom
   assert.match(mainEntry, /diagnostics\.add\(socket\)/)
   assert.match(mainEntry, /diagnostics\.delete\(socket\)/)
   assert.match(mainEntry, /teardown\('renderer-ws-close'\)/)
+  assert.match(mainEntry, /RENDERER_RECONNECT_GRACE_MS/)
+  assert.match(mainEntry, /renderer reconnected within grace period/)
+  assert.match(bootEntry, /enableReconnect/)
+  assert.match(bootEntry, /reconnect-failed/)
   assert.doesNotMatch(mainEntry.match(/const onDiagnosticSocket[\s\S]*?\n}\n\nconst onSocket/)?.[0] || '', /teardown\(/)
 })
 

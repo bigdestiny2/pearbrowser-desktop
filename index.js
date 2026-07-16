@@ -25,6 +25,7 @@ const { authorizeRpcWebSocket, DiagnosticRpcRouter } = rpcWebSocketAuth
 // grabs the next port instead of failing with EADDRINUSE.
 const RPC_PORT_BASE = 9876
 const RPC_PORT_COUNT = 5
+const RENDERER_RECONNECT_GRACE_MS = 8000
 const rpcSessionToken = String(Pear.config?.startId || '')
 const diagnosticToken = String(env.PEARBROWSER_RPC_DIAGNOSTIC_TOKEN || '')
 if (!rpcSessionToken) throw new Error('Pear runtime did not provide a per-launch RPC session token')
@@ -105,6 +106,7 @@ try {
 // Events emitted by the backend before the renderer connects are
 // buffered here so nothing boot-time is missed.
 let client = null
+let rendererDisconnectTimer = null
 const diagnostics = new Set()
 const eventBuffer = []
 const diagnosticRouter = new DiagnosticRpcRouter({
@@ -183,6 +185,11 @@ const onSocket = (socket, req) => {
     console.log('[rpc] rejecting extra WS connection')
     return socket.end()
   }
+  if (rendererDisconnectTimer) {
+    clearTimeout(rendererDisconnectTimer)
+    rendererDisconnectTimer = null
+    console.log('[rpc] renderer reconnected within grace period')
+  }
   console.log('[rpc] renderer connected')
   client = socket
 
@@ -208,17 +215,26 @@ const onSocket = (socket, req) => {
   socket.on('data', (data) => backendPipe.write(data))
   socket.on('close', () => {
     console.log('[rpc] renderer disconnected')
-    if (client === socket) client = null
-    // The WS socket closing is the most reliable signal that the
-    // user closed the window. Pipe events from runtime.start and
-    // Pear.teardown proved unreliable in practice. Tear down the
-    // main process here so the next launch doesn't see a zombie.
-    teardown('renderer-ws-close')
+    detachRenderer(socket)
   })
   socket.on('error', (err) => {
     console.error('[rpc] socket error:', err.message)
-    if (client === socket) client = null
+    detachRenderer(socket)
   })
+}
+
+function detachRenderer (socket) {
+  if (client !== socket) return
+  client = null
+  if (rendererDisconnectTimer) clearTimeout(rendererDisconnectTimer)
+  // A renderer reload or brief localhost socket interruption can reconnect
+  // with the same per-launch token. Preserve the backend and buffered events
+  // briefly; a genuine window close still tears down before it can become a
+  // zombie that holds the Corestore lock or RPC port.
+  rendererDisconnectTimer = setTimeout(() => {
+    rendererDisconnectTimer = null
+    if (!client) teardown('renderer-ws-close')
+  }, RENDERER_RECONNECT_GRACE_MS)
 }
 
 let rpcServer = null
@@ -293,6 +309,8 @@ function teardown (reason) {
   if (tornDown) return
   tornDown = true
   console.log('[teardown] triggered by', reason)
+  if (rendererDisconnectTimer) clearTimeout(rendererDisconnectTimer)
+  rendererDisconnectTimer = null
   try { rpcServer?.close() } catch {}
   try { client?.end?.() } catch {}
   try { backendPipe.end?.() } catch {}
