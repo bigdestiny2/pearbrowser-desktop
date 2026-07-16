@@ -43,7 +43,9 @@ npm run check:linux-appimage-metadata -- --json
 6. Run `desktop-native-release.yml` in `package-proof` mode and verify every
    attached package against its SHA-256 sidecar.
 7. Update and deploy `pearbrowser.com` from the verified asset metadata.
-8. Re-publish the website's stable Hyperdrive mirror.
+8. Re-publish the website's stable Hyperdrive mirror from a tracked-file-only
+   export. Do not publish a linked Git worktree root directly: its `.git`
+   pointer is a regular file and would otherwise become a drive entry.
 
 ## Required evidence
 
@@ -63,9 +65,9 @@ npm run check:linux-appimage-metadata -- --json
 
 ## Final record
 
-- Source PR/merge: [#62](https://github.com/bigdestiny2/pearbrowser-desktop/pull/62) / `924823b88363797f2cff24bd57391086f16d938e`
+- Source PR/merge: feature [#62](https://github.com/bigdestiny2/pearbrowser-desktop/pull/62) / `924823b88363797f2cff24bd57391086f16d938e`; publication record [#63](https://github.com/bigdestiny2/pearbrowser-desktop/pull/63) / tagged commit `2b15dbeebe3a8e2237bcef8e8ee0df6bd227c1a7`
 - Stable Pear length: `78006` (from `63165`); cold metadata read matched, two pin refreshes received five relay acceptances each, and the durable seeder re-announced with 4–6 live remote peers pulling more than 2 GB after restart
 - Live catalogue length: `307` (catalogue version `8`); signed metadata and all 14 rows verified from four fresh-network peers
-- GitHub release/workflow: pending
-- Website deploy: pending
-- Website Hyperdrive length: pending
+- GitHub release/workflow: [v0.7.0](https://github.com/bigdestiny2/pearbrowser-desktop/releases/tag/v0.7.0); package-proof [run 29492153888](https://github.com/bigdestiny2/pearbrowser-desktop/actions/runs/29492153888) passed all four targets and attached 16 assets with zero structural warnings; all four product packages were downloaded and matched their SHA-256 sidecars and advertised byte sizes
+- Website deploy: [pearbrowser.com PR #4](https://github.com/bigdestiny2/pearbrowser-com/pull/4) / `ccb07125a8c61a45d6c7020cb7cc1087167fe585`; production HTML and `downloads.json` returned `v0.7.0`, length `78006`, and the verified package metadata
+- Website Hyperdrive length: `126`; five relay acceptances; a fresh peer extracted exactly 14 tracked files (171.3 KB), the extracted tree matched the publish tree byte-for-byte, its sync check passed, and `/.git` was absent
