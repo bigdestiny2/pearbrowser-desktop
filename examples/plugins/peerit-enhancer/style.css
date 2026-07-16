@@ -1,0 +1,30 @@
+/* peerit Enhancer — example Pear Plugin, scoped to the peerit drive.
+ * Compact rows and a reading-width cap; nothing here runs anywhere else. */
+
+main, .feed, .posts {
+  max-width: 780px;
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
+
+.post, .post-row, article {
+  padding-top: 6px !important;
+  padding-bottom: 6px !important;
+  line-height: 1.45;
+}
+
+/* Badge so it's obvious the enhancer is active during the example demo. */
+body::after {
+  content: "peerit enhancer active";
+  position: fixed;
+  right: 10px;
+  bottom: 10px;
+  font: 11px system-ui, sans-serif;
+  color: #9aa7b0;
+  background: rgba(20, 26, 32, 0.85);
+  border: 1px solid rgba(154, 167, 176, 0.3);
+  border-radius: 999px;
+  padding: 3px 10px;
+  pointer-events: none;
+  z-index: 2147483647;
+}

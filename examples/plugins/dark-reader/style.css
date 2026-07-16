@@ -1,0 +1,26 @@
+/* Pear Dark Reader — example Pear Plugin (pear.content.styles).
+ *
+ * A deliberately simple inversion-based dark theme: dark canvas, light text,
+ * media flipped back to normal. Real dark-reader engines analyze computed
+ * styles; this example shows the plugin surface, not CSS science. */
+
+:root {
+  color-scheme: dark;
+}
+
+html {
+  background: #101418 !important;
+  filter: invert(1) hue-rotate(180deg);
+}
+
+/* Flip media and embeds back so photos and video look natural. */
+img, picture, video, canvas, svg, iframe, embed, object,
+[style*="background-image"] {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+/* Keep selection readable through the double inversion. */
+::selection {
+  background: #2b5f8a;
+  color: #ffffff;
+}

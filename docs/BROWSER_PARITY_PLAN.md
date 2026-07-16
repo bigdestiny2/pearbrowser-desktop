@@ -1,7 +1,7 @@
 # PearBrowser → mainstream-browser parity plan
 
-Status: Phases 1–3 shipped; Phase 4 clearnet proxy + session-bridge facade shipped; Phase 5 privacy ladder shipped (HTTPS-only, tracking strip, farbling, cookie isolation in proxy mode). Native pear-electron session.webRequest still optional for direct-mode shields.  
-Date: 2026-07-13
+Status: Phases 1–3 shipped with gates closed; Phase 4 clearnet proxy + session-bridge facade shipped; Phase 5 privacy ladder shipped (HTTPS-only, tracking strip, farbling, cookie isolation in proxy mode). P2P distribution live 2026-07-16: filter-list drive subscriptions (`shield-list-sync.cjs`) and plugin installs from drives (`plugin-drive-loader.cjs` with the capability-escalation guard), plus the plugin catalogue (`plugin-catalog.cjs`, anonGPT in the builtin seed). All four distribution drives published, pinned, and fresh-peer verified — keys in `filter-lists/README.md`. Remaining: the native pear-electron session.webRequest bridge for direct-mode shields.  
+Date: 2026-07-16
 
 The goal: make PearBrowser as capable a daily browser as Brave — ad blocking,
 tracker protection, and a plugin/extension system — without giving up what
@@ -235,8 +235,8 @@ layer to host real web content:
 | Phase | Scope | Gate to advance |
 |---|---|---|
 | 1 (done) | Shield engine + proxy wiring + settings + tests | full desktop suite green |
-| 2 | P2P lists, shield panel, strict mode, allowlists | list drive pinned + hot-swap proven offline |
-| 3 | Plugin manifest vocabulary, content styles/scripts, panels, Permission Center | two real plugins (e.g. a dark-reader and a peerit enhancer) shipped from drives |
+| 2 (**gate closed 2026-07-16**) | P2P lists (`shield-list-sync.cjs`, subscribe/refresh/offline restore, Settings UI), shield panel, strict mode, allowlists | pear-default list drive published + pinned + fresh-peer verified (`842fb9e6…`, see `filter-lists/README.md`); hot-swap + offline proven in `test/shield-list-sync.test.js` |
+| 3 (**gate closed 2026-07-16**) | Plugin manifest vocabulary, drive installs (`plugin-drive-loader.cjs`), escalation guard, kill switch, Settings UI, plugin catalogue (`plugin-catalog.cjs` — builtin seed with anonGPT + drive-loadable `/plugins.json` sources, one-click install/open UI) | two real plugins shipped from drives: dark-reader `bbde8330…` + peerit-enhancer `1b21d8a6…`, catalogue drive `01b74736…`, all pinned + fresh-peer verified |
 | 4 | pear-electron session bridge, clearnet tabs, native shield | upstream decision or maintained patch + release smoke on all targets |
 | 5 | privacy ladder (HTTPS-only, fingerprinting, cookies) | per-feature web-compat smoke |
 

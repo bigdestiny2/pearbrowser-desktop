@@ -50,7 +50,11 @@ function isLoopbackOrigin (origin) {
 
 function normalizeOrigin (origin) {
   if (typeof origin !== 'string' || origin.length === 0) return null
-  return new URL(origin).origin
+  const parsed = new URL(origin)
+  // Bare's URL implementation exposes protocol + host but not `origin`.
+  // Building it explicitly keeps injected <base> URLs and token bindings
+  // valid in the packaged runtime as well as in Node-based tests.
+  return `${parsed.protocol}//${parsed.host}`
 }
 
 function originForPort (port) {

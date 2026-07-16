@@ -50,7 +50,10 @@ The key above is **content-addressed and stable**: when we ship a new release, t
 - "About this site" panel (ⓘ button): drive key in hex + z-base-32 with copy buttons, scheme + path, one-click bookmark toggle
 - **Ask Browser:** click **✦ Ask** to question a local QVAC/Qwen model about the active page, with private on-device streaming, cancellation, short follow-ups, source provenance, and no page access to the browser-owned AI channel
 - **Local AI widget:** every blank new tab (`⌘T`) hosts a QVAC quick-ask card — zero page context, streamed on-device answers, model picker, and load-on-first-use progress ([docs](./docs/ASK_BROWSER.md))
-- **Content Shield:** Brave-style ad/tracker blocking enforced inside the browser-owned proxy — blocked requests never reach a peer, relay, or the network; cosmetic element hiding rides the HTML injection path; toggle + live counters in Settings ([plan](./docs/BROWSER_PARITY_PLAN.md))
+- **Content Shield:** Brave-style ad/tracker blocking enforced inside the browser-owned proxy — blocked requests never reach a peer, relay, or the network; cosmetic element hiding + scriptlets ride the CSP-safe HTML injection path; per-drive allowlist/strict modes, toggle + live counters in Settings ([plan](./docs/BROWSER_PARITY_PLAN.md))
+- **P2P filter lists:** subscribe to a filter-list Hyperdrive by key — rules sync peer-to-peer with sha256 verification, hot-swap when the publisher updates, and keep blocking fully offline; publish your own with `scripts/build-shield-list.mjs` + `scripts/publish-and-pin.js` ([guide](./filter-lists/README.md))
+- **Pear Plugins:** extensions as Hyperdrives with declared capabilities (`pear.content.styles/scripts`, `pear.net.filter`) — install by drive key, contributions inject hash-authorized, and a swarm update that requests new capabilities is auto-disabled pending re-approval; two ready-to-publish examples in `examples/plugins/`
+- **Plugin catalogue:** one-click discovery in Settings — curated entries install without pasting keys, `kind: "app"` entries like **anonGPT** open directly as P2P apps, and additional catalogues load from any drive with a `/plugins.json` (shippable source in `catalogues/pear-plugins/`)
 
 ### Apps
 - Paste any `pear://` link → opens in its own isolated window
@@ -141,6 +144,7 @@ Three independent keypairs — BIP-39 identity, HiveRelay publisher key, Coresto
 | [Ask Browser](./docs/ASK_BROWSER.md) | Local-model side panel, Ollama/Qwen discovery, authenticated page-context capture, stream RPC, safety boundaries, and verification. |
 | [QVAC native AI](./docs/QVAC_NATIVE_AI.md) | Native Bare/QVAC runtime, model aliases, browser-page AI API, security limits, and smoke commands. |
 | [Browser parity plan](./docs/BROWSER_PARITY_PLAN.md) | Roadmap to Brave-grade capability: Content Shield phases, P2P filter lists, the Pear Plugins extension model, and the clearnet session bridge. |
+| [Filter lists & plugins guide](./filter-lists/README.md) | Publishing and subscribing to P2P filter-list drives, and packaging/installing Pear Plugins with the capability-escalation guard. |
 | [Deep audit](./docs/DEEP_AUDIT_CATALOG_SEARCH_NAMING_NOSTR_2026-06-21.md) | Detailed catalogue/search/naming/Nostr audit, issue list, fixes, and test evidence. |
 | [Manual release smoke](./docs/MANUAL_RELEASE_SMOKE_2026-06-23.md) | Final human-run release checklist for UI flows, Peercord trust approval, mobile device smoke, and signing/store gates. |
 | [Native install guide](./docs/INSTALL_NATIVE_PACKAGES.md) | User-facing package selection, checksum verification, and OS-specific install steps for the current native assets. |

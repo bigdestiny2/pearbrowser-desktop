@@ -194,8 +194,10 @@ function rewriteHtmlForProxy (html, documentUrl, proxyOrigin) {
 
   // Inject <base> pointing at proxy document root so any leftover relative
   // resolution still hits our host; we also set a pear-clearnet meta.
+  // Bare's URL implementation exposes protocol + host but not `.origin`.
+  const documentOrigin = `${base.protocol}//${base.host}`
   const headBits =
-    `<meta name="pear-clearnet-origin" content="${escapeHtml(base.origin)}">` +
+    `<meta name="pear-clearnet-origin" content="${escapeHtml(documentOrigin)}">` +
     `<base href="${escapeHtml(origin)}/clearnet/${encodeClearnetTarget(base.toString())}">`
 
   if (/<head[^>]*>/i.test(out)) {

@@ -90,7 +90,10 @@ class HttpBridge {
 
   _sameOrigin (a, b) {
     try {
-      return new URL(a).origin === new URL(b).origin
+      const left = new URL(a)
+      const right = new URL(b)
+      // Bare's URL implementation does not expose `.origin`.
+      return left.protocol === right.protocol && left.host === right.host
     } catch {
       return false
     }

@@ -44,7 +44,7 @@ test('rewriteHtmlForProxy rewrites href/src to proxy paths', () => {
   </body></html>`
   const out = rewriteHtmlForProxy(html, 'https://example.com/page', 'http://127.0.0.1:9')
   assert.match(out, /\/clearnet\//)
-  assert.match(out, /pear-clearnet-origin/)
+  assert.match(out, /<meta name="pear-clearnet-origin" content="https:\/\/example\.com">/)
   assert.doesNotMatch(out, /href="\/next"/)
   // Absolute CDN URL is base64url-encoded into the proxy path
   assert.match(out, /clearnet\/[A-Za-z0-9_-]+/)
