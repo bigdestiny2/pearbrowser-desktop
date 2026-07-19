@@ -3,7 +3,7 @@
 Generated: 2026-06-23
 Loop candidate: `pearbrowser-desktop-test-matrix`
 Autonomy level: Level 1 docs-tests
-Source root: `/Users/localllm/Projects/pear-ecosystem/01-browser/pearbrowser-desktop`
+Source root: `~/pear-ecosystem/01-browser/pearbrowser-desktop`
 
 ## Executive Status
 
@@ -250,18 +250,18 @@ Run the PearBrowser Desktop release-evidence cleanup pass:
 
 ## Source Evidence
 
-- `/Users/localllm/Projects/pear-ecosystem/01-browser/pearbrowser-desktop/package.json`
-- `/Users/localllm/Projects/pear-ecosystem/01-browser/pearbrowser-desktop/backend/package.json`
-- `/Users/localllm/Projects/pear-ecosystem/01-browser/pearbrowser-desktop/examples/headless-tab/package.json`
-- `/Users/localllm/Projects/pear-ecosystem/01-browser/pearbrowser-desktop/docs/CURRENT_STATUS_AUDIT_2026-06-23.md`
-- `/Users/localllm/Projects/pear-ecosystem/01-browser/pearbrowser-desktop/docs/RELEASE_READINESS_2026-06-23.md`
-- `/Users/localllm/Projects/pear-ecosystem/01-browser/pearbrowser-desktop/docs/MANUAL_RELEASE_SMOKE_2026-06-23.md`
-- `/Users/localllm/Projects/pear-ecosystem/01-browser/pearbrowser-desktop/scripts/runtime-rpc-smoke.mjs`
-- `/Users/localllm/Projects/pear-ecosystem/01-browser/pearbrowser-desktop/scripts/check-release-evidence.mjs`
-- `/Users/localllm/Projects/pear-ecosystem/01-browser/pearbrowser-desktop/scripts/check-relays.js`
-- `/Users/localllm/Projects/pear-ecosystem/01-browser/pearbrowser-desktop/scripts/verify-pin.js`
-- `/Users/localllm/Projects/pear-ecosystem/01-browser/pearbrowser-desktop/scripts/verify-live-catalog.js`
-- `/Users/localllm/Projects/pear-ecosystem/01-browser/pearbrowser-desktop/scripts/verify-release-contents.js`
-- `/Users/localllm/Projects/pear-ecosystem/01-browser/pearbrowser-desktop/scripts/verify-app-full.js`
-- `/Users/localllm/Projects/pear-ecosystem/01-browser/pearbrowser-desktop/scripts/verify-pear-bundle-contract.js`
-- `/Users/localllm/Projects/pear-ecosystem/01-browser/pearbrowser-desktop/test`
+- `~/pear-ecosystem/01-browser/pearbrowser-desktop/package.json`
+- `~/pear-ecosystem/01-browser/pearbrowser-desktop/backend/package.json`
+- `~/pear-ecosystem/01-browser/pearbrowser-desktop/examples/headless-tab/package.json`
+- `~/pear-ecosystem/01-browser/pearbrowser-desktop/docs/CURRENT_STATUS_AUDIT_2026-06-23.md`
+- `~/pear-ecosystem/01-browser/pearbrowser-desktop/docs/RELEASE_READINESS_2026-06-23.md`
+- `~/pear-ecosystem/01-browser/pearbrowser-desktop/docs/MANUAL_RELEASE_SMOKE_2026-06-23.md`
+- `~/pear-ecosystem/01-browser/pearbrowser-desktop/scripts/runtime-rpc-smoke.mjs`
+- `~/pear-ecosystem/01-browser/pearbrowser-desktop/scripts/check-release-evidence.mjs`
+- `~/pear-ecosystem/01-browser/pearbrowser-desktop/scripts/check-relays.js`
+- `~/pear-ecosystem/01-browser/pearbrowser-desktop/scripts/verify-pin.js`
+- `~/pear-ecosystem/01-browser/pearbrowser-desktop/scripts/verify-live-catalog.js`
+- `~/pear-ecosystem/01-browser/pearbrowser-desktop/scripts/verify-release-contents.js`
+- `~/pear-ecosystem/01-browser/pearbrowser-desktop/scripts/verify-app-full.js`
+- `~/pear-ecosystem/01-browser/pearbrowser-desktop/scripts/verify-pear-bundle-contract.js`
+- `~/pear-ecosystem/01-browser/pearbrowser-desktop/test`

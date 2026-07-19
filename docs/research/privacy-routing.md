@@ -110,7 +110,7 @@ Every path below was read on `feat/phase5-relay-directory`.
 12. RFC 9230 — *Oblivious DNS over HTTPS* (Independent Submission, experimental) — https://datatracker.ietf.org/doc/rfc9230/
 13. *Private Information Retrieval* (Chor/Goldreich/Kushilevitz/Sudan) — https://www.cs.umd.edu/~gasarch/TOPICS/pir/first.pdf ; CPIR overview — https://en.wikipedia.org/wiki/Private_information_retrieval
 14. iroh connectivity & relays (docs + DERP lineage) — https://docs.iroh.computer/concepts/relays ; https://www.iroh.computer/blog/what-is-derp (IP/NodeId-visibility synthesized — flagged)
-15. pear-pos Tor relay architecture (in-house prior art) — `/Users/localllm/Desktop/pear-pos/docs/tor-relay-architecture.md`
+15. pear-pos Tor relay architecture (in-house prior art) — `~/Desktop/pear-pos/docs/tor-relay-architecture.md`
 16. HyperDHT / Hyperswarm privacy — README + privacy issues — https://github.com/holepunchto/hyperdht ; https://github.com/holepunchto/hyperdht/issues/50 ; https://github.com/holepunchto/hyperdht/issues/2
 
 ## 6. Candidate approaches (with tradeoffs)
@@ -341,7 +341,7 @@ External prior-art claims are cited inline by bracketed number to this list; int
 12. RFC 9230 — *Oblivious DNS over HTTPS* (Independent Submission, experimental — "not endorsed by the IETF") — https://datatracker.ietf.org/doc/rfc9230/
 13. *Private Information Retrieval* (Chor, Goldreich, Kushilevitz, Sudan) — https://www.cs.umd.edu/~gasarch/TOPICS/pir/first.pdf ; cPIR/itPIR overview — https://en.wikipedia.org/wiki/Private_information_retrieval ; CACM survey — https://cacm.acm.org/research/private-information-retrieval/
 14. iroh connectivity & relays — https://docs.iroh.computer/concepts/relays ; DERP lineage (blog) — https://www.iroh.computer/blog/what-is-derp ; holepunching — https://www.iroh.computer/docs/protocols/net/holepunching (IP/NodeId-visibility synthesized from blog/docs — flagged; re-read the relay protocol spec before citing as load-bearing)
-15. pear-pos Tor relay architecture (in-house prior art, design-only, Node-20/Docker not Bare) — `/Users/localllm/Desktop/pear-pos/docs/tor-relay-architecture.md`
+15. pear-pos Tor relay architecture (in-house prior art, design-only, Node-20/Docker not Bare) — `~/Desktop/pear-pos/docs/tor-relay-architecture.md`
 16. HyperDHT / Hyperswarm privacy — README (server-mode announces keypair to the DHT) — https://github.com/holepunchto/hyperdht ; privacy issues — https://github.com/holepunchto/hyperdht/issues/50 , https://github.com/holepunchto/hyperdht/issues/2 ; independent analysis — https://hypha.coop/dripline/p2p-primer-part-3/
 
 ---

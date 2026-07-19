@@ -2,7 +2,7 @@
 
 Generated: 2026-06-23
 Loop candidate: `pearbrowser-desktop-security-crosscheck`
-Source root: `/Users/localllm/Projects/pear-ecosystem/01-browser/pearbrowser-desktop`
+Source root: `~/pear-ecosystem/01-browser/pearbrowser-desktop`
 
 ## Executive Status
 
@@ -127,21 +127,21 @@ Local validation completed in this loop:
 
 ## Source Evidence
 
-- `/Users/localllm/Projects/pear-ecosystem/01-browser/pearbrowser-desktop/backend/hyper-proxy.js`
-- `/Users/localllm/Projects/pear-ecosystem/01-browser/pearbrowser-desktop/backend/http-bridge.js`
-- `/Users/localllm/Projects/pear-ecosystem/01-browser/pearbrowser-desktop/backend/pear-bridge.js`
-- `/Users/localllm/Projects/pear-ecosystem/01-browser/pearbrowser-desktop/backend/swarm-bridge.js`
-- `/Users/localllm/Projects/pear-ecosystem/01-browser/pearbrowser-desktop/backend/catalog-safety.cjs`
-- `/Users/localllm/Projects/pear-ecosystem/01-browser/pearbrowser-desktop/backend/sheets-catalog.js`
-- `/Users/localllm/Projects/pear-ecosystem/01-browser/pearbrowser-desktop/backend/index-room-client.js`
-- `/Users/localllm/Projects/pear-ecosystem/01-browser/pearbrowser-desktop/backend/capability-verify.cjs`
-- `/Users/localllm/Projects/pear-ecosystem/01-browser/pearbrowser-desktop/backend/search-handler.js`
-- `/Users/localllm/Projects/pear-ecosystem/01-browser/pearbrowser-desktop/backend/search-federation.cjs`
-- `/Users/localllm/Projects/pear-ecosystem/01-browser/pearbrowser-desktop/backend/identity-binding.cjs`
-- `/Users/localllm/Projects/pear-ecosystem/01-browser/pearbrowser-desktop/backend/nostr-binding-store.cjs`
-- `/Users/localllm/Projects/pear-ecosystem/01-browser/pearbrowser-desktop/backend/nostr-events-apply.cjs`
-- `/Users/localllm/Projects/pear-ecosystem/01-browser/pearbrowser-desktop/backend/federated-nostr-feed.cjs`
-- `/Users/localllm/Projects/pear-ecosystem/01-browser/pearbrowser-desktop/docs/SEARCH-HANDOVER.md`
-- `/Users/localllm/Projects/pear-ecosystem/01-browser/pearbrowser-desktop/docs/P2P-BROWSER-FEATURE-ROADMAP.md`
-- `/Users/localllm/Projects/pear-ecosystem/01-browser/pearbrowser-desktop/docs/DEEP_AUDIT_CATALOG_SEARCH_NAMING_NOSTR_2026-06-21.md`
-- `/Users/localllm/Projects/pear-ecosystem/01-browser/pearbrowser-desktop/docs/TEST-COMMAND-MATRIX-2026-06-23.md`
+- `~/pear-ecosystem/01-browser/pearbrowser-desktop/backend/hyper-proxy.js`
+- `~/pear-ecosystem/01-browser/pearbrowser-desktop/backend/http-bridge.js`
+- `~/pear-ecosystem/01-browser/pearbrowser-desktop/backend/pear-bridge.js`
+- `~/pear-ecosystem/01-browser/pearbrowser-desktop/backend/swarm-bridge.js`
+- `~/pear-ecosystem/01-browser/pearbrowser-desktop/backend/catalog-safety.cjs`
+- `~/pear-ecosystem/01-browser/pearbrowser-desktop/backend/sheets-catalog.js`
+- `~/pear-ecosystem/01-browser/pearbrowser-desktop/backend/index-room-client.js`
+- `~/pear-ecosystem/01-browser/pearbrowser-desktop/backend/capability-verify.cjs`
+- `~/pear-ecosystem/01-browser/pearbrowser-desktop/backend/search-handler.js`
+- `~/pear-ecosystem/01-browser/pearbrowser-desktop/backend/search-federation.cjs`
+- `~/pear-ecosystem/01-browser/pearbrowser-desktop/backend/identity-binding.cjs`
+- `~/pear-ecosystem/01-browser/pearbrowser-desktop/backend/nostr-binding-store.cjs`
+- `~/pear-ecosystem/01-browser/pearbrowser-desktop/backend/nostr-events-apply.cjs`
+- `~/pear-ecosystem/01-browser/pearbrowser-desktop/backend/federated-nostr-feed.cjs`
+- `~/pear-ecosystem/01-browser/pearbrowser-desktop/docs/SEARCH-HANDOVER.md`
+- `~/pear-ecosystem/01-browser/pearbrowser-desktop/docs/P2P-BROWSER-FEATURE-ROADMAP.md`
+- `~/pear-ecosystem/01-browser/pearbrowser-desktop/docs/DEEP_AUDIT_CATALOG_SEARCH_NAMING_NOSTR_2026-06-21.md`
+- `~/pear-ecosystem/01-browser/pearbrowser-desktop/docs/TEST-COMMAND-MATRIX-2026-06-23.md`

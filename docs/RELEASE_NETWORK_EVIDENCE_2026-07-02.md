@@ -4,7 +4,7 @@
 PearBrowser Desktop is source-green in the current checkout, but it is not announcement-ready. The remaining release work is operator evidence: desktop GUI and real-network rows, Peercord human trust approval, mobile real-device and production signing/store rows, and the final announcement decision.
 
 ## Checkout
-- Root: `/Users/localllm/Projects/pear-ecosystem/01-browser/pearbrowser-desktop`
+- Root: `~/pear-ecosystem/01-browser/pearbrowser-desktop`
 - Branch: `fix/native-packaging-linux-deps`
 - Head: `bb3bb68`
 - Package version: `pearbrowser-desktop@0.5.2`

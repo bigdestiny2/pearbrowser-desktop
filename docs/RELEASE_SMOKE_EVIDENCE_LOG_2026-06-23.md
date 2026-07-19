@@ -18,7 +18,7 @@ manual gate.
 | Desktop PR/CI URL | PR #28: `https://github.com/bigdestiny2/pearbrowser-desktop/pull/28`; Desktop CI pull_request run `https://github.com/bigdestiny2/pearbrowser-desktop/actions/runs/28320741592`, job `83902114643`, passed |
 | Mobile repo/head | `bigdestiny2/PearBrowser`, `main`, `9101200d8bb54ff31b21d6d90154cb2321756a6c` |
 | Mobile preflight CI URL | `https://github.com/bigdestiny2/PearBrowser/actions/runs/28316870344` (`mobile-release-preflight` artifact downloaded and verified locally) |
-| macOS machine | `Locals-Mac-Studio.local`, macOS 26.4.1 build 25E253 |
+| macOS machine | `localhost`, macOS |
 | iOS simulator/device(s) | Prior simulator proof in `PearBrowser/ios-native/BUILD.md`: iPhone 17 simulator green `Connected`; not rerun in this loop |
 | Android emulator/device(s) | Prior emulator proof in `PearBrowser/android-native/BUILD.md`: headless `pp_avd` green `Connected`; not rerun in this loop |
 | Network/location | Local shell in Asia/Dubai timezone; 2026-06-24 Pear hotfix release ran with real network access |

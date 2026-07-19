@@ -115,8 +115,8 @@ class TabRuntime {
     // (worker)" card launches.
     const env = (globalThis.Bare && Bare.env) || (globalThis.process && process.env) || {}
     let demoWorker = env.PEAR_TAB_DEMO_WORKER || null
-    if (!demoWorker) {
-      const p = '/Users/localllm/Desktop/pear-request-demo'
+    if (!demoWorker && env.HOME) {
+      const p = env.HOME + '/Desktop/pear-request-demo'
       try { require('bare-fs').statSync(p); demoWorker = 'file://' + p } catch {}
     }
     if (demoWorker) {

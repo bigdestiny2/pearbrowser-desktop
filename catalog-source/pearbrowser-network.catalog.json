@@ -34,7 +34,7 @@
       "id": "peerit",
       "name": "peerit",
       "description": "The front page of the P2P internet — a peer-to-peer Reddit. Communities, posts, threaded comments and votes live in a shared Holepunch log (Autobase + Hyperbee) and replicate directly between peers. No servers, no data center. Runs as a P2P site inside PearBrowser, seeded 24/7 on HiveRelay.",
-      "author": "defidon",
+      "author": "bigdestiny2",
       "version": "1.0.0",
       "type": "hypersite",
       "categories": [
@@ -74,7 +74,7 @@
       "id": "p2pbuilders",
       "name": "P2P Builders",
       "description": "Permissionless peer-to-peer Hacker News for anons who build P2P — in the browser. Proof-of-work-gated posts, reputation-weighted votes, boards, threaded comments, follows and subscribable blocklists replicate directly between peers over the same Holepunch engine as peerit. Runs as a P2P site inside PearBrowser, seeded 24/7 on HiveRelay.",
-      "author": "defidon",
+      "author": "bigdestiny2",
       "version": "1.0.0",
       "categories": [
         "community",
@@ -96,7 +96,7 @@
       "id": "pear-dealroom",
       "name": "Pear Dealroom",
       "description": "Zero-infrastructure P2P virtual data room for M&A and due diligence. End-to-end encrypted documents, a signed tamper-evident audit trail, and cryptographic access tiers — no cloud, no server, no vendor. Built on Holepunch.",
-      "author": "defidon",
+      "author": "bigdestiny2",
       "version": "1.0.0",
       "categories": [
         "productivity",
@@ -122,7 +122,7 @@
       "id": "pearpaste",
       "name": "Paste",
       "description": "Local-first, end-to-end encrypted notes & clipboard sync for your own devices. No account, no hosted database, no plaintext replication — built on Pear, Holepunch, Hypercore, Hyperbee, Autobase and Hyperswarm. Tap-to-decrypt rows keep secrets sealed until you reveal them. Desktop (macOS / Windows / Linux) + Expo mobile.",
-      "author": "defidon",
+      "author": "bigdestiny2",
       "version": "0.1.0",
       "categories": [
         "productivity",

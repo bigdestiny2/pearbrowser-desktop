@@ -181,7 +181,7 @@ Catalogue updates are versioned from [`catalog-source/pearbrowser-network.catalo
 
 ```sh
 node scripts/gen-catalogue-seed.mjs
-node scripts/publish-catalog-bee.js catalog-source/pearbrowser-network.catalog.json --storage /Users/localllm/Projects/pear-ecosystem/03-sites/pearbrowser-publishers/catalog
+node scripts/publish-catalog-bee.js catalog-source/pearbrowser-network.catalog.json --storage ~/pear-ecosystem/03-sites/pearbrowser-publishers/catalog
 node scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --expect-app hiveworm
 ```
 

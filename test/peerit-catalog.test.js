@@ -15,7 +15,7 @@ test('peerit is seeded as a browsable hypersite, not a standalone app', () => {
   assert.equal(app.type, 'hypersite')
   assert.equal(app.driveKey, PEERIT_KEY)
   assert.equal(app.link, PEERIT_URL)
-  assert.equal(app.author, 'defidon')
+  assert.equal(app.author, 'bigdestiny2')
   assert.equal(app.version, '1.0.0')
   assert.ok(app.categories.includes('featured'), 'peerit must be featured')
   assert.ok(app.categories.includes('site'))
