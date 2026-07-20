@@ -26,6 +26,20 @@ const { escapeStyleText } = require('./html-raw-text.cjs')
 const MAX_BODY_BYTES = 8 * 1024 * 1024 // 8 MiB response cap for proxy mode
 const FETCH_TIMEOUT_MS = 20000
 const USER_AGENT = 'PearBrowser/0.5 (clearnet-proxy; P2P browser)'
+const STRIPPED_UPSTREAM_HEADERS = new Set([
+  'connection',
+  'content-encoding',
+  'content-length',
+  'content-security-policy',
+  'content-security-policy-report-only',
+  'nel',
+  'report-to',
+  'reporting-endpoints',
+  'transfer-encoding',
+  'x-content-security-policy',
+  'x-frame-options',
+  'x-webkit-csp'
+])
 
 /**
  * Encode a target URL into a path segment under /clearnet/.
@@ -76,6 +90,28 @@ function parseClearnetPath (pathname, search = '') {
 }
 
 /**
+ * Recover a dynamic root-relative request using its proxied document referer.
+ * Publisher scripts commonly create `/media/...` URLs at runtime, after the
+ * static HTML rewrite has run. The browser resolves those against loopback;
+ * this maps them back to the publisher origin without trusting a non-proxy
+ * referer.
+ */
+function resolveClearnetFallback (referer, requestUrl, proxyOrigin) {
+  try {
+    const proxy = new URL(proxyOrigin)
+    const ref = new URL(String(referer || ''))
+    if (ref.protocol !== proxy.protocol || ref.host !== proxy.host) return null
+    const parsed = parseClearnetPath(ref.pathname, ref.search)
+    if (!parsed) return null
+    const target = new URL(String(requestUrl || ''), parsed.target)
+    if (target.protocol !== 'http:' && target.protocol !== 'https:') return null
+    return new URL(`/clearnet/${encodeClearnetTarget(target.toString())}`, proxy)
+  } catch {
+    return null
+  }
+}
+
+/**
  * Fetch a clearnet URL using bare-https / bare-http1 (Bare runtime) or
  * Node https/http as fallback in unit tests.
  */
@@ -88,9 +124,12 @@ function fetchClearnet (absoluteUrl, opts = {}) {
     'Accept-Language': 'en-US,en;q=0.9',
     ...(opts.headers || {})
   }
-  // Strip hop-by-hop
-  delete headers['host']
-  delete headers['connection']
+  // Strip hop-by-hop and absent optional headers. Header names can arrive in
+  // either browser-style or Node-style casing.
+  for (const key of Object.keys(headers)) {
+    const lower = key.toLowerCase()
+    if (lower === 'host' || lower === 'connection' || headers[key] == null) delete headers[key]
+  }
 
   return new Promise((resolve, reject) => {
     let u
@@ -151,12 +190,12 @@ function fetchClearnet (absoluteUrl, opts = {}) {
  * Relative URLs resolve against the document's real clearnet base, then are
  * re-encoded under /clearnet/<blob>.
  */
-function rewriteHtmlForProxy (html, documentUrl, proxyOrigin) {
+function rewriteHtmlForProxy (html, documentUrl, proxyOrigin, injectedHead = '') {
   const base = new URL(documentUrl)
   const origin = String(proxyOrigin || '').replace(/\/$/, '')
 
   const rewriteAttrUrl = (raw) => {
-    const value = String(raw || '').trim()
+    const value = decodeHtmlCharacterReferences(String(raw || '').trim())
     if (!value || value.startsWith('#') || value.startsWith('data:') ||
         value.startsWith('blob:') || value.startsWith('javascript:') ||
         value.startsWith('mailto:') || value.startsWith('about:')) {
@@ -171,44 +210,163 @@ function rewriteHtmlForProxy (html, documentUrl, proxyOrigin) {
     }
   }
 
-  let out = String(html || '')
-  // href / src / action / poster / formaction / data-src
-  out = out.replace(
-    /\b(href|src|action|poster|formaction|data-src)\s*=\s*(["'])([^"']*)\2/gi,
-    (full, attr, q, val) => `${attr}=${q}${rewriteAttrUrl(val)}${q}`
-  )
-  // srcset="url 1x, url 2x"
-  out = out.replace(/\bsrcset\s*=\s*(["'])([^"']*)\1/gi, (full, q, val) => {
-    const parts = val.split(',').map((part) => {
-      const bits = part.trim().split(/\s+/)
-      if (!bits[0]) return part
-      bits[0] = rewriteAttrUrl(bits[0])
-      return bits.join(' ')
-    })
-    return `srcset=${q}${parts.join(', ')}${q}`
-  })
-  // CSS url(...)
-  out = out.replace(/url\(\s*(['"]?)([^)'"]+)\1\s*\)/gi, (full, q, val) => {
-    const rewritten = rewriteAttrUrl(val.trim())
-    return `url(${q}${rewritten}${q})`
-  })
-
   // Inject <base> pointing at proxy document root so any leftover relative
   // resolution still hits our host; we also set a pear-clearnet meta.
   // Bare's URL implementation exposes protocol + host but not `.origin`.
   const documentOrigin = `${base.protocol}//${base.host}`
   const headBits =
+    String(injectedHead || '') +
     `<meta name="pear-clearnet-origin" content="${escapeHtml(documentOrigin)}">` +
     `<base href="${escapeHtml(origin)}/clearnet/${encodeClearnetTarget(base.toString())}">`
+  return rewriteHtmlMarkup(String(html || ''), rewriteAttrUrl, headBits)
+}
 
-  if (/<head[^>]*>/i.test(out)) {
-    out = out.replace(/<head[^>]*>/i, (m) => `${m}${headBits}`)
-  } else if (/<html[^>]*>/i.test(out)) {
-    out = out.replace(/<html[^>]*>/i, (m) => `${m}<head>${headBits}</head>`)
-  } else {
-    out = `<head>${headBits}</head>${out}`
+function decodeHtmlCharacterReferences (value) {
+  const named = {
+    amp: '&',
+    apos: "'",
+    colon: ':',
+    equals: '=',
+    gt: '>',
+    lt: '<',
+    quot: '"',
+    sol: '/'
   }
-  return out
+  return String(value || '')
+    .replace(/&#(?:x([0-9a-f]+)|([0-9]+));?/gi, (full, hex, decimal) => {
+      const codePoint = parseInt(hex || decimal, hex ? 16 : 10)
+      if (!Number.isFinite(codePoint) || codePoint <= 0 || codePoint > 0x10FFFF ||
+          (codePoint >= 0xD800 && codePoint <= 0xDFFF)) return '\uFFFD'
+      return String.fromCodePoint(codePoint)
+    })
+    .replace(/&([a-z][a-z0-9]+);/gi, (full, name) => named[name.toLowerCase()] || full)
+}
+
+function rewriteCssUrls (css, rewriteUrl) {
+  return String(css || '').replace(/url\(\s*(['"]?)([^)'"]+)\1\s*\)/gi, (full, quote, value) => {
+    const rewritten = rewriteUrl(value.trim())
+    return `url(${quote}${rewritten}${quote})`
+  })
+}
+
+function replaceAttribute (tag, names, transform) {
+  const re = new RegExp(
+    `(\\b(?:${names})\\s*=\\s*)(?:"([^"]*)"|'([^']*)'|([^\\s"'=<>\\x60]+))`,
+    'gi'
+  )
+  return tag.replace(re, (full, prefix, doubleValue, singleValue, bareValue) => {
+    const quote = doubleValue !== undefined ? '"' : (singleValue !== undefined ? "'" : '"')
+    const value = doubleValue !== undefined
+      ? doubleValue
+      : (singleValue !== undefined ? singleValue : bareValue)
+    return `${prefix}${quote}${transform(value)}${quote}`
+  })
+}
+
+function rewriteHtmlTag (tag, rewriteUrl) {
+  let out = replaceAttribute(
+    tag,
+    'href|src|action|poster|formaction|data-src',
+    rewriteUrl
+  )
+  out = replaceAttribute(out, 'srcset', (value) => {
+    return value.split(',').map((part) => {
+      const bits = part.trim().split(/\s+/)
+      if (!bits[0]) return part
+      bits[0] = rewriteUrl(bits[0])
+      return bits.join(' ')
+    }).join(', ')
+  })
+  return replaceAttribute(out, 'style', (value) => rewriteCssUrls(value, rewriteUrl))
+}
+
+function findHtmlTagEnd (html, start) {
+  let quote = ''
+  for (let i = start + 1; i < html.length; i++) {
+    const char = html[i]
+    if (quote) {
+      if (char === quote) quote = ''
+    } else if (char === '"' || char === "'") {
+      quote = char
+    } else if (char === '>') {
+      return i
+    }
+  }
+  return -1
+}
+
+function rewriteHtmlMarkup (html, rewriteUrl, headBits) {
+  const rawTextElements = new Set(['iframe', 'noembed', 'noframes', 'plaintext', 'script', 'textarea', 'title', 'xmp'])
+  const lower = html.toLowerCase()
+  const pieces = []
+  let cursor = 0
+  let headInjected = false
+  let htmlInsertIndex = -1
+
+  while (cursor < html.length) {
+    const tagStart = html.indexOf('<', cursor)
+    if (tagStart === -1) {
+      pieces.push(html.slice(cursor))
+      break
+    }
+    pieces.push(html.slice(cursor, tagStart))
+
+    if (html.startsWith('<!--', tagStart)) {
+      const commentEnd = html.indexOf('-->', tagStart + 4)
+      if (commentEnd === -1) {
+        pieces.push(html.slice(tagStart))
+        break
+      }
+      pieces.push(html.slice(tagStart, commentEnd + 3))
+      cursor = commentEnd + 3
+      continue
+    }
+
+    const tagEnd = findHtmlTagEnd(html, tagStart)
+    if (tagEnd === -1) {
+      pieces.push(html.slice(tagStart))
+      break
+    }
+    const tag = html.slice(tagStart, tagEnd + 1)
+    const nameMatch = tag.match(/^<\s*([a-z][a-z0-9:-]*)\b/i)
+    const tagName = nameMatch ? nameMatch[1].toLowerCase() : ''
+    const rewrittenTag = tagName ? rewriteHtmlTag(tag, rewriteUrl) : tag
+    pieces.push(rewrittenTag)
+
+    if (tagName === 'html' && htmlInsertIndex === -1) htmlInsertIndex = pieces.length
+    if (tagName === 'head' && !headInjected) {
+      pieces.push(headBits)
+      headInjected = true
+    }
+
+    cursor = tagEnd + 1
+    if (!tagName || (!rawTextElements.has(tagName) && tagName !== 'style')) continue
+
+    const closingStart = lower.indexOf(`</${tagName}`, cursor)
+    if (closingStart === -1) {
+      const body = html.slice(cursor)
+      pieces.push(tagName === 'style' ? rewriteCssUrls(body, rewriteUrl) : body)
+      cursor = html.length
+      break
+    }
+    const body = html.slice(cursor, closingStart)
+    pieces.push(tagName === 'style' ? rewriteCssUrls(body, rewriteUrl) : body)
+    const closingEnd = findHtmlTagEnd(html, closingStart)
+    if (closingEnd === -1) {
+      pieces.push(html.slice(closingStart))
+      cursor = html.length
+      break
+    }
+    pieces.push(html.slice(closingStart, closingEnd + 1))
+    cursor = closingEnd + 1
+  }
+
+  if (!headInjected) {
+    const head = `<head>${headBits}</head>`
+    if (htmlInsertIndex >= 0) pieces.splice(htmlInsertIndex, 0, head)
+    else pieces.unshift(head)
+  }
+  return pieces.join('')
 }
 
 function escapeHtml (str) {
@@ -277,6 +435,22 @@ function buildClearnetInjections (opts = {}) {
   return { htmlFragment: fragments.join(''), scriptBodies }
 }
 
+function isTopLevelClearnetNavigation (req) {
+  const mode = String(req.headers['sec-fetch-mode'] || '').toLowerCase()
+  const dest = String(req.headers['sec-fetch-dest'] || '').toLowerCase()
+  return mode === 'navigate' && (dest === 'iframe' || dest === 'document')
+}
+
+function buildClearnetDirectFallback (target) {
+  const targetJson = JSON.stringify(String(target || '')).replace(/</g, '\\u003c')
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Opening directly…</title></head>
+    <body style="font-family:system-ui;padding:2rem;background:#0f1410;color:#e8efe9">
+      <h1>Opening this publisher directly…</h1>
+      <p>The publisher refused PearBrowser's privacy proxy. Content Shield is unavailable for this tab.</p>
+      <script>(()=>{const notify=()=>window.parent.postMessage({type:'pearbrowser:clearnet-direct-fallback',url:${targetJson}},'*');notify();setTimeout(notify,250);setTimeout(notify,1000)})()</script>
+    </body></html>`
+}
+
 /**
  * Handle a /clearnet/* request end-to-end.
  * @returns {Promise<boolean>} true if handled
@@ -307,17 +481,19 @@ async function handleClearnetRequest (req, res, urlObj, deps = {}) {
   }
 
   const proxyOrigin = deps.proxyOrigin || `http://127.0.0.1:${deps.port || 0}`
-  let fetchFn = deps.fetchClearnet || fetchClearnet
+  const fetchFn = deps.fetchClearnet || fetchClearnet
+  const upstreamHeaders = {
+    'User-Agent': req.headers['user-agent'] || USER_AGENT,
+    Accept: req.headers.accept || 'text/html,application/xhtml+xml,*/*;q=0.8',
+    'Accept-Language': req.headers['accept-language'] || 'en-US,en;q=0.9'
+  }
+  if (req.headers.range) upstreamHeaders.Range = req.headers.range
+  if (req.headers['content-type']) upstreamHeaders['Content-Type'] = req.headers['content-type']
 
   try {
     let response = await fetchFn(target, {
       method: req.method === 'POST' ? 'POST' : 'GET',
-      headers: {
-        'User-Agent': USER_AGENT,
-        Accept: req.headers.accept || 'text/html,application/xhtml+xml,*/*;q=0.8',
-        'Accept-Language': req.headers['accept-language'] || 'en-US,en;q=0.9',
-        Referer: privacy.referrerPolicy === 'no-referrer' ? undefined : undefined
-      }
+      headers: upstreamHeaders
     })
 
     // Follow a small number of redirects, re-checking the shield each hop.
@@ -339,7 +515,7 @@ async function handleClearnetRequest (req, res, urlObj, deps = {}) {
         }
       }
       target = next
-      response = await fetchFn(target, { method: 'GET' })
+      response = await fetchFn(target, { method: 'GET', headers: upstreamHeaders })
       hops++
     }
 
@@ -348,53 +524,50 @@ async function handleClearnetRequest (req, res, urlObj, deps = {}) {
       response.headers['Content-Type'] ||
       'application/octet-stream'
     ).toLowerCase()
+    const useDirectFallback = response.statusCode === 403 && isTopLevelClearnetNavigation(req)
 
-    res.statusCode = response.statusCode || 200
+    res.statusCode = useDirectFallback ? 200 : (response.statusCode || 200)
     res.setHeader('X-Pear-Clearnet', '1')
     res.setHeader('X-Pear-Clearnet-Url', target)
+    if (useDirectFallback) res.setHeader('X-Pear-Clearnet-Fallback', 'direct')
     // Do not forward Set-Cookie by default in proxy mode when third-party
     // cookie blocking is on — partitions clearnet cookie jar from hyper.
     const blockCookies = privacy.blockThirdPartyCookies !== false
     for (const [key, value] of Object.entries(response.headers || {})) {
       const lower = key.toLowerCase()
-      if (['transfer-encoding', 'content-encoding', 'content-length', 'connection'].includes(lower)) continue
+      if (STRIPPED_UPSTREAM_HEADERS.has(lower)) continue
       if (blockCookies && (lower === 'set-cookie' || lower === 'set-cookie2')) continue
-      if (lower === 'content-security-policy') continue // we inject our own scripts
       try { res.setHeader(key, value) } catch {}
     }
 
     let body = response.body
-    if (contentType.includes('text/html') || contentType.includes('application/xhtml')) {
+    if (useDirectFallback) {
+      body = Buffer.from(buildClearnetDirectFallback(target), 'utf8')
+      res.setHeader('Content-Type', 'text/html; charset=utf-8')
+      res.setHeader('Referrer-Policy', 'no-referrer')
+    } else if (contentType.includes('text/html') || contentType.includes('application/xhtml')) {
       let html = body.toString('utf8')
-      html = rewriteHtmlForProxy(html, target, proxyOrigin)
       const inj = buildClearnetInjections({
         contentShield: deps.contentShield,
         documentUrl: target,
         privacy,
         farblingSalt: deps.farblingSalt || 'pear'
       })
-      if (inj.htmlFragment) {
-        if (/<head[^>]*>/i.test(html)) {
-          html = html.replace(/<head[^>]*>/i, (m) => `${m}${inj.htmlFragment}`)
-        } else {
-          html = inj.htmlFragment + html
-        }
-      }
+      html = rewriteHtmlForProxy(html, target, proxyOrigin, inj.htmlFragment)
       body = Buffer.from(html, 'utf8')
       res.setHeader('Content-Type', 'text/html; charset=utf-8')
     } else if (contentType.includes('text/css')) {
       // Rewrite url() in stylesheets
-      let css = body.toString('utf8')
       const base = new URL(target)
-      css = css.replace(/url\(\s*(['"]?)([^)'"]+)\1\s*\)/gi, (full, q, val) => {
+      const css = rewriteCssUrls(body.toString('utf8'), (val) => {
         const value = String(val || '').trim()
-        if (!value || value.startsWith('data:')) return full
+        if (!value || value.startsWith('data:')) return value
         try {
           const abs = new URL(value, base).toString()
-          if (!/^https?:/i.test(abs)) return full
-          return `url(${q}${proxyOrigin}/clearnet/${encodeClearnetTarget(abs)}${q})`
+          if (!/^https?:/i.test(abs)) return value
+          return `${proxyOrigin}/clearnet/${encodeClearnetTarget(abs)}`
         } catch {
-          return full
+          return value
         }
       })
       body = Buffer.from(css, 'utf8')
@@ -425,9 +598,11 @@ module.exports = {
   decodeClearnetTarget,
   localClearnetUrl,
   parseClearnetPath,
+  resolveClearnetFallback,
   fetchClearnet,
   rewriteHtmlForProxy,
   buildClearnetInjections,
+  buildClearnetDirectFallback,
   handleClearnetRequest,
   MAX_BODY_BYTES,
   USER_AGENT

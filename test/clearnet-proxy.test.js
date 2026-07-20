@@ -1,9 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
-import Module from 'node:module'
+import Module, { createRequire } from 'node:module'
 import nodeCrypto from 'node:crypto'
-import { createRequire } from 'node:module'
 
 const require = createRequire(import.meta.url)
 const {
@@ -11,6 +10,7 @@ const {
   decodeClearnetTarget,
   localClearnetUrl,
   parseClearnetPath,
+  resolveClearnetFallback,
   rewriteHtmlForProxy,
   buildClearnetInjections,
   handleClearnetRequest
@@ -49,6 +49,40 @@ test('rewriteHtmlForProxy rewrites href/src to proxy paths', () => {
   // Absolute CDN URL is base64url-encoded into the proxy path
   assert.match(out, /clearnet\/[A-Za-z0-9_-]+/)
   assert.ok(out.includes(encodeClearnetTarget('https://cdn.example/a.png')))
+})
+
+test('rewriteHtmlForProxy leaves JavaScript text intact while rewriting markup and styles', () => {
+  const script = 'const preload = url(\'/media/app.js\'); const html = \'<img src="/do-not-touch.png">\''
+  const html = `<html><head><style>.hero{background:url('/hero.png')}</style></head><body>
+    <script>${script}</script>
+    <div style="background:url('/tile.png')"></div>
+  </body></html>`
+  const out = rewriteHtmlForProxy(html, 'https://news.example/story', 'http://127.0.0.1:9')
+
+  assert.ok(out.includes(`<script>${script}</script>`))
+  assert.ok(out.includes(encodeClearnetTarget('https://news.example/hero.png')))
+  assert.ok(out.includes(encodeClearnetTarget('https://news.example/tile.png')))
+  assert.equal(out.includes(encodeClearnetTarget('https://news.example/do-not-touch.png')), false)
+})
+
+test('rewriteHtmlForProxy decodes HTML character references before encoding targets', () => {
+  const target = 'https://media.example/video.mp4?c=original&width=1280'
+  const html = '<video src="https://media.example/video.mp4?c&#x3D;original&amp;width&#61;1280"></video>'
+  const out = rewriteHtmlForProxy(html, 'https://news.example/story', 'http://127.0.0.1:9')
+
+  assert.ok(out.includes(encodeClearnetTarget(target)))
+  assert.equal(out.includes(encodeClearnetTarget('https://media.example/video.mp4?c&#x3D;original&amp;width&#61;1280')), false)
+})
+
+test('resolveClearnetFallback maps dynamic root paths through the referring upstream page', () => {
+  const documentUrl = 'https://www.cnn.com/world/story'
+  const proxyOrigin = 'http://127.0.0.1:51177'
+  const referer = `${proxyOrigin}/clearnet/${encodeClearnetTarget(documentUrl)}`
+  const resolved = resolveClearnetFallback(referer, '/media/sites/app.js?v=1', proxyOrigin)
+
+  assert.ok(resolved)
+  assert.equal(parseClearnetPath(resolved.pathname).target, 'https://www.cnn.com/media/sites/app.js?v=1')
+  assert.equal(resolveClearnetFallback('https://attacker.example/', '/media/app.js', proxyOrigin), null)
 })
 
 test('buildClearnetInjections adds shield CSS, scriptlets, farbling', () => {
@@ -145,6 +179,90 @@ test('handleClearnetRequest rewrites HTML and injects shield on pass-through', a
   assert.equal(res.headers['set-cookie'], undefined)
 })
 
+test('handleClearnetRequest strips framing/report headers and forwards browser request headers', async () => {
+  const req = new EventEmitter()
+  req.method = 'GET'
+  req.headers = {
+    accept: 'text/html',
+    'accept-language': 'en-AU,en;q=0.9',
+    'user-agent': 'Mozilla/5.0 Test Chromium',
+    range: 'bytes=0-1023'
+  }
+  const res = {
+    statusCode: 200,
+    headers: {},
+    setHeader (k, v) { this.headers[k.toLowerCase()] = v },
+    getHeader (k) { return this.headers[k.toLowerCase()] },
+    end (body) { this.body = Buffer.isBuffer(body) ? body.toString('utf8') : String(body || '') }
+  }
+  let seenOptions
+  await handleClearnetRequest(
+    req,
+    res,
+    new URL(`/clearnet/${encodeClearnetTarget('https://www.news.com.au/')}`, 'http://127.0.0.1:9'),
+    {
+      proxyOrigin: 'http://127.0.0.1:9',
+      fetchClearnet: async (target, options) => {
+        seenOptions = options
+        return {
+          statusCode: 200,
+          headers: {
+            'content-type': 'text/html',
+            'content-security-policy': "default-src 'self'",
+            'content-security-policy-report-only': "frame-ancestors 'self'; report-uri /csp-reports",
+            'x-frame-options': 'SAMEORIGIN',
+            'report-to': '{"group":"csp"}',
+            nel: '{"report_to":"csp"}'
+          },
+          body: Buffer.from('<html><head></head><body>ok</body></html>')
+        }
+      }
+    }
+  )
+
+  assert.equal(seenOptions.headers['User-Agent'], 'Mozilla/5.0 Test Chromium')
+  assert.equal(seenOptions.headers['Accept-Language'], 'en-AU,en;q=0.9')
+  assert.equal(seenOptions.headers.Range, 'bytes=0-1023')
+  assert.equal(res.headers['content-security-policy'], undefined)
+  assert.equal(res.headers['content-security-policy-report-only'], undefined)
+  assert.equal(res.headers['x-frame-options'], undefined)
+  assert.equal(res.headers['report-to'], undefined)
+  assert.equal(res.headers.nel, undefined)
+})
+
+test('handleClearnetRequest offers direct mode only for a publisher-blocked navigation', async () => {
+  const req = new EventEmitter()
+  req.method = 'GET'
+  req.headers = {
+    accept: 'text/html',
+    'sec-fetch-dest': 'iframe',
+    'sec-fetch-mode': 'navigate'
+  }
+  const res = {
+    statusCode: 200,
+    headers: {},
+    setHeader (k, v) { this.headers[k.toLowerCase()] = v },
+    getHeader (k) { return this.headers[k.toLowerCase()] },
+    end (body) { this.body = Buffer.isBuffer(body) ? body.toString('utf8') : String(body || '') }
+  }
+  const target = 'https://www.cnn.com/'
+  await handleClearnetRequest(
+    req,
+    res,
+    new URL(`/clearnet/${encodeClearnetTarget(target)}`, 'http://127.0.0.1:9'),
+    {
+      proxyOrigin: 'http://127.0.0.1:9',
+      fetchClearnet: async () => ({ statusCode: 403, headers: {}, body: Buffer.alloc(0) })
+    }
+  )
+
+  assert.equal(res.statusCode, 200)
+  assert.equal(res.headers['x-pear-clearnet-fallback'], 'direct')
+  assert.match(res.body, /pearbrowser:clearnet-direct-fallback/)
+  assert.match(res.body, /https:\/\/www\.cnn\.com\//)
+  assert.match(res.body, /Content Shield is unavailable/)
+})
+
 test('SessionBridge resolves clearnet to proxy localUrl by default', () => {
   const bridge = new SessionBridge({
     getShield: () => new ContentShield({ builtinList: false }),
@@ -206,5 +324,35 @@ test('HyperProxy routes /clearnet/* to clearnet handler', async () => {
   assert.ok(seen)
   assert.match(seen.path, /^\/clearnet\//)
   assert.equal(seen.hasShield, true)
+  assert.equal(res.statusCode, 204)
+})
+
+test('HyperProxy routes dynamic root paths using a clearnet referer', async () => {
+  const proxy = new HyperProxy(async () => null, () => {})
+  proxy._port = 51177
+  let seen = null
+  proxy.setClearnetHandler(async (req, res, urlObj) => {
+    seen = parseClearnetPath(urlObj.pathname).target
+    res.statusCode = 204
+    res.end()
+    return true
+  })
+  const req = new EventEmitter()
+  req.method = 'GET'
+  req.url = '/media/sites/js/app.js'
+  req.headers = {
+    referer: `http://127.0.0.1:51177/clearnet/${encodeClearnetTarget('https://www.cnn.com/story')}`
+  }
+  req.socket = { remoteAddress: '127.0.0.1' }
+  const res = {
+    statusCode: 200,
+    headers: {},
+    setHeader (k, v) { this.headers[k.toLowerCase()] = v },
+    end () { this.ended = true }
+  }
+
+  await proxy._handle(req, res)
+
+  assert.equal(seen, 'https://www.cnn.com/media/sites/js/app.js')
   assert.equal(res.statusCode, 204)
 })

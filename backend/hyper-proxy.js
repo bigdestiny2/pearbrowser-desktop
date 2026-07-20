@@ -719,6 +719,26 @@ class HyperProxy {
       })
     }
 
+    // Runtime-created root-relative publisher URLs (for example CNN's
+    // `/media/sites/...`) bypass the static HTML attribute rewrite. Recover
+    // their upstream origin from a valid proxied-page referer before the
+    // generic loopback 404 path runs.
+    const clearnet = require('./clearnet-proxy.cjs')
+    const clearnetFallback = clearnet.resolveClearnetFallback(
+      req.headers.referer,
+      req.url,
+      documentOrigin
+    )
+    if (clearnetFallback) {
+      const handle = this._clearnetHandler || clearnet.handleClearnetRequest
+      return handle(req, res, clearnetFallback, {
+        contentShield: this._contentShield,
+        privacy: this._privacySettings,
+        proxyOrigin: documentOrigin,
+        port: serverPort
+      })
+    }
+
     try {
       let driveKeyHex, filePath
 

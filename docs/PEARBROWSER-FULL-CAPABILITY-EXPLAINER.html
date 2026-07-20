@@ -1,0 +1,1442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PearBrowser — Full Capability Explainer</title>
+<meta name="description" content="A plain-language tour of PearBrowser once naming, deploy, and public-content features are complete — with wireframes, diagrams, and feature maps." />
+<style>
+  :root {
+    --bg: #070b12;
+    --bg2: #0e1520;
+    --panel: #141c28;
+    --panel2: #1a2433;
+    --line: #2a3648;
+    --line2: #3a4a62;
+    --text: #eef3f9;
+    --muted: #9aabbf;
+    --faint: #6d7f95;
+    --teal: #2dd4bf;
+    --sky: #38bdf8;
+    --violet: #a78bfa;
+    --amber: #fbbf24;
+    --rose: #fb7185;
+    --green: #4ade80;
+    --chrome: #0b1220;
+    --url: #0f172a;
+    --shadow: 0 24px 60px rgba(0,0,0,.45);
+    --sans: "Segoe UI", Inter, system-ui, -apple-system, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    font-family: var(--sans);
+    color: var(--text);
+    background:
+      radial-gradient(1000px 500px at 0% -5%, rgba(45,212,191,.12), transparent 55%),
+      radial-gradient(900px 480px at 100% 0%, rgba(56,189,248,.10), transparent 50%),
+      radial-gradient(700px 400px at 50% 100%, rgba(167,139,250,.08), transparent 50%),
+      var(--bg);
+    line-height: 1.65;
+    font-size: 17px;
+  }
+  a { color: var(--sky); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 28px 20px 90px; }
+
+  /* Hero */
+  .hero {
+    border: 1px solid var(--line);
+    border-radius: 24px;
+    background: linear-gradient(160deg, rgba(20,28,40,.98), rgba(10,16,24,.98));
+    box-shadow: var(--shadow);
+    padding: 40px 36px;
+    margin-bottom: 28px;
+    overflow: hidden;
+    position: relative;
+  }
+  .hero::after {
+    content: "";
+    position: absolute;
+    right: -40px; top: -40px;
+    width: 220px; height: 220px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(45,212,191,.18), transparent 70%);
+    pointer-events: none;
+  }
+  .badges { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+  .badge {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    padding: 5px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--line2);
+    color: var(--muted);
+    background: rgba(255,255,255,.03);
+  }
+  .badge.teal { color: var(--teal); border-color: rgba(45,212,191,.35); background: rgba(45,212,191,.08); }
+  .badge.amber { color: var(--amber); border-color: rgba(251,191,36,.35); background: rgba(251,191,36,.08); }
+  h1 {
+    font-size: clamp(2rem, 4vw, 2.8rem);
+    line-height: 1.1;
+    margin: 0 0 14px;
+    letter-spacing: -0.03em;
+  }
+  .lede {
+    font-size: 1.15rem;
+    color: var(--muted);
+    max-width: 62ch;
+    margin: 0 0 22px;
+  }
+  .hero-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px;
+  }
+  .stat {
+    background: rgba(0,0,0,.22);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 12px 14px;
+  }
+  .stat b { display: block; font-size: 1.35rem; color: var(--teal); letter-spacing: -0.02em; }
+  .stat span { color: var(--faint); font-size: 13px; }
+
+  /* TOC */
+  .toc {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    backdrop-filter: blur(14px);
+    background: rgba(7,11,18,.85);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 14px 16px;
+    margin-bottom: 36px;
+  }
+  .toc strong {
+    display: block;
+    font-size: 12px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--teal);
+    margin-bottom: 8px;
+  }
+  .toc ol { margin: 0; padding-left: 18px; columns: 2; gap: 28px; }
+  .toc li { margin: 4px 0; break-inside: avoid; }
+  .toc a { color: var(--muted); font-size: 14px; }
+  .toc a:hover { color: var(--text); }
+
+  section { margin: 48px 0; scroll-margin-top: 90px; }
+  h2 {
+    font-size: 1.7rem;
+    letter-spacing: -0.02em;
+    margin: 0 0 10px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--line);
+  }
+  h3 { font-size: 1.2rem; color: var(--sky); margin: 28px 0 10px; }
+  h4 { font-size: 1rem; color: var(--violet); margin: 18px 0 8px; }
+  p { margin: 0 0 12px; }
+  .muted { color: var(--muted); }
+  ul, ol { margin: 0 0 14px; padding-left: 22px; }
+  li { margin: 6px 0; }
+  li::marker { color: var(--faint); }
+
+  .note {
+    border-left: 4px solid var(--teal);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-left-width: 4px;
+    border-radius: 14px;
+    padding: 14px 16px;
+    margin: 16px 0;
+  }
+  .note.warn { border-left-color: var(--amber); }
+  .note p:last-child { margin: 0; }
+
+  .grid-2 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 14px;
+    margin: 16px 0;
+  }
+  .grid-3 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+    margin: 16px 0;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 16px;
+  }
+  .card h4 { margin-top: 0; }
+  .card p:last-child { margin-bottom: 0; }
+  .icon-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+  .icon {
+    width: 36px; height: 36px;
+    border-radius: 10px;
+    display: grid;
+    place-items: center;
+    font-size: 18px;
+    background: rgba(45,212,191,.12);
+    border: 1px solid rgba(45,212,191,.25);
+  }
+
+  /* Feature map chips */
+  .chip-cloud { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 6px; }
+  .chip {
+    font-size: 13px;
+    font-weight: 600;
+    padding: 7px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--line2);
+    background: var(--panel2);
+    color: var(--text);
+  }
+  .chip.now { border-color: rgba(74,222,128,.35); color: var(--green); background: rgba(74,222,128,.08); }
+  .chip.soon { border-color: rgba(251,191,36,.35); color: var(--amber); background: rgba(251,191,36,.08); }
+
+  /* Browser wireframe */
+  .wire {
+    margin: 18px 0 24px;
+    border-radius: 18px;
+    border: 1px solid var(--line2);
+    background: linear-gradient(180deg, #121a26, #0a1018);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+  .wire-label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: rgba(255,255,255,.03);
+    border-bottom: 1px solid var(--line);
+    font-size: 12px;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    color: var(--faint);
+    font-weight: 700;
+  }
+  .wire-label em {
+    font-style: normal;
+    color: var(--amber);
+    font-weight: 700;
+  }
+  .chrome {
+    background: var(--chrome);
+    border-bottom: 1px solid var(--line);
+  }
+  .tabs {
+    display: flex;
+    gap: 6px;
+    padding: 10px 10px 0;
+    overflow-x: auto;
+  }
+  .tab {
+    min-width: 120px;
+    max-width: 180px;
+    padding: 8px 12px;
+    border-radius: 10px 10px 0 0;
+    background: #162031;
+    color: var(--muted);
+    font-size: 12.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    border: 1px solid transparent;
+    border-bottom: 0;
+  }
+  .tab.active {
+    background: #1c2a3d;
+    color: var(--text);
+    border-color: var(--line);
+  }
+  .toolbar {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 10px 10px;
+  }
+  .nav-btns { display: flex; gap: 4px; }
+  .btn-dot {
+    width: 28px; height: 28px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: #121a28;
+    color: var(--muted);
+    display: grid;
+    place-items: center;
+    font-size: 12px;
+  }
+  .urlbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--url);
+    border: 1px solid var(--line2);
+    border-radius: 12px;
+    padding: 8px 12px;
+    min-width: 0;
+  }
+  .lock {
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    background: rgba(45,212,191,.15);
+    color: var(--teal);
+    display: grid;
+    place-items: center;
+    font-size: 10px;
+    flex: 0 0 auto;
+  }
+  .url-text {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .url-text .scheme { color: var(--teal); }
+  .url-text .dim { color: var(--faint); }
+  .tools { display: flex; gap: 6px; }
+  .tool {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 6px 9px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: #121a28;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .tool.hi { color: var(--sky); border-color: rgba(56,189,248,.35); }
+  .content {
+    display: grid;
+    grid-template-columns: 1fr;
+    min-height: 280px;
+  }
+  .content.split { grid-template-columns: 1fr 280px; }
+  .page {
+    padding: 18px;
+    background:
+      linear-gradient(180deg, rgba(255,255,255,.02), transparent 80px),
+      #0c121c;
+    min-height: 280px;
+  }
+  .page h5 {
+    margin: 0 0 8px;
+    font-size: 1.25rem;
+    letter-spacing: -0.02em;
+  }
+  .page .sub { color: var(--muted); font-size: 14px; margin-bottom: 14px; }
+  .fake-feed { display: grid; gap: 8px; }
+  .fake-card {
+    border: 1px solid var(--line);
+    background: rgba(255,255,255,.03);
+    border-radius: 12px;
+    padding: 10px 12px;
+  }
+  .fake-card .t { font-weight: 650; font-size: 14px; }
+  .fake-card .m { color: var(--faint); font-size: 12.5px; margin-top: 3px; }
+  .side {
+    border-left: 1px solid var(--line);
+    background: #0f1622;
+    padding: 14px;
+  }
+  .side h6 {
+    margin: 0 0 10px;
+    font-size: 11px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--teal);
+  }
+  .trust-row {
+    display: grid;
+    grid-template-columns: 18px 1fr;
+    gap: 8px;
+    margin: 0 0 10px;
+    font-size: 12.5px;
+  }
+  .dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    margin-top: 5px;
+  }
+  .dot.ok { background: var(--green); box-shadow: 0 0 0 3px rgba(74,222,128,.15); }
+  .dot.warn { background: var(--amber); box-shadow: 0 0 0 3px rgba(251,191,36,.15); }
+  .dot.info { background: var(--sky); box-shadow: 0 0 0 3px rgba(56,189,248,.15); }
+  .dot.bad { background: var(--rose); box-shadow: 0 0 0 3px rgba(251,113,133,.15); }
+  .tag {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 999px;
+    margin-right: 4px;
+    border: 1px solid var(--line2);
+    color: var(--muted);
+  }
+  .tag.pet { color: var(--green); border-color: rgba(74,222,128,.35); }
+  .tag.ens { color: var(--violet); border-color: rgba(167,139,250,.35); }
+  .tag.ipfs { color: var(--amber); border-color: rgba(251,191,36,.35); }
+  .tag.hyper { color: var(--sky); border-color: rgba(56,189,248,.35); }
+  .wire-caption {
+    padding: 10px 14px 12px;
+    color: var(--faint);
+    font-size: 13px;
+    border-top: 1px solid var(--line);
+    background: rgba(0,0,0,.18);
+  }
+
+  /* Diagram blocks */
+  .diagram {
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: linear-gradient(180deg, #101722, #0b1119);
+    padding: 16px;
+    margin: 16px 0 22px;
+    overflow-x: auto;
+  }
+  .diagram figcaption {
+    text-align: center;
+    color: var(--faint);
+    font-size: 12.5px;
+    margin-top: 10px;
+  }
+  .diagram svg { display: block; margin: 0 auto; max-width: 100%; height: auto; }
+
+  /* App grid wireframe */
+  .app-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 10px;
+  }
+  .app-tile {
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: rgba(255,255,255,.03);
+    padding: 12px;
+    min-height: 110px;
+  }
+  .app-tile .glyph {
+    width: 36px; height: 36px;
+    border-radius: 10px;
+    margin-bottom: 8px;
+    display: grid;
+    place-items: center;
+    font-weight: 800;
+    font-size: 13px;
+    color: #041018;
+  }
+  .app-tile .name { font-weight: 700; font-size: 13.5px; }
+  .app-tile .meta { color: var(--faint); font-size: 11.5px; margin-top: 3px; }
+
+  /* Publish wizard steps */
+  .steps {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 8px;
+    margin: 12px 0;
+  }
+  .step {
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 10px;
+    background: rgba(255,255,255,.02);
+    position: relative;
+  }
+  .step .n {
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    background: rgba(45,212,191,.15);
+    color: var(--teal);
+    display: grid;
+    place-items: center;
+    font-size: 11px;
+    font-weight: 800;
+    margin-bottom: 6px;
+  }
+  .step strong { display: block; font-size: 13px; margin-bottom: 3px; }
+  .step span { color: var(--faint); font-size: 12px; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    display: block;
+    overflow-x: auto;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    margin: 14px 0 18px;
+    font-size: 14.5px;
+  }
+  thead { background: var(--panel2); }
+  th, td {
+    text-align: left;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+    min-width: 110px;
+  }
+  th {
+    color: var(--faint);
+    font-size: 11.5px;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+  }
+  tr:last-child td { border-bottom: 0; }
+
+  .compare {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin: 14px 0;
+  }
+  @media (max-width: 720px) {
+    .compare { grid-template-columns: 1fr; }
+    .content.split { grid-template-columns: 1fr; }
+    .side { border-left: 0; border-top: 1px solid var(--line); }
+    .toc ol { columns: 1; }
+    .hero { padding: 28px 20px; }
+  }
+
+  footer {
+    margin-top: 50px;
+    padding-top: 18px;
+    border-top: 1px solid var(--line);
+    color: var(--faint);
+    font-size: 13px;
+  }
+  code {
+    font-family: var(--mono);
+    font-size: .88em;
+    background: rgba(56,189,248,.08);
+    border: 1px solid rgba(56,189,248,.18);
+    border-radius: 6px;
+    padding: 1px 6px;
+    color: #cfefff;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <div class="badges">
+    <span class="badge teal">PearBrowser explainer</span>
+    <span class="badge amber">Full capability vision</span>
+    <span class="badge">Wireframes · not final UI</span>
+    <span class="badge">Today + post-roadmap</span>
+  </div>
+  <h1>What PearBrowser becomes</h1>
+  <p class="lede">
+    A simple tour of the P2P browser once naming, cryptographic publishing,
+    public mirrors, and trust panels are fully in place.
+    Think of it as: <strong>a normal browser UX</strong> for sites and apps that live
+    on Pear, with optional bridges to ENS and IPFS — and without handing your keys
+    to a server.
+  </p>
+  <p class="lede" style="margin-top:-8px">
+    <strong>Pear Deploy</strong> is not a separate product window you bolt on later.
+    In this map it ships as a <strong>Pear Plugin inside PearBrowser</strong> —
+    the publish / preview / promote console — while portable
+    <code>pear.deploy</code> contracts stay inspectable and usable from CI or CLI.
+  </p>
+  <div class="hero-grid">
+    <div class="stat"><b>1 browser</b><span>browse · apps · deploy plugin · search</span></div>
+    <div class="stat"><b>0 accounts</b><span>local identity · no signup wall</span></div>
+    <div class="stat"><b>Many names</b><span>petname · ENS · keys · CID</span></div>
+    <div class="stat"><b>Verify first</b><span>signatures · bytes · freshness</span></div>
+  </div>
+</header>
+
+<nav class="toc" aria-label="Contents">
+  <strong>Contents</strong>
+  <ol>
+    <li><a href="#picture">1. The big picture</a></li>
+    <li><a href="#map">2. Feature map at a glance</a></li>
+    <li><a href="#browse">3. Browse anything verifiable</a></li>
+    <li><a href="#trust">4. Trust Center</a></li>
+    <li><a href="#apps">5. Apps store without installers</a></li>
+    <li><a href="#publish">6. Publish, name, and mirror</a></li>
+    <li><a href="#deploy-plugin">7. Pear Deploy as a Pear Plugin</a></li>
+    <li><a href="#search">8. Search your P2P web</a></li>
+    <li><a href="#names">9. Human names that stay honest</a></li>
+    <li><a href="#identity">10. Identity, login, and privacy</a></li>
+    <li><a href="#shield">11. Content Shield &amp; plugins</a></li>
+    <li><a href="#ai">12. Local AI (Ask Browser)</a></li>
+    <li><a href="#network">13. How the network fits together</a></li>
+    <li><a href="#day">14. A day in the browser</a></li>
+    <li><a href="#legend">15. What’s today vs future</a></li>
+  </ol>
+</nav>
+
+<!-- 1 -->
+<section id="picture">
+  <h2>1. The big picture</h2>
+  <p>
+    PearBrowser is a desktop (and later mobile) browser for the peer-to-peer web.
+    Instead of “type a DNS name → trust a company server,” you open
+    content addressed by cryptographic keys, signed releases, and optional public
+    names — while <strong>your device verifies</strong> what it got.
+  </p>
+
+  <div class="compare">
+    <div class="card">
+      <h4>Classic browser</h4>
+      <ul>
+        <li>DNS names point at servers</li>
+        <li>HTTPS proves the server, not the app author forever</li>
+        <li>Apps = download installers / app stores</li>
+        <li>When the host is gone, the site is gone</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4>PearBrowser (full capability)</h4>
+      <ul>
+        <li>Keys, petnames, ENS, and CIDs as entry points</li>
+        <li>Signatures + content addresses prove exact bytes</li>
+        <li>Apps launch from catalogues; updates are content</li>
+        <li>Relays keep bytes available after the publisher leaves</li>
+      </ul>
+    </div>
+  </div>
+
+  <figure class="diagram">
+    <svg viewBox="0 0 980 320" role="img" aria-label="PearBrowser in the middle of user, peers, relays, and public web">
+      <rect x="370" y="110" width="240" height="100" rx="18" fill="#123028" stroke="#2dd4bf" stroke-width="2"/>
+      <text x="490" y="155" text-anchor="middle" fill="#eef3f9" font-size="18" font-weight="700" font-family="system-ui,sans-serif">PearBrowser</text>
+      <text x="490" y="180" text-anchor="middle" fill="#99f6e4" font-size="13" font-family="system-ui,sans-serif">verify · resolve · run · publish</text>
+
+      <rect x="40" y="40" width="180" height="70" rx="14" fill="#152033" stroke="#38bdf8"/>
+      <text x="130" y="70" text-anchor="middle" fill="#eef3f9" font-size="14" font-weight="700" font-family="system-ui,sans-serif">You</text>
+      <text x="130" y="92" text-anchor="middle" fill="#9aabbf" font-size="12" font-family="system-ui,sans-serif">identity · tabs · trust</text>
+
+      <rect x="40" y="210" width="180" height="70" rx="14" fill="#152033" stroke="#38bdf8"/>
+      <text x="130" y="240" text-anchor="middle" fill="#eef3f9" font-size="14" font-weight="700" font-family="system-ui,sans-serif">Peers</text>
+      <text x="130" y="262" text-anchor="middle" fill="#9aabbf" font-size="12" font-family="system-ui,sans-serif">direct P2P when online</text>
+
+      <rect x="760" y="40" width="180" height="70" rx="14" fill="#231a36" stroke="#a78bfa"/>
+      <text x="850" y="70" text-anchor="middle" fill="#eef3f9" font-size="14" font-weight="700" font-family="system-ui,sans-serif">HiveRelay</text>
+      <text x="850" y="92" text-anchor="middle" fill="#9aabbf" font-size="12" font-family="system-ui,sans-serif">availability · services</text>
+
+      <rect x="760" y="210" width="180" height="70" rx="14" fill="#2a2210" stroke="#fbbf24"/>
+      <text x="850" y="240" text-anchor="middle" fill="#eef3f9" font-size="14" font-weight="700" font-family="system-ui,sans-serif">Public web bridges</text>
+      <text x="850" y="262" text-anchor="middle" fill="#9aabbf" font-size="12" font-family="system-ui,sans-serif">ENS · IPFS · DNS/HTTPS</text>
+
+      <line x1="220" y1="75" x2="370" y2="145" stroke="#6d7f95" stroke-width="2"/>
+      <line x1="220" y1="245" x2="370" y2="175" stroke="#6d7f95" stroke-width="2"/>
+      <line x1="610" y1="145" x2="760" y2="75" stroke="#6d7f95" stroke-width="2"/>
+      <line x1="610" y1="175" x2="760" y2="245" stroke="#6d7f95" stroke-width="2"/>
+    </svg>
+    <figcaption>Figure 1 — PearBrowser sits between you and three worlds: peers, relays, and optional public bridges. It verifies; it does not become the authority.</figcaption>
+  </figure>
+
+  <div class="note">
+    <p><strong>Simple rule:</strong> publishers sign meaning, content addresses prove integrity,
+    relays provide availability, PearBrowser verifies, and each app decides its own trust/merge policy.</p>
+  </div>
+</section>
+
+<!-- 2 -->
+<section id="map">
+  <h2>2. Feature map at a glance</h2>
+  <p class="muted">Green chips ≈ already real or largely real today. Amber chips ≈ full vision after naming / deploy / mirror trains land.</p>
+  <div class="chip-cloud">
+    <span class="chip now">Multi-tab hyper:// browse</span>
+    <span class="chip now">Apps catalogue</span>
+    <span class="chip now">Site publisher (today)</span>
+    <span class="chip now">Petnames &amp; pearname://</span>
+    <span class="chip now">Local + federated search</span>
+    <span class="chip now">BIP-39 identity</span>
+    <span class="chip now">Login consent</span>
+    <span class="chip now">Content Shield</span>
+    <span class="chip now">Pear Plugins model</span>
+    <span class="chip now">Ask Browser (local AI)</span>
+    <span class="chip now">Nostr contact bridge</span>
+    <span class="chip now">HiveRelay seed / durability</span>
+    <span class="chip soon">Pear Deploy plugin</span>
+    <span class="chip soon">ENS / .eth resolve</span>
+    <span class="chip soon">ipfs:// via relay bridge</span>
+    <span class="chip soon">Trust Center panel</span>
+    <span class="chip soon">Dual-publish native + IPFS</span>
+    <span class="chip soon">Non-custodial ENS publish</span>
+    <span class="chip soon">Portable release proofs</span>
+    <span class="chip soon">Native ↔ mirror failover</span>
+    <span class="chip soon">Multi-operator availability UI</span>
+  </div>
+</section>
+
+<!-- 3 -->
+<section id="browse">
+  <h2>3. Browse anything verifiable</h2>
+  <p>
+    The address bar understands different <em>kinds</em> of destinations and routes them
+    correctly — without pretending they all mean the same thing.
+  </p>
+
+  <table>
+    <thead>
+      <tr><th>You type…</th><th>What it means</th><th>What PearBrowser does</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>hyper://…</code> / raw key</td>
+        <td>Native Pear drive or site</td>
+        <td>Load from peers/relays; show drive identity</td>
+      </tr>
+      <tr>
+        <td><code>pearname://alice</code> or <code>alice</code></td>
+        <td>Human name in Pear naming</td>
+        <td>Resolve with provenance (petname / registry / contact / curated)</td>
+      </tr>
+      <tr>
+        <td><code>alice.eth</code> / <code>ens://…</code></td>
+        <td>Public ENS name</td>
+        <td>Resolve via Universal Resolver; verify contenthash / Pear link</td>
+      </tr>
+      <tr>
+        <td><code>ipfs://&lt;cid&gt;/…</code></td>
+        <td>Public immutable content</td>
+        <td>Fetch through bounded relay bridge; verify CID before render</td>
+      </tr>
+      <tr>
+        <td><code>pear://…</code></td>
+        <td>Pear app package / desktop app</td>
+        <td>Open in isolated app window when appropriate</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- Wireframe browse -->
+  <div class="wire">
+    <div class="wire-label">
+      <span>Wireframe · Browse + site info</span>
+      <em>Example UI · not final chrome</em>
+    </div>
+    <div class="chrome">
+      <div class="tabs">
+        <div class="tab">Home</div>
+        <div class="tab active">peerit · front page</div>
+        <div class="tab">docs.site</div>
+        <div class="tab">+</div>
+      </div>
+      <div class="toolbar">
+        <div class="nav-btns">
+          <div class="btn-dot">←</div>
+          <div class="btn-dot">→</div>
+          <div class="btn-dot">↻</div>
+        </div>
+        <div class="urlbar">
+          <div class="lock">✓</div>
+          <div class="url-text">
+            <span class="scheme">pearname://</span>peerit
+            <span class="dim"> · resolved · provenance: curated</span>
+          </div>
+        </div>
+        <div class="tools">
+          <div class="tool">★</div>
+          <div class="tool hi">ⓘ Trust</div>
+          <div class="tool">✦ Ask</div>
+        </div>
+      </div>
+    </div>
+    <div class="content split">
+      <div class="page">
+        <h5>peerit</h5>
+        <div class="sub">The front page of the P2P internet · live from signed outboxes</div>
+        <div class="fake-feed">
+          <div class="fake-card">
+            <div class="t">Welcome to local-first communities</div>
+            <div class="m">↑ 42 · 12 comments · author verified</div>
+          </div>
+          <div class="fake-card">
+            <div class="t">How relays keep the site online</div>
+            <div class="m">↑ 18 · 5 comments · author verified</div>
+          </div>
+          <div class="fake-card">
+            <div class="t">Show HN: portable release proofs</div>
+            <div class="m">↑ 9 · 3 comments · author verified</div>
+          </div>
+        </div>
+      </div>
+      <aside class="side">
+        <h6>About this site</h6>
+        <div class="trust-row"><div class="dot ok"></div><div><strong>Name</strong><br><span class="tag pet">petname</span><span class="tag">curated floor</span></div></div>
+        <div class="trust-row"><div class="dot ok"></div><div><strong>Native target</strong><br><span class="tag hyper">hyper://</span> ec6e… ready</div></div>
+        <div class="trust-row"><div class="dot info"></div><div><strong>Availability</strong><br>3 relays · 2 operators</div></div>
+        <div class="trust-row"><div class="dot warn"></div><div><strong>Optional mirror</strong><br><span class="tag ipfs">IPFS</span> pending pin check</div></div>
+        <div class="trust-row"><div class="dot ok"></div><div><strong>Freshness</strong><br>At high-water · no rollback</div></div>
+      </aside>
+    </div>
+    <div class="wire-caption">
+      Figure 2 — Browsing a human name. The page runs sandboxed; the side panel answers “why am I here?” without mixing ownership and availability.
+    </div>
+  </div>
+
+  <div class="grid-3">
+    <div class="card">
+      <div class="icon-row"><div class="icon">📑</div><h4 style="margin:0">Real browser chrome</h4></div>
+      <p class="muted">Tabs, back/forward, session restore, bookmarks, history, autocomplete, keyboard shortcuts, devtools.</p>
+    </div>
+    <div class="card">
+      <div class="icon-row"><div class="icon">🛡️</div><h4 style="margin:0">Sandbox by default</h4></div>
+      <p class="muted">Untrusted pages never inherit browser privileges. Active content stays inside browser-owned origins.</p>
+    </div>
+    <div class="card">
+      <div class="icon-row"><div class="icon">🔌</div><h4 style="margin:0">Page APIs with consent</h4></div>
+      <p class="muted"><code>window.pear</code> login, identity, sync, swarm — capability-gated, not free-for-all.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 4 -->
+<section id="trust">
+  <h2>4. Trust Center — five questions, five answers</h2>
+  <p>
+    Most browsers collapse trust into a lock icon. PearBrowser’s full Trust Center
+    separates five questions people usually mix up.
+  </p>
+
+  <figure class="diagram">
+    <svg viewBox="0 0 980 260" role="img" aria-label="Five trust questions">
+      <rect x="20" y="40" width="175" height="160" rx="16" fill="#123028" stroke="#2dd4bf"/>
+      <text x="107" y="90" text-anchor="middle" fill="#eef3f9" font-size="13" font-weight="700" font-family="system-ui,sans-serif">1. Who signed?</text>
+      <text x="107" y="120" text-anchor="middle" fill="#99f6e4" font-size="12" font-family="system-ui,sans-serif">publisher / name</text>
+      <text x="107" y="145" text-anchor="middle" fill="#9aabbf" font-size="11" font-family="system-ui,sans-serif">authenticity</text>
+
+      <rect x="215" y="40" width="175" height="160" rx="16" fill="#152033" stroke="#38bdf8"/>
+      <text x="302" y="90" text-anchor="middle" fill="#eef3f9" font-size="13" font-weight="700" font-family="system-ui,sans-serif">2. Exact bytes?</text>
+      <text x="302" y="120" text-anchor="middle" fill="#7dd3fc" font-size="12" font-family="system-ui,sans-serif">CID / digests</text>
+      <text x="302" y="145" text-anchor="middle" fill="#9aabbf" font-size="11" font-family="system-ui,sans-serif">integrity</text>
+
+      <rect x="410" y="40" width="175" height="160" rx="16" fill="#231a36" stroke="#a78bfa"/>
+      <text x="497" y="90" text-anchor="middle" fill="#eef3f9" font-size="13" font-weight="700" font-family="system-ui,sans-serif">3. Newest OK?</text>
+      <text x="497" y="120" text-anchor="middle" fill="#c4b5fd" font-size="12" font-family="system-ui,sans-serif">high-water</text>
+      <text x="497" y="145" text-anchor="middle" fill="#9aabbf" font-size="11" font-family="system-ui,sans-serif">freshness</text>
+
+      <rect x="605" y="40" width="175" height="160" rx="16" fill="#2a2210" stroke="#fbbf24"/>
+      <text x="692" y="90" text-anchor="middle" fill="#eef3f9" font-size="13" font-weight="700" font-family="system-ui,sans-serif">4. Who hosts?</text>
+      <text x="692" y="120" text-anchor="middle" fill="#fde68a" font-size="12" font-family="system-ui,sans-serif">relays / pins</text>
+      <text x="692" y="145" text-anchor="middle" fill="#9aabbf" font-size="11" font-family="system-ui,sans-serif">availability</text>
+
+      <rect x="800" y="40" width="160" height="160" rx="16" fill="#2a1520" stroke="#fb7185"/>
+      <text x="880" y="90" text-anchor="middle" fill="#eef3f9" font-size="13" font-weight="700" font-family="system-ui,sans-serif">5. Private?</text>
+      <text x="880" y="120" text-anchor="middle" fill="#fda4af" font-size="12" font-family="system-ui,sans-serif">route class</text>
+      <text x="880" y="145" text-anchor="middle" fill="#9aabbf" font-size="11" font-family="system-ui,sans-serif">privacy</text>
+    </svg>
+    <figcaption>Figure 3 — Trust is multi-dimensional. A green “available” light is not the same as “owned by Alice.”</figcaption>
+  </figure>
+
+  <div class="wire">
+    <div class="wire-label"><span>Wireframe · Trust Center</span><em>Unified panel</em></div>
+    <div class="page" style="min-height:auto">
+      <h5 style="margin-bottom:14px">Trust · alice.eth → public site</h5>
+      <div class="grid-2">
+        <div class="fake-card">
+          <div class="t">Publisher identity</div>
+          <div class="m">ENS name confirmed · contenthash codec supported · wallet not held by browser</div>
+        </div>
+        <div class="fake-card">
+          <div class="t">Byte integrity</div>
+          <div class="m">CID verified · incomplete DAG would not render</div>
+        </div>
+        <div class="fake-card">
+          <div class="t">Freshness</div>
+          <div class="m">Version 14 · rejects silent N→N-1 rollback</div>
+        </div>
+        <div class="fake-card">
+          <div class="t">Availability policy</div>
+          <div class="m">Native: 2 operators · IPFS: 2 pins · one pin degraded</div>
+        </div>
+      </div>
+      <p class="muted" style="margin:14px 0 0;font-size:13.5px">
+        Conflicts, expiry, suppression, and missing providers show as explicit states — not a blank error page.
+      </p>
+    </div>
+    <div class="wire-caption">Figure 4 — Trust Center wireframe. Same five questions for every navigable target.</div>
+  </div>
+</section>
+
+<!-- 5 -->
+<section id="apps">
+  <h2>5. Apps store without installers</h2>
+  <p>
+    The Apps tab is a decentralized catalogue. Rows point at stable Pear/Hyperdrive
+    targets so you launch the current release without hunting downloads or running an updater.
+  </p>
+
+  <div class="wire">
+    <div class="wire-label"><span>Wireframe · Apps catalogue</span><em>Aggregated sources</em></div>
+    <div class="chrome">
+      <div class="toolbar" style="grid-template-columns:1fr auto">
+        <div class="urlbar">
+          <div class="lock">⌕</div>
+          <div class="url-text">Search apps, categories, authors…</div>
+        </div>
+        <div class="tools">
+          <div class="tool hi">My Catalog</div>
+          <div class="tool">Sources</div>
+        </div>
+      </div>
+    </div>
+    <div class="page">
+      <div class="sub" style="margin-bottom:12px">
+        Sources: <span class="tag">curated</span><span class="tag">HiveRelay index</span><span class="tag">community</span><span class="tag">my catalog</span>
+      </div>
+      <div class="app-grid">
+        <div class="app-tile"><div class="glyph" style="background:#2dd4bf">P</div><div class="name">peerit</div><div class="meta">social · hypersite</div></div>
+        <div class="app-tile"><div class="glyph" style="background:#38bdf8">K</div><div class="name">Keet</div><div class="meta">chat · desktop</div></div>
+        <div class="app-tile"><div class="glyph" style="background:#a78bfa">A</div><div class="name">anonGPT</div><div class="meta">AI · pear app</div></div>
+        <div class="app-tile"><div class="glyph" style="background:#fbbf24">H</div><div class="name">HiveRelay</div><div class="meta">infra · docs</div></div>
+        <div class="app-tile"><div class="glyph" style="background:#fb7185">T</div><div class="name">Pear Tickets</div><div class="meta">events</div></div>
+        <div class="app-tile"><div class="glyph" style="background:#4ade80">+</div><div class="name">Add catalog</div><div class="meta">paste key / link</div></div>
+      </div>
+    </div>
+    <div class="wire-caption">Figure 5 — One store UI, many untrusted sources — all normalized and safety-checked before display.</div>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <h4>What you can do</h4>
+      <ul>
+        <li>Load multiple catalogues at once</li>
+        <li>Filter by category and source</li>
+        <li>Keep a writable “My Catalog”</li>
+        <li>Share catalog keys (read-only without writer key)</li>
+        <li>Open <code>pear://</code> apps in isolated windows</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4>Safety defaults</h4>
+      <ul>
+        <li>Reject malformed targets</li>
+        <li>Strip prototype-pollution keys</li>
+        <li>Preserve provenance / verification status</li>
+        <li>Never treat “listed on a relay” as “owned by”</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- 6 -->
+<section id="publish">
+  <h2>6. Publish, name, and mirror</h2>
+  <p>
+    Publishing starts simple (block editor → Hyperdrive → pin) and grows into a
+    full dual-publish flow: native live site, optional public IPFS snapshot,
+    optional memorable <code>.eth</code> name — each surface independent.
+  </p>
+
+  <div class="steps">
+    <div class="step"><div class="n">1</div><strong>Build / edit</strong><span>Blocks or folder · inspectable intent</span></div>
+    <div class="step"><div class="n">2</div><strong>Preview</strong><span>Isolated keys · expires · no prod access</span></div>
+    <div class="step"><div class="n">3</div><strong>Stage</strong><span>Warm providers · exact costs/limits</span></div>
+    <div class="step"><div class="n">4</div><strong>Sign</strong><span>External project signers · not dashboard alone</span></div>
+    <div class="step"><div class="n">5</div><strong>Native release</strong><span>Monotonic channel · portable proof</span></div>
+    <div class="step"><div class="n">6</div><strong>Optional mirror</strong><span>Deterministic CAR/CID · multi-op pins</span></div>
+    <div class="step"><div class="n">7</div><strong>Optional ENS</strong><span>Wallet signs · browser never holds seed</span></div>
+    <div class="step"><div class="n">8</div><strong>Observe</strong><span>Each surface can lag safely</span></div>
+  </div>
+
+  <div class="wire">
+    <div class="wire-label"><span>Wireframe · Publisher console</span><em>Native primary · names/mirrors secondary</em></div>
+    <div class="page">
+      <h5>Release · docs.site</h5>
+      <div class="sub">Sequence 12 · signed · native channel ready</div>
+      <div class="grid-2">
+        <div class="fake-card">
+          <div class="t"><span class="tag hyper">Native</span> Hyperdrive live</div>
+          <div class="m">Key d663… · both cores complete · 3 service sources green</div>
+        </div>
+        <div class="fake-card">
+          <div class="t"><span class="tag ipfs">Mirror</span> IPFS snapshot</div>
+          <div class="m">CID bafy… · 2/2 pins · fresh retrieval OK</div>
+        </div>
+        <div class="fake-card">
+          <div class="t"><span class="tag ens">ENS</span> docs.eth</div>
+          <div class="m">Confirmed on-chain · contenthash matches CID</div>
+        </div>
+        <div class="fake-card">
+          <div class="t"><span class="tag">DNS</span> https://docs.example</div>
+          <div class="m">Independent surface · lagging 1 deploy (OK)</div>
+        </div>
+      </div>
+      <div style="margin-top:14px;display:flex;flex-wrap:wrap;gap:8px">
+        <div class="tool hi">Export CAR + manifest</div>
+        <div class="tool">Request pin renewal</div>
+        <div class="tool">Prepare ENS update…</div>
+        <div class="tool">Roll forward…</div>
+      </div>
+    </div>
+    <div class="wire-caption">
+      Figure 6 — Publisher console. Native release is the source of truth; ENS/IPFS/DNS are converging accessories.
+    </div>
+  </div>
+
+  <div class="note warn">
+    <p><strong>Wallet boundary:</strong> PearBrowser prepares the ENS transaction details and hands them to <em>your</em> external wallet. HiveRelay and PearBrowser never custody ENS keys.</p>
+  </div>
+</section>
+
+<!-- 7 deploy plugin -->
+<section id="deploy-plugin">
+  <h2>7. Pear Deploy as a Pear Plugin</h2>
+  <p>
+    On this map, <strong>Pear Deploy is integrated into PearBrowser as a first-class Pear Plugin</strong>
+    — not a separate SaaS dashboard and not a mandatory second app you install to ship.
+    The browser already has a Plugins model (capability-declared Hyperdrives, install by key,
+    re-approval on capability escalation). Deploy rides that same rail.
+  </p>
+
+  <figure class="diagram">
+    <svg viewBox="0 0 980 300" role="img" aria-label="Pear Deploy plugin inside PearBrowser">
+      <rect x="40" y="30" width="900" height="70" rx="16" fill="#152033" stroke="#38bdf8"/>
+      <text x="490" y="72" text-anchor="middle" fill="#eef3f9" font-size="18" font-weight="700" font-family="system-ui,sans-serif">PearBrowser shell · browse · apps · trust · settings</text>
+
+      <rect x="80" y="140" width="360" height="120" rx="16" fill="#123028" stroke="#2dd4bf" stroke-width="2"/>
+      <text x="260" y="185" text-anchor="middle" fill="#eef3f9" font-size="16" font-weight="700" font-family="system-ui,sans-serif">Pear Deploy plugin</text>
+      <text x="260" y="212" text-anchor="middle" fill="#99f6e4" font-size="13" font-family="system-ui,sans-serif">preview · stage · sign request · promote</text>
+      <text x="260" y="235" text-anchor="middle" fill="#9aabbf" font-size="12" font-family="system-ui,sans-serif">declared capabilities · capability-gated</text>
+
+      <rect x="500" y="140" width="400" height="120" rx="16" fill="#231a36" stroke="#a78bfa"/>
+      <text x="700" y="185" text-anchor="middle" fill="#eef3f9" font-size="16" font-weight="700" font-family="system-ui,sans-serif">Portable contracts</text>
+      <text x="700" y="212" text-anchor="middle" fill="#c4b5fd" font-size="13" font-family="system-ui,sans-serif">pear.deploy/v1alpha1 · proofs · CLI/CI</text>
+      <text x="700" y="235" text-anchor="middle" fill="#9aabbf" font-size="12" font-family="system-ui,sans-serif">same records · browser not sole controller</text>
+
+      <line x1="440" y1="200" x2="500" y2="200" stroke="#6d7f95" stroke-width="2"/>
+      <text x="470" y="188" text-anchor="middle" fill="#6d7f95" font-size="12" font-family="system-ui,sans-serif">reads/writes</text>
+    </svg>
+    <figcaption>Figure 6a — Deploy lives as a plugin surface inside the browser; contracts remain portable for CI, headless signers, and recovery without the original machine.</figcaption>
+  </figure>
+
+  <div class="grid-2">
+    <div class="card">
+      <h4>What the plugin is for</h4>
+      <ul>
+        <li>Human-friendly publish / preview / promote UX</li>
+        <li>Review exact artifacts, providers, costs, and limitations</li>
+        <li>Hand release digests to external project signers</li>
+        <li>Show native channel + name/mirror convergence status</li>
+        <li>Prepare ENS intents for an external wallet</li>
+        <li>Export CAR + signed mirror manifest</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4>What it deliberately is not</h4>
+      <ul>
+        <li>Not the only way to build or sign a release (CLI/CI still valid)</li>
+        <li>Not a mandatory hosted controller</li>
+        <li>Not the source of app truth or merge policy</li>
+        <li>Not allowed to escalate capabilities silently</li>
+        <li>Not a place that stores ENS or release seed phrases</li>
+        <li>Not a free pass for pages to pin or deploy</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="wire">
+    <div class="wire-label"><span>Wireframe · Settings → Plugins · Pear Deploy</span><em>Install path like other Pear Plugins</em></div>
+    <div class="page">
+      <h5>Plugins</h5>
+      <div class="sub">Capability-declared Hyperdrives · re-approve on escalation</div>
+      <div class="fake-feed">
+        <div class="fake-card">
+          <div class="t">Pear Deploy <span class="tag" style="color:var(--teal);border-color:rgba(45,212,191,.4)">core plugin</span></div>
+          <div class="m">
+            Caps: <code>pear.deploy.preview</code> · <code>pear.deploy.promote</code> ·
+            <code>pear.deploy.names.observe</code> · <code>pear.deploy.mirror.export</code>
+            · wallet-intent only (no key custody)
+          </div>
+          <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+            <div class="tool hi">Open Deploy console</div>
+            <div class="tool">View capabilities</div>
+            <div class="tool">Disable</div>
+          </div>
+        </div>
+        <div class="fake-card">
+          <div class="t">Content Shield list pack</div>
+          <div class="m">Caps: <code>pear.net.filter</code></div>
+        </div>
+        <div class="fake-card">
+          <div class="t">Theme: Midnight</div>
+          <div class="m">Caps: <code>pear.content.styles</code></div>
+        </div>
+      </div>
+    </div>
+    <div class="wire-caption">
+      Figure 6b — Deploy appears in the same Plugins surface as other capability-gated extensions.
+      Updating the plugin to request broader caps (e.g. unrestricted pinning) disables until re-approval.
+    </div>
+  </div>
+
+  <div class="note">
+    <p>
+      <strong>Architecture split:</strong> the plugin is the <em>UX and orchestration surface</em>
+      inside PearBrowser. Portable records, pure planner, and verifier libraries can still live
+      as shared packages for headless CI. The browser verifies releases independently and must
+      never require trusting “whatever the Deploy plugin UI last showed.”
+    </p>
+  </div>
+</section>
+
+<!-- 8 -->
+<section id="search">
+  <h2>8. Search your P2P web</h2>
+  <div class="grid-2">
+    <div class="card">
+      <h4>Local-first</h4>
+      <p class="muted">First paint comes from your personal index (history, bookmarks, catalogues) instantly — no network required.</p>
+    </div>
+    <div class="card">
+      <h4>Optional federation</h4>
+      <p class="muted">Trusted peers can enrich results with digests, provenance, and stale-query suppression so old network replies cannot overwrite newer searches.</p>
+    </div>
+  </div>
+
+  <div class="wire">
+    <div class="wire-label"><span>Wireframe · Search</span><em>Local then federated</em></div>
+    <div class="page">
+      <div class="urlbar" style="margin-bottom:14px">
+        <div class="lock">⌕</div>
+        <div class="url-text">portable release proofs</div>
+      </div>
+      <div class="fake-feed">
+        <div class="fake-card">
+          <div class="t">Portable cryptographic production — docs</div>
+          <div class="m"><span class="tag">local</span> bookmark · opened yesterday</div>
+        </div>
+        <div class="fake-card">
+          <div class="t">HiveRelay release evidence guide</div>
+          <div class="m"><span class="tag">catalogue</span> curated network catalog</div>
+        </div>
+        <div class="fake-card">
+          <div class="t">peerit post: shipping with offline signers</div>
+          <div class="m"><span class="tag">federated</span> from trusted peer Maya · digest OK</div>
+        </div>
+      </div>
+    </div>
+    <div class="wire-caption">Figure 7 — Search results always show where they came from.</div>
+  </div>
+</section>
+
+<!-- 8 -->
+<section id="names">
+  <h2>9. Human names that stay honest</h2>
+  <p>
+    Memorable names are great. Lying about them is not. PearBrowser is petname-first:
+    <strong>your aliases beat everything</strong>, and every resolution keeps a provenance label.
+  </p>
+
+  <figure class="diagram">
+    <svg viewBox="0 0 980 220" role="img" aria-label="Name resolution tiers">
+      <rect x="30" y="50" width="200" height="110" rx="14" fill="#123028" stroke="#4ade80"/>
+      <text x="130" y="95" text-anchor="middle" fill="#eef3f9" font-size="14" font-weight="700" font-family="system-ui,sans-serif">Your petname</text>
+      <text x="130" y="120" text-anchor="middle" fill="#86efac" font-size="12" font-family="system-ui,sans-serif">highest authority</text>
+
+      <rect x="270" y="50" width="200" height="110" rx="14" fill="#152033" stroke="#38bdf8"/>
+      <text x="370" y="95" text-anchor="middle" fill="#eef3f9" font-size="14" font-weight="700" font-family="system-ui,sans-serif">Owned registry</text>
+      <text x="370" y="120" text-anchor="middle" fill="#7dd3fc" font-size="12" font-family="system-ui,sans-serif">signed claims</text>
+
+      <rect x="510" y="50" width="200" height="110" rx="14" fill="#231a36" stroke="#a78bfa"/>
+      <text x="610" y="95" text-anchor="middle" fill="#eef3f9" font-size="14" font-weight="700" font-family="system-ui,sans-serif">Contacts / curated</text>
+      <text x="610" y="120" text-anchor="middle" fill="#c4b5fd" font-size="12" font-family="system-ui,sans-serif">trust-relative</text>
+
+      <rect x="750" y="50" width="200" height="110" rx="14" fill="#2a2210" stroke="#fbbf24"/>
+      <text x="850" y="95" text-anchor="middle" fill="#eef3f9" font-size="14" font-weight="700" font-family="system-ui,sans-serif">ENS / IPFS / keys</text>
+      <text x="850" y="120" text-anchor="middle" fill="#fde68a" font-size="12" font-family="system-ui,sans-serif">external / explicit</text>
+
+      <text x="230" y="110" fill="#6d7f95" font-size="20" font-family="system-ui,sans-serif">→</text>
+      <text x="470" y="110" fill="#6d7f95" font-size="20" font-family="system-ui,sans-serif">→</text>
+      <text x="710" y="110" fill="#6d7f95" font-size="20" font-family="system-ui,sans-serif">→</text>
+    </svg>
+    <figcaption>Figure 8 — Resolution order is honest about Zooko’s triangle: memorable, secure, and global are never all free.</figcaption>
+  </figure>
+
+  <ul>
+    <li>Homograph warnings for lookalike characters</li>
+    <li>Conflicts shown, not auto-picked by relay order</li>
+    <li>High-water marks prevent silent version rollback</li>
+    <li>Offline petnames still work with no network</li>
+  </ul>
+</section>
+
+<!-- 9 -->
+<section id="identity">
+  <h2>10. Identity, login, and privacy</h2>
+  <div class="grid-3">
+    <div class="card">
+      <div class="icon-row"><div class="icon">🔑</div><h4 style="margin:0">BIP-39 identity</h4></div>
+      <p class="muted">12-word backup. Restore on a new device. No account server.</p>
+    </div>
+    <div class="card">
+      <div class="icon-row"><div class="icon">🪪</div><h4 style="margin:0">Per-app keys</h4></div>
+      <p class="muted">Each site gets a derived key so apps can’t correlate you by default.</p>
+    </div>
+    <div class="card">
+      <div class="icon-row"><div class="icon">✅</div><h4 style="margin:0">Login consent</h4></div>
+      <p class="muted">Scopes for name, avatar, email, website — revocable in Settings.</p>
+    </div>
+  </div>
+
+  <div class="wire">
+    <div class="wire-label"><span>Wireframe · Login consent</span><em>Page requested profile:name</em></div>
+    <div class="page" style="display:grid;place-items:center;min-height:240px">
+      <div class="fake-card" style="max-width:360px;width:100%">
+        <div class="t">Allow “Paste” to log you in?</div>
+        <div class="m" style="margin:10px 0">This app wants:</div>
+        <div class="m">☑ profile:name &nbsp; ☐ profile:avatar &nbsp; ☐ profile:email</div>
+        <div style="display:flex;gap:8px;margin-top:14px">
+          <div class="tool hi">Allow</div>
+          <div class="tool">Deny</div>
+        </div>
+      </div>
+    </div>
+    <div class="wire-caption">Figure 9 — Consent is explicit. Connected Apps lists every grant for later revoke.</div>
+  </div>
+
+  <p class="muted">
+    Swarm access for pages is also tiered: drive-derived topics are low-friction;
+    arbitrary topics require a consent sheet and rate limits.
+  </p>
+</section>
+
+<!-- 10 -->
+<section id="shield">
+  <h2>11. Content Shield &amp; plugins</h2>
+  <div class="grid-2">
+    <div class="card">
+      <h4>Content Shield</h4>
+      <ul>
+        <li>Brave-style ad/tracker blocking inside the browser-owned proxy</li>
+        <li>Blocked requests never reach peers or relays</li>
+        <li>P2P filter lists sync as Hyperdrives with sha256 verification</li>
+        <li>Works offline once lists are local</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4>Pear Plugins (including Deploy)</h4>
+      <ul>
+        <li>Extensions as Hyperdrives with declared capabilities</li>
+        <li>Install by key or from plugin catalogue</li>
+        <li>New capability requests auto-disable until re-approved</li>
+        <li>Hash-authorized injections only</li>
+        <li><strong>Pear Deploy</strong> is the publisher-facing core plugin on this model</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- 12 -->
+<section id="ai">
+  <h2>12. Local AI (Ask Browser)</h2>
+  <p>
+    Ask questions about the current page with an on-device model. The page never
+    gets access to the browser-owned AI channel. New tabs can host a quick-ask card
+    with zero page context.
+  </p>
+  <div class="wire">
+    <div class="wire-label"><span>Wireframe · Ask Browser</span><em>Side panel · private stream</em></div>
+    <div class="content split">
+      <div class="page">
+        <h5>Portable releases guide</h5>
+        <div class="sub">Article content…</div>
+        <div class="fake-card"><div class="m">…publishers sign meaning; relays provide availability…</div></div>
+      </div>
+      <aside class="side">
+        <h6>✦ Ask Browser</h6>
+        <div class="fake-card" style="margin-bottom:8px">
+          <div class="m">Summarize the five trust questions.</div>
+        </div>
+        <div class="fake-card">
+          <div class="m" style="color:#bbf7d0">1) Who signed 2) Exact bytes 3) Newest OK 4) Who hosts 5) Privacy route…</div>
+        </div>
+        <div class="m" style="margin-top:10px;color:var(--faint)">On-device · cancelled anytime · sources cited</div>
+      </aside>
+    </div>
+    <div class="wire-caption">Figure 10 — Local AI assists you; it does not become a cloud middleman for your browsing.</div>
+  </div>
+</section>
+
+<!-- 12 -->
+<section id="network">
+  <h2>13. How the network fits together</h2>
+  <figure class="diagram">
+    <svg viewBox="0 0 980 400" role="img" aria-label="Full stack around PearBrowser with Deploy plugin">
+      <rect x="40" y="20" width="900" height="55" rx="14" fill="#152033" stroke="#38bdf8"/>
+      <text x="490" y="52" text-anchor="middle" fill="#eef3f9" font-size="15" font-weight="700" font-family="system-ui,sans-serif">You · tabs · identity · Trust Center · Apps · Settings</text>
+
+      <rect x="40" y="95" width="430" height="70" rx="14" fill="#123028" stroke="#2dd4bf" stroke-width="2"/>
+      <text x="255" y="125" text-anchor="middle" fill="#eef3f9" font-size="14" font-weight="700" font-family="system-ui,sans-serif">Pear Deploy plugin</text>
+      <text x="255" y="148" text-anchor="middle" fill="#99f6e4" font-size="12" font-family="system-ui,sans-serif">publish UX · not sole authority</text>
+
+      <rect x="510" y="95" width="430" height="70" rx="14" fill="#123028" stroke="#2dd4bf"/>
+      <text x="725" y="125" text-anchor="middle" fill="#eef3f9" font-size="14" font-weight="700" font-family="system-ui,sans-serif">Bare backend · verify · resolve · sandbox</text>
+      <text x="725" y="148" text-anchor="middle" fill="#99f6e4" font-size="12" font-family="system-ui,sans-serif">independent of Deploy plugin DB</text>
+
+      <rect x="40" y="200" width="280" height="100" rx="14" fill="#231a36" stroke="#a78bfa"/>
+      <text x="180" y="240" text-anchor="middle" fill="#eef3f9" font-size="14" font-weight="700" font-family="system-ui,sans-serif">Native Pear</text>
+      <text x="180" y="265" text-anchor="middle" fill="#c4b5fd" font-size="12" font-family="system-ui,sans-serif">Hyperdrive · swarm · apps</text>
+
+      <rect x="350" y="200" width="280" height="100" rx="14" fill="#1a2433" stroke="#94a3b8"/>
+      <text x="490" y="240" text-anchor="middle" fill="#eef3f9" font-size="14" font-weight="700" font-family="system-ui,sans-serif">HiveRelay operators</text>
+      <text x="490" y="265" text-anchor="middle" fill="#9aabbf" font-size="12" font-family="system-ui,sans-serif">seed · outbox · names · IPFS bridge</text>
+
+      <rect x="660" y="200" width="280" height="100" rx="14" fill="#2a2210" stroke="#fbbf24"/>
+      <text x="800" y="240" text-anchor="middle" fill="#eef3f9" font-size="14" font-weight="700" font-family="system-ui,sans-serif">Public bridges</text>
+      <text x="800" y="265" text-anchor="middle" fill="#fde68a" font-size="12" font-family="system-ui,sans-serif">ENS · IPFS tooling · DNS</text>
+
+      <rect x="40" y="330" width="900" height="45" rx="12" fill="#0f1622" stroke="#3a4a62"/>
+      <text x="490" y="358" text-anchor="middle" fill="#9aabbf" font-size="13" font-family="system-ui,sans-serif">Portable pear.deploy records · CLI/CI · clean-controller import · browser verifies independently</text>
+    </svg>
+    <figcaption>Figure 11 — Deploy is a plugin inside PearBrowser. HiveRelay stays the availability switchboard. Public bridges optional. Contracts remain portable outside the UI.</figcaption>
+  </figure>
+
+  <div class="note">
+    <p>
+      <strong>Important:</strong> Kubo/Rainbow (IPFS node software) lives on operator machines
+      behind HiveRelay — not as a mandatory second P2P stack inside every browser profile.
+      Clients still verify CIDs and signatures locally.
+    </p>
+  </div>
+</section>
+
+<!-- 13 -->
+<section id="day">
+  <h2>14. A day in the browser</h2>
+  <div class="grid-2">
+    <div class="card">
+      <h4>Morning — reader</h4>
+      <ol>
+        <li>Open PearBrowser; peerit is already a front tab</li>
+        <li>Type a friend’s petname into the bar</li>
+        <li>Trust panel shows contact provenance + relay health</li>
+        <li>Bookmark a post; it lands in private local library</li>
+        <li>Ask Browser: “summarize this thread”</li>
+      </ol>
+    </div>
+    <div class="card">
+      <h4>Afternoon — publisher (Deploy plugin)</h4>
+      <ol>
+        <li>Open the Pear Deploy plugin console</li>
+        <li>Isolated preview for a PR branch</li>
+        <li>Stage production; review artifact digests &amp; costs</li>
+        <li>Collect project signatures offline</li>
+        <li>Promote native channel; pin IPFS mirror; prepare <code>.eth</code> update in wallet</li>
+      </ol>
+    </div>
+  </div>
+
+  <div class="wire">
+    <div class="wire-label"><span>Wireframe · Home / new tab</span><em>Sites grid + local AI</em></div>
+    <div class="page">
+      <div class="grid-2">
+        <div>
+          <h5>Pinned sites</h5>
+          <div class="app-grid" style="margin-top:10px">
+            <div class="app-tile"><div class="glyph" style="background:#2dd4bf">P</div><div class="name">peerit</div><div class="meta">pinned</div></div>
+            <div class="app-tile"><div class="glyph" style="background:#38bdf8">D</div><div class="name">docs</div><div class="meta">petname</div></div>
+            <div class="app-tile"><div class="glyph" style="background:#a78bfa">W</div><div class="name">workspace</div><div class="meta">drive</div></div>
+          </div>
+        </div>
+        <div class="fake-card">
+          <div class="t">✦ Quick ask</div>
+          <div class="m" style="margin-top:8px">No page context · on-device model</div>
+          <div class="urlbar" style="margin-top:12px">
+            <div class="url-text dim">Ask anything…</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="wire-caption">Figure 12 — New-tab home combines discovery and private AI without leaving local-first defaults.</div>
+  </div>
+</section>
+
+<!-- 14 -->
+<section id="legend">
+  <h2>15. What’s today vs full vision</h2>
+  <table>
+    <thead>
+      <tr><th>Area</th><th>Largely available now</th><th>Full capability (roadmap)</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Browse</td>
+        <td>Tabs, hyper://, site info, sandbox, Ask, Shield</td>
+        <td>ENS, ipfs://, richer conflict/freshness UX, mirror failover</td>
+      </tr>
+      <tr>
+        <td>Apps</td>
+        <td>Multi-source catalogue, My Catalog, pear:// windows</td>
+        <td>Deeper trust chips, release-proof badges</td>
+      </tr>
+      <tr>
+        <td>Publish / Deploy</td>
+        <td>Block editor, seed, durability wait, unseed; Pear Plugins substrate</td>
+        <td><strong>Pear Deploy as Pear Plugin</strong> · portable records · dual-publish · non-custodial ENS · CLI/CI parity</td>
+      </tr>
+      <tr>
+        <td>Names</td>
+        <td>Petnames, registry, curated, provenance</td>
+        <td>Relay name availability, high-water/recovery polish, ENS production</td>
+      </tr>
+      <tr>
+        <td>Trust</td>
+        <td>Site info + settings fragments</td>
+        <td>Unified Trust Center answering the five questions</td>
+      </tr>
+      <tr>
+        <td>Network</td>
+        <td>HiveRelay seed/capabilities, hybrid fetch</td>
+        <td>Multi-operator SLOs, IPFS bridge, public pin receipts</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="note">
+    <p>
+      <strong>How to read this document:</strong> wireframes are teaching pictures, not product commitments
+      or final visual design. Version numbers and gates live in the engineering roadmaps.
+      PearBrowser remains an independent verifier — not a wallet custodian and not the source of application truth.
+      The Deploy plugin is orchestration UX; portable proofs must still verify without trusting the plugin’s local database.
+    </p>
+  </div>
+
+  <h3>Where to go next</h3>
+  <ul>
+    <li>Current system map: <code>docs/ARCHITECTURE_AND_CAPABILITIES.md</code></li>
+    <li>Feature roadmap: <code>docs/P2P-BROWSER-FEATURE-ROADMAP.md</code></li>
+    <li>Ecosystem trains: <code>00-core/PEAR-NAMING-IPFS-RELEASE-ROADMAP-2026-07-15.md</code></li>
+    <li>HiveRelay substrate guide: <code>00-core/hiverelay/docs/HIVERELAY-NAMING-IPFS-DEPLOY-ROADMAP-GUIDE.html</code></li>
+  </ul>
+</section>
+
+<footer>
+  <p>
+    PearBrowser Full Capability Explainer — plain-language product tour with example wireframes.
+    Combines shipped desktop capabilities (≈0.6.x) with the post-roadmap vision for naming, deploy, public mirrors, and trust.
+  </p>
+  <p>
+    File:
+    <code>01-browser/pearbrowser-desktop/docs/PEARBROWSER-FULL-CAPABILITY-EXPLAINER.html</code>
+  </p>
+</footer>
+
+</div>
+</body>
+</html>

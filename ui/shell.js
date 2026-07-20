@@ -1510,12 +1510,43 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
   useEffect(() => {
     const onFrameMessage = (event) => {
       const data = event.data
-      if (!data || data.type !== 'pearbrowser:navigate') return
-      const url = typeof data.url === 'string' ? data.url.trim() : ''
-      if (!/^hyper:\/\//i.test(url)) return
-
+      if (!data) return
       const sourceTab = tabs.find((t) => iframeRefs.current[t.id]?.contentWindow === event.source)
       if (!sourceTab) return
+
+      if (data.type === 'pearbrowser:clearnet-direct-fallback') {
+        if (sourceTab.kind !== 'clearnet' || sourceTab.clearnetMode !== 'proxy') return
+        let directUrl
+        try {
+          const current = new URL(sourceTab.url || sourceTab.displayUrl)
+          const next = new URL(typeof data.url === 'string' ? data.url.trim() : '')
+          const sameHostFamily = current.hostname === next.hostname ||
+            current.hostname.endsWith(`.${next.hostname}`) ||
+            next.hostname.endsWith(`.${current.hostname}`)
+          if (!/^https?:$/.test(next.protocol) || !sameHostFamily) return
+          directUrl = next.toString()
+        } catch {
+          return
+        }
+        setTabs((prev) => prev.map((tab) => tab.id === sourceTab.id
+          ? {
+              ...tab,
+              src: directUrl,
+              url: directUrl,
+              displayUrl: directUrl,
+              contextToken: null,
+              clearnetMode: 'direct',
+              shieldActive: false,
+              status: 'Publisher blocked the privacy proxy — loaded direct; Content Shield is unavailable for this tab.'
+            }
+          : tab))
+        if (sourceTab.id === activeIdRef.current) setEditingUrl(directUrl)
+        return
+      }
+
+      if (data.type !== 'pearbrowser:navigate') return
+      const url = typeof data.url === 'string' ? data.url.trim() : ''
+      if (!/^hyper:\/\//i.test(url)) return
 
       if (data.openInNewTab) {
         const t = makeBrowserTab(url)
