@@ -1,7 +1,7 @@
 {
   "name": "PearBrowser Network",
   "description": "Curated entry point for the Pear ecosystem — the browser itself plus its companion sites.",
-  "version": 9,
+  "version": 10,
   "publishedAt": "2026-07-16T00:00:00Z",
   "publisher": "bigdestiny2",
   "apps": [
@@ -17,7 +17,8 @@
         "p2p"
       ],
       "publishedAt": "2026-04-28T00:00:00Z",
-      "pearLink": "pear://tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty",
+      "legacyPearLink": "pear://tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty",
+      "nativeDelivery": { "status": "migration-required" },
       "driveKey": "03f0060a35451cfb6b68ad1dda1b8474ebb43fd9100071ccf7d67679a83ebb4f",
       "homepage": "hyper://03f0060a35451cfb6b68ad1dda1b8474ebb43fd9100071ccf7d67679a83ebb4f/",
       "source": "https://github.com/bigdestiny2/pearbrowser-desktop",
@@ -28,7 +29,7 @@
         "linux"
       ],
       "verification": "relay-listed",
-      "link": "pear://tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty"
+      "link": "hyper://03f0060a35451cfb6b68ad1dda1b8474ebb43fd9100071ccf7d67679a83ebb4f/"
     },
     {
       "id": "peerit",
@@ -114,8 +115,9 @@
         "linux"
       ],
       "verification": "relay-listed",
-      "link": "pear://7octu5dimjye8rn68raehwuetk5mttzt4zxh6yjw1eqktn49bq7o",
-      "pearLink": "pear://7octu5dimjye8rn68raehwuetk5mttzt4zxh6yjw1eqktn49bq7o",
+      "link": "hyper://0724aabf2ad6394983f91c6b24ebd417cb3d25addcf29c98eb246c512dc77f90/",
+      "legacyPearLink": "pear://7octu5dimjye8rn68raehwuetk5mttzt4zxh6yjw1eqktn49bq7o",
+      "nativeDelivery": { "status": "migration-required" },
       "iconData": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMwYTBkMTIiLz48cGF0aCBkPSJNMzIgMTJsMTYgNnYxMWMwIDExLTcgMTgtMTYgMjMtOS01LTE2LTEyLTE2LTIzVjE4eiIgZmlsbD0iIzU4YTZmZiIvPjxnIHN0cm9rZT0iIzBhMGQxMiIgc3Ryb2tlLXdpZHRoPSIyLjYiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCI+PHBhdGggZD0iTTI2IDI4aDEyTTI2IDM0aDEyTTI2IDQwaDgiLz48L2c+PC9zdmc+"
     },
     {
@@ -131,8 +133,9 @@
       ],
       "publishedAt": "2026-06-21T00:00:00Z",
       "type": "standalone",
-      "link": "pear://qnax5k8ojtod51ci9qwkrawdof1hx5w3a7gqbueoqnzzq9dw5hfo",
-      "pearLink": "pear://qnax5k8ojtod51ci9qwkrawdof1hx5w3a7gqbueoqnzzq9dw5hfo",
+      "link": "hyper://25a06bb3dddec8138e9eda606cc4a11e9ebbe47815fd5d22064b30cff752bb5b/",
+      "legacyPearLink": "pear://qnax5k8ojtod51ci9qwkrawdof1hx5w3a7gqbueoqnzzq9dw5hfo",
+      "nativeDelivery": { "status": "migration-required" },
       "homepage": "hyper://25a06bb3dddec8138e9eda606cc4a11e9ebbe47815fd5d22064b30cff752bb5b/",
       "url": "hyper://25a06bb3dddec8138e9eda606cc4a11e9ebbe47815fd5d22064b30cff752bb5b/",
       "source": "https://github.com/bigdestiny2/pearpaste",
