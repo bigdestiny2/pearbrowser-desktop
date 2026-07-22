@@ -1,5 +1,8 @@
 # PearBrowser Desktop Test Command Matrix
 
+> Historical v2 command matrix. Legacy remote-app commands are evidence of
+> past coverage only; current validation must not execute remote app code.
+
 Generated: 2026-06-23
 Loop candidate: `pearbrowser-desktop-test-matrix`
 Autonomy level: Level 1 docs-tests

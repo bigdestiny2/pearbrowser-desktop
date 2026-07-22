@@ -1,5 +1,8 @@
 # PearBrowser Desktop v0.7.0
 
+> Historical release notes. References to legacy remote Pear artifacts are not
+> installation or launch instructions for the current product.
+
 PearBrowser `v0.7.0` makes browser protection and extensions peer-to-peer.
 Content Shield can now subscribe to checksum-verified filter-list Hyperdrives,
 hot-swap updates, and keep blocking offline. Pear Plugins install from ordinary

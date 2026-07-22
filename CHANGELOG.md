@@ -1,5 +1,9 @@
 # Changelog
 
+> Historical release record. Legacy remote Pear references below are retained
+> only to explain past releases; they are not current installation, launch, or
+> recovery instructions. Current native delivery requires a verified package.
+
 ## v0.7.1 — 2026-07-16
 
 Corrective desktop transport release. The backend RPC handlers were healthy,
