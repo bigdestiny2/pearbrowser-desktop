@@ -1272,93 +1272,21 @@ rpc.handle(C.CMD_RESET_APP, async () => {
   return report
 })
 
-rpc.handle(C.CMD_LAUNCH_PEAR_LINK, async (data) => {
-  const link = String(data?.link || '').trim()
-  if (!link) throw new Error('legacy app link required')
-  if (!/^pear:\/\/.+/.test(link) && !/^file:\/\/.+/.test(link)) {
-    throw new Error('Only legacy pear:// and file:// app links can be assessed')
+rpc.handle(C.CMD_LEGACY_APP_MIGRATION, async (data) => {
+  const legacyMigrationId = String(data?.legacyMigrationId || '').trim().toLowerCase()
+  if (!/^[13-9a-km-uw-z]{52}$/.test(legacyMigrationId)) {
+    throw new Error('legacy migration id must be a 52-character z-base-32 identifier')
   }
   return {
-    started: false,
     action: 'legacy-migration-required',
-    link,
+    legacyMigrationId,
     message: 'This legacy Pear app cannot be launched by PearBrowser v3. Install a verified native v3 package when its publisher provides one.'
   }
 })
 
-// Retained only as a compatibility seam for callers compiled against older
-// builds. A remote link is not a v3 worker entrypoint and must never execute.
-async function launchPearLinkWithProgress (link, keyHex) {
-  const emit = (p) => { try { rpc.event(C.EVT_LAUNCH_PROGRESS, { key: keyHex, link, ...p }) } catch {} }
-  const spawn = () => {
-    throw new Error('legacy app migration required; remote links are not v3 worker entrypoints')
-  }
-
-  // No drive to pre-fetch (file:// or unknown key) → straight to launch.
-  if (!link.startsWith('pear://') || !keyHex) {
-    emit({ phase: 'launching', percent: 100, downloaded: 0, total: 0, peers: 0 })
-    spawn()
-    emit({ phase: 'done', percent: 100 })
-    return
-  }
-
-  emit({ phase: 'connecting', downloaded: 0, total: 0, percent: 0, peers: 0 })
-
-  let drive
-  try {
-    drive = await getDriveForProxy(keyHex)
-    registerHiveRelayDrive(keyHex, drive)
-    await updateDriveBestEffort(drive)
-  } catch {
-    // Do not fall back to a remote launcher; surface the migration boundary.
-    emit({ phase: 'launching', percent: 100 })
-    spawn()
-    emit({ phase: 'done', percent: 100 })
-    return
-  }
-
-  let blobs = null
-  try { blobs = await drive.getBlobs() } catch {}
-  let downloaded = 0
-  const onDl = (_i, byteLength) => { downloaded += (byteLength || 0) }
-  try { drive.core && drive.core.on('download', onDl) } catch {}
-  try { blobs && blobs.core && blobs.core.on('download', onDl) } catch {}
-  const totalNow = () => (drive.core && drive.core.byteLength || 0) + (blobs && blobs.core && blobs.core.byteLength || 0)
-  const peersNow = () => { try { return getDrivePeerSnapshot(drive).peerCount } catch { return 0 } }
-
-  let dl = null
-  try { dl = drive.download('/') } catch {}
-
-  let finished = false
-  const timer = setInterval(() => {
-    if (finished) return
-    const total = totalNow()
-    const peers = peersNow()
-    const percent = total > 0 ? Math.min(99, Math.round((downloaded / total) * 100)) : 0
-    emit({ phase: peers > 0 ? 'downloading' : 'connecting', downloaded, total, percent, peers })
-  }, 300)
-
-  try {
-    const waitDl = (dl && typeof dl.done === 'function') ? dl.done()
-      : (dl && typeof dl.then === 'function') ? dl
-      : Promise.resolve()
-    await Promise.race([waitDl, new Promise((r) => setTimeout(r, 10 * 60 * 1000))])
-  } catch {}
-
-  finished = true
-  clearInterval(timer)
-  try { drive.core && drive.core.removeListener('download', onDl) } catch {}
-  try { blobs && blobs.core && blobs.core.removeListener('download', onDl) } catch {}
-
-  const total = totalNow()
-  emit({ phase: 'launching', downloaded: total, total, percent: 100, peers: peersNow() })
-  spawn()
-  emit({ phase: 'done', downloaded: total, total, percent: 100, peers: peersNow() })
-}
-
-// Run a pear-request app HEADLESS, streamed into a browser tab (the in-tab
-// sibling of CMD_LAUNCH_PEAR_LINK's window spawn). Returns the wrapper URL the
-// UI opens in a Browse tab. 'demo' runs the in-process demo router.
+// Runs only the in-process demo router headlessly in a browser tab. Remote
+// application workers require a signed native v3 package and are never fetched
+// or executed from a browser catalog.
 rpc.handle(C.CMD_RUN_APP_IN_TAB, async (data) => {
   const link = String(data?.link || 'demo').trim()
   if (!tabRuntime) throw new Error('tab runtime is not available')

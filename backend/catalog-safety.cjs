@@ -26,7 +26,9 @@ function catalogAppsFromEnvelope (catalog) {
 
 const HEX64_RE = /^[0-9a-f]{64}$/i
 const Z32_RE = /^[13-9a-km-uw-z]{52}$/i
-const APP_LINK_RE = /^(?:hyper|pear|file):\/\/.+/i
+// Catalog links are browsable content only. Native delivery must be represented
+// separately as a verified package or a non-executable migration record.
+const APP_LINK_RE = /^hyper:\/\/.+/i
 const VERIFICATION_RANK = { 'author-signed': 3, 'relay-listed': 2, unverified: 1 }
 const NATIVE_DELIVERY_STATUSES = new Set(['migration-required', 'available'])
 

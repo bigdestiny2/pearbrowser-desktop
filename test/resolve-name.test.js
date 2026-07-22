@@ -11,15 +11,16 @@ const KEY = '0c35d12fd9b1115dd2d1fb1cd1751817c9173d3196ac7c62ae37d023340dcb75'
 test('bootstrap floor: a bare word resolves on day one (curated)', () => {
   const r = resolveName('keet', { petnames: {} })
   assert.equal(r.provenance, 'curated')
-  assert.match(r.link, /^pear:\/\//)
+  assert.equal(r.link, null)
+  assert.match(r.legacyMigrationId, /^[13-9a-km-uw-z]{52}$/)
   assert.equal(r.label, 'Keet')
 })
 
 test('curated lookup is normalized + supports alias names', () => {
   assert.equal(resolveName('KEET', { petnames: {} }).provenance, 'curated')  // case-folded
   assert.equal(lookupAlias('pass').label, 'PearPass')                        // alias → PearPass
-  assert.equal(lookupAlias('peercord').link, 'pear://wmir47w7mai3b1skj66mx7fzso6k6o91kipaney7gtt69npimouy')
-  // peerit is a hyper:// site (not a pear:// app) — the alias layer carries it too
+  assert.match(lookupAlias('peercord').legacyMigrationId, /^[13-9a-km-uw-z]{52}$/)
+  // peerit is a browsable hyper:// site — the alias layer carries it too
   assert.equal(lookupAlias('peerit').link, 'hyper://ec6e2d6d9d22b9d6b40e11a9ca3042be3197e4bdca9e9a7f079be6ee830761b4/')
 })
 
@@ -48,7 +49,7 @@ test('miss → null; aliases:false disables the floor', () => {
 // --- Tier 2: the N5 name registry --------------------------------------------
 
 const TKEY = 'aa'.repeat(32)
-const TLINK = 'pear://link-only-app'
+const TLINK = `hyper://${TKEY}/link-only-app`
 const HYPER_TLINK = `hyper://${TKEY}/app`
 
 test('registry tier resolves a claimed name (target → key, provenance registry)', () => {
@@ -61,11 +62,11 @@ test('registry tier resolves a claimed name (target → key, provenance registry
   assert.equal(r.label, 'alice')
 })
 
-test('registry tier resolves a link-only app target as link', () => {
+test('registry tier resolves a link-only Hyper target as link', () => {
   const registry = { keet: { target: TLINK, owner: 'bb'.repeat(32), version: 1, label: 'Keet via registry' } }
   const r = resolveName('keet', { petnames: {}, registry })
   assert.equal(r.provenance, 'registry')
-  assert.equal(r.key, null)
+  assert.equal(r.key, TKEY)
   assert.equal(r.link, TLINK)
   assert.equal(r.target, TLINK)
   assert.equal(r.label, 'Keet via registry')
