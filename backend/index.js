@@ -1951,7 +1951,7 @@ rpc.handle(C.CMD_CONTACTS_MY_INVITE, async () => {
   const bindingKey = b4a.toString(id.getAppKeypair('lighthouse-binding').publicKey, 'hex')
   // sign name AND binding key, so neither can be swapped in transit (add() binds both)
   const sig = id.sign(`pear.contact:${rootHex}:${displayName}:${bindingKey}`).signature
-  const url = `pear://contact?pk=${rootHex}&name=${encodeURIComponent(displayName)}&sig=${sig}&bk=${bindingKey}`
+  const url = `p2p-contact://invite?pk=${rootHex}&name=${encodeURIComponent(displayName)}&sig=${sig}&bk=${bindingKey}`
   return { url, pubkey: rootHex, displayName, bindingKey }
 })
 

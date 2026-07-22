@@ -3722,7 +3722,7 @@ function TrustedPeers ({ rpc, C }) {
         <div className="tp-field">
           <label>Add a peer</label>
           <div className="tp-row">
-            <input className="profile-input" placeholder="Paste a pear://contact invite…" value=${addUrl}
+            <input className="profile-input" placeholder="Paste a p2p-contact://invite…" value=${addUrl}
                    onInput=${(e) => setAddUrl(e.target.value)} onKeyDown=${(e) => e.key === 'Enter' && add()} />
             <button className="btn small primary" onClick=${add} disabled=${!addUrl.trim()}>Add</button>
           </div>
