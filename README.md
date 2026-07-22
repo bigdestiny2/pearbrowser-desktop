@@ -265,8 +265,8 @@ ID/notary and Windows signing credentials are configured.
 | Repo | What |
 |---|---|
 | [`bigdestiny2/hyper-fetch`](https://github.com/bigdestiny2/hyper-fetch) | ~5 KB JS library — read `hyper://` drives from any browser via the HiveRelay HTTP gateway. Pair with PearBrowser to embed hyper:// content in regular web pages. |
-| [`bigdestiny2/hiveworm`](https://github.com/bigdestiny2/hiveworm) | Featured multiplayer life-sim. Uses `window.pear.swarm.v1` for direct peer gossip. Live at `pear://d1xbkcpc…`. |
-| [`mastercodeon/Peercord`](https://git.churchofmalware.org/mastercodeon/Peercord) | Featured decentralized Discord-style chat. Current Pear release: `pear://wmir47w7…`, window-class desktop app. |
+| [`bigdestiny2/hiveworm`](https://github.com/bigdestiny2/hiveworm) | Featured multiplayer life-sim. Uses `window.pear.swarm.v1` for direct peer gossip; its legacy native release needs a verified v3 package. |
+| [`mastercodeon/Peercord`](https://git.churchofmalware.org/mastercodeon/Peercord) | Featured decentralized Discord-style chat. Its legacy desktop release needs a publisher-provided verified v3 package. |
 | [`bigdestiny2/P2P-Hiverelay`](https://github.com/bigdestiny2/P2P-Hiverelay) | The always-on relay backbone keeping the whole network alive; this desktop checkout consumes the compatible `0.20.2` npm packages and verifies live relay compatibility through capability docs. |
 | [`bigdestiny2/PearBrowser`](https://github.com/bigdestiny2/PearBrowser) | Mobile-focused sibling — iOS / Android port. Bare-kit-based. |
 

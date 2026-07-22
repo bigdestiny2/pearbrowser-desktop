@@ -304,7 +304,7 @@ async function main () {
     console.log('   relay:     ' + hiveRelayProof.mode + ' via ' + hiveRelayProof.relay.slice(0, 12) + '…')
   }
   console.log()
-  console.log('   `pear run pear://...` from anywhere will find this drive.')
+  console.log('   A Hyperdrive reader can retrieve this content from available peers.')
 
   await cleanup(0)
 }
