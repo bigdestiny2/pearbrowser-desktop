@@ -48,6 +48,7 @@ The key above is **content-addressed and stable**: when we ship a new release, t
 - Per-tab back/forward history; tabs persist across launches and survive panel switches
 - URL bar autocomplete from your bookmarks + history Hyperbees (↑↓ to navigate, Enter to pick)
 - "About this site" panel (ⓘ button): drive key in hex + z-base-32 with copy buttons, scheme + path, one-click bookmark toggle
+- **Private-search home:** the active first tab on launch opens a browser-owned search page powered by DuckDuckGo. PearBrowser sends no search analytics and excludes submitted queries from the optional persistent visit log; the on-page disclosure makes clear that DuckDuckGo still receives the query and network address, and that private search is not anonymity.
 - **Ask Browser:** click **✦ Ask** to question a local QVAC/Qwen model about the active page, with private on-device streaming, cancellation, short follow-ups, source provenance, and no page access to the browser-owned AI channel
 - **Local AI widget:** every blank new tab (`⌘T`) hosts a QVAC quick-ask card — zero page context, streamed on-device answers, model picker, and load-on-first-use progress ([docs](./docs/ASK_BROWSER.md))
 - **Content Shield:** Brave-style ad/tracker blocking enforced inside the browser-owned proxy — blocked requests never reach a peer, relay, or the network; cosmetic element hiding + scriptlets ride the CSP-safe HTML injection path; per-drive allowlist/strict modes, toggle + live counters in Settings ([plan](./docs/BROWSER_PARITY_PLAN.md))
@@ -63,7 +64,7 @@ The key above is **content-addressed and stable**: when we ship a new release, t
 - **My Catalog:** create a writable personal catalog, add apps from loaded catalogs or installed apps, rename it, edit saved metadata (name, description, version, author, categories), and share the catalog key; copies opened without the writer key stay read-only
 - Safe catalogue normalization accepts `apps[]`, `items[]`, or `entries[]`, preserves safe link-only rows (`hyper://`, `pear://`, `file://`), rejects malformed targets, and strips prototype-pollution keys before rendering
 - Default catalog auto-loads on first Apps-tab visit (the "PearBrowser Network" Hyperbee `hyperbee://f5fb7500bccd…` — PearBrowser, peerit, HiveRelay, P2P Builders, Pear Dealroom, Paste, PearPoker, Keet, PearPass, Peercord, anonGPT, Pear POS, Pear Tickets, HiveWorm), generated from a single source manifest and mirrored into the offline seed
-- **peerit — "the front page of the P2P internet"** (a peer-to-peer Reddit, `hyper://ec6e2d6d…/`): a browsable `hypersite` whose communities, posts, threaded comments and votes live in a shared Autobase+Hyperbee log. It opens as the **active front tab on every fresh launch** (alongside the landing page) and is **pinned to the top** of the Sites discovery grid. Source: `02-apps/peerit`.
+- **peerit — "the front page of the P2P internet"** (a peer-to-peer Reddit, `hyper://ec6e2d6d…/`): a browsable `hypersite` whose communities, posts, threaded comments and votes live in a shared Autobase+Hyperbee log. It opens as a startup tab beside the private-search home and landing page, and is **pinned to the top** of the Sites discovery grid. Source: `02-apps/peerit`.
 - Featured apps: **Keet** · **PearPass** · **anonGPT** · **Paste** · **[Peercord](https://git.churchofmalware.org/mastercodeon/Peercord)**. Peercord's current Pear release is a full desktop app (`pear.json` `type:"desktop"`), so PearBrowser launches it via the standalone `pear://` window path; it should only move to headless "Run in tab" once Peercord publishes a pear-request worker entry.
 
 ### Publish (P2P Sites)
@@ -79,9 +80,10 @@ The key above is **content-addressed and stable**: when we ship a new release, t
 - Cross-launch persistence; powers the URL-bar autocomplete
 
 ### Search
+- Private web search is available from the browser-owned home page through DuckDuckGo over HTTPS with Content Shield enabled; PearBrowser does not send search analytics or add these queries to its optional persistent visit log.
 - Local-first personal index returns first-paint results immediately from local browser/catalogue data
 - Optional trusted-peer federation enriches results in the background through `QueryPlanner`, digest checks, provenance, and stale-query suppression
-- Query length and result limits are bounded; no query leaves the device unless the user asks for federated search
+- Local-index query length and result limits are bounded; local queries do not leave the device unless the user asks for federated search. Web-search submissions do leave the device for DuckDuckGo, as disclosed on the home page.
 
 ### Naming
 - `pearname://` and typed names resolve through local petnames, owned registry records, trusted-contact federation, and curated defaults

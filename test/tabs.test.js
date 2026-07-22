@@ -100,6 +100,20 @@ test('restoreStartupTabs keeps PearBrowser landing first even when Dealroom was 
   assert.equal(restored.activeId, restored.tabs[0].id)
 })
 
+test('restoreStartupTabs keeps a named blank browser home at the front', () => {
+  const restored = restoreStartupTabs([
+    { url: DEALROOM, title: 'Pear Dealroom', active: true }
+  ], [
+    { url: '', title: 'PearBrowser Home' },
+    { url: A, title: 'PearBrowser' }
+  ])
+  assert.equal(restored.tabs[0].url, '')
+  assert.equal(restored.tabs[0].title, 'PearBrowser Home')
+  assert.equal(restored.tabs[1].url, A)
+  assert.equal(restored.tabs[2].url, DEALROOM)
+  assert.equal(restored.activeId, restored.tabs[0].id)
+})
+
 test('normalizeDefaultTab accepts named startup entries', () => {
   assert.deepEqual(normalizeDefaultTab({ url: A, title: 'PearBrowser' }), { url: A, title: 'PearBrowser' })
   assert.deepEqual(normalizeDefaultTab(B), { url: B, title: '' })

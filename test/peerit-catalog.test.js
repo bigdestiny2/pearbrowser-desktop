@@ -33,13 +33,15 @@ test('peerit catalogue source declares the site + drive key', () => {
   assert.equal(app.url, PEERIT_URL)
 })
 
-test('shell.js opens PearBrowser landing first with peerit beside it', () => {
+test('shell.js opens private-search home first with PearBrowser and peerit beside it', () => {
   const shell = readFileSync(new URL('../ui/shell.js', import.meta.url), 'utf8')
   // The drive key constant exists and is used to build the front-tab URL.
   assert.match(shell, new RegExp(`PEERIT_DRIVE_KEY = '${PEERIT_KEY}'`))
   assert.match(shell, /const PEERIT_URL = 'hyper:\/\/' \+ PEERIT_DRIVE_KEY \+ '\/'/)
-  // Fresh launch opens PearBrowser first (tabs[0] == the active tab), then p2pbuilders + peerit.
+  // Fresh launch opens the browser-owned home first, then the landing,
+  // p2pbuilders, and peerit.
   assert.match(shell, /const STARTUP_TABS = \[/)
+  assert.match(shell, /\{ url: '', title: 'PearBrowser Home' \}/)
   assert.match(shell, /\{ url: DEFAULT_URL, title: 'PearBrowser' \}/)
   assert.match(shell, /\{ url: P2PBUILDERS_URL, title: 'P2P Builders' \}/)
   assert.match(shell, /\{ url: PEERIT_URL, title: 'peerit' \}/)

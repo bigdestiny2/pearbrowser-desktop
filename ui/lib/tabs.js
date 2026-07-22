@@ -126,7 +126,9 @@ export function restoreStartupTabs (savedTabs, defaultUrls = []) {
 
   for (const entry of defaultUrls) {
     const { url, title } = normalizeDefaultTab(entry)
-    if (url) add(makeTab(url, title ? { title } : {}))
+    // A named blank entry is the browser-owned start page. It has no URL to
+    // fetch, but still belongs at the front of every restored session.
+    if (url || title) add(makeTab(url, title ? { title } : {}))
   }
 
   const restoredPairs = Array.isArray(savedTabs)

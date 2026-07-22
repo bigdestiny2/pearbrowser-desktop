@@ -24,6 +24,7 @@ import {
   describeAiStatus,
   buildQuickAskRequest
 } from './lib/qvac-widget.js'
+import { PRIVATE_SEARCH_PROVIDER, buildPrivateSearchUrl } from './lib/private-search.js'
 
 function copyText (text) {
   try {
@@ -179,6 +180,7 @@ const PEERIT_URL = 'hyper://' + PEERIT_DRIVE_KEY + '/'
 const P2PBUILDERS_DRIVE_KEY = 'ac1977a75cc84b46af0af8bb559cd4ebbe10507eb0f51d863e289d09635f6d74'
 const P2PBUILDERS_URL = 'hyper://' + P2PBUILDERS_DRIVE_KEY + '/'
 const STARTUP_TABS = [
+  { url: '', title: 'PearBrowser Home' },
   { url: DEFAULT_URL, title: 'PearBrowser' },
   { url: P2PBUILDERS_URL, title: 'P2P Builders' },
   { url: PEERIT_URL, title: 'peerit' }
@@ -1152,6 +1154,7 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
   const activeIdRef = useRef(activeId)
   const autoLoadedRef = useRef(new Set())
   const [editingUrl, setEditingUrl] = useState('')
+  const [privateSearchQuery, setPrivateSearchQuery] = useState('')
   // About-this-site modal — true when user clicked the (i) button.
   const [aboutOpen, setAboutOpen] = useState(false)
   const [askOpen, setAskOpen] = useState(false)
@@ -1432,6 +1435,16 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
     setTabs((prev) => [...prev, t])
     setActiveId(t.id)
     setEditingUrl(url || '')
+  }
+
+  const submitPrivateSearch = (event) => {
+    event?.preventDefault?.()
+    const target = buildPrivateSearchUrl(privateSearchQuery)
+    if (!target) return
+    setPrivateSearchQuery('')
+    // Search queries are never written to the optional persistent visit log.
+    // The active tab still shows its current results URL, like every browser.
+    go(target, activeId, { rememberVisit: false })
   }
 
   const closeTab = (id) => {
@@ -1837,12 +1850,37 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
                         </div>
                       </div>
                     </div>`
-                  // A truly blank tab (⌘T) gets the welcome + quick actions.
+                  // A truly blank tab (including the first startup tab) is the
+                  // browser-owned home surface: private search + local tools.
                     : html`<div key=${t.id} className="browse-welcome">
-                      <div className="browse-welcome-inner">
+                      <div className="browse-welcome-inner start-page">
                         <div className="browse-welcome-logo">🍐</div>
-                        <h2>The peer-to-peer web starts here</h2>
-                        <p>Paste any <code>hyper://</code> URL above — hex or z-base-32 — and PearBrowser fetches it directly from its peers. No DNS, no servers, no CDN.</p>
+                        <h2>Search without a profile</h2>
+                        <p className="start-page-lede">PearBrowser sends no search analytics and never adds a query to its optional persistent visit history.</p>
+                        <section className="private-search-card" aria-labelledby="private-search-title">
+                          <div className="private-search-heading">
+                            <span id="private-search-title">Private web search</span>
+                            <span className="private-search-provider">${PRIVATE_SEARCH_PROVIDER.name}</span>
+                          </div>
+                          <form className="private-search-form" data-testid="private-search-form" onSubmit=${submitPrivateSearch}>
+                            <input
+                              type="search"
+                              value=${privateSearchQuery}
+                              data-testid="private-search-input"
+                              aria-label="Search the web privately"
+                              placeholder="Search the web"
+                              autoComplete="off"
+                              autoFocus
+                              spellCheck="false"
+                              onInput=${event => setPrivateSearchQuery(event.target.value)}
+                            />
+                            <button type="submit" className="private-search-submit" data-testid="private-search-submit" disabled=${!privateSearchQuery.trim()}>Search</button>
+                          </form>
+                          <div className="private-search-disclosure">
+                            Content Shield stays on. ${PRIVATE_SEARCH_PROVIDER.name} receives your query and network address to return results; its published policy says it does not save or share search history. Private search is not anonymity.
+                          </div>
+                        </section>
+                        <div className="start-page-p2p">Or paste a <code>hyper://</code> address above to fetch a site directly from its peers — no DNS, server, or CDN.</div>
                         <div className="browse-welcome-actions">
                           <button className="btn primary" onClick=${() => go(DEFAULT_URL)}>Open the PearBrowser site</button>
                           <button className="btn subtle" onClick=${() => { inputRef.current?.focus(); inputRef.current?.select?.() }}>Focus the URL bar</button>
@@ -6482,10 +6520,10 @@ export function App ({ rpc, C, storagePath }) {
   //   1. Switching to Apps/Settings/etc and back doesn't destroy them
   //      (Browse used to remount with a fresh tabs[] every time)
   //   2. We can persist them to user-data and restore across launches
-  // Default initial state on launch is the PearBrowser landing page first,
-  // then p2pbuilders, then peerit. Restored session tabs stay behind those
-  // defaults so an app homepage such as Dealroom cannot hijack the release
-  // landing slot.
+  // Default initial state on launch is the browser-owned private-search home
+  // first, then the PearBrowser landing, p2pbuilders, and peerit. Restored
+  // session tabs stay behind those defaults so an app homepage cannot hijack
+  // the home slot.
   const [tabs, setTabs] = useState(() => STARTUP_TABS.map((tab) => makeBrowserTab(tab.url, { title: tab.title })))
   const [browseActiveId, setBrowseActiveId] = useState(() => 'placeholder')
   const [closedTabs, setClosedTabs] = useState(() => [])
