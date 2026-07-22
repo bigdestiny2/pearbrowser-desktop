@@ -51,7 +51,7 @@ const DEFAULT_CATALOGS = [
 ]
 const REQUIRED_FEATURED = ['Keet', 'PearPass', 'anonGPT', 'Paste', 'Peercord']
 const CATALOG_SEARCH_TERMS = ['peercord', 'peerit', 'keet', 'paste']
-const PEERCORD_LINK = 'pear://wmir47w7mai3b1skj66mx7fzso6k6o91kipaney7gtt69npimouy'
+const PEERCORD_MIGRATION_ID = 'wmir47w7mai3b1skj66mx7fzso6k6o91kipaney7gtt69npimouy'
 const RELEASE_EVIDENCE_SECTION = 'Desktop GUI And User Stories'
 
 function parseArgs (argv) {
@@ -472,20 +472,20 @@ function assertCatalogues (catalogResult) {
 
   const peercord = byName.get('peercord')
   if (!peercord) throw new Error('Peercord missing from catalogue')
-  if (peercord.type !== 'standalone') throw new Error(`Peercord type mismatch: expected standalone, got ${peercord.type || '(missing)'}`)
-  if (peercord.link !== PEERCORD_LINK) throw new Error(`Peercord link mismatch: ${peercord.link || '(missing)'}`)
-  if (peercord.driveKey) throw new Error('Peercord unexpectedly has a driveKey; standalone pear:// apps should launch in a window')
+  if (peercord.legacyMigrationId !== PEERCORD_MIGRATION_ID) throw new Error(`Peercord migration id mismatch: ${peercord.legacyMigrationId || '(missing)'}`)
+  if (peercord.nativeDelivery?.status !== 'migration-required') throw new Error('Peercord must require a verified native v3 package')
+  if (peercord.link || peercord.driveKey) throw new Error('Peercord must not expose a remote executable or browsable content target')
 
   return {
     catalogs: catalogs.length,
     apps: apps.length,
     featured,
     peercord: {
-      type: peercord.type,
-      link: peercord.link,
+      nativeDelivery: peercord.nativeDelivery,
+      legacyMigrationId: peercord.legacyMigrationId,
       sourceUrl: peercord.sourceUrl || null,
       license: peercord.license || null,
-      runMode: 'window'
+      runMode: 'migration-required'
     }
   }
 }
@@ -892,23 +892,23 @@ async function runSafeCatalogueAppOpenStory (ws, args, catalogResult) {
 
 function runFeaturedAppRegressionStory (catalogResult, safeOpen) {
   const apps = Array.isArray(catalogResult?.apps) ? catalogResult.apps : []
-  const standaloneTargets = REQUIRED_FEATURED
+  const migrationRequired = REQUIRED_FEATURED
     .map((name) => findAppByName(apps, name))
     .filter(Boolean)
-    .filter((app) => /^pear:\/\//i.test(String(app.link || '')))
+    .filter((app) => app.nativeDelivery?.status === 'migration-required')
     .map((app) => ({
       name: app.name || app.id,
-      type: app.type || 'standalone',
-      link: app.link,
+      legacyMigrationId: app.legacyMigrationId || null,
+      nativeDelivery: app.nativeDelivery,
       action: launchActionForApp(app)
     }))
 
-  if (!standaloneTargets.some((app) => sameNameOrId(app, 'keet'))) {
-    throw new Error('featured app regression story could not verify Keet window launch target')
+  if (!migrationRequired.some((app) => sameNameOrId(app, 'keet'))) {
+    throw new Error('featured app regression story could not verify Keet migration state')
   }
-  for (const app of standaloneTargets) {
-    if (app.action.primary !== 'open-window') {
-      throw new Error(`featured app regression launch action mismatch for ${app.name}`)
+  for (const app of migrationRequired) {
+    if (app.action.primary !== 'migration-required' || !app.legacyMigrationId) {
+      throw new Error(`featured app regression migration state mismatch for ${app.name}`)
     }
   }
 
@@ -920,8 +920,8 @@ function runFeaturedAppRegressionStory (catalogResult, safeOpen) {
       bytes: safeOpen.bytes,
       action: safeOpen.action
     },
-    standaloneTargets,
-    automationScope: 'safe featured Hyperdrive open plus standalone pear:// target validation; no third-party trust approval'
+    migrationRequired,
+    automationScope: 'safe featured Hyperdrive open plus non-executable native migration-state validation; no third-party code execution'
   }
 }
 
@@ -1061,12 +1061,12 @@ function launchActionForApp (app) {
   const link = String(app?.link || '').trim()
   const driveKey = String(app?.driveKey || '').trim().toLowerCase()
   const hasDrive = isHyperDriveKey(driveKey)
-  if (/^(pear|file):\/\//i.test(link)) {
+  if (app?.nativeDelivery?.status === 'migration-required') {
     return {
-      primary: 'open-window',
-      openPage: hasDrive,
+      primary: 'migration-required',
+      openPage: false,
       runInTab: false,
-      reason: `${app?.type || 'standalone'} pear/file app`
+      reason: 'verified native v3 package required'
     }
   }
   if (/^hyper:\/\//i.test(link) || hasDrive) {
@@ -1139,7 +1139,7 @@ function buildReleaseEvidence (result) {
     add('Latest-app-without-download story', `release RPC desktop-gui smoke: opened ${desktop.latestAppWithoutDownload.name} from catalogue row via Browse at ${shortHyper(desktop.latestAppWithoutDownload.url)}, HTTP ${desktop.latestAppWithoutDownload.statusCode} ${desktop.latestAppWithoutDownload.bytes} bytes, no project page download or manual update`)
   }
   if (desktop?.featuredAppRegression) {
-    add('Existing featured app regression', `release RPC desktop-gui smoke: safe featured app ${desktop.featuredAppRegression.safeOpenedFeaturedApp.name} opened via Browse HTTP ${desktop.featuredAppRegression.safeOpenedFeaturedApp.statusCode}; standalone featured targets ${desktop.featuredAppRegression.standaloneTargets.map((app) => app.name).join(', ')} remain pear window targets with no trust approval automated`)
+    add('Existing featured app regression', `release RPC desktop-gui smoke: safe featured app ${desktop.featuredAppRegression.safeOpenedFeaturedApp.name} opened via Browse HTTP ${desktop.featuredAppRegression.safeOpenedFeaturedApp.statusCode}; legacy native records ${desktop.featuredAppRegression.migrationRequired.map((app) => app.name).join(', ')} require verified packages and no code execution was automated`)
   }
   if (desktop?.nostrTrustedContact) {
     add('Nostr trusted-contact story', `release RPC desktop-gui smoke: Nostr trust proof exposed ${desktop.nostrTrustedContact.visibleEvents} attested contact event via ${desktop.nostrTrustedContact.trustedVia} and quarantined ${desktop.nostrTrustedContact.hidden.quarantined} revoked or forged event(s)`)
@@ -1242,7 +1242,7 @@ function printHuman (result) {
   console.log(`  homepage: HTTP ${result.homepage.statusCode}, ${result.homepage.bytes} bytes${result.homepage.title ? `, "${result.homepage.title}"` : ''}`)
   console.log(`  catalogues: ${result.catalog.catalogs} loaded, ${result.catalog.apps} aggregated apps`)
   console.log(`  featured: ${result.catalog.featured.map((app) => app.name).join(', ')}`)
-  console.log(`  Peercord: ${result.catalog.peercord.type}, ${result.catalog.peercord.runMode}, ${result.catalog.peercord.link}`)
+  console.log(`  Peercord: ${result.catalog.peercord.runMode}, ${result.catalog.peercord.legacyMigrationId}`)
   if (result.localStories) {
     console.log(`  local search: ${result.localStories.search.results} result(s), doc ${result.localStories.search.docId}`)
     console.log(`  naming: ${result.localStories.naming.curated.name} curated + ${result.localStories.naming.petname.name} petname`)

@@ -6,7 +6,8 @@
       "id": "keet",
       "name": "Keet",
       "description": "End-to-end encrypted P2P chat, voice, and video calls by Holepunch.",
-      "link": "pear://oeeoz3w6fjjt7bym3ndpa6hhicm8f8naxyk11z4iypeoupn6jzpo",
+      "legacyMigrationId": "oeeoz3w6fjjt7bym3ndpa6hhicm8f8naxyk11z4iypeoupn6jzpo",
+      "nativeDelivery": { "status": "migration-required" },
       "author": "Holepunch",
       "categories": ["chat", "communication"]
     },
@@ -14,15 +15,17 @@
       "id": "pearpass",
       "name": "PearPass",
       "description": "Peer-to-peer password manager from Tether — synced across devices without a cloud.",
-      "link": "pear://tywsat7gz8m65ejx4zjn3773pbdc4j8m66tukis8dgzekraymtzo",
+      "legacyMigrationId": "tywsat7gz8m65ejx4zjn3773pbdc4j8m66tukis8dgzekraymtzo",
+      "nativeDelivery": { "status": "migration-required" },
       "author": "Tether",
       "categories": ["security", "utilities"]
     },
     {
       "id": "hiveworm",
       "name": "HiveWorm",
-      "description": "Perpetual P2P life-sim — runs as a Pear app via swarm.v1.",
-      "link": "pear://d1xbkcpcbi1xa8dexp49rsendra5r67w3qh5a9k8t44oemm4k16y",
+      "description": "Perpetual P2P life-sim — native v3 package migration required.",
+      "legacyMigrationId": "d1xbkcpcbi1xa8dexp49rsendra5r67w3qh5a9k8t44oemm4k16y",
+      "nativeDelivery": { "status": "migration-required" },
       "author": "HiveWorm",
       "categories": ["games"]
     },
@@ -30,7 +33,8 @@
       "id": "anongpt",
       "name": "anonGPT",
       "description": "Private P2P AI chat — pay-per-inference from a HiveMind seller, with signed receipts.",
-      "link": "pear://rpzh3fsgg38kfir9nmae7x3o8ubofddzzixr5js4mxd6a6drb6wo",
+      "legacyMigrationId": "rpzh3fsgg38kfir9nmae7x3o8ubofddzzixr5js4mxd6a6drb6wo",
+      "nativeDelivery": { "status": "migration-required" },
       "author": "anonGPT",
       "categories": ["ai"]
     }

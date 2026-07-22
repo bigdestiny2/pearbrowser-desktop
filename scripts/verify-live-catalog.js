@@ -136,9 +136,9 @@ async function main () {
 
   const peercord = byId.get('peercord')
   if (peercord) {
-    if (peercord.link !== 'pear://wmir47w7mai3b1skj66mx7fzso6k6o91kipaney7gtt69npimouy') fail('Peercord link mismatch')
-    if (peercord.driveKey) fail('Peercord should be pear:// standalone without a Hyperdrive driveKey')
-    if (peercord.type !== 'standalone') fail(`Peercord type mismatch: expected standalone, got ${peercord.type || '(missing)'}`)
+    if (peercord.legacyMigrationId !== 'wmir47w7mai3b1skj66mx7fzso6k6o91kipaney7gtt69npimouy') fail('Peercord migration id mismatch')
+    if (peercord.link || peercord.driveKey) fail('Peercord must not expose a remote executable or browsable content target')
+    if (peercord.nativeDelivery?.status !== 'migration-required') fail('Peercord must require a verified native v3 package')
     if (peercord.sourceUrl !== 'https://git.churchofmalware.org/mastercodeon/Peercord') fail('Peercord sourceUrl mismatch')
     if (peercord.license !== 'GPL-3.0') fail('Peercord license mismatch')
   }
