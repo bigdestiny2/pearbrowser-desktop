@@ -27,17 +27,11 @@ The current package targets match the `cmake-pear` appling toolchain:
 - Windows: `PearBrowser-<version>-windows-x64.msix` now
 - Linux: `PearBrowser-<version>-linux-x64.AppImage` now, distro packages such as `.deb` later if demand warrants them
 
-The stable Pear key remains available as the temporary legacy fallback for testers and recovery:
-
-```sh
-npm i -g pear
-pear
-pear run pear://tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty
-```
-
-The key above is **content-addressed and stable**: when we ship a new release, the same key starts serving the new version. Existing installs hot-sync on next launch.
-
-> **Heads up:** `pear run` is officially deprecated in Pear runtime `v2.4.0` ("use `pear-runtime` module instead for embeddable runtime with P2P OTA updates"). It still works today, but it is no longer the recommended install path.
+The previous stable `pear://` key is a **legacy migration record**, not an
+install or launch instruction. PearBrowser never passes a remote link to
+`PearRuntime.run()`. Keep legacy data intact, install the native package for
+your platform, and use the migration guidance in
+[docs/PEAR_V3_MIGRATION.md](./docs/PEAR_V3_MIGRATION.md).
 
 ## What's inside
 
