@@ -121,7 +121,7 @@ export function shortKey (k) {
 
 /**
  * Normalize URL-bar input to a navigable absolute URL.
- * Accepts hyper:// keys, pear:// links, https?/http URLs, and bare hostnames
+ * Accepts Hyper content keys, https?/http URLs, and bare hostnames
  * (example.com → https://example.com). Bare words without a dot still map
  * to hyper:// for the name-resolver path.
  */
@@ -130,13 +130,15 @@ export function normalizeUrl (raw) {
   if (!s) return null
   if (/^hyper:\/\//i.test(s)) return s
   if (/^https?:\/\//i.test(s)) return s
+  // Remote native-app and local-file launch schemes are not browser targets.
+  if (/^(?:pear|file):\/\//i.test(s)) return null
   if (/^[0-9a-f]{64}$/i.test(s)) return `hyper://${s.toLowerCase()}/`
   if (/^[13-9a-km-uw-z]{52}$/i.test(s)) return `hyper://${s}/`
   // Public hostname (optionally with path/port) → https clearnet
   if (/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}(?::\d{1,5})?(?:[/?#].*)?$/i.test(s)) {
     return `https://${s.replace(/^\/+/, '')}`
   }
-  if (s.includes('/') || s.startsWith('pear://')) return s
+  if (s.includes('/')) return s
   return `hyper://${s}`
 }
 
@@ -166,7 +168,7 @@ export function normalizeNameTarget (raw) {
   const s = String(raw || '').trim()
   if (!s) return null
   if (/^[0-9a-f]{64}$/i.test(s)) return s.toLowerCase()
-  if (s.length <= 300 && /^(?:hyper|pear|file):\/\/.+/i.test(s)) return s
+  if (s.length <= 300 && /^hyper:\/\/.+/i.test(s)) return s
   return null
 }
 

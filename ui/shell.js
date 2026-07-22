@@ -4614,7 +4614,7 @@ function NostrFeedSection ({ rpc, C }) {
   `
 }
 
-// --- Name registry (Phase N5) — claim memorable names → drives/app links ----
+// --- Name registry (Phase N5) — claim memorable names → browsable content ---
 // Owner-signed, multi-writer, first-claim-wins with a confusable/homograph guard.
 // One form claims a new name or updates (rotates) one you already own; each name
 // is shareable as pearname://<name> and resolves in the URL bar.
@@ -4640,7 +4640,7 @@ function NameRegistrySection ({ rpc, C }) {
   const submit = async () => {
     const n = name.trim()
     const t = normalizeNameTarget(target)
-    if (!t) { setErr('Enter a 64-hex drive key or pear://, hyper://, file:// link.'); return }
+    if (!t) { setErr('Enter a 64-hex drive key or hyper:// link.'); return }
     const owned = list.find((e) => e.normalized === n.toLowerCase() || (e.name || '').toLowerCase() === n.toLowerCase())
     setBusy('submit'); setErr('')
     try {
@@ -4666,12 +4666,12 @@ function NameRegistrySection ({ rpc, C }) {
 	        <div className="settings-row">
 	          <div>
 	            <div className="settings-label">Claim or update a name</div>
-	            <div className="settings-subtle">A memorable name → a drive key or app link. First claim wins; confusable look-alikes are rejected. Re-submitting a name you own updates its target.</div>
+            <div className="settings-subtle">A memorable name → browsable P2P content. First claim wins; confusable look-alikes are rejected. Re-submitting a name you own updates its target.</div>
           </div>
         </div>
         <div className="tp-row">
           <input className="profile-input" placeholder="name (e.g. alice)" value=${name} onInput=${(e) => setName(e.target.value)} />
-          <input className="profile-input" placeholder="64-hex key, pear://, hyper://, file://" value=${target} onInput=${(e) => setTarget(e.target.value)} />
+          <input className="profile-input" placeholder="64-hex key or hyper:// link" value=${target} onInput=${(e) => setTarget(e.target.value)} />
           <button className="btn small primary" onClick=${submit} disabled=${busy != null || !name.trim() || !targetValid}>${busy === 'submit' ? 'Saving…' : 'Save'}</button>
         </div>
         ${list.length > 0 && html`<div className="namereg-list">

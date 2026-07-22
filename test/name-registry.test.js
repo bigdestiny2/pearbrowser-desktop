@@ -16,9 +16,7 @@ const owner = (kp) => hex(kp.publicKey)
 const TARGET_A = 'aa'.repeat(32)
 const TARGET_B = 'bb'.repeat(32)
 const TARGET_C = 'cc'.repeat(32)
-const PEAR_LINK = 'pear://keet'
 const HYPER_LINK = `hyper://${TARGET_A}/app`
-const FILE_LINK = 'file:///tmp/pear-app'
 // a confusable squat of "paypal": latin p, CYRILLIC а (U+0430), y, p, cyr а, l →
 // skeleton folds to "paypal" but its normalized form differs.
 const PAYPAL_SQUAT = 'pаypаl'
@@ -38,19 +36,12 @@ test('first-claim-wins: the earlier claim in linear order owns the name', () => 
   assert.equal(resolve(view, 'alice').target, TARGET_A)
 })
 
-test('claims can target allowed app links, while unsafe schemes are rejected', () => {
+test('claims can target browsable Hyper links, while other schemes are rejected', () => {
   const a = crypto.keyPair()
   assert.deepEqual(ops.normalizeTarget(HYPER_LINK), { target: HYPER_LINK, key: TARGET_A, link: HYPER_LINK, kind: 'link' })
   assert.deepEqual(ops.targetToResolution(HYPER_LINK), { key: TARGET_A, link: HYPER_LINK })
-  assert.equal(ops.normalizeTarget(' PEAR://keet ').target, PEAR_LINK)
-  assert.equal(ops.normalizeTarget(FILE_LINK).link, FILE_LINK)
-
-  const view = applyView([
-    ops.claimOp({ name: 'keet', target: PEAR_LINK, owner: owner(a) }, signer(a)),
-  ])
-  const r = resolveFromNames(view.names, 'keet')
-  assert.equal(r.target, PEAR_LINK)
-  assert.equal(ops.targetToResolution(r.target).link, PEAR_LINK)
+  assert.equal(ops.normalizeTarget(' PEAR://keet '), null)
+  assert.equal(ops.normalizeTarget('file:///tmp/pear-app'), null)
 
   assert.throws(
     () => ops.claimOp({ name: 'bad', target: 'javascript:alert(1)', owner: owner(a) }, signer(a)),
@@ -58,6 +49,10 @@ test('claims can target allowed app links, while unsafe schemes are rejected', (
   )
   assert.throws(
     () => ops.claimOp({ name: 'web', target: 'https://example.com', owner: owner(a) }, signer(a)),
+    /target must be/
+  )
+  assert.throws(
+    () => ops.claimOp({ name: 'legacy', target: 'pear://keet', owner: owner(a) }, signer(a)),
     /target must be/
   )
   const badRemote = {

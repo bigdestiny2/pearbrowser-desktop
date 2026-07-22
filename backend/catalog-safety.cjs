@@ -288,7 +288,7 @@ function sanitizePersonalCatalogEntry (app) {
   }
   for (const k of Object.keys(draft)) if (draft[k] === undefined || draft[k] === '') delete draft[k]
   const out = normalizeCatalogApp(draft)
-  if (!out) throw new Error('App needs a valid 64-hex drive key, hyper:// drive link, pear:// link, or file:// link.')
+  if (!out) throw new Error('App needs a valid 64-hex drive key or hyper:// drive link.')
   return {
     id: out.id,
     name: out.name,

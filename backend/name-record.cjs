@@ -38,9 +38,9 @@ function normalizeRecordTarget ({ driveKey, link, target } = {}) {
 }
 
 // Wire shape: { v, n, k?, s, l? } — version, name, optional drive key
-// (64-hex), monotonic seq, and optional target/launch link. Old key-only records
-// still decode; newer link-only records are accepted when the link scheme is one
-// of the shared app-link schemes. Unknown shapes decode to null.
+// (64-hex), monotonic seq, and optional browsable Hyper link. Old key-only
+// records still decode; link-only records must be Hyper content. Unknown shapes
+// decode to null.
 function decodeNameRecord (buf) {
   if (buf == null) return null
   let rec
@@ -57,7 +57,7 @@ function encodeNameRecord ({ name, driveKey, seq, link, target } = {}) {
   if (typeof name !== 'string' || !name) throw new Error('name required')
   if (!Number.isInteger(seq) || seq < 0) throw new Error('seq must be a non-negative integer')
   const resolved = normalizeRecordTarget({ driveKey, link, target })
-  if (!resolved) throw new Error('target must be a Hyperdrive key or pear://, hyper://, file:// link')
+  if (!resolved) throw new Error('target must be a Hyperdrive key or hyper:// link')
   const rec = { v: NAME_RECORD_VERSION, n: name, s: seq }
   if (resolved.driveKey) rec.k = resolved.driveKey
   if (resolved.link) rec.l = resolved.link
@@ -92,7 +92,7 @@ const NAME_BINDING_SCHEMA = {
   properties: {
     name: { type: 'string', maxLength: 253 },
     driveKey: { type: 'string', pattern: '^[0-9a-f]{64}$' },
-    link: { type: 'string', maxLength: 300, pattern: '^(?:hyper|pear|file)://.+' },
+    link: { type: 'string', maxLength: 300, pattern: '^hyper://.+' },
     binderPubkey: { type: 'string', pattern: '^[0-9a-f]{64}$' },
     bindingSig: { type: 'string', pattern: '^[0-9a-f]{128}$' },
     seq: { type: 'integer' },

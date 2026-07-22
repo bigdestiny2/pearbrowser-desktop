@@ -82,21 +82,14 @@ test('catalog JSON normalizer accepts relay items and entries envelopes', () => 
   assert.equal(legacyCatalog.apps[0].id, entryKey)
 })
 
-test('catalog app normalizer drops unsafe targets and keeps allowed app links', () => {
+test('catalog app normalizer drops unsafe and executable targets', () => {
   const driveKey = 'c'.repeat(64)
 
   assert.equal(normalizeCatalogApp({ id: 'bad-key', driveKey: 'not-a-key', name: 'Bad key' }), null)
   assert.equal(normalizeCatalogApp({ id: 'bad-link', link: 'javascript:alert(1)', name: 'Bad link' }), null)
   assert.equal(normalizeCatalogApp({ id: 'targetless', name: 'No target' }), null)
 
-  assert.deepEqual(normalizeCatalogApp({ id: 'linked', driveKey: 'not-a-key', link: 'pear://keet', name: 'Keet' }), {
-    id: 'linked',
-    link: 'pear://keet',
-    name: 'Keet',
-    version: '',
-    categories: [],
-    verification: 'unverified'
-  })
+  assert.equal(normalizeCatalogApp({ id: 'linked', driveKey: 'not-a-key', link: 'pear://keet', name: 'Keet' }), null)
 
   const hyper = normalizeCatalogApp({ link: `hyper://${driveKey}/app`, name: 'Site' })
   assert.equal(hyper.driveKey, driveKey)
@@ -109,7 +102,7 @@ test('shared catalog app normalizer builds stable target keys', () => {
     id: 'custom-id',
     name: '  Demo  ',
     appKey: driveKey.toUpperCase(),
-    link: ' PEAR://Demo ',
+    link: ` hyper://${driveKey}/demo `,
     version: 2,
     categories: [' tools ', '', 'p2p']
   }, { source: 'hiveindex', catalogKey: 'hiveindex:cat', catalogName: 'Relay Index' })
@@ -117,14 +110,14 @@ test('shared catalog app normalizer builds stable target keys', () => {
   assert.equal(app.id, 'custom-id')
   assert.equal(app.name, 'Demo')
   assert.equal(app.driveKey, driveKey)
-  assert.equal(app.link, 'pear://Demo')
+  assert.equal(app.link, `hyper://${driveKey}/demo`)
   assert.equal(app.version, '2')
   assert.deepEqual(app.categories, ['tools', 'p2p'])
   assert.equal(app.verification, 'unverified')
   assert.equal(app.source, 'hiveindex')
   assert.equal(catalogAppStableKey(app), `drive:${driveKey}`)
 
-  assert.equal(catalogAppStableKey({ link: ' PEAR://Demo ' }), 'link:pear://Demo')
+  assert.equal(catalogAppStableKey({ link: ` hyper://${key('e')}/demo ` }), `drive:${key('e')}`)
   assert.equal(catalogAppStableKey({ id: 'only-id' }), 'id:only-id')
   assert.equal(catalogAppStableKey({ id: 'site', link: `hyper://${driveKey}/app` }), `drive:${driveKey}`)
 })
@@ -134,10 +127,10 @@ test('catalog app normalizer keeps only supported launch types', () => {
   assert.equal(normalizeAppType('HYPERSITE'), 'hypersite')
   assert.equal(normalizeAppType('desktop'), '')
 
-  const standalone = normalizeCatalogApp({ name: 'Window App', type: 'standalone', link: 'pear://app' })
+  const standalone = normalizeCatalogApp({ name: 'Hyper App', type: 'standalone', link: `hyper://${key('f')}/app` })
   assert.equal(standalone.type, 'standalone')
 
-  const invalid = normalizeCatalogApp({ name: 'Bad Type App', type: 'desktop', link: 'pear://app' })
+  const invalid = normalizeCatalogApp({ name: 'Bad Type App', type: 'desktop', link: `hyper://${key('e')}/app` })
   assert.equal(invalid.type, undefined)
 })
 
@@ -145,13 +138,14 @@ test('personal catalog entry sanitizer accepts link-only apps and rejects target
   assert.deepEqual(sanitizePersonalCatalogEntry({
     id: 'keet',
     name: ' Keet ',
-    link: ' PEAR://keet ',
+    link: ` hyper://${key('c')}/keet `,
     categories: [' chat ', '']
   }), {
     id: 'keet',
     name: 'Keet',
     description: '',
-    link: 'pear://keet',
+    driveKey: key('c'),
+    link: `hyper://${key('c')}/keet`,
     version: '',
     author: '',
     categories: ['chat']
@@ -200,7 +194,7 @@ test('backend aggregation dedupes by stable target across all catalog sources', 
     data: {
       name: 'Sheets Cat',
       apps: [
-        { id: 'link-low', name: 'Link Low', link: 'PEAR://Same', version: '1.0.0', verification: 'relay-listed' }
+        { id: 'link-low', name: 'Link Low', link: `hyper://${key('1')}/same`, version: '1.0.0', verification: 'relay-listed' }
       ]
     }
   })
@@ -209,7 +203,7 @@ test('backend aggregation dedupes by stable target across all catalog sources', 
     data: {
       name: 'Hiveindex Cat',
       apps: [
-        { id: 'link-high', name: 'Link High', link: 'pear://Same', version: '2.0.0', verification: 'relay-listed' },
+        { id: 'link-high', name: 'Link High', link: `hyper://${key('1')}/same`, version: '2.0.0', verification: 'relay-listed' },
         { id: 'same-id', name: 'Second Same Id Different Drive', driveKey: otherDriveKey, version: '1.0.0' }
       ]
     }
@@ -225,7 +219,7 @@ test('backend aggregation dedupes by stable target across all catalog sources', 
   assert.equal(byName['Drive Signed'].iconData, 'data:image/png;base64,aaa')
   assert.deepEqual(byName['Drive Signed']._sources.sort(), ['Autobee Cat', 'Hyperbee Cat', 'Hyperdrive Cat'])
 
-  assert.equal(byName['Link High'].link, 'pear://Same')
+  assert.equal(byName['Link High'].link, `hyper://${key('1')}/same`)
   assert.equal(byName['Link High'].catalogKey, 'hiveindex:cat')
   assert.deepEqual(byName['Link High']._sources.sort(), ['Hiveindex Cat', 'Sheets Cat'])
 
@@ -241,7 +235,7 @@ test('backend aggregation collapses link-only duplicates with different catalog 
     data: {
       name: 'Signed Catalog',
       apps: [
-        { id: 'signed-row', name: 'Signed Link App', link: 'PEAR://shared-app', type: 'standalone', version: '1.0.0', verification: 'author-signed' }
+        { id: 'signed-row', name: 'Signed Link App', link: `hyper://${key('2')}/shared-app`, type: 'hypersite', version: '1.0.0', verification: 'author-signed' }
       ]
     }
   })
@@ -250,7 +244,7 @@ test('backend aggregation collapses link-only duplicates with different catalog 
     data: {
       name: 'Community Catalog',
       apps: [
-        { id: 'sheet-row-uuid', name: 'Community Link App', link: 'pear://shared-app', type: 'standalone', version: '9.0.0', verification: 'unverified' }
+        { id: 'sheet-row-uuid', name: 'Community Link App', link: `hyper://${key('2')}/shared-app`, type: 'hypersite', version: '9.0.0', verification: 'unverified' }
       ]
     }
   })
@@ -259,8 +253,8 @@ test('backend aggregation collapses link-only duplicates with different catalog 
   assert.equal(apps.length, 1)
   assert.equal(apps[0].id, 'signed-row')
   assert.equal(apps[0].name, 'Signed Link App')
-  assert.equal(apps[0].link, 'pear://shared-app')
-  assert.equal(apps[0].type, 'standalone')
+  assert.equal(apps[0].link, `hyper://${key('2')}/shared-app`)
+  assert.equal(apps[0].type, 'hypersite')
   assert.equal(apps[0].verification, 'author-signed')
   assert.deepEqual(apps[0]._sources.sort(), ['Community Catalog', 'Signed Catalog'])
 })
