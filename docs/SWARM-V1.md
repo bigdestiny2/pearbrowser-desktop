@@ -226,7 +226,8 @@ The HTTP `/api/swarm/*` endpoints are similarly versioned in their request body:
 5. **`backend/pear-bridge.js`** — page-side injected shim adds `window.pear.swarm.v1`.
 6. **`ui/shell.js`** — adds swarm-join consent path to `LoginConsent` (or a sibling `SwarmConsent` component, depending on UX) + a "Swarm topics" sub-table to Connected Apps.
 7. **Demo:** `examples/echo-peer/` — 30-line `hyper://` page that joins a known topic, sends "hello", logs replies. Doubles as a smoke test.
-8. **`pear stage` + `pear release production .`** — ship.
+8. **Native package build + signed AppRelease v2 record** — ship only after
+   clean-install, worker boot/shutdown, and data-continuity evidence pass.
 
 ---
 

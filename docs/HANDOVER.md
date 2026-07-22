@@ -170,7 +170,7 @@ breaking the feature with no error. The drift guard fails CI if they disagree.
 ## 9. How to run & test · concurrent-session hazard
 
 ```bash
-npm start          # pear run --dev .   (dev shell)
+npm start          # fails closed until the embedded v3 host is configured
 npm test           # node --test 'test/*.test.js'   → 469 passing on the release PR branch
 node scripts/check-hiverelay-layout.mjs  # confirms HiveRelay installs from npm (^0.20.2 / lockfile 0.20.2); sibling checkout optional unless using file: deps
 gh pr checks 4 --repo bigdestiny2/pearbrowser-desktop  # GitHub Actions desktop CI, if enabled for the PR branch

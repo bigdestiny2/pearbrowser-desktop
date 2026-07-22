@@ -2,7 +2,7 @@
 
 A local-first peer-to-peer browser, app store, search engine, naming layer, Nostr bridge, and site publisher for macOS, Windows, and Linux, built on the Pear Runtime.
 
-**No accounts. No DNS. No manual app updates.** Sites and apps are addressed by stable Pear/Hyperdrive keys and pinned 24/7 on the [HiveRelay](https://github.com/bigdestiny2/P2P-Hiverelay) backbone. The publisher's laptop being offline doesn't matter — the relays carry the bytes, and users launch the current release from the catalogue without hunting for a download or applying an updater.
+**No accounts. No DNS. Local-first data.** Sites are addressed by stable Hyperdrive keys and can be pinned on the [HiveRelay](https://github.com/bigdestiny2/P2P-Hiverelay) backbone. Native applications are installed from verified packages; a catalogue never turns a remote executable link into a runtime command.
 
 **Current release:** `v0.7.1` · stable Pear production length `92858`. The current hot-synced app adds private DuckDuckGo search on the browser-owned home tab: PearBrowser sends no search analytics and excludes submitted searches from the optional persistent visit log, while DuckDuckGo still receives the query and network address. The release also makes the renderer/backend RPC transport survive reload and live-update handoffs: pending calls fail immediately on disconnect, the per-launch authenticated socket reconnects during a bounded grace window, and the shell visibly resumes instead of reporting unrelated 30-second command timeouts. It retains all `v0.7.0` Content Shield, Pear Plugins, and P2P catalogue features. Catalogue version `9` advertises the release. See [docs/RELEASE_v0.7.1_OPERATOR.md](./docs/RELEASE_v0.7.1_OPERATOR.md) for the coordinated publish record.
 
@@ -51,15 +51,16 @@ your platform, and use the migration guidance in
 - **Plugin catalogue:** one-click discovery in Settings — curated entries install without pasting keys, `kind: "app"` entries like **anonGPT** open directly as P2P apps, and additional catalogues load from any drive with a `/plugins.json`; the public catalogue is live at `01b74736…`
 
 ### Apps
-- Paste any `pear://` link → opens in its own isolated window
-- Launch the latest available release from a stable catalogue row or app link; users do not need to revisit a project page, download a package, or manually update installed app bytes
+- Open `hyper://` sites in a browser tab.
+- A compatible AppRelease v2 desktop package is a separate, verified install action; it is not a tab-runtime input.
+- A `pear://` or `file://` row is a **legacy migration record**. PearBrowser displays migration guidance and never launches it.
 - Load decentralized catalogues from Hyperdrive JSON, signed Hyperbee, Autobee, schema-sheets rooms, HiveRelay index rooms, default curated seeds, community submissions, and your own writable catalogues
 - Keep multiple catalogs loaded at once with search, category, and source filters across the aggregated app store
 - **My Catalog:** create a writable personal catalog, add apps from loaded catalogs or installed apps, rename it, edit saved metadata (name, description, version, author, categories), and share the catalog key; copies opened without the writer key stay read-only
-- Safe catalogue normalization accepts `apps[]`, `items[]`, or `entries[]`, preserves safe link-only rows (`hyper://`, `pear://`, `file://`), rejects malformed targets, and strips prototype-pollution keys before rendering
+- Safe catalogue normalization accepts `apps[]`, `items[]`, or `entries[]`, classifies `hyper://` as browsable content, classifies compatible signed package releases for install, retains `pear://`/`file://` only for migration, rejects malformed targets, and strips prototype-pollution keys before rendering
 - Default catalog auto-loads on first Apps-tab visit (the "PearBrowser Network" Hyperbee `hyperbee://f5fb7500bccd…` — PearBrowser, peerit, HiveRelay, P2P Builders, Pear Dealroom, Paste, PearPoker, Keet, PearPass, Peercord, anonGPT, Pear POS, Pear Tickets, HiveWorm), generated from a single source manifest and mirrored into the offline seed
-- **peerit — "the front page of the P2P internet"** (a peer-to-peer Reddit, `hyper://ec6e2d6d…/`): a browsable `hypersite` whose communities, posts, threaded comments and votes live in a shared Autobase+Hyperbee log. It opens as a startup tab beside the private-search home and landing page, and is **pinned to the top** of the Sites discovery grid. Source: `02-apps/peerit`.
-- Featured apps: **Keet** · **PearPass** · **anonGPT** · **Paste** · **[Peercord](https://git.churchofmalware.org/mastercodeon/Peercord)**. Peercord's current Pear release is a full desktop app (`pear.json` `type:"desktop"`), so PearBrowser launches it via the standalone `pear://` window path; it should only move to headless "Run in tab" once Peercord publishes a pear-request worker entry.
+- **peerit — "the front page of the P2P internet"** (a peer-to-peer Reddit, `hyper://ec6e2d6d…/`): a browsable `hypersite` whose communities, posts, threaded comments and votes live in a shared Autobase+Hyperbee log. It opens as the **active front tab on every fresh launch** (alongside the landing page) and is **pinned to the top** of the Sites discovery grid. Source: `02-apps/peerit`.
+- Featured projects include **Keet**, **PearPass**, **anonGPT**, **Paste**, and **[Peercord](https://git.churchofmalware.org/mastercodeon/Peercord)**. Legacy Pear desktop releases remain visible as migration-required records until their owners publish compatible native v3 package metadata.
 
 ### Publish (P2P Sites)
 - Block editor: heading, paragraph, image, link, list, quote, code, raw HTML/CSS/JS, divider
@@ -188,13 +189,13 @@ human approval of clean-install, upgrade, rollback, and data-continuity proof.
 
 | Script | What |
 |---|---|
-| `scripts/pin-self-on-hiverelay.js` | Seed the desktop's own production drive on the HiveRelay backbone. Run after every release. |
+| `scripts/pin-self-on-hiverelay.js <64-hex-key>` | Pin an explicit non-executable content or release-evidence drive on HiveRelay. Availability does not approve a package. |
 | `scripts/publish-and-pin.js <dir>` | Publish a directory as a Hyperdrive + auto-pin to relays. |
 | `scripts/unseed-drive.js <key>` | Send a signed unseed (publisher-only). |
 | `scripts/extract-drive.js <key>` | Pull a drive's full content out to a local directory. |
 | `scripts/list-drive.js <key>` | Diagnose what's inside a drive's manifest. |
 | `scripts/check-relays.js` | Discovery probe — print all HiveRelays reachable via DHT. |
-| `scripts/verify-pin.js --expect <length> --hiverelay` | Fresh-peer production-drive check plus optional HiveRelay `proveSeeded` evidence when upgraded relays expose storage-proof. |
+| `scripts/verify-pin.js --key <64-hex> --expect <length> --hiverelay` | Fresh-peer content/evidence-drive check plus optional HiveRelay `proveSeeded` evidence when upgraded relays expose storage-proof. |
 | `scripts/verify-release-contents.js --expect <length> --missing <path>` | Fresh-peer release metadata scan: proves ignored scratch/docs/scripts/tests paths are absent from the production drive after purge staging. |
 | `scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --expect-app hiveworm` | Fresh-peer Hyperbee catalogue check: proves the live app catalogue key is reachable and contains expected release rows and Peercord launch metadata. |
 | `scripts/runtime-rpc-smoke.mjs` | Runtime GUI smoke: after launching PearBrowser, checks the diagnostic RPC path reports DHT, proxy, relay, peer-count, and storage readiness without becoming the renderer. |
