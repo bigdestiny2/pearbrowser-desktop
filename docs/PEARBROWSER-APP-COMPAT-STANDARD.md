@@ -6,7 +6,7 @@
 
 ## 1. Purpose
 
-PearBrowser is a peer-to-peer browser that can host Pear apps. It decides — **purely from catalogue/app metadata, never from runtime probing** — whether your app renders **inline in a browser tab** or opens in **its own OS window**. This standard tells a Pear app author exactly what to do **at release time** so their app is *maximally PearBrowser-compatible*: ideally runs inline in a tab on **both desktop and mobile**, declares itself honestly to the catalogue, degrades gracefully when capabilities are absent, respects the browser's permission/consent and layout model, and — where inline hosting is impossible — releases for the best window/launcher experience and declares that truthfully.
+PearBrowser is a peer-to-peer browser that hosts browsable Hyper content. It decides — **purely from catalogue/app metadata, never from runtime probing** — whether content opens in a browser tab or is a legacy native record requiring a publisher-provided verified package. This standard tells an app author how to release static content that runs inline on **both desktop and mobile**, declares delivery state honestly, degrades gracefully when capabilities are absent, and respects the browser's permission/consent and layout model. PearBrowser does not execute native app code from a catalogue.
 
 ### TL;DR for app authors
 
@@ -85,13 +85,12 @@ PearBrowser apps fall into three deployable shapes. The single number that matte
 
 - **PB-TYPEMODEL-17 (SHOULD, both).** Serve **all your own bytes** from your own Hyperdrive (static) or worker (hypersite). PearBrowser proxies static drives unchanged and runs hypersite workers as separate processes; it does not bundle/ingest foreign app code. (Exception: on the `hyper://` ad-hoc hosting path the proxy *does* inject `window.pear.*` shims — but never your dependencies or your own bytes.)
 
-> **NOT CURRENTLY ENFORCED (aspirational / PROPOSED) — app lifecycle & launcher management.** The following describe behavior **not present** in current code (no `CMD_QUIT_PEAR_APP`, `CMD_FOCUS_PEAR_APP`, `launchedPearApps` registry, `EVT_PEAR_APP_EXITED`, launcher card, "Open in tab"/`openInTab()`, `kind:'pear'` tab, or `Pear.View` embedding spike exist). `CMD_LAUNCH_PEAR_LINK` is **fire-and-forget**: it spawns via pear-run, captures no pid, and cannot terminate or focus the app.
-> - *(PROPOSED)* A standalone app should be externally terminable (exit on pipe-destroy/SIGTERM, no detached children) so a future launcher can manage it.
-> - *(PROPOSED)* A standalone app should let window close/crash propagate so a future launcher card can flip to "stopped".
-> - *(PROPOSED)* A `pear://` standalone could expose a launcher-card "Open in tab" handle.
-> - *(PROPOSED)* Workflows must not depend on launcher-tab persistence across restart.
->
-> Authors: design your app to **exit cleanly on process termination and keep all session state inside the app**, which satisfies these proposals if/when they land, but do not rely on PearBrowser managing your window today.
+> **Native-delivery boundary.** PearBrowser is not a native-app launcher. A
+> catalogue entry for a legacy native app must carry an opaque migration ID and
+> `nativeDelivery.status:'migration-required'`; it cannot expose executable
+> code, an app-worker address, or an “open in window” action. Publishers must
+> ship a verified signed package with their own lifecycle, update, and recovery
+> experience outside the browser process.
 
 ### Anti-patterns
 
@@ -346,9 +345,9 @@ Targeting the Pear Runtime global; top-of-script `await window.pear.X` with no g
 - **PB-SECURITYSTORAGEUI-13 (MUST — origin clause is desktop-only).** Keep drive keys as bare 64-hex; keep paths free of `..`/NUL (→ 400). **Correction:** "non-loopback origins are 403'd" is **desktop-only** — mobile deliberately allows canonical `http(s)` origins through and defers to token/Origin checks. The traversal/hex-key rules apply on both.
 - **PB-SECURITYSTORAGEUI-14 (SHOULD, both).** Keep any single bridge **sync-append** operation under 100KB (enforced on `/api/sync/append`); a separate ~1MB total request-body cap also applies. Chunk/stream larger work.
 - **PB-SECURITYSTORAGEUI-15 (SHOULD, both).** Keep any single published file under **10MB** (enforced at write/publish). Reconcile with the 5MB cache/stream threshold (PB-STATICHYPERDRIVE-17): files 5–10MB publish but are never cached and re-fetched every load — prefer <5MB for frequently-loaded assets.
-- **PB-SECURITYSTORAGEUI-17 (MUST, both).** A window-class/standalone app MUST declare itself honestly (window/launcher-only) rather than claiming tab-compatibility. Desktop launches it in its own window via `CMD_LAUNCH_PEAR_LINK`; mobile cannot load it (blank tab / WorkerError).
-- **PB-SECURITYSTORAGEUI-18 (SHOULD, both).** For a window-class app, design for single-instance: open your store once, close cleanly on teardown, and if a second launch finds the store locked, focus/hand off rather than crash. Don't leave a rocksdb LOCK held or a fixed port bound. *(The host survives this only by hard-exiting to release LOCKs and scanning to the next free port — don't depend on that.)*
-- **PB-SECURITYSTORAGEUI-19 (MAY, both).** Prefer the tab-able shapes (pear-request worker or static Hyperdrive) over a full-GUI window app when functionality allows, to be inline-in-tab on both platforms.
+- **PB-SECURITYSTORAGEUI-17 (MUST, both).** A legacy native app MUST declare `nativeDelivery.status:'migration-required'` until its publisher has a verified package; it must not claim browser-tab compatibility or present a remote executable target.
+- **PB-SECURITYSTORAGEUI-18 (SHOULD, both).** A native package should be single-instance safe and own its lifecycle/recovery outside PearBrowser; the browser neither starts nor manages it.
+- **PB-SECURITYSTORAGEUI-19 (MAY, both).** Prefer static Hyperdrive content when functionality allows, so it remains inline-in-tab on both platforms.
 
 > **PB-SECURITYSTORAGEUI-16 (mobile-only; partly PROPOSED).** If your app needs the bridge on a real HTTPS origin (not loopback/`hyper://`), it is injected only when the user has **trusted** that origin in allowlist mode; prompt the user to trust and degrade read-only until granted. Use a stable canonical origin (scheme+host+non-default port) so the trust entry persists/replicates. **Scope correction:** the trusted-origins store exists **only on mobile** (no equivalent on desktop), and the `{allowed:false, reason:'untrusted'}` withholding is implemented at the session-mint layer (described in code comments) rather than in the trust-store module itself. Treat HTTPS-origin trust as a **mobile** concern.
 
@@ -638,7 +637,7 @@ application.
 7. **`canonicalJSON` spec** for signed-catalog Ed25519 verification (key ordering, number/unicode normalization) so independent relays interoperate.
 8. **Cross-platform `type` unification** — either teach mobile to honor `type`, or formally bless "mobile does not route on `type`; static drive is the mobile app floor" as the contract.
 9. **Inter-app deep-link contract** — a canonical way to construct a shareable link to a hypersite/static app at a specific resource (beyond `hyper://` + ad-hoc hash params).
-10. **Standalone app management** — a real launcher (terminate/focus/relaunch, exit propagation, launcher-card persistence). `CMD_LAUNCH_PEAR_LINK` is fire-and-forget today; the §3 lifecycle block is entirely aspirational.
+10. **Verified native-delivery contract** — package signing, update, recovery, and platform lifecycle are publisher responsibilities outside the browser; catalogue metadata must link only to the documented package channel, never executable bytes.
 
 **Unresolved/underspecified (need a normative ruling once code stabilizes):**
 
