@@ -289,11 +289,15 @@ test('PearBrowser catalogue release row stays in sync with package and public ad
 })
 
 test('release script purges ignored files from previous Pear stages', () => {
-  assert.match(releaseScript, /pear stage --purge/)
+  assert.match(releaseScript, /native-release preflight/)
+  assert.match(releaseScript, /no publication authority/)
+  assert.doesNotMatch(releaseScript, /pear stage/)
+  assert.doesNotMatch(releaseScript, /pear release/)
 })
 
-test('release verification asks HiveRelay for signed seed proof evidence', () => {
-  assert.match(releaseScript, /verify-pin\.js --expect \$NEW_LEN --hiverelay/)
+test('v3 release preflight leaves availability verification to the approved release workflow', () => {
+  assert.doesNotMatch(releaseScript, /verify-pin\.js/)
+  assert.match(releaseScript, /independent HiveRelay availability evidence/)
   assert.match(verifyPin, /HiveRelayClient/)
   assert.match(verifyPin, /proveSeeded/)
   assert.match(verifyPin, /verifySeededFallback/)
@@ -1467,7 +1471,7 @@ test('native install snippet generator emits release-note packages for every des
     assert.match(guide.stdout, /\[PearBrowser-0\.5\.0-macos-arm64\.dmg\]\(https:\/\/example\.invalid\/PearBrowser-0\.5\.0-macos-arm64\.dmg\)/)
     assert.match(guide.stdout, /npm run -s generate:native-install-guide/)
     assert.match(guide.stdout, /PowerShell/)
-    assert.match(guide.stdout, /pear run pear:\/\/tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty/)
+    assert.match(guide.stdout, /legacy migration record/i)
 
     const packageProofDir = join(fixture, 'package-proof')
     mkdirSync(packageProofDir)

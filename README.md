@@ -157,20 +157,19 @@ mkdir -p pear-ecosystem/01-browser
 git clone https://github.com/bigdestiny2/pearbrowser-desktop pear-ecosystem/01-browser/pearbrowser-desktop
 cd pear-ecosystem/01-browser/pearbrowser-desktop
 npm install
-pear run --dev .
+npm run start
 ```
 
 Source installs are standalone. The desktop packages default to npm `latest` for HiveRelay; the root package defaults to npm `latest` for `p2p-hiverelay`, `p2p-hiverelay-client`, and `p2p-hiverelay-verifier`, with the current dist-tag resolving to `0.20.2` in the lockfile, so a clone of just this repo resolves them from the registry. `npm install` runs `scripts/check-hiverelay-layout.mjs`, which exits quietly for the registry line and fails only if the HiveRelay dependency/lockfile line drifts or you opt into incomplete/mismatched `file:` workspace dependencies. A sibling `../../00-core/hiverelay` checkout is optional and only needed for HiveRelay co-development.
 
-UI files use htm + React (no build step). Backend in `backend/` is CommonJS. See `package.json` `pear` field for runtime config, and `pear.json` for multisig signing config.
+UI files use htm + React (no build step). Backend in `backend/` is CommonJS. The source checkout retains its native-shell development wiring while the v3 embedded-runtime host is completed; it does not accept remote app links as worker input.
 
 ## Release pipeline
 
-Solo publisher, two steps:
+The checked-in command is a native-release **preflight**, not a publisher:
 
 ```sh
-./scripts/release-prod.sh         # pear stage --purge + pear release (deprecated path)
-node scripts/pin-self-on-hiverelay.js   # re-pin the new length on relays
+./scripts/release-prod.sh         # local v3 release evidence checks only
 ```
 
 Catalogue updates are versioned from [`catalog-source/pearbrowser-network.catalog.json`](./catalog-source/pearbrowser-network.catalog.json):
@@ -181,9 +180,9 @@ node scripts/publish-catalog-bee.js catalog-source/pearbrowser-network.catalog.j
 node scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --expect-app hiveworm
 ```
 
-`pear release` is deprecated in Pear runtime `v2.4.0` but still works and we use it deliberately — the replacement (`pear provision` + `pear multisig` quorum-cosigning) is designed for multi-publisher releases. A solo 1-of-1 multisig is pure ceremony with no security gain.
-
-**When to migrate to multisig:** when we add a co-signer (genuine quorum security), or when Pear actually removes `pear release` (not just deprecates it). The link config + provision target are pre-staged in `pear.json` so the migration is just plumbing — see the `_comment` field there.
+The preflight never stages or publishes a release. Promotion requires a signed
+native package, an AppRelease v2 record, independent availability evidence, and
+human approval of clean-install, upgrade, rollback, and data-continuity proof.
 
 ## Operator scripts
 
@@ -216,7 +215,7 @@ node scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --
 | `npm run check:release-evidence` | Reads the operator evidence log and fails until required gates are marked `PASS` or documented `DEFER`, with a final announcement decision. |
 | `scripts/verify-app-full.js --key <driveKey>` | Deeper fresh-peer blob sampling across a drive's file tree. |
 | `scripts/verify-pear-bundle-contract.js --key <driveKey>` | Metadata-only Pear bundle contract check: reads `pear.json` and selected files from a fresh peer without executing third-party code. |
-| `scripts/release-prod.sh` | The two-step release pipeline above. |
+| `scripts/release-prod.sh` | Fail-closed v3 native-release preflight; it never publishes. |
 
 ## Distribution
 

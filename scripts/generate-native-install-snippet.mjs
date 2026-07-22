@@ -433,17 +433,10 @@ function printInstallGuide (report) {
   console.log('```')
   if (fallback) {
     console.log()
-    console.log('## Recovery Fallback')
+    console.log('## Legacy Migration Record')
     console.log()
-    console.log('The stable Pear link remains available for testers and recovery while native packaging matures:')
-    console.log()
-    console.log('```sh')
-    console.log('npm i -g pear')
-    console.log('pear')
-    console.log(`pear run ${fallback}`)
-    console.log('```')
-    console.log()
-    console.log('This fallback is not the preferred public install path because `pear run` is deprecated in Pear runtime `v2.4.0`, but it is still useful when diagnosing a native package issue.')
+    console.log(`Legacy migration record: \`${fallback}\`.`)
+    console.log('Keep existing data intact while migrating. This record is not a v3 launch or install command; use the native package and app-specific migration guidance.')
   }
 }
 
