@@ -2854,6 +2854,10 @@ function Apps ({ rpc, C, onLaunch }) {
     setErr(''); setBusy('run-in-tab'); setLaunched('')
     try {
       const res = await rpc.request(C.CMD_RUN_APP_IN_TAB, { link: app.link }, 30000)
+      if (res?.action === 'legacy-migration-required') {
+        setErr(res.message || 'A verified native v3 package is required.')
+        return
+      }
       onLaunch?.(res.url)
       setLaunched(`Running ${app.name} headless in a tab.`)
       setTimeout(() => setLaunched(''), 4000)

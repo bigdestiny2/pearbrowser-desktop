@@ -418,16 +418,13 @@ export async function startBackend () {
     // pure port-scan failure means the main process itself didn't
     // start (pear-electron handoff issue, NOT a backend crash).
     //
-    // Most common cause: stale partial download from a prior release.
-    // Pear's cache may have a half-written app bundle. Clear and retry:
-    //   rm -rf "$HOME/Library/Application Support/pear/by-dkey/00f61fc1473b9d01a199833fc96e76d5e99000c603ec697bc842f8d978538f4d"
-    //   pear run pear://tco5...
+    // Most common cause: an interrupted local installation. Do not revive a
+    // remote app reference; reinstall the verified signed native package.
     throw new Error(
       `Could not reach backend on any port ${RPC_PORT_BASE}-${RPC_PORT_BASE + RPC_PORT_COUNT - 1} ` +
       `(${errors.join('; ')}). The Bare main process appears not to be running. ` +
-      `Most likely cause: stale partial download. Clear the cache at ` +
-      `~/Library/Application Support/pear/by-dkey/00f61fc1473b… and relaunch ` +
-      `pear run pear://tco5...`
+      `Most likely cause: an interrupted installation. Reinstall the verified ` +
+      `signed native package and relaunch it.`
     )
   }
   const rpc = new RpcClient(pipe)
