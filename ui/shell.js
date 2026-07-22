@@ -1315,8 +1315,8 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
           if (/^(?:pear|file):\/\//i.test(link)) {
             updateTab(id, { status: `opening ${resolved.label || nameQuery} · ${resolved.provenance}…` })
             try {
-              await rpc.request(C.CMD_LAUNCH_PEAR_LINK, { link }, 60000)
-              updateTab(id, { status: '' })
+              const result = await rpc.request(C.CMD_LAUNCH_PEAR_LINK, { link }, 60000)
+              updateTab(id, { status: result?.message || '' })
             } catch (err) {
               updateTab(id, { status: `error: ${err.message}` })
             }
@@ -2916,7 +2916,11 @@ function Apps ({ rpc, C, onLaunch }) {
     setErr(''); setBusy('pear-link'); setLaunched('')
     if (keyHex) setLaunchProg((p) => ({ ...p, [keyHex]: { phase: 'connecting', percent: 0, peers: 0, downloaded: 0, total: 0 } }))
     try {
-      await rpc.request(C.CMD_LAUNCH_PEAR_LINK, { link, keyHex }, 60000)
+      const result = await rpc.request(C.CMD_LAUNCH_PEAR_LINK, { link, keyHex }, 60000)
+      if (result?.action === 'legacy-migration-required') {
+        setErr(result.message)
+        return
+      }
       setPearLink('')
       // pear:// launches show progress inline via EVT_LAUNCH_PROGRESS; file://
       // and others have no bundle to track, so keep the toast for them.

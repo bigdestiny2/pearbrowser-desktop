@@ -1274,32 +1274,24 @@ rpc.handle(C.CMD_RESET_APP, async () => {
 
 rpc.handle(C.CMD_LAUNCH_PEAR_LINK, async (data) => {
   const link = String(data?.link || '').trim()
-  if (!link) throw new Error('pear:// link required')
+  if (!link) throw new Error('legacy app link required')
   if (!/^pear:\/\/.+/.test(link) && !/^file:\/\/.+/.test(link)) {
-    throw new Error('Only pear:// and file:// links can be launched')
+    throw new Error('Only legacy pear:// and file:// app links can be assessed')
   }
-  const keyHex = (data?.keyHex && /^[0-9a-f]{64}$/i.test(data.keyHex)) ? data.keyHex.toLowerCase() : null
-  // Fire-and-forget: pre-download the app bundle with progress (so the UI can
-  // render an inline bar driven by EVT_LAUNCH_PROGRESS instead of looking
-  // hung), then spawn it. Return immediately.
-  launchPearLinkWithProgress(link, keyHex).catch((err) => {
-    try { rpc.event(C.EVT_LAUNCH_PROGRESS, { key: keyHex, link, phase: 'error', error: (err && err.message) || 'launch failed' }) } catch {}
-  })
-  return { started: true, link }
+  return {
+    started: false,
+    action: 'legacy-migration-required',
+    link,
+    message: 'This legacy Pear app cannot be launched by PearBrowser v3. Install a verified native v3 package when its publisher provides one.'
+  }
 })
 
-// Spawn a pear:// / file:// app in its own window. For pear:// links with a
-// known drive key, first pull the bundle into OUR store (which also seeds the
-// swarm, so the subsequent pear-run launch pulls from localhost and the window
-// appears promptly) while streaming download progress to the UI.
+// Retained only as a compatibility seam for callers compiled against older
+// builds. A remote link is not a v3 worker entrypoint and must never execute.
 async function launchPearLinkWithProgress (link, keyHex) {
   const emit = (p) => { try { rpc.event(C.EVT_LAUNCH_PROGRESS, { key: keyHex, link, ...p }) } catch {} }
   const spawn = () => {
-    const run = require('pear-run')
-    const pipe = run(link)
-    try { pipe.on('data', () => {}) } catch {}
-    try { pipe.on('crash', (info) => console.error('[pear-run] child crashed:', info)) } catch {}
-    try { pipe.on('error', (err) => console.error('[pear-run] child error:', err && err.message)) } catch {}
+    throw new Error('legacy app migration required; remote links are not v3 worker entrypoints')
   }
 
   // No drive to pre-fetch (file:// or unknown key) → straight to launch.
@@ -1318,7 +1310,7 @@ async function launchPearLinkWithProgress (link, keyHex) {
     registerHiveRelayDrive(keyHex, drive)
     await updateDriveBestEffort(drive)
   } catch {
-    // Can't open it ourselves — let pear-run handle the download itself.
+    // Do not fall back to a remote launcher; surface the migration boundary.
     emit({ phase: 'launching', percent: 100 })
     spawn()
     emit({ phase: 'done', percent: 100 })
@@ -1370,8 +1362,12 @@ async function launchPearLinkWithProgress (link, keyHex) {
 rpc.handle(C.CMD_RUN_APP_IN_TAB, async (data) => {
   const link = String(data?.link || 'demo').trim()
   if (!tabRuntime) throw new Error('tab runtime is not available')
-  if (link !== 'demo' && !/^pear:\/\/.+/.test(link) && !/^file:\/\/.+/.test(link)) {
-    throw new Error('Only the demo, or pear:// / file:// apps, can run in a tab')
+  if (link !== 'demo') {
+    return {
+      action: 'legacy-migration-required',
+      link,
+      message: 'This legacy app needs a verified v3 package before it can run in a PearBrowser tab.'
+    }
   }
   const res = tabRuntime.open(link)
   console.log('[tab-runtime] run-in-tab')
@@ -3313,7 +3309,7 @@ async function boot () {
   // bridges each tab's WebSocket to a pear-request worker pipe. Best-effort —
   // a failure here just means the in-tab path is unavailable, not a boot block.
   try {
-    tabRuntime = new TabRuntime({ pearRun: (link) => require('pear-run')(link) })
+    tabRuntime = new TabRuntime()
     await tabRuntime.start()
   } catch (err) {
     console.error('[tab-runtime] failed to start:', err && err.message)
