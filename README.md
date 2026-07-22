@@ -169,7 +169,7 @@ UI files use htm + React (no build step). Backend in `backend/` is CommonJS. The
 The checked-in command is a native-release **preflight**, not a publisher:
 
 ```sh
-./scripts/release-prod.sh         # local v3 release evidence checks only
+bash ./scripts/release-prod.sh    # local v3 release evidence checks only
 ```
 
 Catalogue updates are versioned from [`catalog-source/pearbrowser-network.catalog.json`](./catalog-source/pearbrowser-network.catalog.json):
