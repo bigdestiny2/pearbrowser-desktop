@@ -17,7 +17,7 @@
         "p2p"
       ],
       "publishedAt": "2026-04-28T00:00:00Z",
-      "legacyPearLink": "pear://tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty",
+      "legacyMigrationId": "tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty",
       "nativeDelivery": { "status": "migration-required" },
       "driveKey": "03f0060a35451cfb6b68ad1dda1b8474ebb43fd9100071ccf7d67679a83ebb4f",
       "homepage": "hyper://03f0060a35451cfb6b68ad1dda1b8474ebb43fd9100071ccf7d67679a83ebb4f/",
@@ -116,7 +116,7 @@
       ],
       "verification": "relay-listed",
       "link": "hyper://0724aabf2ad6394983f91c6b24ebd417cb3d25addcf29c98eb246c512dc77f90/",
-      "legacyPearLink": "pear://7octu5dimjye8rn68raehwuetk5mttzt4zxh6yjw1eqktn49bq7o",
+      "legacyMigrationId": "7octu5dimjye8rn68raehwuetk5mttzt4zxh6yjw1eqktn49bq7o",
       "nativeDelivery": { "status": "migration-required" },
       "iconData": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMwYTBkMTIiLz48cGF0aCBkPSJNMzIgMTJsMTYgNnYxMWMwIDExLTcgMTgtMTYgMjMtOS01LTE2LTEyLTE2LTIzVjE4eiIgZmlsbD0iIzU4YTZmZiIvPjxnIHN0cm9rZT0iIzBhMGQxMiIgc3Ryb2tlLXdpZHRoPSIyLjYiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCI+PHBhdGggZD0iTTI2IDI4aDEyTTI2IDM0aDEyTTI2IDQwaDgiLz48L2c+PC9zdmc+"
     },
@@ -134,7 +134,7 @@
       "publishedAt": "2026-06-21T00:00:00Z",
       "type": "standalone",
       "link": "hyper://25a06bb3dddec8138e9eda606cc4a11e9ebbe47815fd5d22064b30cff752bb5b/",
-      "legacyPearLink": "pear://qnax5k8ojtod51ci9qwkrawdof1hx5w3a7gqbueoqnzzq9dw5hfo",
+      "legacyMigrationId": "qnax5k8ojtod51ci9qwkrawdof1hx5w3a7gqbueoqnzzq9dw5hfo",
       "nativeDelivery": { "status": "migration-required" },
       "homepage": "hyper://25a06bb3dddec8138e9eda606cc4a11e9ebbe47815fd5d22064b30cff752bb5b/",
       "url": "hyper://25a06bb3dddec8138e9eda606cc4a11e9ebbe47815fd5d22064b30cff752bb5b/",
@@ -161,8 +161,8 @@
         "p2p"
       ],
       "publishedAt": "2026-06-21T00:00:00Z",
-      "pearLink": "pear://owr1ukamxhxm1j67p8dkhbm46n1d9qoh7igd8ag9f36x6dzjrjwy",
-      "link": "pear://owr1ukamxhxm1j67p8dkhbm46n1d9qoh7igd8ag9f36x6dzjrjwy",
+      "legacyMigrationId": "owr1ukamxhxm1j67p8dkhbm46n1d9qoh7igd8ag9f36x6dzjrjwy",
+      "nativeDelivery": { "status": "migration-required" },
       "driveKey": "850929ab0b7f1eb927dd69c6ae057af0a43fba1ced4c33e0df2e7cff0ee92268",
       "type": "pear-app",
       "license": "MIT",
@@ -187,8 +187,8 @@
       "version": "1.0.0",
       "publishedAt": "2026-06-21T00:00:00Z",
       "verification": "relay-listed",
-      "link": "pear://oeeoz3w6fjjt7bym3ndpa6hhicm8f8naxyk11z4iypeoupn6jzpo",
-      "pearLink": "pear://oeeoz3w6fjjt7bym3ndpa6hhicm8f8naxyk11z4iypeoupn6jzpo",
+      "legacyMigrationId": "oeeoz3w6fjjt7bym3ndpa6hhicm8f8naxyk11z4iypeoupn6jzpo",
+      "nativeDelivery": { "status": "migration-required" },
       "iconData": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMwYTBkMTIiLz48cGF0aCBkPSJNMTQgMjFhNiA2IDAgMCAxIDYtNmgyNGE2IDYgMCAwIDEgNiA2djE1YTYgNiAwIDAgMS02IDZIMjlsLTEwIDh2LThhNiA2IDAgMCAxLTUtNnoiIGZpbGw9IiNmYmJmMjQiLz48ZyBmaWxsPSIjMGEwZDEyIj48Y2lyY2xlIGN4PSIyNSIgY3k9IjI4LjUiIHI9IjIuNiIvPjxjaXJjbGUgY3g9IjMzIiBjeT0iMjguNSIgcj0iMi42Ii8+PGNpcmNsZSBjeD0iNDEiIGN5PSIyOC41IiByPSIyLjYiLz48L2c+PC9zdmc+"
     },
     {
@@ -204,15 +204,15 @@
       "version": "1.0.0",
       "publishedAt": "2026-06-21T00:00:00Z",
       "verification": "relay-listed",
-      "link": "pear://tywsat7gz8m65ejx4zjn3773pbdc4j8m66tukis8dgzekraymtzo",
-      "pearLink": "pear://tywsat7gz8m65ejx4zjn3773pbdc4j8m66tukis8dgzekraymtzo",
+      "legacyMigrationId": "tywsat7gz8m65ejx4zjn3773pbdc4j8m66tukis8dgzekraymtzo",
+      "nativeDelivery": { "status": "migration-required" },
       "iconData": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMwYTBkMTIiLz48cmVjdCB4PSIxOCIgeT0iMzAiIHdpZHRoPSIyOCIgaGVpZ2h0PSIyMiIgcng9IjQiIGZpbGw9IiMzZmI5NTAiLz48cGF0aCBkPSJNMjQgMzB2LTZhOCA4IDAgMCAxIDE2IDB2NiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjM2ZiOTUwIiBzdHJva2Utd2lkdGg9IjQiLz48Y2lyY2xlIGN4PSIzMiIgY3k9IjM5IiByPSIzLjQiIGZpbGw9IiMwYTBkMTIiLz48cmVjdCB4PSIzMC41IiB5PSIzOSIgd2lkdGg9IjMiIGhlaWdodD0iOCIgcng9IjEuNSIgZmlsbD0iIzBhMGQxMiIvPjwvc3ZnPg=="
     },
     {
       "id": "peercord",
       "name": "Peercord",
       "type": "standalone",
-      "link": "pear://wmir47w7mai3b1skj66mx7fzso6k6o91kipaney7gtt69npimouy",
+      "legacyMigrationId": "wmir47w7mai3b1skj66mx7fzso6k6o91kipaney7gtt69npimouy",
       "author": "Mastercodeon",
       "categories": [
         "chat",
@@ -226,7 +226,7 @@
       "homepage": "https://git.churchofmalware.org/mastercodeon/Peercord",
       "source": "https://git.churchofmalware.org/mastercodeon/Peercord",
       "license": "GPL-3.0",
-      "pearLink": "pear://wmir47w7mai3b1skj66mx7fzso6k6o91kipaney7gtt69npimouy",
+      "nativeDelivery": { "status": "migration-required" },
       "publishedAt": "2026-06-22T00:00:00Z"
     },
     {
@@ -257,8 +257,8 @@
       "version": "1.0.0",
       "publishedAt": "2026-06-21T00:00:00Z",
       "verification": "relay-listed",
-      "link": "pear://rpzh3fsgg38kfir9nmae7x3o8ubofddzzixr5js4mxd6a6drb6wo",
-      "pearLink": "pear://rpzh3fsgg38kfir9nmae7x3o8ubofddzzixr5js4mxd6a6drb6wo",
+      "legacyMigrationId": "rpzh3fsgg38kfir9nmae7x3o8ubofddzzixr5js4mxd6a6drb6wo",
+      "nativeDelivery": { "status": "migration-required" },
       "iconData": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMwYTBkMTIiLz48cGF0aCBkPSJNMTQgMjFhNiA2IDAgMCAxIDYtNmgyNGE2IDYgMCAwIDEgNiA2djE1YTYgNiAwIDAgMS02IDZIMjlsLTEwIDh2LThhNiA2IDAgMCAxLTUtNnoiIGZpbGw9IiMyMmQzZWUiLz48cGF0aCBkPSJNMzMgMjBsMi4zIDUuNyA1LjcgMi4zLTUuNyAyLjMtMi4zIDUuNy0yLjMtNS43LTUuNy0yLjMgNS43LTIuM3oiIGZpbGw9IiMwYTBkMTIiLz48L3N2Zz4="
     },
     {
@@ -275,8 +275,8 @@
       "publishedAt": "2026-06-21T00:00:00Z",
       "verification": "relay-listed",
       "driveKey": "b776f15f3e6860ecf6d923853c295350e55b708772e67d7124899b96aecfcd43",
-      "link": "pear://myhk94sz7tokqcs58173xe7359c6nd9enwrm7z7xrthy9xsr7ehy",
-      "pearLink": "pear://myhk94sz7tokqcs58173xe7359c6nd9enwrm7z7xrthy9xsr7ehy"
+      "legacyMigrationId": "myhk94sz7tokqcs58173xe7359c6nd9enwrm7z7xrthy9xsr7ehy",
+      "nativeDelivery": { "status": "migration-required" }
     },
     {
       "id": "pear-tickets",
@@ -291,8 +291,8 @@
       "publishedAt": "2026-06-21T00:00:00Z",
       "verification": "relay-listed",
       "driveKey": "ec309f516da659718746fe10ded086e2b6d157718c3e3651f86e07a4df34210a",
-      "link": "pear://gsnmwo4kdopbcif44wgt9k1ysmwwn1erh4o1358kis1ebtwbpouy",
-      "pearLink": "pear://gsnmwo4kdopbcif44wgt9k1ysmwwn1erh4o1358kis1ebtwbpouy",
+      "legacyMigrationId": "gsnmwo4kdopbcif44wgt9k1ysmwwn1erh4o1358kis1ebtwbpouy",
+      "nativeDelivery": { "status": "migration-required" },
       "iconData": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMwYTBkMTIiLz48cGF0aCBkPSJNMTQgMjRoMzZhNCA0IDAgMCAxIDQgNHYxLjVhMy4yIDMuMiAwIDAgMCAwIDYuNFYzN2E0IDQgMCAwIDEtNCA0SDE0YTQgNCAwIDAgMS00LTR2LTEuMWEzLjIgMy4yIDAgMCAwIDAtNi40VjI4YTQgNCAwIDAgMSA0LTR6IiBmaWxsPSIjZmJiZjI0Ii8+PHBhdGggZD0iTTQwIDI2djEzIiBzdHJva2U9IiMwYTBkMTIiIHN0cm9rZS13aWR0aD0iMi40IiBzdHJva2UtZGFzaGFycmF5PSIzIDMiLz48L3N2Zz4="
     }
   ]

@@ -14,7 +14,8 @@
 // The manifest is rich (id, pearLink, homepage, source, license, platforms, …);
 // seed rows are validated against the strict APPS_SCHEMA
 // (additionalProperties:false), so we project onto exactly its allowed fields and
-// infer `type` from `link`.
+// infer `type` from `link`. Native migration records retain only a local
+// migration ID, never an executable remote URI.
 
 import { readFileSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -52,6 +53,8 @@ function toSeedRow (a) {
   const row = { name: a.name, type: manifestType(a.type) || (a.link ? 'standalone' : 'hypersite') }
   if (a.driveKey && /^[0-9a-f]{64}$/i.test(a.driveKey)) row.driveKey = a.driveKey
   if (a.link) row.link = a.link
+  if (typeof a.legacyMigrationId === 'string') row.legacyMigrationId = a.legacyMigrationId
+  if (a.nativeDelivery && typeof a.nativeDelivery.status === 'string') row.nativeDeliveryStatus = a.nativeDelivery.status
   // Inline icon (data: URI) for apps without a fetchable drive icon — rendered
   // directly by AppIcon, so every catalogue app shows a real icon, not a glyph.
   if (a.iconData) row.iconData = a.iconData
@@ -69,7 +72,7 @@ function toSeedRow (a) {
 const rows = cat.apps.map(toSeedRow)
 for (const [i, r] of rows.entries()) {
   if (!r.name || !r.type) throw new Error(`row ${i} missing name/type`)
-  if (!r.driveKey && !r.link) throw new Error(`row ${i} (${r.name}) has neither driveKey nor link`)
+  if (!r.driveKey && !r.link && !r.legacyMigrationId) throw new Error(`row ${i} (${r.name}) has neither driveKey, link, nor legacy migration ID`)
 }
 
 const header = `/**

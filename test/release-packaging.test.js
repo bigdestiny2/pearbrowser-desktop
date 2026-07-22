@@ -270,7 +270,7 @@ test('Pear stage ignore excludes local release/operator scratch files', () => {
   assert.ok(ignored.includes('/test'))
 })
 
-test('PearBrowser catalogue release row stays in sync with package and public addresses', () => {
+test('PearBrowser catalogue row is a migration-required native record, not a remote launcher', () => {
   const source = catalogSource.apps.find((app) => app.id === 'pearbrowser-desktop')
   const seed = SEED_APPS.find((app) => app.name === 'PearBrowser Desktop')
   const homepageKey = '03f0060a35451cfb6b68ad1dda1b8474ebb43fd9100071ccf7d67679a83ebb4f'
@@ -278,11 +278,13 @@ test('PearBrowser catalogue release row stays in sync with package and public ad
   assert.ok(source, 'catalogue source row missing')
   assert.ok(seed, 'offline catalogue seed row missing')
   assert.equal(source.version, pkg.version)
-  assert.equal(source.pearLink, pearConfig.links.production)
-  assert.equal(source.link, pearConfig.links.production)
+  assert.equal(source.legacyMigrationId, pearConfig.links.production.replace(/^pear:\/\//, ''))
+  assert.equal(source.nativeDelivery?.status, 'migration-required')
   assert.equal(source.driveKey, homepageKey)
   assert.equal(source.homepage, `hyper://${homepageKey}/`)
+  assert.equal(source.link, source.homepage)
   assert.equal(seed.version, source.version)
+  assert.equal(seed.nativeDeliveryStatus, source.nativeDelivery.status)
   assert.equal(seed.link, source.link)
   assert.equal(seed.driveKey, source.driveKey)
   assert.equal(seed.homepage, source.homepage)

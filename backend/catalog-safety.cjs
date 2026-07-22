@@ -28,6 +28,7 @@ const HEX64_RE = /^[0-9a-f]{64}$/i
 const Z32_RE = /^[13-9a-km-uw-z]{52}$/i
 const APP_LINK_RE = /^(?:hyper|pear|file):\/\/.+/i
 const VERIFICATION_RANK = { 'author-signed': 3, 'relay-listed': 2, unverified: 1 }
+const NATIVE_DELIVERY_STATUSES = new Set(['migration-required', 'available'])
 
 function trimString (value) {
   return typeof value === 'string' ? value.trim() : ''
@@ -90,6 +91,16 @@ function normalizeAppType (value) {
   return type === 'standalone' || type === 'hypersite' ? type : ''
 }
 
+function normalizeLegacyMigrationId (value) {
+  const id = trimString(value).toLowerCase()
+  return Z32_RE.test(id) ? id : ''
+}
+
+function normalizeNativeDelivery (value) {
+  const status = trimString(value && typeof value === 'object' ? value.status : value)
+  return NATIVE_DELIVERY_STATUSES.has(status) ? { status } : null
+}
+
 function normalizeCatalogApp (app, opts = {}) {
   if (!app || typeof app !== 'object' || Array.isArray(app)) return null
   const out = { ...app }
@@ -102,8 +113,10 @@ function normalizeCatalogApp (app, opts = {}) {
   const rawLink = trimString(out.link)
   const link = normalizeCatalogLink(out.link)
   const driveKey = normalizeDriveKey(key) || driveKeyFromHyperLink(link)
-  const id = trimString(out.id) || driveKey || link
-  if ((key && !driveKey && !link) || (rawLink && !link && !driveKey) || (!driveKey && !link) || !id) return null
+  const legacyMigrationId = normalizeLegacyMigrationId(out.legacyMigrationId)
+  const nativeDelivery = normalizeNativeDelivery(out.nativeDelivery)
+  const id = trimString(out.id) || driveKey || link || (legacyMigrationId ? `legacy:${legacyMigrationId}` : '')
+  if ((key && !driveKey && !link) || (rawLink && !link && !driveKey) || (!driveKey && !link && !legacyMigrationId) || !id) return null
 
   out.id = id || undefined
   out.name = trimString(out.name) || id || undefined
@@ -111,6 +124,10 @@ function normalizeCatalogApp (app, opts = {}) {
   else delete out.driveKey
   if (link) out.link = link
   else delete out.link
+  if (legacyMigrationId) out.legacyMigrationId = legacyMigrationId
+  else delete out.legacyMigrationId
+  if (nativeDelivery) out.nativeDelivery = nativeDelivery
+  else delete out.nativeDelivery
   const type = normalizeAppType(out.type)
   if (type) out.type = type
   else delete out.type
@@ -145,6 +162,8 @@ function catalogAppStableKey (app) {
   const driveKey = normalizeDriveKey(key) || driveKeyFromHyperLink(link)
   if (driveKey) return `drive:${driveKey}`
   if (link) return `link:${link}`
+  const legacyMigrationId = normalizeLegacyMigrationId(app.legacyMigrationId)
+  if (legacyMigrationId) return `legacy:${legacyMigrationId}`
   const id = trimString(app.id)
   if (id) return `id:${id}`
   return ''
@@ -233,6 +252,8 @@ function catalogAppSearchText (app) {
     app.source,
     app.catalogName,
     app.verification,
+    app.legacyMigrationId,
+    app.nativeDelivery && app.nativeDelivery.status,
     app.link,
     app.driveKey,
     ...(Array.isArray(app.categories) ? app.categories : []),
@@ -293,6 +314,8 @@ module.exports = {
   normalizeDriveKey,
   driveKeyFromHyperLink,
   normalizeCatalogData,
+  normalizeLegacyMigrationId,
+  normalizeNativeDelivery,
   normalizeAppType,
   scrubPrototypeKeys,
   safeJSONParse,
