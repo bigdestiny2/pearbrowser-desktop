@@ -157,12 +157,12 @@ mkdir -p pear-ecosystem/01-browser
 git clone https://github.com/bigdestiny2/pearbrowser-desktop pear-ecosystem/01-browser/pearbrowser-desktop
 cd pear-ecosystem/01-browser/pearbrowser-desktop
 npm install
-npm run start
+npm run start # fails closed until the embedded v3 runtime host is configured
 ```
 
 Source installs are standalone. The desktop packages default to npm `latest` for HiveRelay; the root package defaults to npm `latest` for `p2p-hiverelay`, `p2p-hiverelay-client`, and `p2p-hiverelay-verifier`, with the current dist-tag resolving to `0.20.2` in the lockfile, so a clone of just this repo resolves them from the registry. `npm install` runs `scripts/check-hiverelay-layout.mjs`, which exits quietly for the registry line and fails only if the HiveRelay dependency/lockfile line drifts or you opt into incomplete/mismatched `file:` workspace dependencies. A sibling `../../00-core/hiverelay` checkout is optional and only needed for HiveRelay co-development.
 
-UI files use htm + React (no build step). Backend in `backend/` is CommonJS. The source checkout retains its native-shell development wiring while the v3 embedded-runtime host is completed; it does not accept remote app links as worker input.
+UI files use htm + React (no build step). Backend in `backend/` is CommonJS. The source checkout deliberately refuses to start through the removed v2 launcher until the v3 embedded-runtime host is complete; it does not accept remote app links as worker input.
 
 ## Release pipeline
 
