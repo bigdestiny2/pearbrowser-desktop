@@ -4,7 +4,6 @@ import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
-const pearConfig = JSON.parse(readFileSync(new URL('../pear.json', import.meta.url), 'utf8'))
 
 const SUPPORTED_TARGETS = [
   { label: 'macOS Apple Silicon', platform: 'macos', arch: 'arm64' },
@@ -327,7 +326,6 @@ function printInstallGuide (report) {
   const windows = report.targets.find((target) => target.platform === 'windows')
   const linux = report.targets.find((target) => target.platform === 'linux')
   const macosExample = macos[0]
-  const fallback = pearConfig?.links?.production || ''
 
   console.log('# Install Native Packages')
   console.log()
@@ -431,13 +429,6 @@ function printInstallGuide (report) {
   console.log(`chmod +x ${linux?.asset?.name || 'PearBrowser-<version>-linux-x64.AppImage'}`)
   console.log(`./${linux?.asset?.name || 'PearBrowser-<version>-linux-x64.AppImage'}`)
   console.log('```')
-  if (fallback) {
-    console.log()
-    console.log('## Legacy Migration Record')
-    console.log()
-    console.log(`Legacy migration record: \`${fallback}\`.`)
-    console.log('Keep existing data intact while migrating. This record is not a v3 launch or install command; use the native package and app-specific migration guidance.')
-  }
 }
 
 function unique (values) {

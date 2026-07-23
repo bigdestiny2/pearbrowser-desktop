@@ -109,7 +109,7 @@ toolchain that was tested locally.
 `scripts/check-appling-release.mjs` fails the workflow when:
 
 - the requested tag does not match `package.json` version
-- `appling/CMakeLists.txt` does not match the production Pear key in `pear.json`
+- `appling/CMakeLists.txt` does not match the Pear OTA update channel in `package.json`
 - the appling CMake version is stale
 - the appling package no longer exposes `generate`, `build`, and `package`
 - the native wrapper toolchain lockfile, pinned Bare headers, macOS ICNS asset,

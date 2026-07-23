@@ -20,7 +20,6 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
 const require = createRequire(import.meta.url)
 const packageLock = JSON.parse(readFileSync(new URL('../package-lock.json', import.meta.url), 'utf8'))
-const pearConfig = JSON.parse(readFileSync(new URL('../pear.json', import.meta.url), 'utf8'))
 const catalogSource = JSON.parse(readFileSync(new URL('../catalog-source/pearbrowser-network.catalog.json', import.meta.url), 'utf8'))
 const { SEED_APPS } = require('../backend/catalogue-seed.js')
 const rootLicense = readFileSync(new URL('../LICENSE', import.meta.url), 'utf8')
@@ -278,7 +277,7 @@ test('PearBrowser catalogue row is a migration-required native record, not a rem
   assert.ok(source, 'catalogue source row missing')
   assert.ok(seed, 'offline catalogue seed row missing')
   assert.equal(source.version, pkg.version)
-  assert.equal(source.legacyMigrationId, pearConfig.links.production.replace(/^pear:\/\//, ''))
+  assert.equal(source.legacyMigrationId, pkg.upgrade.replace(/^pear:\/\//, ''))
   assert.equal(source.nativeDelivery?.status, 'migration-required')
   assert.equal(source.driveKey, homepageKey)
   assert.equal(source.homepage, `hyper://${homepageKey}/`)
@@ -726,7 +725,7 @@ test('macOS DMG packager is exposed for public-trust native releases', () => {
 })
 
 test('appling release metadata stays in sync with the production Pear channel', () => {
-  const productionId = pearConfig.links.production.replace(/^pear:\/\//, '')
+  const productionId = pkg.upgrade.replace(/^pear:\/\//, '')
   assert.match(applingCmake, new RegExp(`ID "${productionId}"`))
   assert.match(applingCmake, new RegExp(`VERSION ${pkg.version.replace(/\./g, '\\.')}`))
   assert.equal(applingPkg.name, 'pearbrowser-desktop-appling')
@@ -1473,7 +1472,7 @@ test('native install snippet generator emits release-note packages for every des
     assert.match(guide.stdout, /\[PearBrowser-0\.5\.0-macos-arm64\.dmg\]\(https:\/\/example\.invalid\/PearBrowser-0\.5\.0-macos-arm64\.dmg\)/)
     assert.match(guide.stdout, /npm run -s generate:native-install-guide/)
     assert.match(guide.stdout, /PowerShell/)
-    assert.match(guide.stdout, /legacy migration record/i)
+    assert.doesNotMatch(guide.stdout, /legacy migration record/i)
 
     const packageProofDir = join(fixture, 'package-proof')
     mkdirSync(packageProofDir)

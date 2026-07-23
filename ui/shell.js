@@ -1457,23 +1457,20 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
     ))))
   }
 
-  // Try to open devtools for the active tab's iframe. pear-electron
-  // exposes Pear.Window.devtools(...) on some channels; fall back to
-  // a console log if unavailable.
+  // Ask the native v3 host to open devtools for the active renderer. Fall back
+  // to a concise status message if the host capability is unavailable.
   const openDevtools = () => {
     try {
       const el = iframeRefs.current[activeId]
       const cw = el?.contentWindow
       if (!cw) return
-      // Path 1: pear-electron exposes Pear.Window.openDevTools()
-      if (typeof Pear !== 'undefined' && Pear.Window?.openDevTools) {
-        Pear.Window.openDevTools({ mode: 'detach' })
+      // The native v3 host exposes only this focused devtools capability.
+      if (globalThis.pearbrowserRuntime?.openDevTools) {
+        globalThis.pearbrowserRuntime.openDevTools()
         return
       }
-      // Path 2: chrome devtools protocol via remote debugging is not
-      // exposed by default; surface a hint instead.
-      console.log('[devtools] runtime does not expose openDevTools — relaunch with --devtools')
-      updateTab(activeId, { status: 'devtools: relaunch with `pear run --dev --devtools .`' })
+      console.log('[devtools] native host does not expose openDevTools')
+      updateTab(activeId, { status: 'devtools are unavailable in this native build' })
       setTimeout(() => updateTab(activeId, { status: '' }), 3000)
     } catch (err) {
       console.error('[devtools] failed:', err)

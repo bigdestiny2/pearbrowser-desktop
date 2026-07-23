@@ -45,7 +45,7 @@ const BLOB_SAMPLE_TIMEOUT_MS = 20_000
 const BLOB_LIST_TIMEOUT_MS = 20_000
 const HIVERELAY_TIMEOUT_MS = 45_000
 const HIVERELAY_PROOF_TIMEOUT_MS = 30_000
-const DEFAULT_SAMPLE_PATHS = ['/index.html', '/package.json', '/pear.json']
+const DEFAULT_SAMPLE_PATHS = ['/index.html', '/package.json', '/electron/main.cjs']
 
 function parseArgs (argv) {
   const args = {

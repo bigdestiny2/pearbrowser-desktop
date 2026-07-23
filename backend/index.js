@@ -1265,7 +1265,6 @@ rpc.handle(C.CMD_RESET_APP, async () => {
 
   // Give the reply a tick to reach the UI before we exit.
   setTimeout(() => {
-    try { if (typeof Pear !== 'undefined' && Pear.exit) Pear.exit() } catch {}
     try { Bare.exit?.() } catch {}
   }, 200)
 
@@ -3420,7 +3419,8 @@ async function cleanupOldData () {
 Bare.on('suspend', () => IPC.unref())
 Bare.on('resume', () => IPC.ref())
 
-// When main closes the IPC pipe (window closed, Pear.teardown), run
+// When the native host closes the IPC pipe (for example, when its window
+// closes), run
 // a clean shutdown so Corestore flushes, Hyperswarm closes, and
 // rocksdb releases its LOCK. Without this the next launch trips on
 // EADDRINUSE or a stale LOCK.

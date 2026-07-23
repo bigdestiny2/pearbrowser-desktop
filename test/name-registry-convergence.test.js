@@ -20,7 +20,7 @@ const hex = (x) => b4a.toString(x, 'hex')
 const signer = (kp) => (msg) => hex(crypto.sign(b4a.from(msg, 'utf-8'), kp.secretKey))
 const owner = (kp) => hex(kp.publicKey)
 const TARGET_A = 'aa'.repeat(32); const TARGET_B = 'bb'.repeat(32); const TARGET_C = 'cc'.repeat(32)
-const PEAR_LINK = 'pear://link-only-app'
+const HYPER_LINK = `hyper://${TARGET_C}/link-only-app`
 
 const tmps = []
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -129,7 +129,7 @@ test('end-to-end: claim → activeMap → resolveName (the CMD_NAME_RESOLVE path
   const R = await new NameRegistry(s.store, { encryptionKey: ENC, namespace: 'nr' }).ready()
   try {
     await R.claim({ name: 'Alice', target: TARGET_A, owner: owner(ka) }, signer(ka))
-    await R.claim({ name: 'LinkApp', target: PEAR_LINK, owner: owner(ka) }, signer(ka))
+    await R.claim({ name: 'LinkApp', target: HYPER_LINK, owner: owner(ka) }, signer(ka))
     const registry = await R.activeMap() // what the backend injects into the resolver
     // a typed bare name resolves through the registry tier to a navigable key
     const r = resolveName('alice', { petnames: {}, registry })
@@ -137,8 +137,8 @@ test('end-to-end: claim → activeMap → resolveName (the CMD_NAME_RESOLVE path
     assert.equal(r.key, TARGET_A) // → go() builds hyper://<target>/
     const link = resolveName('linkapp', { petnames: {}, registry })
     assert.equal(link.provenance, 'registry')
-    assert.equal(link.key, null)
-    assert.equal(link.link, PEAR_LINK)
+    assert.equal(link.key, TARGET_C)
+    assert.equal(link.link, HYPER_LINK)
     // a petname still wins over the registry (tier order preserved end-to-end)
     const pet = resolveName('alice', { petnames: { alice: { key: TARGET_B } }, registry })
     assert.equal(pet.provenance, 'petname')

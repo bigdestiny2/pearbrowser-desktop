@@ -31,7 +31,7 @@ whose subject matches `PEARBROWSER_WINDOWS_SIGNING_SUBJECT`.
 
 Run `npm run check:appling-release -- --tag v0.5.0` before cutting a release.
 It verifies that `CMakeLists.txt` uses the same version as the desktop package
-and the same Pear key as `pear.json`.
+and the same Pear OTA update channel as `package.json`.
 
 Run `npm run check:native-signing -- --require-public-trust` from the repo root
 before publishing public desktop assets. It validates that the macOS Developer

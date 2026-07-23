@@ -1,6 +1,6 @@
 # PearBrowser → mainstream-browser parity plan
 
-Status: Phases 1–3 shipped with gates closed; Phase 4 clearnet proxy + session-bridge facade shipped; Phase 5 privacy ladder shipped (HTTPS-only, tracking strip, farbling, cookie isolation in proxy mode). P2P distribution live 2026-07-16: filter-list drive subscriptions (`shield-list-sync.cjs`) and plugin installs from drives (`plugin-drive-loader.cjs` with the capability-escalation guard), plus the plugin catalogue (`plugin-catalog.cjs`, anonGPT in the builtin seed). All four distribution drives published, pinned, and fresh-peer verified — keys in `filter-lists/README.md`. Remaining: the native pear-electron session.webRequest bridge for direct-mode shields.
+Status: Phases 1–3 shipped with gates closed; Phase 4 clearnet proxy + session-bridge facade shipped; Phase 5 privacy ladder shipped (HTTPS-only, tracking strip, farbling, cookie isolation in proxy mode). P2P distribution live 2026-07-16: filter-list drive subscriptions (`shield-list-sync.cjs`) and plugin installs from drives (`plugin-drive-loader.cjs` with the capability-escalation guard), plus the plugin catalogue (`plugin-catalog.cjs`, anonGPT in the builtin seed). All four distribution drives published, pinned, and fresh-peer verified — keys in `filter-lists/README.md`. The v3 native host now owns Electron directly. Remaining: wire the existing ContentShield contract to Electron's native `session.webRequest` only after a dedicated policy/RPC boundary and cross-platform GUI evidence are in place.
 Date: 2026-07-16
 
 The goal: make PearBrowser as capable a daily browser as Brave — ad blocking,
@@ -13,9 +13,9 @@ browser would do. The constraints below decide everything.
 
 ## 1. Ground truth: what PearBrowser is today
 
-- **Runtime split.** A Bare main process runs the backend
-  (`backend/index.js`); a prebuilt pear-electron renderer runs the React UI
-  (`ui/shell.js`). They speak length-prefixed JSON RPC over a loopback
+- **Runtime split.** An Electron main process owns the window and lifecycle;
+  an embedded Pear OTA worker runs the Bare backend (`index.js`); the renderer
+  hosts the UI (`ui/shell.js`). They speak length-prefixed JSON RPC over a loopback
   WebSocket (ports 9876–9880).
 - **Tabs are sandboxed `<iframe>`s**, not Electron `<webview>`s
   (`ui/shell.js`, `.webview` iframes; sandbox
@@ -28,10 +28,10 @@ browser would do. The constraints below decide everything.
   injects `<base>`, tokens, and `window.pear.*` shims into every served HTML
   document, and re-writes the page CSP to hash-authorize exactly the scripts
   the browser injects (`injectCspShimHashes`) — never `unsafe-inline`.
-- **Chromium's net stack is out of reach.** The Electron main process ships
-  inside pear-electron's prebuilt boot bundle. App code cannot register
-  `session.webRequest`, `declarativeNetRequest`, or protocol handlers without
-  forking that bundle.
+- **Chromium's net stack is host-owned, but not yet policy-wired.** The
+  Electron main process can register `session.webRequest`, but it must not do
+  so until the browser's existing shield policy is exposed through a narrow,
+  testable native-host boundary.
 - **Clearnet `https://` sites are not browsable.** `CMD_NAVIGATE` maps
   non-loopback URLs onto `/hyper/<host>/…`, which 400s for non-drive hosts.
 - **Capability permissions already exist.** Drive manifests declare

@@ -46,12 +46,19 @@ async function withStore (fn) {
   }
 }
 
-test('curated floor answers a bare name offline (Tier 3)', async () => {
+test('legacy native curated names do not resolve to executable targets', async () => {
   await withStore(async (names) => {
     const r = await resolveThroughStore(names, 'keet')
-    assert.equal(r.provenance, 'curated')
-    assert.equal(r.link, lookupAlias('keet').link) // the curated bootstrap target
-    assert.equal(r.name, 'keet')
+    assert.equal(lookupAlias('keet')?.link, undefined)
+    assert.deepEqual(r, {
+      name: 'keet',
+      key: null,
+      link: null,
+      legacyMigrationId: lookupAlias('keet').legacyMigrationId,
+      target: null,
+      label: 'Keet',
+      provenance: 'curated'
+    })
   })
 })
 
@@ -82,12 +89,13 @@ test('an unknown word resolves to null (URL bar falls through to plain handling)
   })
 })
 
-test('a petname pointing at a link (not a key) is returned with its link', async () => {
+test('a petname pointing at a browsable Hyper link is returned with its link', async () => {
   await withStore(async (names) => {
-    await names.setPetname({ name: 'home', link: 'pear://example/' })
+    const link = `hyper://${PET_KEY}/home`
+    await names.setPetname({ name: 'home', link })
     const r = await resolveThroughStore(names, 'home')
     assert.equal(r.provenance, 'petname')
-    assert.equal(r.link, 'pear://example/')
+    assert.equal(r.link, link)
     assert.equal(r.key, null)
   })
 })

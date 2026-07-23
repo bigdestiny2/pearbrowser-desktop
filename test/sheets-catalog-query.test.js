@@ -61,7 +61,7 @@ test('listApps passes a row-scan limit to sheets.list', async () => {
 test('listApps caps the returned row set at MAX_SHEETS_ROWS', async () => {
   const huge = Array.from({ length: MAX_SHEETS_ROWS + 50 }, (_, i) => ({
     uuid: 'app-' + i,
-    json: { name: 'App ' + i, type: 'standalone', link: 'pear://' + i }
+    json: { name: 'App ' + i, type: 'standalone', link: 'hyper://' + i.toString(16).padStart(64, '0') + '/' }
   }))
   const sc = makeCatalog(async () => huge)
   const apps = await sc.listApps()

@@ -14,7 +14,7 @@ const SAMPLE = {
   name: '  Pear Picks  ',
   version: 1,
   apps: [
-    { id: 'keet', name: 'Keet', type: 'standalone', description: 'P2P chat', link: 'pear://keetkey', categories: ['chat'], author: 'Holepunch', homepage: 'https://keet.io', source: 'https://github.com/holepunchto/keet', license: 'Apache-2.0' },
+    { id: 'keet', name: 'Keet', type: 'standalone', description: 'P2P chat', link: 'hyper://' + 'b'.repeat(64) + '/', categories: ['chat'], author: 'Holepunch', homepage: 'https://keet.io', source: 'https://github.com/holepunchto/keet', license: 'Apache-2.0' },
     { id: 'pearpass', name: 'PearPass', driveKey: 'a'.repeat(64), version: '2.0' }
   ]
 }
@@ -38,7 +38,7 @@ test('normalizeManifest rejects bad input', () => {
   assert.throws(() => normalizeManifest({}), /apps must be an array/)
   assert.throws(() => normalizeManifest({ apps: 'nope' }), /apps must be an array/)
   assert.throws(() => normalizeManifest({ apps: [{}] }), /needs an id/)
-  assert.throws(() => normalizeManifest({ apps: [{ id: 'x', link: 'pear://one' }, { id: 'x', link: 'pear://two' }] }), /duplicate app id/)
+  assert.throws(() => normalizeManifest({ apps: [{ id: 'x', link: 'hyper://' + 'c'.repeat(64) + '/' }, { id: 'x', link: 'hyper://' + 'd'.repeat(64) + '/' }] }), /duplicate app id/)
 })
 
 test('normalizeManifest allows an explicitly empty community catalog', () => {
@@ -48,8 +48,9 @@ test('normalizeManifest allows an explicitly empty community catalog', () => {
 })
 
 test('derives an id from driveKey/link when id is absent', () => {
-  const n = normalizeManifest({ apps: [{ link: 'pear://only-a-link' }] })
-  assert.equal(n.apps[0].id, 'pear://only-a-link')
+  const link = 'hyper://' + 'e'.repeat(64) + '/'
+  const n = normalizeManifest({ apps: [{ link }] })
+  assert.equal(n.apps[0].id, 'e'.repeat(64))
 })
 
 test('round-trips through a real Hyperbee using the loader query', async () => {
@@ -79,7 +80,7 @@ test('round-trips through a real Hyperbee using the loader query', async () => {
     const byId = Object.fromEntries(data.apps.map((a) => [a.id, a]))
     assert.equal(byId.keet.name, 'Keet')
     assert.equal(byId.keet.type, 'standalone')
-    assert.equal(byId.keet.link, 'pear://keetkey')
+    assert.equal(byId.keet.link, 'hyper://' + 'b'.repeat(64) + '/')
     assert.equal(byId.keet.source, 'hyperbee')
     assert.equal(byId.keet.sourceUrl, 'https://github.com/holepunchto/keet')
     assert.equal(byId.keet.homepage, 'https://keet.io')

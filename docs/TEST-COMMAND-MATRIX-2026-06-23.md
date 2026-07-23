@@ -68,9 +68,9 @@ covered by `npm test`.
 | --- | --- |
 | `node scripts/runtime-rpc-smoke.mjs --timeout 20000 --max-storage-percent 100 --json` | Diagnostic WebSocket smoke against an already-running app. Requires PearBrowser to be launched first; public smoke should fail if the profile is over quota |
 | `PEARBROWSER_RPC_DIAGNOSTIC_TOKEN=<random> node scripts/release-rpc-story-smoke.mjs --timeout 60000 --request-timeout 80000 --desktop-gui-stories --site-story --json` | Nonvisual story preflight against an app launched with the same `PEARBROWSER_RPC_DIAGNOSTIC_TOKEN`. Loads the release catalogues, fetches/reloads the PearBrowser homepage through the local proxy, verifies drive-info/site metadata, validates featured catalogue rows, confirms Peercord remains window-only, proves catalogue search/action rows, opens a safe catalogue-row Hyperdrive app through Browse, proves local search first-paint, curated/petname naming, bookmark/session round-trips with diagnostic reconnect, runs the Nostr trusted-contact proof, and emits release-evidence row suggestions. With `--site-story` it publishes/fetches/deletes a temporary site with HiveRelay unseed cleanup. It does not launch third-party Pear apps or approve trust prompts |
-| `npm run start` | Interactive Pear dev launch: `pear run --dev .` |
-| `npm run run` | Interactive Pear launch: `pear run .` |
-| `pear run pear://tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty` | Production browser launch/manual smoke gate |
+| `npm run start` | Interactive native Electron development launch with the embedded Pear OTA worker. |
+| `npm run run` | Interactive native Electron launch with the embedded Pear OTA worker. |
+| Signed PearBrowser native package | Production browser launch/manual smoke gate; the package contains the host and resolves its approved OTA update channel locally. |
 
 Use `docs/MANUAL_RELEASE_SMOKE_2026-06-23.md` for GUI proof. Record machine,
 commit SHA, screenshots/logs, and pass/fail notes beside each checked item.

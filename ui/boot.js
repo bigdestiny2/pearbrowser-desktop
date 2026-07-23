@@ -16,7 +16,7 @@ import { RpcClient } from './rpc-client.js'
 const RPC_PORT_BASE = 9876
 const RPC_PORT_COUNT = 5
 const RPC_PROBE_ID = 900000001
-const RPC_SESSION_TOKEN = String(globalThis.Pear?.config?.startId || '')
+const RPC_SESSION_TOKEN = String(globalThis.pearbrowserRuntime?.sessionToken || '')
 
 // Must match backend/constants.js exactly (numeric wire codes). This is a
 // COMPLETE mirror — every command/event the renderer can send or receive.
@@ -315,7 +315,7 @@ function diagnosticUrlFor (url) {
 }
 
 function rendererUrlFor (port) {
-  if (!RPC_SESSION_TOKEN) throw new Error('Pear runtime RPC session token is unavailable')
+  if (!RPC_SESSION_TOKEN) throw new Error('PearBrowser v3 runtime session token is unavailable')
   return `ws://127.0.0.1:${port}/?session=${encodeURIComponent(RPC_SESSION_TOKEN)}`
 }
 
@@ -415,8 +415,8 @@ export async function startBackend () {
     // running or crashed before binding the WS server. Since v0.4.4
     // the main process catches synchronous boot failures and still
     // binds the WS — emitting a `backend-boot-failed` event — so a
-    // pure port-scan failure means the main process itself didn't
-    // start (pear-electron handoff issue, NOT a backend crash).
+    // pure port-scan failure means the native host itself did not start, not
+    // that the backend reported a structured boot failure.
     //
     // Most common cause: an interrupted local installation. Do not revive a
     // remote app reference; reinstall the verified signed native package.

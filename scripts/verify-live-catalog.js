@@ -22,7 +22,6 @@ import { readCatalogBee } from './lib/catalog-bee.js'
 
 const DEFAULT_KEY = 'f5fb7500bccd60a976d2b1d24246108f4444a210b9ca591533114dffc089934d'
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
-const pearConfig = JSON.parse(readFileSync(new URL('../pear.json', import.meta.url), 'utf8'))
 const catalogSource = JSON.parse(readFileSync(new URL('../catalog-source/pearbrowser-network.catalog.json', import.meta.url), 'utf8'))
 const browserSource = catalogSource.apps.find((app) => app.id === 'pearbrowser-desktop')
 if (!browserSource) throw new Error('catalogue source is missing pearbrowser-desktop')
@@ -37,7 +36,7 @@ function parseArgs (argv) {
     expectCount: 14,
     expectName: 'PearBrowser Network',
     expectBrowserVersion: pkg.version,
-    expectBrowserLink: pearConfig.links.production,
+    expectBrowserLink: pkg.upgrade,
     expectBrowserHomepage: browserSource.homepage
   }
   for (let i = 0; i < argv.length; i++) {

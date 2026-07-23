@@ -1115,7 +1115,7 @@
               <path d="M12 3 5 6v5c0 5 3 8 7 10 4-2 7-5 7-10V6l-7-3Z"></path>
               <path d="M9 12l2 2 4-5"></path>
             </svg>
-            <input value="pear://explore" aria-label="Address value" />
+            <input value="hyper://explore" aria-label="Address value" />
             <span class="route-chip">hybrid</span>
           </label>
 
@@ -1231,7 +1231,7 @@
                       <p class="card-copy">Encrypted P2P chat and calls.</p>
                     </div>
                   </div>
-                  <div class="mono-line">pear://oeeoz3...jzpo</div>
+                  <div class="mono-line">Native v3 package required</div>
                 </article>
                 <article class="app-card">
                   <div class="app-row">
@@ -1241,7 +1241,7 @@
                       <p class="card-copy">Private pay-per-inference chat.</p>
                     </div>
                   </div>
-                  <div class="mono-line">pear://rpzh3f...b6wo</div>
+                  <div class="mono-line">Native v3 package required</div>
                 </article>
                 <article class="app-card">
                   <div class="app-row">
@@ -1251,7 +1251,7 @@
                       <p class="card-copy">Local-first password manager.</p>
                     </div>
                   </div>
-                  <div class="mono-line">pear://tywsat...mtzo</div>
+                  <div class="mono-line">Native v3 package required</div>
                 </article>
                 <article class="app-card">
                   <div class="app-row">
@@ -1261,7 +1261,7 @@
                       <p class="card-copy">Community chat over peers.</p>
                     </div>
                   </div>
-                  <div class="mono-line">pear://wmir47...mouy</div>
+                  <div class="mono-line">Native v3 package required</div>
                 </article>
               </div>
             </div>
@@ -1322,7 +1322,7 @@
                 <article class="setting-row">
                   <div>
                     <div class="row-title">Keet app bundle</div>
-                    <div class="row-sub">pear://oeeoz3w6...zpo</div>
+                    <div class="row-sub">Legacy native record · package required</div>
                   </div>
                   <span class="badge">app</span>
                 </article>
@@ -1432,11 +1432,11 @@
       const address = document.querySelector('.address input')
       const title = document.querySelector('.browser-tab.active .tab-title')
       const addresses = {
-        browse: 'pear://explore',
+        browse: 'hyper://explore',
         apps: 'hyperbee://pearbrowser-network/apps',
-        sites: 'pear://sites',
-        library: 'pear://library',
-        settings: 'pear://settings'
+        sites: 'hyper://sites',
+        library: 'hyper://library',
+        settings: 'hyper://settings'
       }
       const titles = {
         browse: 'PearBrowser Home',
@@ -1451,7 +1451,7 @@
           const view = button.dataset.view
           buttons.forEach((item) => item.classList.toggle('active', item === button))
           panels.forEach((panel) => panel.classList.toggle('active', panel.dataset.panel === view))
-          if (address) address.value = addresses[view] || 'pear://explore'
+          if (address) address.value = addresses[view] || 'hyper://explore'
           if (title) title.textContent = titles[view] || 'PearBrowser'
         })
       })
