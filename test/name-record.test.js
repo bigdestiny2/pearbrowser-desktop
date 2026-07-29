@@ -11,34 +11,22 @@ test('encode → decode round-trips', () => {
   assert.deepEqual(decodeNameRecord(buf), { name: 'keet', driveKey: KEY, seq: 3, link: null, target: KEY })
 })
 
-test('decode: valid launch links are normalized and unsafe links are dropped when a key remains', () => {
+test('decode: executable links are dropped when a drive key remains', () => {
   const withLink = encodeNameRecord({ name: 'keet', driveKey: KEY, seq: 1, link: 'PEAR://abc' })
-  assert.deepEqual(decodeNameRecord(withLink), {
-    name: 'keet',
-    driveKey: KEY,
-    seq: 1,
-    link: 'pear://abc',
-    target: 'pear://abc'
-  })
+  assert.deepEqual(decodeNameRecord(withLink), { name: 'keet', driveKey: KEY, seq: 1, link: null, target: KEY })
   // an unsafe link is ignored (→ key-only), not trusted
   const bad = Buffer.from(JSON.stringify({ v: 1, n: 'keet', k: KEY, s: 1, l: 'https://evil.example' }))
   assert.deepEqual(decodeNameRecord(bad), { name: 'keet', driveKey: KEY, seq: 1, link: null, target: KEY })
 })
 
-test('encode → decode accepts link-only app targets', () => {
-  const pear = decodeNameRecord(encodeNameRecord({ name: 'keet', target: 'pear://abc', seq: 1 }))
-  assert.equal(pear.driveKey, null)
-  assert.equal(pear.link, 'pear://abc')
-  assert.equal(pear.target, 'pear://abc')
-
+test('encode → decode accepts link-only Hyper targets', () => {
   const hyper = decodeNameRecord(encodeNameRecord({ name: 'site', target: `hyper://${KEY}/app`, seq: 2 }))
   assert.equal(hyper.driveKey, KEY)
   assert.equal(hyper.link, `hyper://${KEY}/app`)
   assert.equal(hyper.target, `hyper://${KEY}/app`)
 
-  const file = decodeNameRecord(encodeNameRecord({ name: 'local', target: 'file:///tmp/app', seq: 3 }))
-  assert.equal(file.driveKey, null)
-  assert.equal(file.link, 'file:///tmp/app')
+  assert.throws(() => encodeNameRecord({ name: 'legacy', target: 'pear://abc', seq: 3 }), /target must/)
+  assert.throws(() => encodeNameRecord({ name: 'local', target: 'file:///tmp/app', seq: 3 }), /target must/)
 })
 
 test('decode: rejects wrong version', () => {
@@ -66,7 +54,7 @@ test('encodeNameRecord validates inputs', () => {
 
 test('NAME_BINDING_SCHEMA mirrors the catalogue schema contract', () => {
   assert.deepEqual(NAME_BINDING_SCHEMA.properties.verification.enum, ['unverified', 'relay-listed', 'author-signed'])
-  assert.equal(NAME_BINDING_SCHEMA.properties.link.pattern, '^(?:hyper|pear|file)://.+')
+  assert.equal(NAME_BINDING_SCHEMA.properties.link.pattern, '^hyper://.+')
   assert.deepEqual(NAME_BINDING_SCHEMA.anyOf, [{ required: ['driveKey'] }, { required: ['link'] }])
   assert.ok(NAME_BINDING_SCHEMA.required.includes('binderPubkey'))
   assert.ok(NAME_BINDING_SCHEMA.required.includes('bindingSig'))

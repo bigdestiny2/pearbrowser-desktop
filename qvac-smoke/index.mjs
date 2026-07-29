@@ -5,7 +5,7 @@ import { createLazyQvacService } from '../backend/ai/qvac-host.mjs'
 
 if (!globalThis.process) globalThis.process = bareProcess
 
-const origin = 'pear://pearbrowser-qvac-native-smoke'
+const origin = 'p2p-local://pearbrowser-qvac-native-smoke'
 const prompt = process.argv.slice(2).join(' ') || 'Reply with exactly: QVAC native smoke passed.'
 const smokeHome = process.env.QVAC_SMOKE_HOME || path.join(os.tmpdir(), 'pearbrowser-qvac-native-smoke')
 const localModelPath = process.env.QVAC_SMOKE_MODEL_PATH
@@ -35,14 +35,14 @@ async function shutdown (code) {
   if (shuttingDown) return
   shuttingDown = true
   try { await service.close() } catch (err) { console.error('[qvac-smoke] cleanup failed:', err?.message || err) }
-  if (globalThis.Pear?.exit) Pear.exit(code)
-  else process.exit(code)
+  process.exit(code)
 }
 
-if (globalThis.Pear?.teardown) Pear.teardown(() => shutdown(0))
+process.once('SIGINT', () => { void shutdown(0) })
+process.once('SIGTERM', () => { void shutdown(0) })
 
 try {
-  console.log(`[qvac-smoke] runtime=Pear/Bare model=${modelAlias} device=${device}`)
+  console.log(`[qvac-smoke] runtime=Bare worker model=${modelAlias} device=${device}`)
   if (localModelPath) console.log(`[qvac-smoke] model-path=${localModelPath}`)
   console.log(`[qvac-smoke] storage=${smokeHome}`)
   if (!localModelPath) console.log('[qvac-smoke] first run downloads about 386 MB; later runs use QVAC cache')

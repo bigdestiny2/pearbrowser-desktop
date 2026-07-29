@@ -1,5 +1,8 @@
 # Deep Audit: Catalogue, Search, Naming, and Nostr Bridge
 
+> Historical audit record. Any legacy remote app references document the state
+> observed in June 2026 and are not current browser behavior or launch advice.
+
 Date: 2026-06-21
 
 This pass reviewed the four discovery surfaces that have to agree with each other:

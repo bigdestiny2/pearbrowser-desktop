@@ -6,7 +6,7 @@
 
 ## 1. Purpose
 
-PearBrowser is a peer-to-peer browser that can host Pear apps. It decides — **purely from catalogue/app metadata, never from runtime probing** — whether your app renders **inline in a browser tab** or opens in **its own OS window**. This standard tells a Pear app author exactly what to do **at release time** so their app is *maximally PearBrowser-compatible*: ideally runs inline in a tab on **both desktop and mobile**, declares itself honestly to the catalogue, degrades gracefully when capabilities are absent, respects the browser's permission/consent and layout model, and — where inline hosting is impossible — releases for the best window/launcher experience and declares that truthfully.
+PearBrowser is a peer-to-peer browser that hosts browsable Hyper content. It decides — **purely from catalogue/app metadata, never from runtime probing** — whether content opens in a browser tab or is a legacy native record requiring a publisher-provided verified package. This standard tells an app author how to release static content that runs inline on **both desktop and mobile**, declares delivery state honestly, degrades gracefully when capabilities are absent, and respects the browser's permission/consent and layout model. PearBrowser does not execute native app code from a catalogue.
 
 ### TL;DR for app authors
 
@@ -85,13 +85,12 @@ PearBrowser apps fall into three deployable shapes. The single number that matte
 
 - **PB-TYPEMODEL-17 (SHOULD, both).** Serve **all your own bytes** from your own Hyperdrive (static) or worker (hypersite). PearBrowser proxies static drives unchanged and runs hypersite workers as separate processes; it does not bundle/ingest foreign app code. (Exception: on the `hyper://` ad-hoc hosting path the proxy *does* inject `window.pear.*` shims — but never your dependencies or your own bytes.)
 
-> **NOT CURRENTLY ENFORCED (aspirational / PROPOSED) — app lifecycle & launcher management.** The following describe behavior **not present** in current code (no `CMD_QUIT_PEAR_APP`, `CMD_FOCUS_PEAR_APP`, `launchedPearApps` registry, `EVT_PEAR_APP_EXITED`, launcher card, "Open in tab"/`openInTab()`, `kind:'pear'` tab, or `Pear.View` embedding spike exist). `CMD_LAUNCH_PEAR_LINK` is **fire-and-forget**: it spawns via pear-run, captures no pid, and cannot terminate or focus the app.
-> - *(PROPOSED)* A standalone app should be externally terminable (exit on pipe-destroy/SIGTERM, no detached children) so a future launcher can manage it.
-> - *(PROPOSED)* A standalone app should let window close/crash propagate so a future launcher card can flip to "stopped".
-> - *(PROPOSED)* A `pear://` standalone could expose a launcher-card "Open in tab" handle.
-> - *(PROPOSED)* Workflows must not depend on launcher-tab persistence across restart.
->
-> Authors: design your app to **exit cleanly on process termination and keep all session state inside the app**, which satisfies these proposals if/when they land, but do not rely on PearBrowser managing your window today.
+> **Native-delivery boundary.** PearBrowser is not a native-app launcher. A
+> catalogue entry for a legacy native app must carry an opaque migration ID and
+> `nativeDelivery.status:'migration-required'`; it cannot expose executable
+> code, an app-worker address, or an “open in window” action. Publishers must
+> ship a verified signed package with their own lifecycle, update, and recovery
+> experience outside the browser process.
 
 ### Anti-patterns
 
@@ -346,9 +345,9 @@ Targeting the Pear Runtime global; top-of-script `await window.pear.X` with no g
 - **PB-SECURITYSTORAGEUI-13 (MUST — origin clause is desktop-only).** Keep drive keys as bare 64-hex; keep paths free of `..`/NUL (→ 400). **Correction:** "non-loopback origins are 403'd" is **desktop-only** — mobile deliberately allows canonical `http(s)` origins through and defers to token/Origin checks. The traversal/hex-key rules apply on both.
 - **PB-SECURITYSTORAGEUI-14 (SHOULD, both).** Keep any single bridge **sync-append** operation under 100KB (enforced on `/api/sync/append`); a separate ~1MB total request-body cap also applies. Chunk/stream larger work.
 - **PB-SECURITYSTORAGEUI-15 (SHOULD, both).** Keep any single published file under **10MB** (enforced at write/publish). Reconcile with the 5MB cache/stream threshold (PB-STATICHYPERDRIVE-17): files 5–10MB publish but are never cached and re-fetched every load — prefer <5MB for frequently-loaded assets.
-- **PB-SECURITYSTORAGEUI-17 (MUST, both).** A window-class/standalone app MUST declare itself honestly (window/launcher-only) rather than claiming tab-compatibility. Desktop launches it in its own window via `CMD_LAUNCH_PEAR_LINK`; mobile cannot load it (blank tab / WorkerError).
-- **PB-SECURITYSTORAGEUI-18 (SHOULD, both).** For a window-class app, design for single-instance: open your store once, close cleanly on teardown, and if a second launch finds the store locked, focus/hand off rather than crash. Don't leave a rocksdb LOCK held or a fixed port bound. *(The host survives this only by hard-exiting to release LOCKs and scanning to the next free port — don't depend on that.)*
-- **PB-SECURITYSTORAGEUI-19 (MAY, both).** Prefer the tab-able shapes (pear-request worker or static Hyperdrive) over a full-GUI window app when functionality allows, to be inline-in-tab on both platforms.
+- **PB-SECURITYSTORAGEUI-17 (MUST, both).** A legacy native app MUST declare `nativeDelivery.status:'migration-required'` until its publisher has a verified package; it must not claim browser-tab compatibility or present a remote executable target.
+- **PB-SECURITYSTORAGEUI-18 (SHOULD, both).** A native package should be single-instance safe and own its lifecycle/recovery outside PearBrowser; the browser neither starts nor manages it.
+- **PB-SECURITYSTORAGEUI-19 (MAY, both).** Prefer static Hyperdrive content when functionality allows, so it remains inline-in-tab on both platforms.
 
 > **PB-SECURITYSTORAGEUI-16 (mobile-only; partly PROPOSED).** If your app needs the bridge on a real HTTPS origin (not loopback/`hyper://`), it is injected only when the user has **trusted** that origin in allowlist mode; prompt the user to trust and degrade read-only until granted. Use a stable canonical origin (scheme+host+non-default port) so the trust entry persists/replicates. **Scope correction:** the trusted-origins store exists **only on mobile** (no equivalent on desktop), and the `{allowed:false, reason:'untrusted'}` withholding is implemented at the session-mint layer (described in code comments) rather than in the trust-store module itself. Treat HTTPS-origin trust as a **mobile** concern.
 
@@ -582,33 +581,49 @@ Run before release. Grouped by tier; **Tier A items are the universal floor**.
 
 ---
 
-## 13. Release Build, Pinning & Verification Runbook (NORMATIVE — added v0.2)
+## 13. V3 release, availability, and catalogue runbook (NORMATIVE)
 
-§9/§10.3 specify *what* a publishable record and a seeded drive look like. This section is the *how* — the end-to-end process to take an app from source to a clean, durably-pinned, catalogue-listed release. Every rule here was validated against the live system 2026-06.
+Pear v2 staging, `pear run`, `pear release`, and a persistent executable-key
+seeder are retired workflows. They are not compatibility paths for a v3
+application.
 
-### 13.1 Build a clean, lean release key (desktop standalone / `pear://` apps)
+### 13.1 Build and package
 
-- **PB-RELEASE-1 (MUST).** Publish from a **fresh, history-free key**, not your day-to-day dev/stage key. A Hyperdrive is an **append-only log**: each `pear stage` re-imports the changed bundle forever, so re-staging one key throughout development accumulates **gigabytes of dead history** (observed: a "lightweight" app's dev key at 35 GB blob-core / 480k metadata ops while the live checkout was a fraction of that — dominated by native prebuilds for all platforms re-imported every stage). Relays will **not** fully replicate a history-heavy drive (PB-RELEASE-9) and cold reads must traverse a huge metadata core. Mint a clean key with **`pear touch`** and stage to it once. (`pear init` is removed; current `pear stage` requires a real `pear://` link — bare channel names like `dev` are rejected.)
-- **PB-RELEASE-2 (SHOULD).** Stage **lean**: `pear stage --compact <link> .` tree-shakes to the runtime-reachable file set (dropping devDependencies, build tools, tests, and non-target native prebuilds) — typically a 5–40× size reduction (observed: 2.7 GB→172 MB, 35 GB→413 MB).
-- **PB-RELEASE-3 (MUST, when using --compact).** Declare **every** entry in `package.json` `pear.stage.entrypoints` — including workers spawned **by string path** (e.g. a renderer doing `applink + '/app/backend/worker.js'`). `--compact` follows only the static import graph from declared entrypoints; an undeclared worker (and its entire dependency subtree) is silently dropped → the app boots to `MODULE_NOT_FOUND`.
-- **PB-RELEASE-4 (MUST, when using --compact).** `--compact` follows `<script src>` but **not** `<link href>` CSS or other HTML-referenced assets. After the compact stage, **patch** them back: `pear stage --only /<ui-or-dist-dir> <link> .`. Then confirm every asset `index.html` references actually exists in the drive.
-- **PB-RELEASE-5 (MUST).** **Test-run the staged key** (`pear run <link>`) before releasing — boot logs catch dropped modules, missing assets, and dependency-version bugs that staging alone won't. Keep `hyperbee`/`hypercore`/`corestore`/`autobase` **majors aligned**: hyperbee ≥2.22 requires hypercore 11; a hyperbee 2.27 + hypercore 10 mismatch crashes on boot at `Hyperbee._open` (`setInflightRange` of undefined).
-- **PB-RELEASE-6 (SHOULD).** A production app whose key is the **auto-update identity** users already hold (a `pear release` link) **cannot** be re-keyed to shed history without breaking their upgrade path — keep the stable key and lean on a persistent seeder (PB-RELEASE-9). Re-keying is only for apps not yet distributed.
+- **PB-RELEASE-1 (MUST).** Build a native package for each declared desktop
+  target. The package must have a signed AppRelease v2 (`apr_`) record,
+  immutable digest, platform target, and rollback metadata before it is shown
+  as installable.
+- **PB-RELEASE-2 (MUST).** The embedded runtime starts only a bundled local
+  entrypoint (for example `PearRuntime.run(require.resolve('./worker.js'))`).
+  A catalogue link, release identifier, or remote path must never become a
+  runtime argument. A v3 catalogue install uses `pear-install`; after OS
+  installation, that application configures and starts its own runtime.
+- **PB-RELEASE-3 (MUST).** Test clean install, upgrade, data preservation,
+  rollback, and local worker boot/shutdown for every supported target. A
+  checksum alone is insufficient release evidence.
 
-### 13.2 Pin durably on HiveRelay
+### 13.2 HiveRelay availability
 
-- **PB-RELEASE-7 (MUST).** Apps **are** durably HiveRelay-pinnable by **anyone** — not just the author — via a **read-only foreign-key seed**: `HiveRelayClient.seed()` signs the seed-request with the seeder's own swarm keypair, not the drive author's. Tool: `scripts/pin-app-on-hiverelay.js <pear://|hex> --name <x> --maxStorage <MB> --hold <s>` opens the drive, pre-fetches the current checkout (becoming a complete source), broadcasts an archive-tier seed-request, and holds online while relays replicate. The tool MUST refuse a zero-file current checkout before broadcasting a seed request; a reachable but empty checkout is availability failure, not a successful pin.
-- **PB-RELEASE-8 (MUST).** Size `maxStorage` to the **current checkout + metadata**, never the (bloated) blob-core byteLength — relays reject multi-GB reservations (256–600 MB requests accepted; 11 GB/140 GB rejected). Relay **acceptances arrive *after*** the initial broadcast window, so confirm over a `--hold` of a few minutes, not the first 15 s.
-- **PB-RELEASE-9 (MUST, large / history-heavy production keys).** If relays accept the pin but each replicates only **part** of a heavy drive (no complete per-relay copy → a fresh peer gets 0 useful peers), the publisher MUST run a **persistent seeder** so the app stays reachable 24/7. Template: `scripts/durable-seed.sh` driven by a launchd/systemd agent with run-at-login + restart-on-crash (`~/Library/LaunchAgents/com.pearbrowser.seed.plist`). For true off-machine durability, run it on an always-on host.
+- **PB-RELEASE-4 (MUST).** HiveRelay may pin non-executable content, catalogue,
+  and evidence Hyperdrives. Pass an explicit 64-hex key to
+  `scripts/pin-self-on-hiverelay.js`; a pin proves availability only and never
+  approves a package.
+- **PB-RELEASE-5 (MUST).** Prove a pinned content drive from a fresh peer with
+  every local source stopped: `scripts/verify-app-full.js --key <hex>` or
+  `scripts/verify-pin.js --key <hex> --hiverelay`. Zero peers, zero files, or a
+  missing blob is availability failure.
 
-### 13.3 Verify from a fresh peer, then register
+### 13.3 Catalogue actions
 
-- **PB-RELEASE-10 (MUST).** **Prove durability from a fresh peer with every local source stopped** before listing: `scripts/verify-app-full.js --key <hex>` opens the drive from a clean corestore, joins the swarm, and fetches a spread of blobs across the whole tree. 0 peers, 0 file entries, or any missing blob = not durable — do not list it. (This is the teeth behind PB-AVAIL-2's cold-node check.)
-- **PB-RELEASE-11 (MUST).** Only after a passing fresh-peer verify, publish the catalogue row (§9) and, for the unified Hyperbee, regenerate + re-publish with the persistent `--storage` (PB-DISCOVERYCATALOGUE-18). Cards surface the app's **size and live peer count** from `CMD_GET_DRIVE_INFO`; a row whose drive shows **0 peers** reads as dead.
-
-### 13.4 What a complete catalogue submission carries
-
-Beyond the `APPS_SCHEMA`-required `name`+`type`+(`driveKey`|`link`), a quality submission SHOULD carry `description`, `author`, `version`, `categories`, and an in-drive **icon** (PB-ICON-1). A unified-bee catalogue (not the strict sheets `APPS_SCHEMA`) MAY additionally carry `source`, `license`, `platforms`, and `homepage`. The desktop **My Catalog** publisher form collects these; **`type` is the single most common omission** (PB-DISCOVERYCATALOGUE-2/3) — set it explicitly to `standalone` (own window) or `hypersite` (inline tab).
+- **PB-RELEASE-6 (MUST).** A `hyper://` entry is browsable content. A compatible
+  Pear v3 build is represented separately as
+  `nativeDelivery:{status:'available',kind:'pear-v3',installLink:'pear://…'}`
+  and is an explicit, host-confirmed native install action. A top-level
+  `pear://` or `file://` entry is legacy discovery metadata and must display
+  **migration required**, never an install or run action.
+- **PB-RELEASE-7 (MUST).** Catalogue records include name, description, author,
+  version, categories, provenance, platform targets, and the delivery kind.
+  They must not rely on inference from an executable URL.
 
 ---
 
@@ -625,7 +640,7 @@ Beyond the `APPS_SCHEMA`-required `name`+`type`+(`driveKey`|`link`), a quality s
 7. **`canonicalJSON` spec** for signed-catalog Ed25519 verification (key ordering, number/unicode normalization) so independent relays interoperate.
 8. **Cross-platform `type` unification** — either teach mobile to honor `type`, or formally bless "mobile does not route on `type`; static drive is the mobile app floor" as the contract.
 9. **Inter-app deep-link contract** — a canonical way to construct a shareable link to a hypersite/static app at a specific resource (beyond `hyper://` + ad-hoc hash params).
-10. **Standalone app management** — a real launcher (terminate/focus/relaunch, exit propagation, launcher-card persistence). `CMD_LAUNCH_PEAR_LINK` is fire-and-forget today; the §3 lifecycle block is entirely aspirational.
+10. **Verified native-delivery contract** — package signing, update, recovery, and platform lifecycle are publisher responsibilities outside the browser; catalogue metadata must link only to the documented package channel, never executable bytes.
 
 **Unresolved/underspecified (need a normative ruling once code stabilizes):**
 

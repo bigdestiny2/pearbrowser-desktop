@@ -40,16 +40,16 @@ test("resolves a trusted contact's claim (owner == contact root)", async () => {
   assert.equal(res.candidates, 1)
 })
 
-test("resolves a trusted contact's link-only app claim", async () => {
+test("resolves a trusted contact's hyper link claim", async () => {
   const root = K('aa')
-  const link = 'pear://contact-app'
+  const link = `hyper://${K('ee')}/contact-app`
   const r = stubResolver({
     contacts: [{ pubkey: root, displayName: 'Bob', verifiedAt: 1, bindingKey: K('bb') }],
     bindings: { [root]: { nameRegKey: K('cc') } },
     registries: { [K('cc')]: fakeReg({ app: { target: link, owner: root, version: 1 } }) },
   })
   const res = await r.resolve('app')
-  assert.equal(res.key, null)
+  assert.equal(res.key, K('ee'))
   assert.equal(res.link, link)
   assert.equal(res.source, 'Bob')
 })

@@ -1265,113 +1265,36 @@ rpc.handle(C.CMD_RESET_APP, async () => {
 
   // Give the reply a tick to reach the UI before we exit.
   setTimeout(() => {
-    try { if (typeof Pear !== 'undefined' && Pear.exit) Pear.exit() } catch {}
     try { Bare.exit?.() } catch {}
   }, 200)
 
   return report
 })
 
-rpc.handle(C.CMD_LAUNCH_PEAR_LINK, async (data) => {
-  const link = String(data?.link || '').trim()
-  if (!link) throw new Error('pear:// link required')
-  if (!/^pear:\/\/.+/.test(link) && !/^file:\/\/.+/.test(link)) {
-    throw new Error('Only pear:// and file:// links can be launched')
+rpc.handle(C.CMD_LEGACY_APP_MIGRATION, async (data) => {
+  const legacyMigrationId = String(data?.legacyMigrationId || '').trim().toLowerCase()
+  if (!/^[13-9a-km-uw-z]{52}$/.test(legacyMigrationId)) {
+    throw new Error('legacy migration id must be a 52-character z-base-32 identifier')
   }
-  const keyHex = (data?.keyHex && /^[0-9a-f]{64}$/i.test(data.keyHex)) ? data.keyHex.toLowerCase() : null
-  // Fire-and-forget: pre-download the app bundle with progress (so the UI can
-  // render an inline bar driven by EVT_LAUNCH_PROGRESS instead of looking
-  // hung), then spawn it. Return immediately.
-  launchPearLinkWithProgress(link, keyHex).catch((err) => {
-    try { rpc.event(C.EVT_LAUNCH_PROGRESS, { key: keyHex, link, phase: 'error', error: (err && err.message) || 'launch failed' }) } catch {}
-  })
-  return { started: true, link }
+  return {
+    action: 'legacy-migration-required',
+    legacyMigrationId,
+    message: 'This legacy Pear app cannot be launched by PearBrowser v3. Install a verified native v3 package when its publisher provides one.'
+  }
 })
 
-// Spawn a pear:// / file:// app in its own window. For pear:// links with a
-// known drive key, first pull the bundle into OUR store (which also seeds the
-// swarm, so the subsequent pear-run launch pulls from localhost and the window
-// appears promptly) while streaming download progress to the UI.
-async function launchPearLinkWithProgress (link, keyHex) {
-  const emit = (p) => { try { rpc.event(C.EVT_LAUNCH_PROGRESS, { key: keyHex, link, ...p }) } catch {} }
-  const spawn = () => {
-    const run = require('pear-run')
-    const pipe = run(link)
-    try { pipe.on('data', () => {}) } catch {}
-    try { pipe.on('crash', (info) => console.error('[pear-run] child crashed:', info)) } catch {}
-    try { pipe.on('error', (err) => console.error('[pear-run] child error:', err && err.message)) } catch {}
-  }
-
-  // No drive to pre-fetch (file:// or unknown key) → straight to launch.
-  if (!link.startsWith('pear://') || !keyHex) {
-    emit({ phase: 'launching', percent: 100, downloaded: 0, total: 0, peers: 0 })
-    spawn()
-    emit({ phase: 'done', percent: 100 })
-    return
-  }
-
-  emit({ phase: 'connecting', downloaded: 0, total: 0, percent: 0, peers: 0 })
-
-  let drive
-  try {
-    drive = await getDriveForProxy(keyHex)
-    registerHiveRelayDrive(keyHex, drive)
-    await updateDriveBestEffort(drive)
-  } catch {
-    // Can't open it ourselves — let pear-run handle the download itself.
-    emit({ phase: 'launching', percent: 100 })
-    spawn()
-    emit({ phase: 'done', percent: 100 })
-    return
-  }
-
-  let blobs = null
-  try { blobs = await drive.getBlobs() } catch {}
-  let downloaded = 0
-  const onDl = (_i, byteLength) => { downloaded += (byteLength || 0) }
-  try { drive.core && drive.core.on('download', onDl) } catch {}
-  try { blobs && blobs.core && blobs.core.on('download', onDl) } catch {}
-  const totalNow = () => (drive.core && drive.core.byteLength || 0) + (blobs && blobs.core && blobs.core.byteLength || 0)
-  const peersNow = () => { try { return getDrivePeerSnapshot(drive).peerCount } catch { return 0 } }
-
-  let dl = null
-  try { dl = drive.download('/') } catch {}
-
-  let finished = false
-  const timer = setInterval(() => {
-    if (finished) return
-    const total = totalNow()
-    const peers = peersNow()
-    const percent = total > 0 ? Math.min(99, Math.round((downloaded / total) * 100)) : 0
-    emit({ phase: peers > 0 ? 'downloading' : 'connecting', downloaded, total, percent, peers })
-  }, 300)
-
-  try {
-    const waitDl = (dl && typeof dl.done === 'function') ? dl.done()
-      : (dl && typeof dl.then === 'function') ? dl
-      : Promise.resolve()
-    await Promise.race([waitDl, new Promise((r) => setTimeout(r, 10 * 60 * 1000))])
-  } catch {}
-
-  finished = true
-  clearInterval(timer)
-  try { drive.core && drive.core.removeListener('download', onDl) } catch {}
-  try { blobs && blobs.core && blobs.core.removeListener('download', onDl) } catch {}
-
-  const total = totalNow()
-  emit({ phase: 'launching', downloaded: total, total, percent: 100, peers: peersNow() })
-  spawn()
-  emit({ phase: 'done', downloaded: total, total, percent: 100, peers: peersNow() })
-}
-
-// Run a pear-request app HEADLESS, streamed into a browser tab (the in-tab
-// sibling of CMD_LAUNCH_PEAR_LINK's window spawn). Returns the wrapper URL the
-// UI opens in a Browse tab. 'demo' runs the in-process demo router.
+// Runs only the in-process demo router headlessly in a browser tab. Remote
+// application workers require a signed native v3 package and are never fetched
+// or executed from a browser catalog.
 rpc.handle(C.CMD_RUN_APP_IN_TAB, async (data) => {
   const link = String(data?.link || 'demo').trim()
   if (!tabRuntime) throw new Error('tab runtime is not available')
-  if (link !== 'demo' && !/^pear:\/\/.+/.test(link) && !/^file:\/\/.+/.test(link)) {
-    throw new Error('Only the demo, or pear:// / file:// apps, can run in a tab')
+  if (link !== 'demo') {
+    return {
+      action: 'legacy-migration-required',
+      link,
+      message: 'This legacy app needs a verified v3 package before it can run in a PearBrowser tab.'
+    }
   }
   const res = tabRuntime.open(link)
   console.log('[tab-runtime] run-in-tab')
@@ -2027,7 +1950,7 @@ rpc.handle(C.CMD_CONTACTS_MY_INVITE, async () => {
   const bindingKey = b4a.toString(id.getAppKeypair('lighthouse-binding').publicKey, 'hex')
   // sign name AND binding key, so neither can be swapped in transit (add() binds both)
   const sig = id.sign(`pear.contact:${rootHex}:${displayName}:${bindingKey}`).signature
-  const url = `pear://contact?pk=${rootHex}&name=${encodeURIComponent(displayName)}&sig=${sig}&bk=${bindingKey}`
+  const url = `p2p-contact://invite?pk=${rootHex}&name=${encodeURIComponent(displayName)}&sig=${sig}&bk=${bindingKey}`
   return { url, pubkey: rootHex, displayName, bindingKey }
 })
 
@@ -3313,7 +3236,7 @@ async function boot () {
   // bridges each tab's WebSocket to a pear-request worker pipe. Best-effort —
   // a failure here just means the in-tab path is unavailable, not a boot block.
   try {
-    tabRuntime = new TabRuntime({ pearRun: (link) => require('pear-run')(link) })
+    tabRuntime = new TabRuntime()
     await tabRuntime.start()
   } catch (err) {
     console.error('[tab-runtime] failed to start:', err && err.message)
@@ -3496,7 +3419,8 @@ async function cleanupOldData () {
 Bare.on('suspend', () => IPC.unref())
 Bare.on('resume', () => IPC.ref())
 
-// When main closes the IPC pipe (window closed, Pear.teardown), run
+// When the native host closes the IPC pipe (for example, when its window
+// closes), run
 // a clean shutdown so Corestore flushes, Hyperswarm closes, and
 // rocksdb releases its LOCK. Without this the next launch trips on
 // EADDRINUSE or a stale LOCK.

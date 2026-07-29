@@ -44,9 +44,7 @@ try {
       data?.message || '(no message)',
       data?.code ? '\nCode: ' + data.code : '',
       data?.stack ? '\n\n' + data.stack : '',
-      '\n\nLikely fix: clear the local app cache and relaunch:',
-      '\n  rm -rf "$HOME/Library/Application Support/pear/by-dkey/00f61fc1473b9d01a199833fc96e76d5e99000c603ec697bc842f8d978538f4d"',
-      '\n  pear run pear://tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty'
+      '\n\nLikely fix: reinstall the verified signed native package, then relaunch it.'
     ].join('')
     root.render(html`<${Splash}
       message="Backend failed to boot"

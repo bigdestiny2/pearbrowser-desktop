@@ -2,14 +2,12 @@
  * Pear adapter for PearBrowser backend.
  *
  * The original backend assumes a mobile BareKit host that injects
- * `BareKit.IPC` (a duplex stream) before the backend loads. In the
- * desktop Pear fork we run the backend in the renderer for M1 and
- * fake that injection with an in-memory pipe pair.
+ * `BareKit.IPC` (a duplex stream) before the backend loads. For the
+ * desktop worker adapter we use an in-memory pipe pair.
  *
- * Migration to a real 2-process layout (pear-run + pear-pipe) only
- * has to swap the two "sides" returned here for a real `bare-pipe`
- * duplex; the backend code above and the UI RPC client below don't
- * change.
+ * The v3 Electron host owns the worker lifecycle. If it later provides a
+ * native duplex, only the two sides returned here need replacing; the backend
+ * and renderer RPC contracts remain unchanged.
  */
 
 const EventEmitter = require('bare-events')

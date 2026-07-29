@@ -16,7 +16,7 @@ import { RpcClient } from './rpc-client.js'
 const RPC_PORT_BASE = 9876
 const RPC_PORT_COUNT = 5
 const RPC_PROBE_ID = 900000001
-const RPC_SESSION_TOKEN = String(globalThis.Pear?.config?.startId || '')
+const RPC_SESSION_TOKEN = String(globalThis.pearbrowserRuntime?.sessionToken || '')
 
 // Must match backend/constants.js exactly (numeric wire codes). This is a
 // COMPLETE mirror — every command/event the renderer can send or receive.
@@ -53,7 +53,7 @@ const C = {
   CMD_DELETE_SITE: 25,
   CMD_LOAD_TEMPLATE: 26,
   CMD_GET_SITE_BLOCKS: 27,
-  CMD_LAUNCH_PEAR_LINK: 28,
+  CMD_LEGACY_APP_MIGRATION: 28,
   CMD_RUN_APP_IN_TAB: 201,
   CMD_RESET_APP: 29,
   CMD_CLEAR_CACHE: 30,
@@ -315,7 +315,7 @@ function diagnosticUrlFor (url) {
 }
 
 function rendererUrlFor (port) {
-  if (!RPC_SESSION_TOKEN) throw new Error('Pear runtime RPC session token is unavailable')
+  if (!RPC_SESSION_TOKEN) throw new Error('PearBrowser v3 runtime session token is unavailable')
   return `ws://127.0.0.1:${port}/?session=${encodeURIComponent(RPC_SESSION_TOKEN)}`
 }
 
@@ -415,19 +415,16 @@ export async function startBackend () {
     // running or crashed before binding the WS server. Since v0.4.4
     // the main process catches synchronous boot failures and still
     // binds the WS — emitting a `backend-boot-failed` event — so a
-    // pure port-scan failure means the main process itself didn't
-    // start (pear-electron handoff issue, NOT a backend crash).
+    // pure port-scan failure means the native host itself did not start, not
+    // that the backend reported a structured boot failure.
     //
-    // Most common cause: stale partial download from a prior release.
-    // Pear's cache may have a half-written app bundle. Clear and retry:
-    //   rm -rf "$HOME/Library/Application Support/pear/by-dkey/00f61fc1473b9d01a199833fc96e76d5e99000c603ec697bc842f8d978538f4d"
-    //   pear run pear://tco5...
+    // Most common cause: an interrupted local installation. Do not revive a
+    // remote app reference; reinstall the verified signed native package.
     throw new Error(
       `Could not reach backend on any port ${RPC_PORT_BASE}-${RPC_PORT_BASE + RPC_PORT_COUNT - 1} ` +
       `(${errors.join('; ')}). The Bare main process appears not to be running. ` +
-      `Most likely cause: stale partial download. Clear the cache at ` +
-      `~/Library/Application Support/pear/by-dkey/00f61fc1473b… and relaunch ` +
-      `pear run pear://tco5...`
+      `Most likely cause: an interrupted installation. Reinstall the verified ` +
+      `signed native package and relaunch it.`
     )
   }
   const rpc = new RpcClient(pipe)

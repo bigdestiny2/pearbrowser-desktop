@@ -6,28 +6,25 @@
  * accept seed requests). This script does the real round-trip:
  *
  *   1. Boot a fresh Corestore + Hyperswarm with NO local cache
- *   2. Open the Hyperdrive at the production key
+ *   2. Open an explicitly supplied Hyperdrive key
  *   3. Join the swarm and wait for any peer (relay or otherwise)
  *   4. Read the drive's current length and a sample blob
  *   5. Compare against an expected length, if provided
  *   6. Exit 0 on success, non-zero on failure
  *
- * If this exits 0, the drive is genuinely available from a third
- * party — meaning a fresh `pear run pear://tco5...` from anywhere
- * will find content.
+ * If this exits 0, the drive is genuinely available from a third party. It is
+ * content availability evidence only; it does not approve a native package or
+ * execute a legacy Pear v2 project.
  *
  * Usage:
- *   # Verify the pearbrowser-desktop production drive is reachable
- *   node scripts/verify-pin.js
+ *   # Verify an explicit content/evidence drive is reachable
+ *   node scripts/verify-pin.js --key <64-hex>
  *
- *   # Verify a specific length is being served (use after release)
- *   node scripts/verify-pin.js --expect 4914
+ *   # Verify a specific length is being served
+ *   node scripts/verify-pin.js --key <64-hex> --expect 4914
  *
  *   # Also ask upgraded HiveRelay relays for signed proveSeeded evidence
- *   node scripts/verify-pin.js --expect 4914 --hiverelay
- *
- *   # Verify any other key
- *   node scripts/verify-pin.js --key <64-hex>
+ *   node scripts/verify-pin.js --key <64-hex> --expect 4914 --hiverelay
  *
  * Designed to be called from CI / release-prod.sh — fails loudly if
  * the release hasn't propagated to the network within the timeout.
@@ -42,18 +39,17 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
-const DEFAULT_KEY = '8b21b577993ce0fc45036ca9011861e25f0a49fd4d68bcc655fb2690a03cb062'
 const PEER_TIMEOUT_MS = 30_000
 const LENGTH_TIMEOUT_MS = 20_000
 const BLOB_SAMPLE_TIMEOUT_MS = 20_000
 const BLOB_LIST_TIMEOUT_MS = 20_000
 const HIVERELAY_TIMEOUT_MS = 45_000
 const HIVERELAY_PROOF_TIMEOUT_MS = 30_000
-const DEFAULT_SAMPLE_PATHS = ['/index.html', '/package.json', '/pear.json']
+const DEFAULT_SAMPLE_PATHS = ['/index.html', '/package.json', '/electron/main.cjs']
 
 function parseArgs (argv) {
   const args = {
-    key: DEFAULT_KEY,
+    key: null,
     expect: null,
     hiverelay: false,
     requireHiverelay: false,
@@ -78,7 +74,7 @@ function parseArgs (argv) {
 
 const args = parseArgs(process.argv.slice(2))
 if (!/^[0-9a-f]{64}$/i.test(args.key)) {
-  console.error('error: key must be 64-char hex')
+  console.error('error: --key <64-char-hex-hyperdrive-key> is required')
   process.exit(2)
 }
 
@@ -308,7 +304,7 @@ async function main () {
     console.log('   relay:     ' + hiveRelayProof.mode + ' via ' + hiveRelayProof.relay.slice(0, 12) + '…')
   }
   console.log()
-  console.log('   `pear run pear://...` from anywhere will find this drive.')
+  console.log('   A Hyperdrive reader can retrieve this content from available peers.')
 
   await cleanup(0)
 }

@@ -1,5 +1,3 @@
-import Runtime from 'pear-electron'
-import Bridge from 'pear-bridge'
 import ws from 'bare-ws'
 import http from 'bare-http1'
 import fs from 'bare-fs'
@@ -26,9 +24,13 @@ const { authorizeRpcWebSocket, DiagnosticRpcRouter } = rpcWebSocketAuth
 const RPC_PORT_BASE = 9876
 const RPC_PORT_COUNT = 5
 const RENDERER_RECONNECT_GRACE_MS = 8000
-const rpcSessionToken = String(Pear.config?.startId || '')
+// Pear v3 executes this file as a worker owned by `pear-runtime`. The Electron
+// host supplies the two values below before loading us; unlike the retired
+// `pear run` host, no ambient global `Pear` API is involved.
+const runtimeContext = globalThis.PearBrowserRuntime || {}
+const rpcSessionToken = String(runtimeContext.sessionToken || '')
 const diagnosticToken = String(env.PEARBROWSER_RPC_DIAGNOSTIC_TOKEN || '')
-if (!rpcSessionToken) throw new Error('Pear runtime did not provide a per-launch RPC session token')
+if (!rpcSessionToken) throw new Error('PearBrowser v3 host did not provide a per-launch RPC session token')
 
 // --- 1. Boot the backend in this Bare main process. ---
 //
@@ -41,8 +43,8 @@ if (!rpcSessionToken) throw new Error('Pear runtime did not provide a per-launch
 // Instead: catch the boot failure, still bind the WS server, and when
 // the renderer connects send it a structured `backend-boot-failed`
 // event so the UI can render a clear error. The dev logs also get a
-// loud banner that makes the cause obvious in `pear run --dev` output.
-const storagePath = (Pear.config?.storage || '.') + '/pearbrowser-storage'
+// loud banner that makes the cause obvious in the native host logs.
+const storagePath = String(runtimeContext.storagePath || '.') + '/pearbrowser-storage'
 const ollamaModels = env.PEARBROWSER_QVAC_OLLAMA === '0'
   ? {}
   : discoverOllamaQwenModels({
@@ -92,10 +94,9 @@ try {
   console.error('display this error instead of "could not reach backend".')
   console.error('')
   console.error('Common causes:')
-  console.error('  • Staged drive is incomplete on disk (relay partial pin)')
-  console.error('     Try:  rm -rf "$HOME/Library/Application Support/pear/by-dkey/00f61fc1473b9d01a199833fc96e76d5e99000c603ec697bc842f8d978538f4d"')
-  console.error('           then re-run `pear run pear://tco5...`')
-  console.error('  • Pear runtime too old — update with: pear run pear://runtime')
+  console.error('  • The local PearBrowser installation is incomplete')
+  console.error('     Reinstall the verified native package, then relaunch it.')
+  console.error('  • The embedded Pear OTA runtime is incompatible with this OS/arch')
   console.error('  • Missing native addon for this OS/arch')
   console.error('========================================================')
   console.error('')
@@ -294,16 +295,10 @@ if (!rpcServer) {
   throw new Error(`No free WS RPC port in ${RPC_PORT_BASE}-${RPC_PORT_BASE + RPC_PORT_COUNT - 1}`)
 }
 
-// --- 3. Open the UI window via pear-electron. ---
-const runtime = new Runtime()
-const bridge = new Bridge()
-await bridge.ready()
-const pipe = runtime.start({ bridge })
-
-// Real shutdown: when the renderer pipe ends, close + force-exit.
-// Pear.teardown alone didn't fire consistently; hooking every
-// exit signal so lingering processes stop blocking subsequent
-// launches with EADDRINUSE / rocksdb LOCK conflicts.
+// --- 3. Worker lifecycle. ---
+// The Electron host owns windows and terminates this Pear OTA worker when the
+// last window exits. Keep the backend cleanup local to the worker rather than
+// relying on Pear v2's renderer pipe or global teardown hooks.
 let tornDown = false
 function teardown (reason) {
   if (tornDown) return
@@ -314,33 +309,16 @@ function teardown (reason) {
   try { rpcServer?.close() } catch {}
   try { client?.end?.() } catch {}
   try { backendPipe.end?.() } catch {}
-  try { pipe?.end?.() } catch {}
   // Hard-exit fast: hypercore/corestore can hold the event loop
   // open for tens of seconds on graceful close, and that's what
   // was letting zombies survive. 300ms is plenty for our WS
   // client to flush.
   setTimeout(() => {
     console.log('[teardown] hard-exit')
-    try { Pear.exit?.(0) } catch {}
     try { Bare.exit?.(0) } catch {}
     try { process?.exit?.(0) } catch {}
   }, 300)
 }
-// pear-electron's runtime.start() return shape varies across versions:
-// older builds returned a duplex pipe (.on/.end), newer ones return a
-// plain object. Detect what we got and only attach listeners that exist.
-// The WS-renderer-close path is our reliable shutdown trigger; these
-// pipe listeners are belt-and-braces so any other exit signal still
-// teardowns. Wrap each in try/catch so an unsupported runtime never
-// throws an [uncaughtException] at boot.
-if (pipe && typeof pipe.on === 'function') {
-  try { pipe.on('close', () => teardown('pipe close')) } catch {}
-  try { pipe.on('end', () => teardown('pipe end')) } catch {}
-  try { pipe.on('error', (err) => teardown('pipe error: ' + (err && err.message))) } catch {}
-} else {
-  console.log('[boot] runtime.start() returned non-emitter pipe; using WS-close + Pear.teardown only')
-}
-try { Pear.teardown(() => teardown('Pear.teardown')) } catch {}
 try { Bare.on?.('beforeExit', () => teardown('beforeExit')) } catch {}
 try { Bare.on?.('exit', () => teardown('exit')) } catch {}
 try { process?.on?.('SIGTERM', () => teardown('SIGTERM')) } catch {}

@@ -3,7 +3,6 @@
 import { existsSync, readFileSync, statSync } from 'node:fs'
 
 const rootPackage = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
-const pearConfig = JSON.parse(readFileSync(new URL('../pear.json', import.meta.url), 'utf8'))
 const applingPackage = JSON.parse(readFileSync(new URL('../appling/package.json', import.meta.url), 'utf8'))
 const applingLock = JSON.parse(readFileSync(new URL('../appling/package-lock.json', import.meta.url), 'utf8'))
 const cmake = readFileSync(new URL('../appling/CMakeLists.txt', import.meta.url), 'utf8')
@@ -12,7 +11,7 @@ const addPearApplingBlock = cmake.match(/add_pear_appling\([\s\S]*?\n\)/)?.[0] |
 const errors = []
 const args = parseArgs(process.argv.slice(2))
 const expectedVersion = versionFromTag(args.tag) || rootPackage.version
-const productionLink = pearConfig.links?.production || ''
+const productionLink = rootPackage.upgrade || ''
 const productionId = productionLink.replace(/^pear:\/\//, '')
 
 const cmakeId = matchValue(/\bID\s+"([^"]+)"/, 'ID', addPearApplingBlock)
@@ -25,7 +24,7 @@ if (rootPackage.version !== expectedVersion) {
   errors.push(`package.json version ${rootPackage.version} does not match release tag ${args.tag}`)
 }
 if (!/^pear:\/\/[a-z0-9]{52}$/i.test(productionLink)) {
-  errors.push(`pear.json links.production is not a pear:// link: ${productionLink || '(missing)'}`)
+  errors.push(`package.json upgrade is not a Pear OTA channel: ${productionLink || '(missing)'}`)
 }
 if (cmakeId !== productionId) {
   errors.push(`appling CMake ID ${cmakeId || '(missing)'} does not match production key ${productionId || '(missing)'}`)

@@ -201,7 +201,7 @@ test('a full signed invite URL (pk+name+sig+bk) round-trips through parse + add,
     const { pubHex, sk } = newKeypair()
     const bindingKey = 'ef'.repeat(32)
     const sig = signMsg(inviteMessageBk(pubHex, 'Carol', bindingKey), sk)
-    const url = `pear://contact?pk=${pubHex}&name=${encodeURIComponent('Carol')}&sig=${sig}&bk=${bindingKey}`
+    const url = `p2p-contact://invite?pk=${pubHex}&name=${encodeURIComponent('Carol')}&sig=${sig}&bk=${bindingKey}`
     const parsed = Contacts.parseInviteURL(url)
     assert.equal(parsed.bindingKey, bindingKey)
     const rec = await contacts.add(parsed)
@@ -216,7 +216,7 @@ test('a signed invite with a tampered name is rejected at add (invite integrity)
     const { pubHex, sk } = newKeypair()
     const bindingKey = 'ef'.repeat(32)
     const sig = signMsg(inviteMessageBk(pubHex, 'Carol', bindingKey), sk) // signed for "Carol"
-    const url = `pear://contact?pk=${pubHex}&name=Mallory&sig=${sig}&bk=${bindingKey}`
+    const url = `p2p-contact://invite?pk=${pubHex}&name=Mallory&sig=${sig}&bk=${bindingKey}`
     await assert.rejects(() => contacts.add(Contacts.parseInviteURL(url)), /signature invalid/)
   })
 })
@@ -227,7 +227,7 @@ test('a swapped binding key is rejected at add (bk is bound by the signature)', 
     const realBk = 'ef'.repeat(32)
     const attackerBk = 'ab'.repeat(32)
     const sig = signMsg(inviteMessageBk(pubHex, 'Carol', realBk), sk) // signed for realBk
-    const url = `pear://contact?pk=${pubHex}&name=Carol&sig=${sig}&bk=${attackerBk}` // bk swapped
+    const url = `p2p-contact://invite?pk=${pubHex}&name=Carol&sig=${sig}&bk=${attackerBk}` // bk swapped
     await assert.rejects(() => contacts.add(Contacts.parseInviteURL(url)), /signature invalid/)
   })
 })

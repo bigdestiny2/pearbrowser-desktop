@@ -1,5 +1,8 @@
 # PearBrowser Desktop v0.7.1
 
+> Historical release notes. References to legacy remote Pear artifacts are not
+> installation or launch instructions for the current product.
+
 PearBrowser `v0.7.1` is a corrective transport release for the desktop browser.
 It fixes the cluster of `RPC timeout` messages that could appear in Settings
 after a renderer reload or live-update handoff even though the identity,

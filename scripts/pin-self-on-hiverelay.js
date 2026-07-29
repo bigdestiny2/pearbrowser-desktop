@@ -1,7 +1,6 @@
 /**
- * Pin a drive (the pearbrowser-desktop bundle itself, the welcome
- * landing-page drive, or any other 64-hex Hyperdrive / Pear project
- * key) onto the HiveRelay backbone.
+ * Pin a non-executable Hyperdrive artifact (a site, catalogue, or release
+ * evidence drive) onto the HiveRelay backbone.
  *
  * Why: drives normally rely on whoever published them being online to
  * serve. Pinning on HiveRelay means a multi-region always-on backbone
@@ -21,14 +20,11 @@
  * Idempotent. Re-running just refreshes the seed window.
  *
  * Usage:
- *   # Pin the pearbrowser-desktop production channel (default)
- *   node scripts/pin-self-on-hiverelay.js
- *
- *   # Pin any other drive — pass the 64-hex project/drive key:
+ *   # Pin an explicit v3-compatible content or evidence drive:
  *   node scripts/pin-self-on-hiverelay.js <64-hex-key> [friendly-name]
  *
- *   # Or via env var (legacy):
- *   PEAR_PROJECT_KEY=<64-hex> node scripts/pin-self-on-hiverelay.js
+ *   # Or via env var:
+ *   HYPERDRIVE_KEY=<64-hex> node scripts/pin-self-on-hiverelay.js
  */
 
 // The client SDK lives in the dedicated `p2p-hiverelay-client` package. Keep
@@ -39,25 +35,21 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-// pearbrowser-desktop production channel project key. Get this from
-// `pear info production .` — first line of output.
-const DEFAULT_PROJECT_KEY = '8b21b577993ce0fc45036ca9011861e25f0a49fd4d68bcc655fb2690a03cb062'
-const projectKey = process.env.PEAR_PROJECT_KEY || DEFAULT_PROJECT_KEY
+const projectKey = process.argv[2] || process.env.HYPERDRIVE_KEY
+if (!/^[0-9a-f]{64}$/i.test(projectKey || '')) {
+  console.error('usage: node scripts/pin-self-on-hiverelay.js <64-hex-hyperdrive-key>')
+  console.error('       HYPERDRIVE_KEY=<64-hex> node scripts/pin-self-on-hiverelay.js')
+  console.error('A legacy pear:// executable key is not a valid v3 release target.')
+  process.exit(2)
+}
 
 // Seed parameters. Generous defaults — this is critical infra, not
 // throwaway content.
 //
-// IMPORTANT: maxStorage must exceed the drive's full size (metadata +
-// blobs). pear-electron's `pre` step bundles the Chromium runtime into
-// the staged drive, so even a small app produces a ~400 MB drive.
-// `pear info pear://<key>` shows `byteLength` + `blobs.byteLength` —
-// keep maxStorage at least 2× that with headroom for future growth.
-// Today (v0.4.3): metadata 1.2 MB + blobs 364 MB ≈ 365 MB. We cap at
-// 1 GB to absorb the next few releases without revisiting this.
-//
-// If maxStorage is too low, relays accept the seed request, replicate
-// metadata fully, and then stall mid-blob-download — producing exactly
-// the symptom of `pear run pear://...` hanging silently for end users.
+// IMPORTANT: maxStorage must exceed the artifact's full size (metadata +
+// blobs). Keep the cap at least 2x the observed size with future headroom.
+// A partial seed is availability evidence failure; it is never a substitute
+// for native package signature verification or a local install.
 const SEED_OPTS = {
   replicas: 5,                       // ask 5 relays to pin
   ttlDays: 365,                      // pin for a year
@@ -66,8 +58,8 @@ const SEED_OPTS = {
 }
 
 async function main () {
-  console.log('🍐 Pinning pearbrowser-desktop on HiveRelay')
-  console.log('   project key:', projectKey)
+  console.log('🍐 Pinning a v3 content/evidence drive on HiveRelay')
+  console.log('   drive key:', projectKey)
   console.log('   replicas:', SEED_OPTS.replicas, '· ttl:', SEED_OPTS.ttlDays, 'days')
   console.log()
 
@@ -179,9 +171,9 @@ async function main () {
       console.log('   · ' + id + '…')
     }
     console.log()
-    console.log('   PearBrowser desktop is now pinned on the HiveRelay backbone.')
-    console.log('   Anyone running `pear run pear://tco5k7h38uo…` will pull bytes')
-    console.log('   from these relays whenever the publisher machine is offline.')
+    console.log('   The requested drive is now pinned on the HiveRelay backbone.')
+    console.log('   This proves availability only; native packages still require')
+    console.log('   their signed AppRelease v2 record and local verification.')
   }
 
   // Linger 2s so any in-flight messages flush before exit.

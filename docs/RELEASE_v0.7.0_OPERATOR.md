@@ -1,5 +1,8 @@
 # PearBrowser Desktop v0.7.0 — release runbook
 
+> Historical v2 operator record. It must not be reused to publish, launch, or
+> recover current builds; use the verified native-package v3 release workflow.
+
 Date: 2026-07-16
 Tag: `v0.7.0`
 Repo: `bigdestiny2/pearbrowser-desktop`

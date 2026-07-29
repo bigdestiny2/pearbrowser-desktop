@@ -1,5 +1,8 @@
 # Manual Release Smoke - 2026-06-23
 
+> Historical v2 smoke checklist. Do not execute its legacy app references;
+> current release proof uses verified native packages and the v3 release gates.
+
 Purpose: final human-run smoke checklist for the PearBrowser community release.
 Automated tests and fresh-peer verifiers prove most protocol and catalogue
 behavior, but these checks cover UI flows, third-party trust decisions, and

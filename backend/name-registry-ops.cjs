@@ -31,8 +31,7 @@ const HEX64 = /^[0-9a-f]{64}$/i
 const HEX128 = /^[0-9a-f]{128}$/i
 const MAX_NAME = 253
 const MAX_TARGET = 300
-const TARGET_ERROR = 'target must be a Hyperdrive key or pear://, hyper://, file:// link'
-const SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i
+const TARGET_ERROR = 'target must be a Hyperdrive key or hyper:// link'
 // Total serialized op cap (defense-in-depth vs a writer bloating the log — a real
 // op is ~700 bytes: name≤253 + normalized/skeleton + a few 64-hex fields). Mirrors
 // MAX_OP_BYTES in browser-state-ops / autobee-catalog-ops. Oversized → dropped on apply.
@@ -42,10 +41,9 @@ function normalizeTarget (target) {
   const s = String(target || '').trim()
   if (!s) return null
 
-  // Links remain link-shaped so hyper:// paths, pear:// launch targets, and
-  // file:// targets survive intact. For hyper:// links, also surface the drive
-  // key when the shared catalogue normalizer can safely derive it.
-  if (SCHEME_RE.test(s)) {
+  // Only browsable Hyper content can be named. Native application delivery is
+  // explicitly outside the registry and requires a verified local package.
+  if (/^hyper:\/\//i.test(s)) {
     const link = normalizeCatalogLink(s)
     if (!link || link.length > MAX_TARGET) return null
     const key = driveKeyFromHyperLink(link) || null

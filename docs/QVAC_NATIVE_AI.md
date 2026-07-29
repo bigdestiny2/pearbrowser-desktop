@@ -136,8 +136,9 @@ QVAC_SMOKE_MODEL_PATH=/absolute/path/to/model.gguf \
 This local path is host configuration for the diagnostic fixture only. An app
 still chooses a browser-approved alias and can never submit a path to QVAC.
 
-`npm run smoke:qvac:pear` exercises the same terminal fixture through the Pear
-launcher when the local Pear runtime is fully installed.
+`npm run smoke:qvac:pear` is retained as a compatibility alias for the native
+Bare-worker smoke. PearBrowser's Electron host owns the embedded Pear OTA
+worker; it never uses a CLI launcher for this check.
 
 ## Current proof
 

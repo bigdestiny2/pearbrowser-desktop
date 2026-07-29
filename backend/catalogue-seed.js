@@ -18,7 +18,9 @@ module.exports = {
       "name": "PearBrowser Desktop",
       "type": "standalone",
       "driveKey": "03f0060a35451cfb6b68ad1dda1b8474ebb43fd9100071ccf7d67679a83ebb4f",
-      "link": "pear://tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty",
+      "link": "hyper://03f0060a35451cfb6b68ad1dda1b8474ebb43fd9100071ccf7d67679a83ebb4f/",
+      "legacyMigrationId": "tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty",
+      "nativeDeliveryStatus": "migration-required",
       "author": "bigdestiny2",
       "categories": [
         "browser",
@@ -90,7 +92,9 @@ module.exports = {
       "name": "Pear Dealroom",
       "type": "standalone",
       "driveKey": "0724aabf2ad6394983f91c6b24ebd417cb3d25addcf29c98eb246c512dc77f90",
-      "link": "pear://7octu5dimjye8rn68raehwuetk5mttzt4zxh6yjw1eqktn49bq7o",
+      "link": "hyper://0724aabf2ad6394983f91c6b24ebd417cb3d25addcf29c98eb246c512dc77f90/",
+      "legacyMigrationId": "7octu5dimjye8rn68raehwuetk5mttzt4zxh6yjw1eqktn49bq7o",
+      "nativeDeliveryStatus": "migration-required",
       "iconData": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMwYTBkMTIiLz48cGF0aCBkPSJNMzIgMTJsMTYgNnYxMWMwIDExLTcgMTgtMTYgMjMtOS01LTE2LTEyLTE2LTIzVjE4eiIgZmlsbD0iIzU4YTZmZiIvPjxnIHN0cm9rZT0iIzBhMGQxMiIgc3Ryb2tlLXdpZHRoPSIyLjYiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCI+PHBhdGggZD0iTTI2IDI4aDEyTTI2IDM0aDEyTTI2IDQwaDgiLz48L2c+PC9zdmc+",
       "author": "bigdestiny2",
       "categories": [
@@ -108,7 +112,9 @@ module.exports = {
       "name": "Paste",
       "type": "standalone",
       "driveKey": "25a06bb3dddec8138e9eda606cc4a11e9ebbe47815fd5d22064b30cff752bb5b",
-      "link": "pear://qnax5k8ojtod51ci9qwkrawdof1hx5w3a7gqbueoqnzzq9dw5hfo",
+      "link": "hyper://25a06bb3dddec8138e9eda606cc4a11e9ebbe47815fd5d22064b30cff752bb5b/",
+      "legacyMigrationId": "qnax5k8ojtod51ci9qwkrawdof1hx5w3a7gqbueoqnzzq9dw5hfo",
+      "nativeDeliveryStatus": "migration-required",
       "iconData": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMwYTBkMTIiLz48cmVjdCB4PSIxOCIgeT0iMTYiIHdpZHRoPSIyOCIgaGVpZ2h0PSIzNCIgcng9IjQiIGZpbGw9IiM0YWRlODAiLz48cmVjdCB4PSIyNSIgeT0iMTEiIHdpZHRoPSIxNCIgaGVpZ2h0PSI5IiByeD0iMi41IiBmaWxsPSIjNGFkZTgwIiBzdHJva2U9IiMwYTBkMTIiIHN0cm9rZS13aWR0aD0iMiIvPjxnIHN0cm9rZT0iIzBhMGQxMiIgc3Ryb2tlLXdpZHRoPSIyLjYiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCI+PHBhdGggZD0iTTI0IDMwaDE2TTI0IDM2aDE2TTI0IDQyaDEwIi8+PC9nPjwvc3ZnPg==",
       "author": "bigdestiny2",
       "categories": [
@@ -125,9 +131,10 @@ module.exports = {
     },
     {
       "name": "PearPoker",
-      "type": "standalone",
+      "type": "hypersite",
       "driveKey": "850929ab0b7f1eb927dd69c6ae057af0a43fba1ced4c33e0df2e7cff0ee92268",
-      "link": "pear://owr1ukamxhxm1j67p8dkhbm46n1d9qoh7igd8ag9f36x6dzjrjwy",
+      "legacyMigrationId": "owr1ukamxhxm1j67p8dkhbm46n1d9qoh7igd8ag9f36x6dzjrjwy",
+      "nativeDeliveryStatus": "migration-required",
       "iconData": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMwYTBkMTIiLz48cGF0aCBkPSJNMzIgMTNDMjEgMjUgMTUgMjkgMTUgMzdhOCA4IDAgMCAwIDE0IDVjLTEgNC0zIDYtNiA5aDE4Yy0zLTMtNS01LTYtOWE4IDggMCAwIDAgMTQtNWMwLTgtNi0xMi0xNy0yNHoiIGZpbGw9IiMzZmI5NTAiLz48L3N2Zz4=",
       "author": "bigdestiny2",
       "categories": [
@@ -142,8 +149,9 @@ module.exports = {
     },
     {
       "name": "Keet",
-      "type": "standalone",
-      "link": "pear://oeeoz3w6fjjt7bym3ndpa6hhicm8f8naxyk11z4iypeoupn6jzpo",
+      "type": "hypersite",
+      "legacyMigrationId": "oeeoz3w6fjjt7bym3ndpa6hhicm8f8naxyk11z4iypeoupn6jzpo",
+      "nativeDeliveryStatus": "migration-required",
       "iconData": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMwYTBkMTIiLz48cGF0aCBkPSJNMTQgMjFhNiA2IDAgMCAxIDYtNmgyNGE2IDYgMCAwIDEgNiA2djE1YTYgNiAwIDAgMS02IDZIMjlsLTEwIDh2LThhNiA2IDAgMCAxLTUtNnoiIGZpbGw9IiNmYmJmMjQiLz48ZyBmaWxsPSIjMGEwZDEyIj48Y2lyY2xlIGN4PSIyNSIgY3k9IjI4LjUiIHI9IjIuNiIvPjxjaXJjbGUgY3g9IjMzIiBjeT0iMjguNSIgcj0iMi42Ii8+PGNpcmNsZSBjeD0iNDEiIGN5PSIyOC41IiByPSIyLjYiLz48L2c+PC9zdmc+",
       "author": "Holepunch",
       "categories": [
@@ -157,8 +165,9 @@ module.exports = {
     },
     {
       "name": "PearPass",
-      "type": "standalone",
-      "link": "pear://tywsat7gz8m65ejx4zjn3773pbdc4j8m66tukis8dgzekraymtzo",
+      "type": "hypersite",
+      "legacyMigrationId": "tywsat7gz8m65ejx4zjn3773pbdc4j8m66tukis8dgzekraymtzo",
+      "nativeDeliveryStatus": "migration-required",
       "iconData": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMwYTBkMTIiLz48cmVjdCB4PSIxOCIgeT0iMzAiIHdpZHRoPSIyOCIgaGVpZ2h0PSIyMiIgcng9IjQiIGZpbGw9IiMzZmI5NTAiLz48cGF0aCBkPSJNMjQgMzB2LTZhOCA4IDAgMCAxIDE2IDB2NiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjM2ZiOTUwIiBzdHJva2Utd2lkdGg9IjQiLz48Y2lyY2xlIGN4PSIzMiIgY3k9IjM5IiByPSIzLjQiIGZpbGw9IiMwYTBkMTIiLz48cmVjdCB4PSIzMC41IiB5PSIzOSIgd2lkdGg9IjMiIGhlaWdodD0iOCIgcng9IjEuNSIgZmlsbD0iIzBhMGQxMiIvPjwvc3ZnPg==",
       "author": "Tether",
       "categories": [
@@ -173,7 +182,8 @@ module.exports = {
     {
       "name": "Peercord",
       "type": "standalone",
-      "link": "pear://wmir47w7mai3b1skj66mx7fzso6k6o91kipaney7gtt69npimouy",
+      "legacyMigrationId": "wmir47w7mai3b1skj66mx7fzso6k6o91kipaney7gtt69npimouy",
+      "nativeDeliveryStatus": "migration-required",
       "author": "Mastercodeon",
       "categories": [
         "chat",
@@ -204,8 +214,9 @@ module.exports = {
     },
     {
       "name": "anonGPT",
-      "type": "standalone",
-      "link": "pear://rpzh3fsgg38kfir9nmae7x3o8ubofddzzixr5js4mxd6a6drb6wo",
+      "type": "hypersite",
+      "legacyMigrationId": "rpzh3fsgg38kfir9nmae7x3o8ubofddzzixr5js4mxd6a6drb6wo",
+      "nativeDeliveryStatus": "migration-required",
       "iconData": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMwYTBkMTIiLz48cGF0aCBkPSJNMTQgMjFhNiA2IDAgMCAxIDYtNmgyNGE2IDYgMCAwIDEgNiA2djE1YTYgNiAwIDAgMS02IDZIMjlsLTEwIDh2LThhNiA2IDAgMCAxLTUtNnoiIGZpbGw9IiMyMmQzZWUiLz48cGF0aCBkPSJNMzMgMjBsMi4zIDUuNyA1LjcgMi4zLTUuNyAyLjMtMi4zIDUuNy0yLjMtNS43LTUuNy0yLjMgNS43LTIuM3oiIGZpbGw9IiMwYTBkMTIiLz48L3N2Zz4=",
       "author": "anonGPT",
       "categories": [
@@ -218,9 +229,10 @@ module.exports = {
     },
     {
       "name": "Pear POS",
-      "type": "standalone",
+      "type": "hypersite",
       "driveKey": "b776f15f3e6860ecf6d923853c295350e55b708772e67d7124899b96aecfcd43",
-      "link": "pear://myhk94sz7tokqcs58173xe7359c6nd9enwrm7z7xrthy9xsr7ehy",
+      "legacyMigrationId": "myhk94sz7tokqcs58173xe7359c6nd9enwrm7z7xrthy9xsr7ehy",
+      "nativeDeliveryStatus": "migration-required",
       "author": "Pear POS",
       "categories": [
         "business",
@@ -233,9 +245,10 @@ module.exports = {
     },
     {
       "name": "Pear Tickets",
-      "type": "standalone",
+      "type": "hypersite",
       "driveKey": "ec309f516da659718746fe10ded086e2b6d157718c3e3651f86e07a4df34210a",
-      "link": "pear://gsnmwo4kdopbcif44wgt9k1ysmwwn1erh4o1358kis1ebtwbpouy",
+      "legacyMigrationId": "gsnmwo4kdopbcif44wgt9k1ysmwwn1erh4o1358kis1ebtwbpouy",
+      "nativeDeliveryStatus": "migration-required",
       "iconData": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMwYTBkMTIiLz48cGF0aCBkPSJNMTQgMjRoMzZhNCA0IDAgMCAxIDQgNHYxLjVhMy4yIDMuMiAwIDAgMCAwIDYuNFYzN2E0IDQgMCAwIDEtNCA0SDE0YTQgNCAwIDAgMS00LTR2LTEuMWEzLjIgMy4yIDAgMCAwIDAtNi40VjI4YTQgNCAwIDAgMSA0LTR6IiBmaWxsPSIjZmJiZjI0Ii8+PHBhdGggZD0iTTQwIDI2djEzIiBzdHJva2U9IiMwYTBkMTIiIHN0cm9rZS13aWR0aD0iMi40IiBzdHJva2UtZGFzaGFycmF5PSIzIDMiLz48L3N2Zz4=",
       "author": "bigdestiny2",
       "categories": [

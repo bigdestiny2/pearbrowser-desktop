@@ -4,7 +4,6 @@ import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
-const pearConfig = JSON.parse(readFileSync(new URL('../pear.json', import.meta.url), 'utf8'))
 
 const SUPPORTED_TARGETS = [
   { label: 'macOS Apple Silicon', platform: 'macos', arch: 'arm64' },
@@ -327,7 +326,6 @@ function printInstallGuide (report) {
   const windows = report.targets.find((target) => target.platform === 'windows')
   const linux = report.targets.find((target) => target.platform === 'linux')
   const macosExample = macos[0]
-  const fallback = pearConfig?.links?.production || ''
 
   console.log('# Install Native Packages')
   console.log()
@@ -431,20 +429,6 @@ function printInstallGuide (report) {
   console.log(`chmod +x ${linux?.asset?.name || 'PearBrowser-<version>-linux-x64.AppImage'}`)
   console.log(`./${linux?.asset?.name || 'PearBrowser-<version>-linux-x64.AppImage'}`)
   console.log('```')
-  if (fallback) {
-    console.log()
-    console.log('## Recovery Fallback')
-    console.log()
-    console.log('The stable Pear link remains available for testers and recovery while native packaging matures:')
-    console.log()
-    console.log('```sh')
-    console.log('npm i -g pear')
-    console.log('pear')
-    console.log(`pear run ${fallback}`)
-    console.log('```')
-    console.log()
-    console.log('This fallback is not the preferred public install path because `pear run` is deprecated in Pear runtime `v2.4.0`, but it is still useful when diagnosing a native package issue.')
-  }
 }
 
 function unique (values) {

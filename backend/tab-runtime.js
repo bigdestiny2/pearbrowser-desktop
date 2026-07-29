@@ -19,10 +19,9 @@
  *     pear-request client (everything else streams from the worker)
  *   - a bare-ws server bridges each tab's WebSocket <-> the worker's duplex pipe
  *
- * Worker source is pluggable:
- *   - 'demo'        -> an in-process pear-request router (rock-solid, no network)
- *   - pear://|file:// -> a real headless worker via pear-run (the production path,
- *                        the in-tab sibling of CMD_LAUNCH_PEAR_LINK's window spawn)
+ * The only worker is the in-process demo router. This runtime is a local UI
+ * proof surface, never an application loader: native app code must arrive in a
+ * verified package outside the browser process.
  */
 const http = require('bare-http1')
 const ws = require('bare-ws')
@@ -74,7 +73,6 @@ function listenWsServer (port, onSocket) {
 
 class TabRuntime {
   constructor (opts = {}) {
-    this.pearRun = opts.pearRun || null // (link) => duplex worker pipe
     this.tabs = new Map()               // tabId -> { source }
     this._seq = 0
     this.httpPort = 0
@@ -108,29 +106,14 @@ class TabRuntime {
     // A stable demo tab so the headless run-in-tab path is reachable without UI
     // (GET /tab/demo) — the in-process router; the "Headless Demo" card opens it.
     this.tabs.set('demo', { source: 'demo' })
-    // Optional: a stable tab that exercises the real pear-run worker path
-    // (/tab/demo-worker). Enabled by PEAR_TAB_DEMO_WORKER, or by the local demo
-    // app at ~/Desktop/pear-request-demo if present (statSync-guarded, so it's a
-    // no-op on machines without it). This is the same app the "Headless Demo
-    // (worker)" card launches.
-    const env = (globalThis.Bare && Bare.env) || (globalThis.process && process.env) || {}
-    let demoWorker = env.PEAR_TAB_DEMO_WORKER || null
-    if (!demoWorker && env.HOME) {
-      const p = env.HOME + '/Desktop/pear-request-demo'
-      try { require('bare-fs').statSync(p); demoWorker = 'file://' + p } catch {}
-    }
-    if (demoWorker) {
-      this.tabs.set('demo-worker', { source: demoWorker })
-      console.log('[tab-runtime] demo-worker (pear-run) -> ' + demoWorker)
-    }
     console.log(`[tab-runtime] http :${this.httpPort}  ws :${this.wsPort}  (demo: /tab/demo)`)
     return { httpPort: this.httpPort, wsPort: this.wsPort }
   }
 
   // Register a tab and return the wrapper URL the UI should load in an iframe.
-  open (link) {
+  open (source = 'demo') {
+    if (source !== 'demo') throw new Error('Only the in-process demo is available in a browser tab')
     const tabId = 'tab' + (++this._seq)
-    const source = (!link || link === 'demo') ? 'demo' : String(link)
     const tab = { source, contextToken: this._newContextToken() }
     this.tabs.set(tabId, tab)
     return {
@@ -188,7 +171,7 @@ class TabRuntime {
         const tab = this.tabs.get(tabId)
         if (!tab) { try { sock.end() } catch {} ; return }
         try {
-          worker = tab.source === 'demo' ? this._spawnInProc(sock) : this._spawnWorker(tab.source, sock)
+          worker = this._spawnInProc(sock)
         } catch (err) {
           console.error('[tab-runtime] spawn failed:', err && err.message)
           try { sock.end() } catch {}
@@ -213,19 +196,6 @@ class TabRuntime {
     return {
       toWorker: (data) => { try { r.processMessage(data) } catch (e) { console.error('[tab-runtime] router:', e && e.message) } },
       close: () => {}
-    }
-  }
-
-  // Production: spawn the app as a real headless worker; bridge its pipe <-> WS.
-  _spawnWorker (link, sock) {
-    if (!this.pearRun) throw new Error('pear-run not available')
-    const pipe = this.pearRun(link)
-    pipe.on('data', (d) => { try { sock.write(d) } catch {} }) // worker -> browser
-    try { pipe.on('error', (e) => console.error('[tab-runtime] worker error:', e && e.message)) } catch {}
-    try { pipe.on('crash', (i) => console.error('[tab-runtime] worker crash:', i)) } catch {}
-    return {
-      toWorker: (data) => { try { pipe.write(data) } catch (e) { console.error('[tab-runtime] write:', e && e.message) } },
-      close: () => { try { pipe.end ? pipe.end() : pipe.destroy && pipe.destroy() } catch {} }
     }
   }
 

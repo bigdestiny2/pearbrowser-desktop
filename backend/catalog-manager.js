@@ -400,7 +400,8 @@ class CatalogManager {
     if (!manager.writable) throw new Error('You are not a writer on this catalog.')
     const driveKey = app && typeof app.driveKey === 'string' ? app.driveKey.trim() : ''
     const link = app && typeof app.link === 'string' ? app.link.trim() : ''
-    if (!driveKey && !link) throw new Error('App needs a driveKey or link.')
+    if (link && !/^hyper:\/\//i.test(link)) throw new Error('Catalog links must be browsable hyper:// content, never executable remote app links.')
+    if (!driveKey && !link) throw new Error('App needs a Hyperdrive key or hyper:// link.')
     await manager.upsertApp(app)  // ops layer whitelists/clamps + derives id
     const { data } = await this._refreshAutobee(keyHex)
     return this._formatAutobee(keyHex, manager, data)
@@ -624,8 +625,9 @@ class CatalogManager {
     const drive = await this._ensureMyCatalogDrive(keyHex)
     if (!drive.writable) throw new Error('This catalog is not editable on this device.')
     const entry = this._sanitizeCatalogEntry(app)
-    if (!entry.driveKey && !entry.link) throw new Error('App is missing a valid drive key or app link.')
-    entry.id = entry.id || entry.driveKey || entry.link
+    const nativeInstallLink = entry.nativeDelivery?.status === 'available' ? entry.nativeDelivery.installLink : ''
+    if (!entry.driveKey && !entry.link && !nativeInstallLink) throw new Error('App is missing browsable content or a Pear v3 native delivery link.')
+    entry.id = entry.id || entry.driveKey || entry.link || nativeInstallLink
 
     const data = await this._readMyCatalogData(drive)
     const idx = data.apps.findIndex((a) => a && a.id === entry.id)
@@ -663,7 +665,8 @@ class CatalogManager {
     const existing = data.apps[idx]
     const stableId = existing.id || appId
     const entry = this._sanitizeCatalogEntry({ ...existing, ...(patch || {}), id: stableId })
-    if (!entry.driveKey && !entry.link) throw new Error('App is missing a valid drive key or app link.')
+    const nativeInstallLink = entry.nativeDelivery?.status === 'available' ? entry.nativeDelivery.installLink : ''
+    if (!entry.driveKey && !entry.link && !nativeInstallLink) throw new Error('App is missing browsable content or a Pear v3 native delivery link.')
     entry.id = stableId
     data.apps[idx] = entry
 

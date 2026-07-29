@@ -21,7 +21,7 @@ const b4a = require('b4a')
 const { normalizeCatalogApp } = require('./catalog-safety.cjs')
 
 // The canonical `apps` schema (design §4.1). Created on a fresh room; carries
-// both driveKey (installable) and link (launch-only), plus the run-in-tab type.
+// browser-drive metadata and native migration state, plus the run-in-tab type.
 const APPS_SCHEMA = {
   type: 'object',
   properties: {
@@ -30,6 +30,12 @@ const APPS_SCHEMA = {
     description: { type: 'string', maxLength: 1000 },
     driveKey: { type: 'string', pattern: '^[0-9a-f]{64}$' },
     link: { type: 'string', maxLength: 300 },
+    legacyMigrationId: { type: 'string', pattern: '^[13-9a-km-uw-z]{52}$' },
+    nativeDeliveryStatus: { enum: ['migration-required', 'available'] },
+    nativeDeliveryKind: { enum: ['pear-v3'] },
+    nativeInstallLink: { type: 'string', pattern: '^pear://[13-9a-km-uw-z]{52}/?$' },
+    nativeProductName: { type: 'string', maxLength: 120 },
+    nativeTargets: { type: 'array', items: { type: 'string', maxLength: 40 }, maxItems: 12 },
     iconData: { type: 'string', maxLength: 20000 },
     type: { enum: ['standalone', 'hypersite'] },
     author: { type: 'string', maxLength: 200 },
@@ -43,7 +49,15 @@ const APPS_SCHEMA = {
     verification: { enum: ['unverified', 'relay-listed', 'author-signed'] }
   },
   required: ['name', 'type'],
-  anyOf: [{ required: ['driveKey'] }, { required: ['link'] }],
+  anyOf: [
+    { required: ['driveKey'] },
+    { required: ['link'] },
+    { required: ['legacyMigrationId'] },
+    {
+      properties: { nativeDeliveryStatus: { const: 'available' } },
+      required: ['nativeDeliveryStatus', 'nativeDeliveryKind', 'nativeInstallLink']
+    }
+  ],
   additionalProperties: false
 }
 
@@ -114,6 +128,16 @@ function rowToApp (row) {
     description: j.description,
     driveKey: j.driveKey || null,
     link: j.link || null,
+    legacyMigrationId: j.legacyMigrationId || null,
+    nativeDelivery: j.nativeDeliveryStatus
+      ? {
+          status: j.nativeDeliveryStatus,
+          kind: j.nativeDeliveryKind,
+          installLink: j.nativeInstallLink,
+          productName: j.nativeProductName,
+          targets: j.nativeTargets
+        }
+      : null,
     type: j.type || (j.link && !j.driveKey ? 'standalone' : undefined),
     author: j.author || null,
     homepage: j.homepage || null,

@@ -28,25 +28,22 @@ function slugify (s) {
 }
 
 /**
- * From a single user-supplied input (a pear:// link, a hyper:// link, or a bare
- * key) derive both the 64-hex content drive key (what gets seeded/pinned) and a
- * launchable link. `normalizeKey` is injected (index.js passes its
+ * From a single user-supplied Hyperdrive input (a hyper:// link or a bare key)
+ * derive the 64-hex content drive key (what gets seeded/pinned) and a
+ * browsable link. `normalizeKey` is injected (index.js passes its
  * normalizeDriveKey, which z32-decodes 52-char keys) so this stays pure.
  *
  * Returns { driveKey, link, kind } or { error }.
  */
 function deriveKeyAndLink (rawInput, normalizeKey = (x) => x) {
   const raw = String(rawInput == null ? '' : rawInput).trim()
-  if (!raw) return { error: 'A pear:// link or hyper:// / drive key is required.' }
+  if (!raw) return { error: 'A hyper:// link or drive key is required.' }
 
   let driveKey = ''
   let link = ''
   let kind = ''
-  if (/^pear:\/\//i.test(raw)) {
-    link = raw.replace(/\/+$/, '')
-    const token = link.replace(/^pear:\/\//i, '').split(/[/?#]/)[0]
-    driveKey = String(normalizeKey(token) || '').toLowerCase()
-    kind = 'pear'
+  if (/^pear:\/\//i.test(raw) || /^file:\/\//i.test(raw)) {
+    return { error: 'Remote executable app links are not accepted. Submit browsable hyper:// content; native apps use verified package delivery.' }
   } else {
     const token = raw.replace(/^hyper:\/\//i, '').split(/[/?#]/)[0]
     driveKey = String(normalizeKey(token) || '').toLowerCase()
@@ -55,7 +52,7 @@ function deriveKeyAndLink (rawInput, normalizeKey = (x) => x) {
   }
 
   if (!HEX64.test(driveKey)) {
-    return { error: 'Could not derive a 64-character drive key from "' + raw + '". Paste a pear:// link, a hyper:// link, or a 64-hex / z-base-32 key.' }
+    return { error: 'Could not derive a 64-character drive key from "' + raw + '". Paste a hyper:// link or a 64-hex / z-base-32 key.' }
   }
   return { driveKey, link, kind }
 }
@@ -97,14 +94,11 @@ function buildSubmissionManifest (input = {}, ctx = {}) {
     version: String(input.version || '1.0.0').slice(0, 40),
     author: String(input.author || '').slice(0, 160),
     categories,
-    type: derived.kind === 'pear' ? 'standalone' : 'hypersite',
+    type: 'hypersite',
     list: 'community',
     submittedBy: ctx.submittedBy || null,
     submittedAt: now
   }
-  // A pear:// app keeps its launchable pearLink alongside the generic link so
-  // the browser's launcher can route it without re-deriving.
-  if (derived.kind === 'pear') manifest.pearLink = derived.link
   // Inline icon (data: URI) is optional; cap it so a submission can't bloat the
   // manifest drive. ~200KB is generous for a 64x64 SVG/PNG data URI.
   if (typeof input.iconData === 'string' && input.iconData && input.iconData.length <= 200000) {

@@ -20,7 +20,6 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
 const require = createRequire(import.meta.url)
 const packageLock = JSON.parse(readFileSync(new URL('../package-lock.json', import.meta.url), 'utf8'))
-const pearConfig = JSON.parse(readFileSync(new URL('../pear.json', import.meta.url), 'utf8'))
 const catalogSource = JSON.parse(readFileSync(new URL('../catalog-source/pearbrowser-network.catalog.json', import.meta.url), 'utf8'))
 const { SEED_APPS } = require('../backend/catalogue-seed.js')
 const rootLicense = readFileSync(new URL('../LICENSE', import.meta.url), 'utf8')
@@ -270,7 +269,7 @@ test('Pear stage ignore excludes local release/operator scratch files', () => {
   assert.ok(ignored.includes('/test'))
 })
 
-test('PearBrowser catalogue release row stays in sync with package and public addresses', () => {
+test('PearBrowser catalogue row is a migration-required native record, not a remote launcher', () => {
   const source = catalogSource.apps.find((app) => app.id === 'pearbrowser-desktop')
   const seed = SEED_APPS.find((app) => app.name === 'PearBrowser Desktop')
   const homepageKey = '03f0060a35451cfb6b68ad1dda1b8474ebb43fd9100071ccf7d67679a83ebb4f'
@@ -278,22 +277,28 @@ test('PearBrowser catalogue release row stays in sync with package and public ad
   assert.ok(source, 'catalogue source row missing')
   assert.ok(seed, 'offline catalogue seed row missing')
   assert.equal(source.version, pkg.version)
-  assert.equal(source.pearLink, pearConfig.links.production)
-  assert.equal(source.link, pearConfig.links.production)
+  assert.equal(source.legacyMigrationId, pkg.upgrade.replace(/^pear:\/\//, ''))
+  assert.equal(source.nativeDelivery?.status, 'migration-required')
   assert.equal(source.driveKey, homepageKey)
   assert.equal(source.homepage, `hyper://${homepageKey}/`)
+  assert.equal(source.link, source.homepage)
   assert.equal(seed.version, source.version)
+  assert.equal(seed.nativeDeliveryStatus, source.nativeDelivery.status)
   assert.equal(seed.link, source.link)
   assert.equal(seed.driveKey, source.driveKey)
   assert.equal(seed.homepage, source.homepage)
 })
 
 test('release script purges ignored files from previous Pear stages', () => {
-  assert.match(releaseScript, /pear stage --purge/)
+  assert.match(releaseScript, /native-release preflight/)
+  assert.match(releaseScript, /no publication authority/)
+  assert.doesNotMatch(releaseScript, /pear stage/)
+  assert.doesNotMatch(releaseScript, /pear release/)
 })
 
-test('release verification asks HiveRelay for signed seed proof evidence', () => {
-  assert.match(releaseScript, /verify-pin\.js --expect \$NEW_LEN --hiverelay/)
+test('v3 release preflight leaves availability verification to the approved release workflow', () => {
+  assert.doesNotMatch(releaseScript, /verify-pin\.js/)
+  assert.match(releaseScript, /independent HiveRelay availability evidence/)
   assert.match(verifyPin, /HiveRelayClient/)
   assert.match(verifyPin, /proveSeeded/)
   assert.match(verifyPin, /verifySeededFallback/)
@@ -720,7 +725,7 @@ test('macOS DMG packager is exposed for public-trust native releases', () => {
 })
 
 test('appling release metadata stays in sync with the production Pear channel', () => {
-  const productionId = pearConfig.links.production.replace(/^pear:\/\//, '')
+  const productionId = pkg.upgrade.replace(/^pear:\/\//, '')
   assert.match(applingCmake, new RegExp(`ID "${productionId}"`))
   assert.match(applingCmake, new RegExp(`VERSION ${pkg.version.replace(/\./g, '\\.')}`))
   assert.equal(applingPkg.name, 'pearbrowser-desktop-appling')
@@ -1467,7 +1472,7 @@ test('native install snippet generator emits release-note packages for every des
     assert.match(guide.stdout, /\[PearBrowser-0\.5\.0-macos-arm64\.dmg\]\(https:\/\/example\.invalid\/PearBrowser-0\.5\.0-macos-arm64\.dmg\)/)
     assert.match(guide.stdout, /npm run -s generate:native-install-guide/)
     assert.match(guide.stdout, /PowerShell/)
-    assert.match(guide.stdout, /pear run pear:\/\/tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty/)
+    assert.doesNotMatch(guide.stdout, /legacy migration record/i)
 
     const packageProofDir = join(fixture, 'package-proof')
     mkdirSync(packageProofDir)
@@ -2241,8 +2246,8 @@ test('release story smoke covers browse, catalogue, local stories, and opt-in si
   assert.match(releaseStorySmoke, /Library\/session story/)
   assert.match(releaseStorySmoke, /PearBrowser\|Pear Browser/)
   assert.match(releaseStorySmoke, /REQUIRED_FEATURED = \['Keet', 'PearPass', 'anonGPT', 'Paste', 'Peercord'\]/)
-  assert.match(releaseStorySmoke, /PEERCORD_LINK/)
-  assert.match(releaseStorySmoke, /runMode: 'window'/)
+  assert.match(releaseStorySmoke, /PEERCORD_MIGRATION_ID/)
+  assert.match(releaseStorySmoke, /runMode: 'migration-required'/)
   assert.doesNotMatch(releaseStorySmoke, /CMD_LAUNCH_PEAR_LINK/)
   assert.doesNotMatch(releaseStorySmoke, /CMD_RUN_APP_IN_TAB/)
 })

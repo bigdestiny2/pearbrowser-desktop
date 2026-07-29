@@ -1,0 +1,8 @@
+{
+  "historical": true,
+  "purpose": "Migration lookup only. These identifiers are never passed to an executable launch path.",
+  "links": {
+    "production": "pear://tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty",
+    "provisionTarget": "pear://pdsd1p3m1xsz8aofyndbwux5hqs19h8uswnsrfee5cz8sj9pmj4o"
+  }
+}

@@ -47,17 +47,14 @@ test('deriveKeyAndLink: bare 64-hex key → hyper link', () => {
   assert.equal(r.kind, 'hyper')
 })
 
-test('deriveKeyAndLink: pear:// link keeps the pear link + z32-decodes the key', () => {
+test('deriveKeyAndLink: remote executable app link is rejected', () => {
   const r = deriveKeyAndLink('pear://' + Z32, fakeNormalize)
-  assert.equal(r.error, undefined)
-  assert.equal(r.driveKey, HEX)
-  assert.equal(r.link, 'pear://' + Z32)
-  assert.equal(r.kind, 'pear')
+  assert.match(r.error, /not accepted/i)
 })
 
-test('deriveKeyAndLink: strips path/query and trailing slashes from pear links', () => {
+test('deriveKeyAndLink: rejects remote executable links with paths and queries', () => {
   const r = deriveKeyAndLink('pear://' + Z32 + '/foo?x=1', fakeNormalize)
-  assert.equal(r.driveKey, HEX)
+  assert.match(r.error, /not accepted/i)
 })
 
 test('deriveKeyAndLink: rejects junk + empty', () => {
@@ -88,14 +85,12 @@ test('buildSubmissionManifest: full hyper submission', () => {
   assert.equal(manifest.iconData, 'data:image/svg+xml,<svg/>')
 })
 
-test('buildSubmissionManifest: pear submission is type standalone + keeps pearLink', () => {
-  const { manifest } = buildSubmissionManifest(
+test('buildSubmissionManifest: remote executable app submission is rejected', () => {
+  const { error } = buildSubmissionManifest(
     { name: 'Pear Thing', link: 'pear://' + Z32 },
     { now: 5, normalizeKey: fakeNormalize }
   )
-  assert.equal(manifest.type, 'standalone')
-  assert.equal(manifest.pearLink, 'pear://' + Z32)
-  assert.equal(manifest.driveKey, HEX)
+  assert.match(error, /not accepted/i)
 })
 
 test('buildSubmissionManifest: name required + bad key rejected', () => {

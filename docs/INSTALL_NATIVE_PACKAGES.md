@@ -100,17 +100,11 @@ chmod +x PearBrowser-0.7.1-linux-x64.AppImage
 ./PearBrowser-0.7.1-linux-x64.AppImage
 ```
 
-## Recovery Fallback
+## Legacy Pear records
 
-The stable Pear link remains available for testers and recovery while native
-packaging matures:
-
-```sh
-npm i -g pear
-pear
-pear run pear://tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty
-```
-
-This fallback is not the preferred public install path because `pear run` is
-deprecated in Pear runtime `v2.4.0`, but it is still useful when diagnosing a
-native package issue.
+There is no Pear-runtime fallback for this v3 release. A legacy `pear://`
+record is migration metadata, not an install or troubleshooting instruction.
+If a native package fails, keep the old installation and its data intact,
+collect the package checksum and local diagnostics, then follow the
+[PearBrowser v3 migration guide](./PEAR_V3_MIGRATION.md). Do not run a remote
+link through a local runtime.

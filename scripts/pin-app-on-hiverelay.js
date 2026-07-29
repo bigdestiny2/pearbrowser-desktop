@@ -2,13 +2,13 @@
  * Durably pin an EXISTING app bundle (or any Hyperdrive) on HiveRelay,
  * WITHOUT owning its signing key.
  *
- * A pear:// app bundle is just a Hyperdrive — its z32 key is the drive key.
- * Pinning is read-only replication: HiveRelay's seed-request is signed by
+ * A content bundle is addressed by a Hyperdrive key. Pinning is read-only
+ * replication: HiveRelay's seed-request is signed by
  * THIS client's swarm keypair (see HiveRelayClient.seed → request.publisher*
  * is OUR keypair, not the drive author's). So any peer that can fetch the
  * content may ask the relay fleet to hold it. The author does NOT have to be
- * the one to seed it — correcting the old assumption that only `pear seed`
- * by the author makes an app durable.
+ * the one to seed it — replication does not make a binary trustworthy or
+ * provide a native application installer.
  *
  * IMPORTANT sizing note: a drive's blob *core* byteLength can be far larger
  * than its CURRENT checkout when the key was re-staged many times during dev
@@ -29,11 +29,11 @@
  * and asking relays to hold it can create misleading "reachable but empty"
  * evidence instead of repairing availability.
  *
- * Confirm durability afterwards (local `pear seed` for the key STOPPED):
+ * Confirm durability after stopping the local seed source:
  *   node scripts/verify-app-full.js --key <64-hex>
  *
  * Usage:
- *   node scripts/pin-app-on-hiverelay.js <pear://z32 | z32 | 64-hex> \
+ *   node scripts/pin-app-on-hiverelay.js <hyper://key | z32 | 64-hex> \
  *     [--name x] [--hold 300] [--replicas 5] [--ttlDays 365] \
  *     [--maxStorage <MB>] [--standard] [--dlTimeout 150]
  */
@@ -62,7 +62,7 @@ function parseArgs (argv) {
 function toHexKey (raw) {
   if (!raw) return null
   let s = String(raw).trim()
-  s = s.replace(/^pear:\/\//i, '').replace(/^hyper:\/\//i, '').replace(/\/.*$/, '')
+  s = s.replace(/^hyper:\/\//i, '').replace(/\/.*$/, '')
   if (/^[0-9a-f]{64}$/i.test(s)) return s.toLowerCase()
   try {
     const buf = z32.decode(s)
@@ -74,7 +74,7 @@ function toHexKey (raw) {
 const { positional, flags } = parseArgs(process.argv.slice(2))
 const keyHex = toHexKey(positional[0])
 if (!keyHex) {
-  console.error('usage: node scripts/pin-app-on-hiverelay.js <pear://z32 | z32 | 64-hex> [--name x] [--hold 300] [--maxStorage <MB>] [--replicas 5] [--ttlDays 365] [--standard]')
+  console.error('usage: node scripts/pin-app-on-hiverelay.js <hyper://key | z32 | 64-hex> [--name x] [--hold 300] [--maxStorage <MB>] [--replicas 5] [--ttlDays 365] [--standard]')
   process.exit(2)
 }
 

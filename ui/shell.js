@@ -60,92 +60,63 @@ function applyAppearanceTheme (theme) {
 
 applyAppearanceTheme(readCachedAppearanceTheme())
 
-// Vetted against https://github.com/holepunchto/pear-aliases — these
-// are the canonical pear:// keys for Holepunch-ecosystem apps.
-//
-// The `type` field + the window-vs-tab distinction is adopted from
-// Drache93's Pear Browser (https://github.com/Drache93/pear-browser), which
-// pioneered running P2P apps in a tab via pear-request (htmx hooked to a
-// worker pipe). Two kinds of apps, exactly as Drache93 models them:
-//   - 'standalone' : a full Bare app with its own UI (Keet, PearPass …). It
-//                    can only open in its OWN WINDOW — there is no htmx/pipe
-//                    UI to stream into a tab. (Drache93: "Standalone site
-//                    opened in new window".)
-//   - 'hypersite'  : a pear-request/htmx app whose UI IS served over a pipe,
-//                    so it renders HEADLESS in a tab.
-// The UI gates the action on this: standalone → "Open" (window); hypersite →
-// "Run in tab". This removes the confusing "Run in tab" on apps that can't.
-const PEERCORD_LINK = 'pear://wmir47w7mai3b1skj66mx7fzso6k6o91kipaney7gtt69npimouy'
-
-// First rollout: Peercord. Add other standalone pear:// apps here only when
-// they need the same first-run window/trust warning.
-const STANDALONE_PRELAUNCH_WARNINGS = {
-  peercord: {
-    key: 'peercord',
-    link: PEERCORD_LINK,
-    appName: 'Peercord',
-    title: 'Before opening Peercord',
-    body: 'Peercord opens in its own Pear window. On first launch, Pear may ask you to review and approve a persistent third-party trust prompt.',
-    trust: 'Approving it executes third-party code and creates a persistent trust decision.'
-  }
-}
+// Legacy native apps remain discoverable, but their former remote application
+// references are opaque migration identifiers. PearBrowser can never fetch or
+// execute them; the publisher must provide a verified native v3 package.
 
 const FEATURED_APPS = [
   {
     id: 'keet',
     name: 'Keet',
-    type: 'standalone',
+    nativeDelivery: { status: 'migration-required' },
     tagline: 'End-to-end encrypted P2P chat, voice, and video calls by Holepunch.',
-    link: 'pear://oeeoz3w6fjjt7bym3ndpa6hhicm8f8naxyk11z4iypeoupn6jzpo',
+    legacyMigrationId: 'oeeoz3w6fjjt7bym3ndpa6hhicm8f8naxyk11z4iypeoupn6jzpo',
     initial: 'K',
     gradient: 'linear-gradient(135deg, #fbbf24, #f97316)'
   },
   {
     id: 'pearpass',
     name: 'PearPass',
-    type: 'standalone',
+    nativeDelivery: { status: 'migration-required' },
     tagline: 'Peer-to-peer password manager from Tether — synced across devices without a cloud.',
-    link: 'pear://tywsat7gz8m65ejx4zjn3773pbdc4j8m66tukis8dgzekraymtzo',
+    legacyMigrationId: 'tywsat7gz8m65ejx4zjn3773pbdc4j8m66tukis8dgzekraymtzo',
     initial: 'P',
     gradient: 'linear-gradient(135deg, #3fb950, #58a6ff)'
   },
-  // anonGPT — private P2P AI chat. A full Pear app: opens in its own window.
+  // anonGPT — private P2P AI chat. Its legacy native release needs migration.
   // (The in-browser window.pear.anongpt buyer shim in backend/anongpt-buyer.js
-  // is a separate hyper:// hosting path, not exercised by this pear:// launch.)
+  // is a separate hyper:// hosting path, not an executable delivery path.)
   {
     id: 'anongpt',
     name: 'anonGPT',
-    type: 'standalone',
+    nativeDelivery: { status: 'migration-required' },
     tagline: 'Private P2P AI chat — pay-per-inference from a HiveMind seller, with signed receipts.',
-    link: 'pear://rpzh3fsgg38kfir9nmae7x3o8ubofddzzixr5js4mxd6a6drb6wo',
+    legacyMigrationId: 'rpzh3fsgg38kfir9nmae7x3o8ubofddzzixr5js4mxd6a6drb6wo',
     initial: 'A',
     gradient: 'linear-gradient(135deg, #22d3ee, #6366f1)'
   },
-  // Paste — local-first, E2E-encrypted notes & clipboard sync. A full Pear
-  // app: opens in its own window. Landing page (hyper://25a06bb3…) is in the
+  // Paste — local-first, E2E-encrypted notes & clipboard sync. Landing page
+  // (hyper://25a06bb3…) is in the
   // default catalog as its homepage. Link MUST match the catalogue entry
-  // (catalog-source/catalog.json id:pearpaste) — the LEAN, compacted key
-  // qnax5k8o (≈432MB). The old u6oyh38 key carried ~35GB of dev-history blob
-  // bloat (see app-pinning notes) and forced a huge first-load download.
+  // (catalog-source/catalog.json id:pearpaste). Its legacy native release
+  // awaits a publisher-provided verified v3 package.
   {
     id: 'pearpaste',
     name: 'Paste',
-    type: 'standalone',
+    nativeDelivery: { status: 'migration-required' },
     tagline: 'Local-first, end-to-end encrypted notes & clipboard sync for your own devices — no account, no cloud.',
-    link: 'pear://qnax5k8ojtod51ci9qwkrawdof1hx5w3a7gqbueoqnzzq9dw5hfo',
+    legacyMigrationId: 'qnax5k8ojtod51ci9qwkrawdof1hx5w3a7gqbueoqnzzq9dw5hfo',
     initial: '📋',
     gradient: 'linear-gradient(135deg, #4ade80, #22d3ee)'
   },
-  // Peercord — Discord-style P2P chat. Its current Pear release is
-  // pear.json type:"desktop" (Electron/Pear window class), not a pear-request
-  // terminal worker, so route it through the standalone launch path. Marking it
-  // hypersite would surface "Run in tab" but hang on the headless wrapper.
+  // Peercord — Discord-style P2P chat. Its former desktop release is retained
+  // only as a migration record, not as a launchable browser app.
   {
     id: 'peercord',
     name: 'Peercord',
-    type: 'standalone',
+    nativeDelivery: { status: 'migration-required' },
     tagline: 'Decentralized Discord-style chat with text, voice, video, screen sharing, and P2P file transfer.',
-    link: PEERCORD_LINK,
+    legacyMigrationId: 'wmir47w7mai3b1skj66mx7fzso6k6o91kipaney7gtt69npimouy',
     initial: 'P',
     gradient: 'linear-gradient(135deg, #5865f2, #22d3ee)'
   }
@@ -1306,23 +1277,19 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
     if (nameQuery) {
       try {
         const { resolved } = await rpc.request(C.CMD_NAME_RESOLVE, { name: nameQuery })
+        if (resolved?.legacyMigrationId) {
+          updateTab(id, { status: `migration required for ${resolved.label || nameQuery} · ${resolved.provenance}…` })
+          try {
+            const result = await rpc.request(C.CMD_LEGACY_APP_MIGRATION, { legacyMigrationId: resolved.legacyMigrationId }, 10000)
+            updateTab(id, { status: result?.message || 'A verified native v3 package is required.' })
+          } catch (err) {
+            updateTab(id, { status: `error: ${err.message}` })
+          }
+          return
+        }
         if (resolved && (resolved.link || resolved.key)) {
           const link = resolved.link || `hyper://${resolved.key}/`
-          // A pear:// / file:// target is a full Pear-runtime app (Keet, PearPass,
-          // …) — launch it in its OWN window exactly as the Apps tab does
-          // (CMD_LAUNCH_PEAR_LINK), not through the in-tab web navigate path that
-          // serves /hyper/<key> as a page. The current tab stays put.
-          if (/^(?:pear|file):\/\//i.test(link)) {
-            updateTab(id, { status: `opening ${resolved.label || nameQuery} · ${resolved.provenance}…` })
-            try {
-              await rpc.request(C.CMD_LAUNCH_PEAR_LINK, { link }, 60000)
-              updateTab(id, { status: '' })
-            } catch (err) {
-              updateTab(id, { status: `error: ${err.message}` })
-            }
-            return
-          }
-          // A browsable hyper:// target — navigate it in-tab below, with a chip.
+          // A browsable Hyper target navigates in-tab with an honest provenance chip.
           target = link
           prov = { provenance: resolved.provenance, label: resolved.label || nameQuery, name: nameQuery, source: resolved.source || null }
         }
@@ -1490,23 +1457,20 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
     ))))
   }
 
-  // Try to open devtools for the active tab's iframe. pear-electron
-  // exposes Pear.Window.devtools(...) on some channels; fall back to
-  // a console log if unavailable.
+  // Ask the native v3 host to open devtools for the active renderer. Fall back
+  // to a concise status message if the host capability is unavailable.
   const openDevtools = () => {
     try {
       const el = iframeRefs.current[activeId]
       const cw = el?.contentWindow
       if (!cw) return
-      // Path 1: pear-electron exposes Pear.Window.openDevTools()
-      if (typeof Pear !== 'undefined' && Pear.Window?.openDevTools) {
-        Pear.Window.openDevTools({ mode: 'detach' })
+      // The native v3 host exposes only this focused devtools capability.
+      if (globalThis.pearbrowserRuntime?.openDevTools) {
+        globalThis.pearbrowserRuntime.openDevTools()
         return
       }
-      // Path 2: chrome devtools protocol via remote debugging is not
-      // exposed by default; surface a hint instead.
-      console.log('[devtools] runtime does not expose openDevTools — relaunch with --devtools')
-      updateTab(activeId, { status: 'devtools: relaunch with `pear run --dev --devtools .`' })
+      console.log('[devtools] native host does not expose openDevTools')
+      updateTab(activeId, { status: 'devtools are unavailable in this native build' })
       setTimeout(() => updateTab(activeId, { status: '' }), 3000)
     } catch (err) {
       console.error('[devtools] failed:', err)
@@ -2145,8 +2109,8 @@ const ONBOARDING_FIRST_SITES = [
   {
     id: 'hiveworm',
     title: 'HiveWorm',
-    subtitle: 'Multiplayer worm life-sim, fully P2P',
-    url: 'pear://d1xbkcpcbi1xa8dexp49rsendra5r67w3qh5a9k8t44oemm4k16y',
+    subtitle: 'Legacy native app — a verified v3 package is required',
+    legacyMigrationId: 'd1xbkcpcbi1xa8dexp49rsendra5r67w3qh5a9k8t44oemm4k16y',
     initial: '🐛',
     gradient: 'linear-gradient(135deg, #a371f7, #d946ef)'
   },
@@ -2171,13 +2135,19 @@ const ONBOARDING_FIRST_SITES = [
 function Onboarding ({ rpc, C, onPickSite, onClose }) {
   const [slide, setSlide] = useState(0)
 
-  const finish = async (pickedUrl) => {
+  const finish = async (pickedSite) => {
     // Persist the flag so we never ask again — fire-and-forget so we
     // don't block the close on a slow user-data write.
     rpc.request(C.CMD_USERDATA_SET_SETTINGS, {
       updates: { onboardingDone: true, onboardingDoneAt: Date.now() }
     }).catch(() => {})
-    if (pickedUrl) onPickSite(pickedUrl)
+    if (pickedSite?.legacyMigrationId) {
+      try {
+        await rpc.request(C.CMD_LEGACY_APP_MIGRATION, { legacyMigrationId: pickedSite.legacyMigrationId }, 10000)
+      } catch {}
+    } else if (pickedSite?.url) {
+      onPickSite(pickedSite.url)
+    }
     onClose()
   }
 
@@ -2212,8 +2182,8 @@ function Onboarding ({ rpc, C, onPickSite, onClose }) {
               </div>
               <div className="onb-pitch">
                 <div className="onb-pitch-icon">📦</div>
-                <div className="onb-pitch-title">Run Pear apps</div>
-                <div className="onb-pitch-body">Click a pear:// link, the app opens in its own window.</div>
+                <div className="onb-pitch-title">Use verified native apps</div>
+                <div className="onb-pitch-body">Legacy entries explain the migration path; native code comes from a verified local package.</div>
               </div>
               <div className="onb-pitch">
                 <div className="onb-pitch-icon">✒️</div>
@@ -2241,8 +2211,8 @@ function Onboarding ({ rpc, C, onPickSite, onClose }) {
                 <button
                   className="onb-site-card"
                   key=${s.id}
-                  onClick=${() => finish(s.url)}
-                  title=${s.url}
+                  onClick=${() => finish(s)}
+                  title=${s.url || 'Legacy native app'}
                 >
                   <div className="onb-site-icon" style=${{ background: s.gradient }}>${s.initial}</div>
                   <div className="onb-site-text">
@@ -2395,10 +2365,12 @@ function CollaborativeCatalog ({ rpc, C }) {
   const addApp = async () => {
     const val = appKey.trim()
     if (!val) return
-    const app = /^(?:pear|file):\/\//i.test(val)
-      ? { link: val, name: appName || val }
-      : { driveKey: driveKeyFromHyperRef(val), name: appName || val }
-    if (!app.link && !app.driveKey) { setErr('Enter a pear:// link, file:// link, or a valid hyper:// drive key.'); return }
+    if (/^(?:pear|file):\/\//i.test(val)) {
+      setErr('Remote executable app links are not accepted. Add browsable hyper:// content only.')
+      return
+    }
+    const app = { driveKey: driveKeyFromHyperRef(val), name: appName || val }
+    if (!app.driveKey) { setErr('Enter a valid hyper:// drive key.'); return }
     setErr(''); setBusy('addapp')
     try {
       const res = await rpc.request(C.CMD_AUTOBEE_ADD_APP, { keyHex: cat.keyHex, app }, 60000)
@@ -2480,7 +2452,7 @@ function CollaborativeCatalog ({ rpc, C }) {
                   <div className="profile-field">
                     <div className="settings-label">Add an app</div>
                     <input className="profile-input" placeholder="App name (optional)" value=${appName} onInput=${(e) => setAppName(e.target.value)} />
-                    <input className="profile-input" placeholder="hyper:// drive key or pear:// link" value=${appKey} onInput=${(e) => setAppKey(e.target.value)} onKeyDown=${(e) => e.key === 'Enter' && addApp()} />
+                    <input className="profile-input" placeholder="hyper:// drive key" value=${appKey} onInput=${(e) => setAppKey(e.target.value)} onKeyDown=${(e) => e.key === 'Enter' && addApp()} />
                   </div>
                   <button className="btn primary" onClick=${addApp} disabled=${busy === 'addapp' || !appKey.trim()}>${busy === 'addapp' ? 'Adding…' : 'Add app'}</button>
                 </div>
@@ -2525,7 +2497,8 @@ function CommunitySubmit ({ rpc, C }) {
   const submit = async () => {
     setErr(''); setOk('')
     if (!name.trim()) { setErr('App name is required.'); return }
-    if (!link.trim()) { setErr('Paste a pear:// link, a hyper:// link, or a drive key.'); return }
+    if (!link.trim()) { setErr('Paste a hyper:// link or a drive key.'); return }
+    if (/^(?:pear|file):\/\//i.test(link.trim())) { setErr('Remote executable app links are not accepted. Submit browsable hyper:// content only.'); return }
     setBusy(true)
     try {
       const res = await rpc.request(C.CMD_SUBMIT_APP, {
@@ -2540,7 +2513,7 @@ function CommunitySubmit ({ rpc, C }) {
   return html`
     <div className="community-submit">
       <h2>Submit your app <span className="settings-subtle">→ Community list</span></h2>
-      <p className="subtitle">Add any Pear app or hyperdrive site to the community catalogue. Submissions are pinned on relays and reviewed by a moderator before appearing in everyone's Community list.</p>
+      <p className="subtitle">Add browsable Hyperdrive content to the community catalogue. HiveRelay replicates content; it never attests or delivers native executable code.</p>
       <div className="settings-card">
         ${err && html`<div className="apps-error">${err}</div>`}
         ${ok && html`<div className="apps-ok">${ok}</div>`}
@@ -2553,7 +2526,7 @@ function CommunitySubmit ({ rpc, C }) {
         <div className="settings-row">
           <div className="profile-field">
             <div className="settings-label">Link *</div>
-            <input className="profile-input" placeholder="pear://… or hyper://… (or a 64-hex / z-base-32 key)" value=${link} onInput=${(e) => setLink(e.target.value)} onKeyDown=${(e) => e.key === 'Enter' && submit()} />
+            <input className="profile-input" placeholder="hyper://… (or a 64-hex / z-base-32 key)" value=${link} onInput=${(e) => setLink(e.target.value)} onKeyDown=${(e) => e.key === 'Enter' && submit()} />
           </div>
         </div>
         <div className="settings-row">
@@ -2717,7 +2690,11 @@ function appStableDedupeKey (app) {
   const link = normalizeAppLinkForKey(app.link)
   const hyperKey = /^hyper:\/\//i.test(link) ? driveKeyFromHyperRef(link) : ''
   if (driveKey || hyperKey) return 'drive:' + (driveKey || hyperKey)
-  if (/^(?:hyper|pear|file):\/\/.+/i.test(link)) return 'link:' + link
+  if (/^hyper:\/\/.+/i.test(link)) return 'link:' + link
+  const nativeInstallLink = String(app.nativeDelivery?.installLink || '').trim().toLowerCase().replace(/\/$/, '')
+  if (app.nativeDelivery?.status === 'available' && app.nativeDelivery?.kind === 'pear-v3' && /^pear:\/\/[13-9a-km-uw-z]{52}$/.test(nativeInstallLink)) return 'native:' + nativeInstallLink
+  const legacyMigrationId = String(app.legacyMigrationId || '').trim().toLowerCase()
+  if (/^[13-9a-km-uw-z]{52}$/.test(legacyMigrationId)) return 'legacy:' + legacyMigrationId
   const id = String(app.id || '').trim()
   return id ? 'id:' + id : ''
 }
@@ -2750,20 +2727,14 @@ function dedupeApps (list) {
   return [...byKey.values(), ...anon]
 }
 
-// Decode an app's bundle drive key from its pear:// link (z-base-32 host,
-// tolerating a versioned `N.M.<z32>` form), falling back to its driveKey.
-// Used for live size/peers and to correlate launch-progress events.
+// Drive metadata belongs to browsable Hyper content only. A legacy native-app
+// migration identifier is intentionally not a drive key and has no fetch path.
 function appBundleKey (app) {
-  if (app && typeof app.link === 'string' && /^pear:\/\//.test(app.link)) {
-    const host = app.link.replace(/^pear:\/\//, '').split('/')[0].split('.').pop()
-    try { const k = hexFromZ32(host); if (/^[0-9a-f]{64}$/i.test(k)) return k.toLowerCase() } catch {}
-  }
   if (app && /^[0-9a-f]{64}$/i.test(app.driveKey || '')) return app.driveKey.toLowerCase()
   return null
 }
 
-// A card footer: the app's pear:// (or hyper://) address (click to copy), its
-// size, and a live peer count — all from CMD_GET_DRIVE_INFO on the bundle key.
+// A card footer for a browsable Hyper address, its size, and live peer count.
 function AppMeta ({ rpc, C, app }) {
   const bundleKey = appBundleKey(app)
   const addr = (app && app.link) ? app.link : (app && /^[0-9a-f]{64}$/i.test(app.driveKey || '') ? ('hyper://' + app.driveKey + '/') : null)
@@ -2796,65 +2767,6 @@ function AppMeta ({ rpc, C, app }) {
 
 // Inline download-progress bar shown in place of a card's Run-app button while
 // the bundle is being pulled (driven by EVT_LAUNCH_PROGRESS).
-function LaunchBar ({ prog, onRetry }) {
-  if (!prog) return null
-  if (prog.phase === 'error') {
-    return html`<div style=${{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: '#f85149', width: '100%' }}>
-      <span>Launch failed${prog.error ? ': ' + prog.error : ''}</span>
-      <button className="btn subtle" onClick=${onRetry}>Retry</button>
-    </div>`
-  }
-  const pct = Math.max(0, Math.min(100, prog.phase === 'launching' ? 100 : (prog.percent || 0)))
-  const label = prog.phase === 'connecting' ? ('Finding peers… ' + (prog.peers || 0))
-    : prog.phase === 'launching' ? 'Launching…'
-    : (formatBytes(prog.downloaded || 0) + ' / ' + formatBytes(prog.total || 0) + ' · ' + (prog.peers || 0) + ' peers · ' + pct + '%')
-  return html`
-    <div style=${{ width: '100%' }}>
-      <div style=${{ height: '6px', borderRadius: '3px', background: '#21262d', overflow: 'hidden' }}>
-        <div style=${{ height: '100%', width: pct + '%', background: 'linear-gradient(90deg,#58a6ff,#3fb950)', transition: 'width .25s ease' }}></div>
-      </div>
-      <div style=${{ marginTop: '4px', fontSize: '11px', color: '#8b949e' }}>${label}</div>
-    </div>
-  `
-}
-
-function standalonePrelaunchWarningFor (app) {
-  if (!app || app.type === 'hypersite') return null
-  const link = normalizeAppLinkForKey(app.link)
-  if (!/^pear:\/\//i.test(link)) return null
-  const id = String(app.id || '').trim().toLowerCase()
-  const warning = STANDALONE_PRELAUNCH_WARNINGS.peercord
-  if (id === warning.key || link === warning.link) return warning
-  return null
-}
-
-function normalizeStandaloneWarningsSeen (value) {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
-}
-
-function StandalonePrelaunchWarning ({ pending, onCancel, onConfirm, busy }) {
-  const warning = pending?.warning
-  const appName = warning?.appName || pending?.app?.name || 'This app'
-  if (!warning) return null
-  return html`
-    <div className="modal-overlay standalone-prelaunch-overlay" role="dialog" aria-modal="true"
-         onClick=${(e) => e.target.classList.contains('modal-overlay') && onCancel()}>
-      <div className="modal-card standalone-prelaunch-card">
-        <div className="standalone-prelaunch-kicker">Standalone Pear app</div>
-        <h2>${warning.title || `Before opening ${appName}`}</h2>
-        <p>${warning.body}</p>
-        <p className="standalone-prelaunch-trust">${warning.trust}</p>
-        ${pending.link && html`<code className="standalone-prelaunch-link">${pending.link}</code>`}
-        <div className="standalone-prelaunch-actions">
-          <button className="btn subtle" onClick=${onCancel} disabled=${busy === 'pear-link'}>Cancel</button>
-          <button className="btn primary" onClick=${onConfirm} disabled=${busy === 'pear-link'}>
-            ${busy === 'pear-link' ? 'Opening...' : `Open ${appName}`}
-          </button>
-        </div>
-      </div>
-    </div>
-  `
-}
 
 function Apps ({ rpc, C, onLaunch }) {
   const [catalogKey, setCatalogKey] = useState('')
@@ -2884,124 +2796,39 @@ function Apps ({ rpc, C, onLaunch }) {
   // via user-data settings so they survive across launches.
   const [recentCatalogs, setRecentCatalogs] = useState([])
   const [installed, setInstalled] = useState([])
+  const [nativeApps, setNativeApps] = useState([])
+  const [nativeProgress, setNativeProgress] = useState(null)
   const [busy, setBusy] = useState(null)
   const [err, setErr] = useState('')
   const [autoLoadAttempted, setAutoLoadAttempted] = useState(false)
-  const [pearLink, setPearLink] = useState('')
   const [launched, setLaunched] = useState('')
-  // Live download/launch progress per bundle key, fed by EVT_LAUNCH_PROGRESS.
-  const [launchProg, setLaunchProg] = useState({})
-  const [standaloneWarningsSeen, setStandaloneWarningsSeen] = useState(null)
-  const [pendingStandaloneLaunch, setPendingStandaloneLaunch] = useState(null)
-  useEffect(() => {
-    if (!(rpc && C && C.EVT_LAUNCH_PROGRESS)) return
-    const onProg = (e) => {
-      const d = (e && e.detail) || {}
-      const k = d.key || d.link
-      if (!k) return
-      setLaunchProg((prev) => {
-        const next = { ...prev, [k]: d }
-        if (d.phase === 'done') setTimeout(() => setLaunchProg((p) => { const n = { ...p }; delete n[k]; return n }), 1200)
-        return next
-      })
+  const showLegacyMigration = async (app) => {
+    const legacyMigrationId = String(app?.legacyMigrationId || '').trim().toLowerCase()
+    if (!legacyMigrationId) {
+      setErr(`${app?.name || 'This app'} has no verified native v3 package yet.`)
+      return
     }
-    rpc.addEventListener(`event:${C.EVT_LAUNCH_PROGRESS}`, onProg)
-    return () => rpc.removeEventListener(`event:${C.EVT_LAUNCH_PROGRESS}`, onProg)
-  }, [rpc, C])
-
-  const launchPearLink = async (overrideLink) => {
-    const link = (typeof overrideLink === 'string' ? overrideLink : pearLink).trim()
-    if (!link) return
-    const keyHex = appBundleKey({ link })
-    setErr(''); setBusy('pear-link'); setLaunched('')
-    if (keyHex) setLaunchProg((p) => ({ ...p, [keyHex]: { phase: 'connecting', percent: 0, peers: 0, downloaded: 0, total: 0 } }))
+    setErr(''); setBusy('legacy-migration'); setLaunched('')
     try {
-      await rpc.request(C.CMD_LAUNCH_PEAR_LINK, { link, keyHex }, 60000)
-      setPearLink('')
-      // pear:// launches show progress inline via EVT_LAUNCH_PROGRESS; file://
-      // and others have no bundle to track, so keep the toast for them.
-      if (!keyHex) { setLaunched(`Launched ${link.slice(0, 60)}${link.length > 60 ? '…' : ''} in a new window.`); setTimeout(() => setLaunched(''), 4000) }
+      const result = await rpc.request(C.CMD_LEGACY_APP_MIGRATION, { legacyMigrationId }, 10000)
+      setErr(result?.message || 'A verified native v3 package is required.')
     } catch (e) {
-      setErr(`launch: ${e.message}`)
-      if (keyHex) setLaunchProg((p) => ({ ...p, [keyHex]: { phase: 'error', error: e.message } }))
+      setErr(`migration: ${e.message}`)
     } finally {
       setBusy(null)
     }
   }
 
-  const readStandaloneWarningsSeen = async () => {
-    if (standaloneWarningsSeen !== null) return standaloneWarningsSeen
-    try {
-      const settings = unwrapSettings(await rpc.request(C.CMD_USERDATA_GET_SETTINGS))
-      const seen = normalizeStandaloneWarningsSeen(settings?.standaloneLaunchWarningsSeen)
-      setStandaloneWarningsSeen(seen)
-      return seen
-    } catch {
-      setStandaloneWarningsSeen({})
-      return {}
-    }
-  }
-
-  const requestPearLinkLaunch = async (overrideLink, app = null) => {
-    const link = (typeof overrideLink === 'string' ? overrideLink : pearLink).trim()
-    if (!link) return
-    const launchApp = { ...(app || {}), link, name: app?.name || '' }
-    const warning = standalonePrelaunchWarningFor(launchApp)
-    if (warning) {
-      const seen = await readStandaloneWarningsSeen()
-      if (!seen[warning.key]) {
-        setErr('')
-        setLaunched('')
-        setPendingStandaloneLaunch({
-          app: { ...launchApp, id: launchApp.id || warning.key, name: launchApp.name || warning.appName },
-          link,
-          warning
-        })
-        return
-      }
-    }
-    await launchPearLink(link)
-  }
-
-  const confirmStandaloneLaunch = async () => {
-    const pending = pendingStandaloneLaunch
-    if (!pending) return
-    const warningKey = pending.warning?.key
-    if (warningKey) {
-      const next = { ...normalizeStandaloneWarningsSeen(standaloneWarningsSeen), [warningKey]: true }
-      setStandaloneWarningsSeen(next)
-      rpc.request(C.CMD_USERDATA_SET_SETTINGS, {
-        updates: { standaloneLaunchWarningsSeen: next }
-      }).catch(() => {})
-    }
-    setPendingStandaloneLaunch(null)
-    await launchPearLink(pending.link)
-  }
-
-  // Featured apps in this list are a mix of `pear://` apps (spawn
-  // their own runtime via CMD_LAUNCH_PEAR_LINK — Keet, PearPass,
-  // HiveWorm) and `hyper://` sites that are hosted INSIDE PearBrowser
-  // with a gated runtime API injection (anonGPT today; the spec calls
-  // this an "injected version" — the app's bytes come from its own
-  // Hyperdrive, and PearBrowser injects window.pear.<app>.* into the
-  // page when a manifest gate passes. The app is NOT bundled into the
-  // PearBrowser runtime; it's still its own Hyperdrive — we just host
-  // it).
-  //
-  // Either way the user pressed "Launch" expecting a new app to open,
-  // so the action is symmetric:
-  //   pear:// / file://  →  CMD_LAUNCH_PEAR_LINK spawns a new window
-  //   hyper:// / http:// →  open in a Browse tab, with the proxy's
-  //                          per-drive shim injection applied
-  // Both surface a "Launched <name>" toast so the user sees the same
-  // feedback regardless of which underlying mechanism ran.
+  // A featured item either opens browsable content or explains that its former
+  // native release needs a verified package. It never treats a catalog value as
+  // executable code.
   const launchFeaturedApp = (app) => {
-    const link = (app.link || '').trim()
-    if (!link) return
-    if (link.startsWith('pear://') || link.startsWith('file://')) {
-      requestPearLinkLaunch(link, app)
+    if (app?.nativeDelivery?.status === 'migration-required') {
+      showLegacyMigration(app)
       return
     }
+    const link = (app.link || '').trim()
+    if (!link) return
     if (link.startsWith('hyper://') || link.startsWith('http://') || link.startsWith('https://')) {
       // onLaunch is the App-level helper that does setNavUrl(url) +
       // setTab('browse'). Browse opens this in a new browser-tab if
@@ -3028,6 +2855,10 @@ function Apps ({ rpc, C, onLaunch }) {
     setErr(''); setBusy('run-in-tab'); setLaunched('')
     try {
       const res = await rpc.request(C.CMD_RUN_APP_IN_TAB, { link: app.link }, 30000)
+      if (res?.action === 'legacy-migration-required') {
+        setErr(res.message || 'A verified native v3 package is required.')
+        return
+      }
       onLaunch?.(res.url)
       setLaunched(`Running ${app.name} headless in a tab.`)
       setTimeout(() => setLaunched(''), 4000)
@@ -3055,6 +2886,78 @@ function Apps ({ rpc, C, onLaunch }) {
       setInstalled(Array.isArray(list) ? list : (list?.apps ?? []))
     } catch (e) {
       setErr(`list failed: ${e.message}`)
+    }
+  }
+
+  const refreshNativeApps = async () => {
+    try {
+      const host = globalThis.pearbrowserRuntime
+      if (!host || typeof host.listPearApps !== 'function') return setNativeApps([])
+      const list = await host.listPearApps()
+      setNativeApps(Array.isArray(list) ? list : [])
+    } catch (e) {
+      setErr(`native apps: ${e.message}`)
+    }
+  }
+
+  const nativeInstallLink = (app) => app?.nativeDelivery?.status === 'available' && app?.nativeDelivery?.kind === 'pear-v3'
+    ? String(app.nativeDelivery.installLink || '')
+    : ''
+
+  const nativeRecordFor = (app) => {
+    const link = nativeInstallLink(app)
+    if (!link) return null
+    return nativeApps.find((record) => record.link === link) || null
+  }
+
+  const installNativeApp = async (app) => {
+    const host = globalThis.pearbrowserRuntime
+    if (!host || typeof host.installPearApp !== 'function') {
+      setErr('Native Pear v3 installation is unavailable in this build.')
+      return
+    }
+    const link = nativeInstallLink(app)
+    if (!link) {
+      setErr(`${app?.name || 'This app'} has no valid Pear v3 install link.`)
+      return
+    }
+    setErr(''); setLaunched(''); setNativeProgress(null); setBusy(`native-install:${link}`)
+    try {
+      const result = await host.installPearApp({
+        id: app.id,
+        name: app.name,
+        verification: app.verification,
+        nativeDelivery: app.nativeDelivery
+      })
+      if (result?.cancelled) return
+      await refreshNativeApps()
+      setLaunched(result?.exists ? `${result.app || app.name} is already installed.` : `Installed ${result?.app || app.name} as a native Pear v3 app.`)
+      setTimeout(() => setLaunched(''), 5000)
+    } catch (e) {
+      setErr(`install ${app.name}: ${e.message}`)
+    } finally {
+      setBusy(null)
+      setNativeProgress(null)
+    }
+  }
+
+  const launchNativeApp = async (app) => {
+    const host = globalThis.pearbrowserRuntime
+    if (!host || typeof host.launchPearApp !== 'function') {
+      setErr('Native Pear v3 launching is unavailable in this build.')
+      return
+    }
+    const target = nativeInstallLink(app) || app?.link || app?.id
+    setErr(''); setLaunched(''); setBusy(`native-launch:${target}`)
+    try {
+      const result = await host.launchPearApp({ link: target, id: app?.id })
+      setLaunched(`Opened ${result?.app || app?.name || 'Pear app'} in its native window.`)
+      setTimeout(() => setLaunched(''), 4000)
+      await refreshNativeApps()
+    } catch (e) {
+      setErr(`launch ${app?.name || 'app'}: ${e.message}`)
+    } finally {
+      setBusy(null)
     }
   }
 
@@ -3314,6 +3217,7 @@ function Apps ({ rpc, C, onLaunch }) {
   // the aggregated store is populated, not just the most recent one.
   useEffect(() => {
     refreshInstalled()
+    refreshNativeApps()
     // Pull the aggregated store immediately so backend-registered catalogues
     // (e.g. the default schema-sheets catalogue, seeded on boot) show up without
     // waiting on a recent/relay catalog load to resolve.
@@ -3321,7 +3225,6 @@ function Apps ({ rpc, C, onLaunch }) {
     ;(async () => {
       try {
         const settings = unwrapSettings(await rpc.request(C.CMD_USERDATA_GET_SETTINGS))
-        setStandaloneWarningsSeen(normalizeStandaloneWarningsSeen(settings?.standaloneLaunchWarningsSeen))
         const recentRaw = Array.isArray(settings?.recentCatalogs) ? settings.recentCatalogs : []
         // Back-compat: older builds persisted only a single lastCatalogKey.
         const last = settings?.lastCatalogKey
@@ -3390,12 +3293,17 @@ function Apps ({ rpc, C, onLaunch }) {
       } catch {
         // user-data not ready yet — first-launch / boot races. The user
         // can still paste a key by hand below.
-        setStandaloneWarningsSeen({})
       } finally {
         setAutoLoadAttempted(true)
       }
     })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    const host = globalThis.pearbrowserRuntime
+    if (!host || typeof host.onPearAppProgress !== 'function') return
+    return host.onPearAppProgress((progress) => setNativeProgress(progress || null))
   }, [])
 
   const installApp = async (app) => {
@@ -3447,10 +3355,8 @@ function Apps ({ rpc, C, onLaunch }) {
   const filteredApps = useMemo(() => {
     const q = query.normalize('NFKC').trim().toLowerCase()
     const matched = apps.filter((a) => {
-      // Apps page = runnable apps only. A `link` (launchable pear://|file:// app,
-      // or a pear-request hypersite) means runnable; pure static sites (driveKey,
-      // no link) live on the P2P Sites tab, not here.
-      if (!a || !a.link) return false
+      // Apps page presents browsable content and legacy migration records.
+      if (!a || (!a.link && !a.legacyMigrationId && !nativeInstallLink(a))) return false
       if (source !== 'all' && a.catalogKey !== source) return false
       if (category !== 'all' && !appCategories(a).includes(category)) return false
       if (!q) return true
@@ -3461,7 +3367,7 @@ function Apps ({ rpc, C, onLaunch }) {
   }, [apps, query, category, source])
 
   // Total unique-app count (deduped, ignoring search/category) for the headers.
-  const uniqueAppCount = useMemo(() => dedupeApps(apps.filter((a) => a && a.link)).length, [apps])
+  const uniqueAppCount = useMemo(() => dedupeApps(apps.filter((a) => a && (a.link || a.legacyMigrationId || nativeInstallLink(a)))).length, [apps])
 
   const renderMyCatalogApp = (app) => {
     const savedId = app.id || app.driveKey || app.name || 'untitled'
@@ -3483,8 +3389,7 @@ function Apps ({ rpc, C, onLaunch }) {
                   <label>
                     Type <span style=${{ opacity: 0.6, fontWeight: 'normal' }}>(how it launches — required)</span>
                     <select value=${appDraft.type || 'standalone'} onChange=${(e) => updateAppDraft('type', e.target.value)} style=${{ width: '100%', padding: '8px', borderRadius: '6px', background: '#0d1117', color: '#c9d1d9', border: '1px solid #30363d' }}>
-                      <option value="standalone">standalone — opens in its own window (pear:// app)</option>
-                      <option value="hypersite">hypersite — runs inline in a tab (pear-request / static)</option>
+                      <option value="hypersite">hypersite — browsable P2P content</option>
                     </select>
                   </label>
                   <label>
@@ -3547,7 +3452,7 @@ function Apps ({ rpc, C, onLaunch }) {
   return html`
     <div className="apps">
       <h1>Apps</h1>
-      <p className="subtitle">Launch any Pear app by link, or browse a HiveRelay catalog.</p>
+      <p className="subtitle">Browse P2P content or find verified native v3 package guidance in a HiveRelay catalog.</p>
 
       <h2>Featured</h2>
       <div className="app-grid">
@@ -3557,32 +3462,31 @@ function Apps ({ rpc, C, onLaunch }) {
             <div className="app-info">
               <div className="app-name">${app.name}</div>
               <div className="app-desc">${app.tagline}</div>
-              <div className="app-meta" title=${app.link}>${app.link.slice(0, 20)}…${app.link.slice(-6)}</div>
+              <div className="app-meta" title=${app.legacyMigrationId}>Legacy native release · migration required</div>
             </div>
             <div className="app-actions">
               ${app.type === 'hypersite'
                 ? html`<button key="run-featured" className="btn primary" onClick=${() => runInTab(app)} disabled=${busy === 'run-in-tab'} title="Run headless — the app's UI streams into a tab over a pipe">Run in tab</button>`
-                : html`<button key="open-featured" className="btn primary" onClick=${() => launchFeaturedApp(app)} disabled=${busy === 'pear-link'} title="Full Pear app — opens in its own window">Open</button>`}
+                : html`<button key="open-featured" className="btn primary" onClick=${() => launchFeaturedApp(app)} disabled=${busy === 'legacy-migration'} title="Requires a verified native v3 package">Migration status</button>`}
             </div>
           </div>
         `)}
       </div>
 
-      <h2>Launch a Pear app</h2>
+      <h2>Legacy native apps</h2>
       <div className="catalog-loader">
-        <input
-          type="text"
-          placeholder=${'pear://<key> — opens in a new window'}
-          value=${pearLink}
-          onInput=${(e) => setPearLink(e.target.value)}
-          onKeyDown=${(e) => e.key === 'Enter' && requestPearLinkLaunch()}
-          spellCheck="false"
-        />
-        <button className="btn primary" onClick=${() => requestPearLinkLaunch()} disabled=${!pearLink || busy === 'pear-link'}>
-          ${busy === 'pear-link' ? 'Launching…' : 'Launch'}
-        </button>
+        <p className="placeholder">Older remote app links cannot run in PearBrowser. Install only a publisher-provided, verified native v3 package.</p>
       </div>
       ${launched && html`<div className="apps-ok">${launched}</div>`}
+      ${nativeProgress && html`<div className="apps-ok">
+        ${nativeProgress.phase === 'downloading'
+          ? `Downloading native app · ${formatBytes(nativeProgress.download?.bytes || 0)} · ${nativeProgress.peers || 0} peer${nativeProgress.peers === 1 ? '' : 's'}`
+          : nativeProgress.phase === 'connecting'
+            ? 'Finding Pear v3 release peers…'
+            : nativeProgress.phase === 'installing'
+              ? `Installing ${nativeProgress.app || 'native app'}${nativeProgress.version ? ` v${nativeProgress.version}` : ''}…`
+              : 'Preparing native app…'}
+      </div>`}
 
       <h2>App Catalog</h2>
       <div className="catalog-loader">
@@ -3676,25 +3580,30 @@ function Apps ({ rpc, C, onLaunch }) {
                   <div className="app-desc">${app.description || ''}</div>
                   <div className="app-meta">
                     ${app.version ? 'v' + app.version : ''} ${app.author ? '· ' + app.author : ''}
-                    ${app.type === 'hypersite' ? html`<span style=${{ marginLeft: '6px', opacity: 0.75 }}>· ${app.driveKey && !app.link ? 'opens in a tab' : 'runs in a tab'}</span>` : (app.link && !app.driveKey ? html`<span style=${{ marginLeft: '6px', opacity: 0.75 }}>· opens in a window</span>` : '')}
+                    ${app.nativeDelivery?.status === 'migration-required'
+                      ? html`<span style=${{ marginLeft: '6px', opacity: 0.75 }}>· verified native package required</span>`
+                      : (nativeInstallLink(app)
+                          ? html`<span style=${{ marginLeft: '6px', opacity: 0.75 }}>· Pear v3 native app</span>`
+                          : (app.type === 'hypersite' ? html`<span style=${{ marginLeft: '6px', opacity: 0.75 }}>· opens in a tab</span>` : ''))}
                   </div>
                   ${app.catalogName && html`<div className="app-source-tag">${app.catalogName}</div>`}
                   <${AppMeta} rpc=${rpc} C=${C} app=${app} />
                 </div>
                 <div className="app-actions">
                   ${(() => {
-                    const bk = appBundleKey(app)
-                    const prog = bk && launchProg[bk]
-                    if (prog && prog.phase !== 'done') {
-                      return html`<${LaunchBar} prog=${prog} onRetry=${() => (app.type === 'hypersite' ? runInTab(app) : launchFeaturedApp(app))} />`
-                    }
+                    const installLink = nativeInstallLink(app)
+                    const nativeRecord = nativeRecordFor(app)
                     return html`
                       ${app.driveKey && /^[0-9a-f]{64}$/i.test(app.driveKey)
                         ? html`<button key="open-page" className="btn subtle" onClick=${() => openSite(app)} title="Open this app's P2P page in a tab">Open page</button>`
                         : ''}
-                      ${app.type === 'hypersite'
-                        ? html`<button key="run-in-tab" className="btn primary" onClick=${() => runInTab(app)} disabled=${busy === 'run-in-tab'} title="Run headless — the app's UI streams into a tab">Run app</button>`
-                        : html`<button key="run-window" className="btn primary" onClick=${() => launchFeaturedApp(app)} disabled=${busy === 'pear-link'} title="Open the app in its own window">Run app</button>`}
+                      ${installLink
+                        ? (nativeRecord?.installed
+                            ? html`<button key="open-native" className="btn primary" onClick=${() => launchNativeApp(app)} disabled=${busy === `native-launch:${installLink}`} title="Open the installed native application">Open app</button>`
+                            : html`<button key="install-native" className="btn primary" onClick=${() => installNativeApp(app)} disabled=${busy === `native-install:${installLink}`} title="Install the Pear v3 build into your operating system">${busy === `native-install:${installLink}` ? 'Installing…' : 'Install app'}</button>`)
+                        : (app.nativeDelivery?.status === 'migration-required'
+                            ? html`<button key="migration" className="btn primary" onClick=${() => showLegacyMigration(app)} disabled=${busy === 'legacy-migration'} title="Requires a verified native v3 package">Migration status</button>`
+                            : html`<button key="open-content" className="btn primary" onClick=${() => openSite(app)} title="Open browsable P2P content">Open</button>`)}
                       ${canEditMyCatalog && app.catalogKey !== myCatalog.keyHex && !inMyCatalog([app.id, app.driveKey, app.link]) && html`
                         <button key="add-catalog" className="btn subtle" title="Add to my catalog" onClick=${() => addToMyCatalog(app)} disabled=${busy === `addcat:${app.id || app.driveKey || app.link}`}>+ Catalog</button>
                       `}
@@ -3773,9 +3682,27 @@ function Apps ({ rpc, C, onLaunch }) {
           </div>
         `}
 
-      <h2>Installed</h2>
+      <h2>Native Pear apps</h2>
+      ${nativeApps.length === 0
+        ? html`<p className="placeholder">No native Pear v3 apps installed through PearBrowser yet.</p>`
+        : html`<div className="app-grid">
+            ${nativeApps.map((app) => html`
+              <div className="app-card" key=${app.link}>
+                <div className="app-icon app-icon-fallback">${(app.app || app.displayName || '?').charAt(0)}</div>
+                <div className="app-info">
+                  <div className="app-name">${app.app || app.displayName}</div>
+                  <div className="app-meta">v${app.version || '?'} · native ${app.platform || ''}${app.installed ? '' : ' · not found at recorded OS location'}</div>
+                </div>
+                <div className="app-actions">
+                  <button key="launch-native-installed" className="btn primary" onClick=${() => launchNativeApp({ id: app.id, name: app.app, nativeDelivery: { status: 'available', kind: 'pear-v3', installLink: app.link } })} disabled=${!app.installed || busy === `native-launch:${app.link}`}>Open app</button>
+                </div>
+              </div>
+            `)}
+          </div>`}
+
+      <h2>Installed sites</h2>
       ${installed.length === 0
-        ? html`<p className="placeholder">No apps installed yet.</p>`
+        ? html`<p className="placeholder">No Hyperdrive sites installed yet.</p>`
         : html`<div className="app-grid">
             ${installed.map((app) => html`
               <div className="app-card" key=${app.id}>
@@ -3806,13 +3733,6 @@ function Apps ({ rpc, C, onLaunch }) {
 
       <${ModeratorPanel} rpc=${rpc} C=${C} />
 
-      ${pendingStandaloneLaunch && html`<${StandalonePrelaunchWarning}
-        pending=${pendingStandaloneLaunch}
-        onCancel=${() => setPendingStandaloneLaunch(null)}
-        onConfirm=${confirmStandaloneLaunch}
-        busy=${busy}
-      />`}
-
       ${detailApp && html`
         <div onClick=${() => setDetailApp(null)} style=${{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '24px' }}>
           <div onClick=${(e) => e.stopPropagation()} style=${{ background: '#11161f', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '14px', padding: '20px 24px 24px', maxWidth: '480px', width: '100%', maxHeight: '82vh', overflowY: 'auto' }}>
@@ -3838,13 +3758,14 @@ function Apps ({ rpc, C, onLaunch }) {
                 ${detailApp.categories.map((c) => html`<span key=${c} style=${{ fontSize: '12px', padding: '2px 9px', borderRadius: '8px', background: 'rgba(255,255,255,0.06)', color: '#8b949e' }}>${c}</span>`)}
               </div>` : ''}
             <div style=${{ fontSize: '13px', color: '#8b949e', display: 'grid', gap: '6px', marginBottom: '18px' }}>
-              <div><strong style=${{ color: '#c9d1d9' }}>Runs:</strong> ${detailApp.type === 'hypersite' ? 'headless in a tab' : 'in its own window'}</div>
+              <div><strong style=${{ color: '#c9d1d9' }}>Runs:</strong> ${nativeInstallLink(detailApp) ? 'as a native Pear v3 OS application' : (detailApp.type === 'hypersite' ? 'headless in a tab' : 'in its own window')}</div>
               ${detailApp.version ? html`<div><strong style=${{ color: '#c9d1d9' }}>Version:</strong> v${detailApp.version}</div>` : ''}
               <div><strong style=${{ color: '#c9d1d9' }}>Verification:</strong> ${detailApp.verification || 'unverified'}</div>
               ${detailApp.homepage ? html`<div style=${{ wordBreak: 'break-all' }}><strong style=${{ color: '#c9d1d9' }}>Homepage:</strong> ${detailApp.homepage}</div>` : ''}
               ${detailApp.sourceUrl ? html`<div style=${{ wordBreak: 'break-all' }}><strong style=${{ color: '#c9d1d9' }}>Source:</strong> ${detailApp.sourceUrl}</div>` : ''}
               ${detailApp.license ? html`<div><strong style=${{ color: '#c9d1d9' }}>License:</strong> ${detailApp.license}</div>` : ''}
               ${detailApp.link ? html`<div style=${{ wordBreak: 'break-all' }}><strong style=${{ color: '#c9d1d9' }}>Link:</strong> ${detailApp.link}</div>` : ''}
+              ${nativeInstallLink(detailApp) ? html`<div style=${{ wordBreak: 'break-all' }}><strong style=${{ color: '#c9d1d9' }}>Install:</strong> ${nativeInstallLink(detailApp)}</div>` : ''}
               ${detailApp.driveKey ? html`<div style=${{ wordBreak: 'break-all' }}><strong style=${{ color: '#c9d1d9' }}>Drive:</strong> ${detailApp.driveKey}</div>` : ''}
               ${(detailApp._sources && detailApp._sources.length)
                 ? html`<div><strong style=${{ color: '#c9d1d9' }}>Catalogue${detailApp._sources.length > 1 ? 's' : ''}:</strong> ${detailApp._sources.join(', ')}</div>`
@@ -3852,15 +3773,21 @@ function Apps ({ rpc, C, onLaunch }) {
               ${detailApp.publisherKey ? html`<div style=${{ wordBreak: 'break-all' }}><strong style=${{ color: '#c9d1d9' }}>Publisher:</strong> ${shortKey(detailApp.publisherKey)}</div>` : ''}
             </div>
             <div style=${{ display: 'flex', gap: '8px' }}>
-              ${detailApp.type === 'hypersite'
-                ? (detailApp.driveKey && !detailApp.link
-                    ? html`<button key="detail-open-site" className="btn primary" onClick=${() => { openSite(detailApp); setDetailApp(null) }}>Open</button>`
-                    : html`<button key="detail-run-tab" className="btn primary" onClick=${() => { runInTab(detailApp); setDetailApp(null) }}>Run in tab</button>`)
-                : (detailApp.link && !detailApp.driveKey)
-                  ? html`<button key="detail-open-window" className="btn primary" onClick=${() => { launchFeaturedApp(detailApp); setDetailApp(null) }}>Open</button>`
-                  : (isInstalled(detailApp.id)
-                    ? html`<button key="detail-launch" className="btn primary" onClick=${() => { launchApp(detailApp); setDetailApp(null) }}>Launch</button>`
-                    : html`<button key="detail-install" className="btn primary" onClick=${() => { installApp(detailApp); setDetailApp(null) }}>Install</button>`)}
+              ${nativeInstallLink(detailApp)
+                ? (nativeRecordFor(detailApp)?.installed
+                    ? html`<button key="detail-open-native" className="btn primary" onClick=${() => { launchNativeApp(detailApp); setDetailApp(null) }}>Open app</button>`
+                    : html`<button key="detail-install-native" className="btn primary" onClick=${() => { installNativeApp(detailApp); setDetailApp(null) }}>Install app</button>`)
+                : detailApp.nativeDelivery?.status === 'migration-required'
+                  ? html`<button key="detail-migration" className="btn primary" onClick=${() => { showLegacyMigration(detailApp); setDetailApp(null) }}>Migration status</button>`
+                : detailApp.type === 'hypersite'
+                  ? (detailApp.driveKey && !detailApp.link
+                      ? html`<button key="detail-open-site" className="btn primary" onClick=${() => { openSite(detailApp); setDetailApp(null) }}>Open</button>`
+                      : html`<button key="detail-run-tab" className="btn primary" onClick=${() => { runInTab(detailApp); setDetailApp(null) }}>Run in tab</button>`)
+                  : (detailApp.link && !detailApp.driveKey)
+                    ? html`<button key="detail-open-window" className="btn primary" onClick=${() => { launchFeaturedApp(detailApp); setDetailApp(null) }}>Open</button>`
+                    : (isInstalled(detailApp.id)
+                        ? html`<button key="detail-launch" className="btn primary" onClick=${() => { launchApp(detailApp); setDetailApp(null) }}>Launch</button>`
+                        : html`<button key="detail-install" className="btn primary" onClick=${() => { installApp(detailApp); setDetailApp(null) }}>Install</button>`)}
               <button key="detail-close" className="btn" onClick=${() => setDetailApp(null)}>Close</button>
             </div>
           </div>
@@ -3921,7 +3848,7 @@ function TrustedPeers ({ rpc, C }) {
         <div className="tp-field">
           <label>Add a peer</label>
           <div className="tp-row">
-            <input className="profile-input" placeholder="Paste a pear://contact invite…" value=${addUrl}
+            <input className="profile-input" placeholder="Paste a p2p-contact://invite…" value=${addUrl}
                    onInput=${(e) => setAddUrl(e.target.value)} onKeyDown=${(e) => e.key === 'Enter' && add()} />
             <button className="btn small primary" onClick=${add} disabled=${!addUrl.trim()}>Add</button>
           </div>
@@ -4813,7 +4740,7 @@ function NostrFeedSection ({ rpc, C }) {
   `
 }
 
-// --- Name registry (Phase N5) — claim memorable names → drives/app links ----
+// --- Name registry (Phase N5) — claim memorable names → browsable content ---
 // Owner-signed, multi-writer, first-claim-wins with a confusable/homograph guard.
 // One form claims a new name or updates (rotates) one you already own; each name
 // is shareable as pearname://<name> and resolves in the URL bar.
@@ -4839,7 +4766,7 @@ function NameRegistrySection ({ rpc, C }) {
   const submit = async () => {
     const n = name.trim()
     const t = normalizeNameTarget(target)
-    if (!t) { setErr('Enter a 64-hex drive key or pear://, hyper://, file:// link.'); return }
+    if (!t) { setErr('Enter a 64-hex drive key or hyper:// link.'); return }
     const owned = list.find((e) => e.normalized === n.toLowerCase() || (e.name || '').toLowerCase() === n.toLowerCase())
     setBusy('submit'); setErr('')
     try {
@@ -4865,12 +4792,12 @@ function NameRegistrySection ({ rpc, C }) {
 	        <div className="settings-row">
 	          <div>
 	            <div className="settings-label">Claim or update a name</div>
-	            <div className="settings-subtle">A memorable name → a drive key or app link. First claim wins; confusable look-alikes are rejected. Re-submitting a name you own updates its target.</div>
+            <div className="settings-subtle">A memorable name → browsable P2P content. First claim wins; confusable look-alikes are rejected. Re-submitting a name you own updates its target.</div>
           </div>
         </div>
         <div className="tp-row">
           <input className="profile-input" placeholder="name (e.g. alice)" value=${name} onInput=${(e) => setName(e.target.value)} />
-          <input className="profile-input" placeholder="64-hex key, pear://, hyper://, file://" value=${target} onInput=${(e) => setTarget(e.target.value)} />
+          <input className="profile-input" placeholder="64-hex key or hyper:// link" value=${target} onInput=${(e) => setTarget(e.target.value)} />
           <button className="btn small primary" onClick=${submit} disabled=${busy != null || !name.trim() || !targetValid}>${busy === 'submit' ? 'Saving…' : 'Save'}</button>
         </div>
         ${list.length > 0 && html`<div className="namereg-list">
