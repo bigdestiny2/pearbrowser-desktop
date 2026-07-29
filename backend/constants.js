@@ -183,11 +183,11 @@ const CMD_NOSTR_QUERY = 192        // { filter } → { events } (NIP-01 filter o
 // relay pin requests. Approval authorizes replication only; publishing into the
 // shared community Hyperbee is a separate operator step. See
 // backend/community-submit.cjs + ui/shell.js (submit form + panel).
-const CMD_SUBMIT_APP = 210   // { name, link|driveKey, description?, author?, categories?, iconData? } → publish receipt + seed → { id, status:'pending-review'|'awaiting-relay' }
+const CMD_SUBMIT_APP = 210   // { submissionKind:'pear-v3'|'hyper', name, link, version?, productName?, targets?, iconData? } → queue one receipt → status
 const CMD_MOD_PENDING = 211  // → { pending: [...] } pulled from the relay review queue
-const CMD_MOD_APPROVE = 212  // { appKey, acknowledged, reviewedAt, reviewedDriveVersion, note } → guarded relay approval + local audit
+const CMD_MOD_APPROVE = 212  // { appKey, acknowledged, reviewedAt, reviewedReceiptDriveVersion, reviewedTargetDriveVersion, note } → guarded receipt approval + local audit
 const CMD_MOD_REJECT = 213   // { appKey, reason, note? } → relay reject + local audit
-const CMD_MOD_REVIEW = 214   // { appKey } → fetch content + manifest and return due-diligence evidence
+const CMD_MOD_REVIEW = 214   // { appKey } → fetch receipt + optional Hyper target and return due-diligence evidence
 
 // Browser chrome-owned local AI. Unlike /api/ai/* these commands are not
 // callable by Hyperdrive pages: only PearBrowser's renderer can use them.

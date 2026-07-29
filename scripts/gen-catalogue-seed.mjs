@@ -14,8 +14,8 @@
 // The manifest is rich (id, pearLink, homepage, source, license, platforms, …);
 // seed rows are validated against the strict APPS_SCHEMA
 // (additionalProperties:false), so we project onto exactly its allowed fields and
-// infer `type` from `link`. Native migration records retain only a local
-// migration ID, never an executable remote URI.
+// infer `type` from `link`. Native delivery is projected into the schema's
+// dedicated columns and never copied into the browsable `link` field.
 
 import { readFileSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -54,7 +54,13 @@ function toSeedRow (a) {
   if (a.driveKey && /^[0-9a-f]{64}$/i.test(a.driveKey)) row.driveKey = a.driveKey
   if (a.link) row.link = a.link
   if (typeof a.legacyMigrationId === 'string') row.legacyMigrationId = a.legacyMigrationId
-  if (a.nativeDelivery && typeof a.nativeDelivery.status === 'string') row.nativeDeliveryStatus = a.nativeDelivery.status
+  if (a.nativeDelivery && typeof a.nativeDelivery.status === 'string') {
+    row.nativeDeliveryStatus = a.nativeDelivery.status
+    if (a.nativeDelivery.kind) row.nativeDeliveryKind = a.nativeDelivery.kind
+    if (a.nativeDelivery.installLink) row.nativeInstallLink = a.nativeDelivery.installLink
+    if (a.nativeDelivery.productName) row.nativeProductName = a.nativeDelivery.productName
+    if (Array.isArray(a.nativeDelivery.targets) && a.nativeDelivery.targets.length) row.nativeTargets = a.nativeDelivery.targets
+  }
   // Inline icon (data: URI) for apps without a fetchable drive icon — rendered
   // directly by AppIcon, so every catalogue app shows a real icon, not a glyph.
   if (a.iconData) row.iconData = a.iconData
@@ -72,7 +78,7 @@ function toSeedRow (a) {
 const rows = cat.apps.map(toSeedRow)
 for (const [i, r] of rows.entries()) {
   if (!r.name || !r.type) throw new Error(`row ${i} missing name/type`)
-  if (!r.driveKey && !r.link && !r.legacyMigrationId) throw new Error(`row ${i} (${r.name}) has neither driveKey, link, nor legacy migration ID`)
+  if (!r.driveKey && !r.link && !r.legacyMigrationId && !r.nativeInstallLink) throw new Error(`row ${i} (${r.name}) has no browsable, migration, or native delivery identity`)
 }
 
 const header = `/**

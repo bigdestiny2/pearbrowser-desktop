@@ -935,27 +935,23 @@ async function reviewPendingSubmission (appKey, pending = {}, opts = {}) {
   const cached = moderationReviewCache.get(normalizedKey)
   if (!opts.force && cached && Date.now() - cached.checkedAt < MODERATION_REVIEW_CACHE_MS) return cached
 
-  let driveVersion = 0
+  let receiptDriveVersion = 0
+  let targetDriveVersion = 0
+  let targetDriveKey = ''
   let indexBuf = null
   let indexBytes = 0
   let manifestBuf = null
   let manifest = null
   let manifestError = ''
-  let fetchError = ''
+  let receiptFetchError = ''
+  let targetFetchError = ''
 
   try {
-    const drive = await withReviewTimeout(ensureBrowseDrive(normalizedKey), 12000, 'Drive open')
-    try { await withReviewTimeout(drive.update({ wait: true }), 10000, 'Drive update') } catch (_) {}
-    driveVersion = Number(drive.version) || 0
+    const receiptDrive = await withReviewTimeout(ensureBrowseDrive(normalizedKey), 12000, 'Receipt drive open')
+    try { await withReviewTimeout(receiptDrive.update({ wait: true }), 10000, 'Receipt drive update') } catch (_) {}
+    receiptDriveVersion = Number(receiptDrive.version) || 0
     try {
-      const indexFile = await readBoundedReviewFile(drive, '/index.html', MAX_REVIEW_INDEX_BYTES, 12000, 'index.html')
-      indexBuf = indexFile.buffer
-      indexBytes = indexFile.byteLength
-    } catch (err) {
-      fetchError = err && err.message ? err.message : String(err)
-    }
-    try {
-      const manifestFile = await readBoundedReviewFile(drive, '/manifest.json', MAX_REVIEW_MANIFEST_BYTES, 8000, 'manifest.json')
+      const manifestFile = await readBoundedReviewFile(receiptDrive, '/manifest.json', MAX_REVIEW_MANIFEST_BYTES, 8000, 'Receipt manifest')
       manifestBuf = manifestFile.buffer
       if (manifestFile.tooLarge) {
         manifestBuf = null
@@ -964,9 +960,7 @@ async function reviewPendingSubmission (appKey, pending = {}, opts = {}) {
     } catch (err) {
       if (!/timed out/i.test(err && err.message)) manifestError = err && err.message ? err.message : String(err)
     }
-  } catch (err) {
-    fetchError = err && err.message ? err.message : String(err)
-  }
+  } catch (err) { receiptFetchError = err && err.message ? err.message : String(err) }
 
   if (manifestBuf) {
     if (manifestBuf.length > MAX_REVIEW_MANIFEST_BYTES) {
@@ -978,11 +972,34 @@ async function reviewPendingSubmission (appKey, pending = {}, opts = {}) {
     }
   }
 
+  if (manifest && manifest.submissionKind === 'hyper') {
+    const target = communitySubmit.deriveKeyAndLink(manifest.link || manifest.driveKey, normalizeDriveKey)
+    if (target.error) {
+      targetFetchError = target.error
+    } else {
+      targetDriveKey = target.driveKey
+      try {
+        const targetDrive = await withReviewTimeout(ensureBrowseDrive(targetDriveKey), 12000, 'Target drive open')
+        try { await withReviewTimeout(targetDrive.update({ wait: true }), 10000, 'Target drive update') } catch (_) {}
+        targetDriveVersion = Number(targetDrive.version) || 0
+        const indexFile = await readBoundedReviewFile(targetDrive, '/index.html', MAX_REVIEW_INDEX_BYTES, 12000, 'Target index.html')
+        indexBuf = indexFile.buffer
+        indexBytes = indexFile.byteLength
+        if (indexFile.tooLarge) indexBytes = Math.max(indexBytes, MAX_REVIEW_INDEX_BYTES + 1)
+      } catch (err) { targetFetchError = err && err.message ? err.message : String(err) }
+    }
+  }
+
   const duplicates = catalogManager
     ? catalogManager.getAggregatedApps().filter((app) => {
+        if (manifest && manifest.submissionKind === 'pear-v3') {
+          const submitted = communitySubmit.normalizePearInstallLink(manifest.nativeDelivery && manifest.nativeDelivery.installLink)
+          const existing = communitySubmit.normalizePearInstallLink(app && app.nativeDelivery && app.nativeDelivery.installLink)
+          return !submitted.error && !existing.error && submitted.installLink === existing.installLink
+        }
         const driveKey = normalizeDriveKey(String((app && app.driveKey) || ''))
         const linkKey = driveKeyFromUrl(app && app.link)
-        return driveKey === normalizedKey || linkKey === normalizedKey
+        return !!targetDriveKey && (driveKey === targetDriveKey || linkKey === targetDriveKey)
       })
     : []
 
@@ -993,9 +1010,12 @@ async function reviewPendingSubmission (appKey, pending = {}, opts = {}) {
     manifestError,
     indexText: indexBuf ? Buffer.from(indexBuf).toString('utf8') : '',
     indexBytes,
-    driveVersion,
+    receiptDriveVersion,
+    targetDriveVersion,
+    targetDriveKey,
     duplicates,
-    fetchError,
+    receiptFetchError,
+    targetFetchError,
     normalizeKey: normalizeDriveKey
   }, Date.now())
   moderationReviewCache.set(normalizedKey, report)
@@ -1090,43 +1110,42 @@ rpc.handle(C.CMD_SUBMIT_APP, async (data = {}) => {
     submittedBy, now: Date.now(), normalizeKey: normalizeDriveKey
   })
   if (built.error) throw new Error(built.error)
-  const { manifest, id, driveKey } = built
+  const { manifest, id, kind, driveKey, installLink, receiptId } = built
 
-  // 1) Publish the submission manifest drive (durable metadata: name/desc/icon)
-  //    so the moderator + mobile firehose can read it later. seed:true pins it.
+  // Publish exactly one bounded receipt drive and put that receipt in the relay
+  // review queue. The receipt references either separately seeded Hyper content
+  // or a Pear v3 production identity. It never asks HiveRelay to pin native
+  // release bytes, and it avoids the old double-queue where moderators saw the
+  // target drive but could not retrieve the separately published form metadata.
   let manifestKey = null
-  let receiptWarning = ''
+  let acceptances = 0
   try {
     const mdrive = await hiveRelay.publish(
       [{ path: '/manifest.json', content: JSON.stringify(manifest, null, 2) }],
-      { appId: id, seed: true, replicas: 3, ttlDays: 365 }
+      { appId: receiptId, seed: true, replicas: 3, ttlDays: 365, timeout: 15000 }
     )
     if (mdrive && mdrive.key) {
-      manifestKey = Buffer.isBuffer(mdrive.key) ? mdrive.key.toString('hex') : String(mdrive.key)
+      manifestKey = normalizeDriveKey(Buffer.isBuffer(mdrive.key) ? mdrive.key.toString('hex') : String(mdrive.key))
     }
+    acceptances = Number(mdrive && mdrive.replicas && mdrive.replicas.accepted) || 0
   } catch (err) {
     console.error('[submit] publish manifest failed:', err && err.message)
-    receiptWarning = 'The submission receipt could not be published yet.'
+    throw new Error('The catalogue receipt could not be published: ' + boundedReviewText(err && err.message, 300))
   }
-  if (!manifestKey && !receiptWarning) receiptWarning = 'The submission receipt publisher returned no drive key.'
+  if (!manifestKey) throw new Error('The catalogue receipt publisher returned no valid drive key.')
 
-  // 2) Seed the app's CONTENT drive. In `review` mode this queues a pin request
-  //    in the relay's pending queue for the moderator to approve.
-  let acceptances = 0
-  try {
-    const res = await hiveRelay.seed(driveKey, { replicas: 3, ttlDays: 365, timeout: 15000 })
-    acceptances = Array.isArray(res) ? res.length : 0
-  } catch (err) {
-    console.error('[submit] seed app drive failed:', err && err.message)
-  }
-
-  console.log(`[submit] queued "${manifest.name}" (${id}) drive=${driveKey.slice(0, 8)} acceptances=${acceptances}`)
+  const receiptWarning = acceptances > 0
+    ? ''
+    : 'No relay acknowledged the review receipt yet; keep this browser online and retry if it does not appear in the operator queue.'
+  console.log(`[submit] queued "${manifest.name}" (${id}) kind=${kind} receipt=${manifestKey.slice(0, 8)} acceptances=${acceptances}`)
   return {
     ok: true,
     id,
     driveKey,
+    installLink,
+    kind,
     manifestKey,
-    receiptPublished: !!manifestKey,
+    receiptPublished: true,
     receiptWarning,
     acceptances,
     status: acceptances > 0 ? 'pending-review' : 'awaiting-relay',
@@ -1187,20 +1206,22 @@ rpc.handle(C.CMD_MOD_APPROVE, async (data = {}) => {
   const pending = moderationPendingByKey.get(appKey)
   if (!pending) throw new Error('This app is not in the loaded relay queue. Refresh pending submissions before approving it.')
   const cachedReview = moderationReviewCache.get(appKey)
-  const reviewedDriveVersion = Number(data.reviewedDriveVersion)
+  const reviewedReceiptDriveVersion = Number(data.reviewedReceiptDriveVersion)
+  const reviewedTargetDriveVersion = Number(data.reviewedTargetDriveVersion || 0)
   if (!communitySubmit.reviewEvidenceMatches(data, cachedReview)) {
     throw new Error('The due-diligence evidence does not match this approval. Re-run the review before approving.')
   }
   const review = await reviewPendingSubmission(appKey, pending, { force: true })
-  if (review.evidence.driveVersion !== reviewedDriveVersion) {
-    throw new Error(`The app changed from drive version ${reviewedDriveVersion} to ${review.evidence.driveVersion} after review. Inspect the new version before approving.`)
+  if (review.evidence.receiptDriveVersion !== reviewedReceiptDriveVersion ||
+      review.evidence.targetDriveVersion !== reviewedTargetDriveVersion) {
+    throw new Error('The receipt or target content changed after review. Inspect the refreshed evidence before approving.')
   }
   if (!review.approvalAllowed) {
     const blockers = review.checks.filter((check) => check.status === 'block').map((check) => check.label).join(', ')
     throw new Error('Due diligence blocked approval: ' + (blockers || 'review evidence failed') + '.')
   }
   if (review.requiresAcknowledgement && data.acknowledged !== true) {
-    throw new Error('A reviewer must preview the app and acknowledge the due-diligence warnings before approval.')
+    throw new Error('A reviewer must complete the human release review and acknowledge the due-diligence warnings before approval.')
   }
   const note = boundedReviewText(data.note, 1000)
   if (!note) throw new Error('Record a reviewer note describing the due diligence performed before approval.')

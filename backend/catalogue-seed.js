@@ -28,7 +28,7 @@ module.exports = {
         "p2p"
       ],
       "description": "P2P browser, decentralized app store, and site publisher. macOS / Windows / Linux. Talks to peers directly over Hyperswarm. Pinned 24/7 on HiveRelay.",
-      "version": "0.7.1",
+      "version": "0.8.0",
       "homepage": "hyper://03f0060a35451cfb6b68ad1dda1b8474ebb43fd9100071ccf7d67679a83ebb4f/",
       "sourceUrl": "https://github.com/bigdestiny2/pearbrowser-desktop",
       "license": "MIT",

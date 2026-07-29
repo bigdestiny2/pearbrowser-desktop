@@ -126,8 +126,25 @@ async function main () {
   if (pearbrowser.version !== args.expectBrowserVersion) {
     fail(`PearBrowser version mismatch: expected ${args.expectBrowserVersion}, got ${pearbrowser.version || '(missing)'}`)
   }
-  if (pearbrowser.link !== args.expectBrowserLink) {
-    fail(`PearBrowser link mismatch: expected ${args.expectBrowserLink}, got ${pearbrowser.link || '(missing)'}`)
+  if (browserSource.nativeDelivery?.status === 'available') {
+    if (pearbrowser.nativeDelivery?.installLink !== args.expectBrowserLink) {
+      fail(`PearBrowser native install link mismatch: expected ${args.expectBrowserLink}, got ${pearbrowser.nativeDelivery?.installLink || '(missing)'}`)
+    }
+    if (pearbrowser.nativeDelivery?.status !== 'available' || pearbrowser.nativeDelivery?.kind !== 'pear-v3') {
+      fail('PearBrowser native delivery must be an available Pear v3 release')
+    }
+    if (pearbrowser.nativeDelivery?.productName !== pkg.productName) {
+      fail(`PearBrowser product name mismatch: expected ${pkg.productName}, got ${pearbrowser.nativeDelivery?.productName || '(missing)'}`)
+    }
+    if (!Array.isArray(pearbrowser.nativeDelivery?.targets) || pearbrowser.nativeDelivery.targets.length === 0) {
+      fail('PearBrowser native delivery targets are missing')
+    }
+  } else {
+    const expectedMigrationId = args.expectBrowserLink.replace(/^pear:\/\//, '')
+    if (pearbrowser.legacyMigrationId !== expectedMigrationId || pearbrowser.nativeDelivery?.status !== 'migration-required') {
+      fail('PearBrowser migration identity mismatch')
+    }
+    if (pearbrowser.nativeDelivery?.installLink) fail('PearBrowser migration record must not expose an install link')
   }
   if (pearbrowser.homepage !== args.expectBrowserHomepage) {
     fail(`PearBrowser homepage mismatch: expected ${args.expectBrowserHomepage}, got ${pearbrowser.homepage || '(missing)'}`)
@@ -157,7 +174,7 @@ async function main () {
 
   console.log('   → signed meta signature:', signedMeta.value.signature.slice(0, 16) + '…')
   console.log('   → catalogue:', data.name, '· apps:', data.apps.length)
-  console.log('   → PearBrowser:', pearbrowser.version, '·', pearbrowser.link, '·', pearbrowser.homepage)
+  console.log('   → PearBrowser:', pearbrowser.version, '·', pearbrowser.nativeDelivery?.installLink || `migration:${pearbrowser.legacyMigrationId}`, '·', pearbrowser.homepage)
   if (peercord) console.log('   → Peercord:', peercord.type, '·', peercord.sourceUrl, '·', peercord.license)
   console.log('   → expected apps:', args.expectApps.length ? args.expectApps.join(', ') : '(none)')
   console.log()

@@ -2480,48 +2480,118 @@ function CollaborativeCatalog ({ rpc, C }) {
   `
 }
 
-// "Submit your app" — anyone can propose an app for the COMMUNITY catalogue.
-// CMD_SUBMIT_APP publishes a submission receipt + seeds the app drive via
-// HiveRelay; the relay queues a pin request in `review` mode. Relay approval and
-// Community-catalogue publication are separate operator gates.
+// "Submit your app" — anyone can propose either released Pear v3 native
+// delivery or browsable Hyper content. CMD_SUBMIT_APP queues a small catalogue
+// receipt; Pear distributes native builds and publishers seed Hyper content.
+// Receipt approval and Community-catalogue publication remain separate gates.
 function CommunitySubmit ({ rpc, C }) {
+  const [submissionKind, setSubmissionKind] = useState('pear-v3')
   const [name, setName] = useState('')
   const [link, setLink] = useState('')
+  const [version, setVersion] = useState('')
+  const [productName, setProductName] = useState('')
+  const [targets, setTargets] = useState([])
+  const [releaseConfirmed, setReleaseConfirmed] = useState(false)
   const [description, setDescription] = useState('')
   const [author, setAuthor] = useState('')
   const [categories, setCategories] = useState('')
+  const [iconData, setIconData] = useState('')
+  const [iconName, setIconName] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [ok, setOk] = useState('')
 
+  const native = submissionKind === 'pear-v3'
+  const targetOptions = [
+    ['darwin-arm64', 'macOS Apple silicon'],
+    ['darwin-x64', 'macOS Intel'],
+    ['linux-arm64', 'Linux ARM64'],
+    ['linux-x64', 'Linux x64'],
+    ['win32-arm64', 'Windows ARM64'],
+    ['win32-x64', 'Windows x64']
+  ]
+
+  const switchKind = (kind) => {
+    setSubmissionKind(kind)
+    setLink('')
+    setOk('')
+    setErr('')
+    setReleaseConfirmed(false)
+  }
+
+  const toggleTarget = (target) => {
+    setTargets((current) => current.includes(target)
+      ? current.filter((value) => value !== target)
+      : [...current, target])
+  }
+
+  const selectIcon = (event) => {
+    setErr(''); setIconData(''); setIconName('')
+    const file = event.target.files && event.target.files[0]
+    if (!file) return
+    const allowed = ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/svg+xml']
+    if (!allowed.includes(file.type)) { setErr('Choose a PNG, JPEG, WebP, GIF, or SVG icon.'); return }
+    if (file.size > 14 * 1024) { setErr('Keep the icon under 14 KB so it fits the shared catalogue record.'); return }
+    const reader = new FileReader()
+    reader.onerror = () => setErr('The icon could not be read.')
+    reader.onload = () => {
+      const value = typeof reader.result === 'string' ? reader.result : ''
+      if (!value || value.length > 20000) { setErr('The encoded icon is too large for the catalogue.'); return }
+      setIconData(value); setIconName(file.name)
+    }
+    reader.readAsDataURL(file)
+  }
+
   const submit = async () => {
     setErr(''); setOk('')
     if (!name.trim()) { setErr('App name is required.'); return }
-    if (!link.trim()) { setErr('Paste a hyper:// link or a drive key.'); return }
-    if (/^(?:pear|file):\/\//i.test(link.trim())) { setErr('Remote executable app links are not accepted. Submit browsable hyper:// content only.'); return }
+    if (!link.trim()) { setErr(native ? 'Paste the production pear:// release link.' : 'Paste a hyper:// link or drive key.'); return }
+    if (native && !version.trim()) { setErr('Enter the version currently published on this Pear release line.'); return }
+    if (native && targets.length === 0) { setErr('Select every operating-system target included in the release.'); return }
+    if (native && !releaseConfirmed) { setErr('Confirm that the root link is the seeded production provision or multisig release line.'); return }
+    if (!native && /^(?:pear|file):\/\//i.test(link.trim())) { setErr('Choose Pear v3 app for native release links.'); return }
     setBusy(true)
     try {
       const res = await rpc.request(C.CMD_SUBMIT_APP, {
-        name: name.trim(), link: link.trim(), description: description.trim(),
-        author: author.trim(), categories
+        submissionKind,
+        name: name.trim(),
+        link: link.trim(),
+        version: version.trim(),
+        productName: productName.trim() || name.trim(),
+        targets,
+        releaseConfirmed,
+        description: description.trim(),
+        author: author.trim(),
+        categories,
+        iconData
       }, 90000)
       const submittedName = (res && res.manifest && res.manifest.name) || name.trim()
       const relayStatus = res && res.status === 'pending-review'
-        ? `${res.acceptances} relay${res.acceptances === 1 ? '' : 's'} acknowledged the review request.`
+        ? `${res.acceptances} relay${res.acceptances === 1 ? '' : 's'} acknowledged the catalogue receipt.`
         : 'The request was broadcast, but no relay acknowledged it within the initial window; the client will retry and it is not yet confirmed in a review queue.'
       const receiptStatus = res && res.receiptWarning ? ` ${res.receiptWarning}` : ''
       setOk(`Submitted "${submittedName}". ${relayStatus}${receiptStatus} Catalogue publication remains a separate final gate.`)
-      setName(''); setLink(''); setDescription(''); setAuthor(''); setCategories('')
+      setName(''); setLink(''); setVersion(''); setProductName(''); setTargets([]); setReleaseConfirmed(false)
+      setDescription(''); setAuthor(''); setCategories(''); setIconData(''); setIconName('')
     } catch (e) { setErr((e && e.message) || String(e)) } finally { setBusy(false) }
   }
 
   return html`
     <div className="community-submit">
       <h2>Submit your app <span className="settings-subtle">→ Community list</span></h2>
-      <p className="subtitle">Add browsable Hyperdrive content to the community review queue. The drive should contain <code>/index.html</code> and a truthful <code>/manifest.json</code>. HiveRelay replication is not an endorsement, and native executable targets are rejected.</p>
+      <p className="subtitle">Submit release metadata for review. Pear v3 native apps must already be built, staged, provisioned or multisig-gated, and seeded under a stable root <code>pear://</code> production identity. This form does not release or execute the app.</p>
       <div className="settings-card">
         ${err && html`<div className="apps-error">${err}</div>`}
         ${ok && html`<div className="apps-ok">${ok}</div>`}
+        <div className="community-kind" role="group" aria-label="Submission type">
+          <button className=${'btn ' + (native ? 'primary' : 'subtle')} onClick=${() => switchKind('pear-v3')}>Pear v3 app</button>
+          <button className=${'btn ' + (!native ? 'primary' : 'subtle')} onClick=${() => switchKind('hyper')}>Hyper site</button>
+        </div>
+        <div className="community-release-note">
+          ${native
+            ? html`<span><strong>Pear v3 flow:</strong> <code>pear build</code> → <code>pear stage</code> → <code>pear provision</code> / multisig → keep the root release link seeded.</span>`
+            : html`<span><strong>Hyper flow:</strong> publish and seed a drive with a root <code>/index.html</code>. The review receipt points to it but does not pin it automatically.</span>`}
+        </div>
         <div className="settings-row">
           <div className="profile-field">
             <div className="settings-label">App name *</div>
@@ -2530,10 +2600,33 @@ function CommunitySubmit ({ rpc, C }) {
         </div>
         <div className="settings-row">
           <div className="profile-field">
-            <div className="settings-label">Link *</div>
-            <input className="profile-input" placeholder="hyper://… (or a 64-hex / z-base-32 key)" value=${link} onInput=${(e) => setLink(e.target.value)} onKeyDown=${(e) => e.key === 'Enter' && submit()} />
+            <div className="settings-label">${native ? 'Production Pear release link *' : 'Hyper content link *'}</div>
+            <input className="profile-input" spellCheck="false" placeholder=${native ? 'pear://<52-character production key>' : 'hyper://… (or a 64-hex / z-base-32 key)'} value=${link} onInput=${(e) => setLink(e.target.value)} />
           </div>
         </div>
+        ${native && html`
+          <div className="settings-row">
+            <div className="profile-field">
+              <div className="settings-label">Released version *</div>
+              <input className="profile-input" placeholder="1.2.3" value=${version} onInput=${(e) => setVersion(e.target.value)} />
+            </div>
+            <div className="profile-field">
+              <div className="settings-label">Installed product name *</div>
+              <input className="profile-input" placeholder=${name.trim() || 'Must match the Pear package'} value=${productName} onInput=${(e) => setProductName(e.target.value)} />
+            </div>
+          </div>
+          <div className="profile-field">
+            <div className="settings-label">Published targets *</div>
+            <div className="community-targets">
+              ${targetOptions.map(([target, label]) => html`
+                <label key=${target}>
+                  <input type="checkbox" checked=${targets.includes(target)} onChange=${() => toggleTarget(target)} />
+                  <span>${label}</span>
+                </label>
+              `)}
+            </div>
+          </div>
+        `}
         <div className="settings-row">
           <div className="profile-field">
             <div className="settings-label">Description</div>
@@ -2550,8 +2643,28 @@ function CommunitySubmit ({ rpc, C }) {
             <input className="profile-input" placeholder="tools, social" value=${categories} onInput=${(e) => setCategories(e.target.value)} />
           </div>
         </div>
+        <div className="profile-field">
+          <div className="settings-label">App icon <span className="settings-subtle">PNG, JPEG, WebP, GIF, or safe SVG · max 14 KB</span></div>
+          <div className="community-icon-upload">
+            ${iconData
+              ? html`<img src=${safeIconSrc(iconData)} alt="Selected app icon" />`
+              : html`<div className="app-icon app-icon-fallback">${(name || '?').charAt(0)}</div>`}
+            <label className="btn">
+              ${iconData ? 'Replace icon' : 'Choose icon'}
+              <input type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml" onChange=${selectIcon} />
+            </label>
+            ${iconName && html`<span className="settings-subtle">${iconName}</span>`}
+            ${iconData && html`<button className="btn subtle" onClick=${() => { setIconData(''); setIconName('') }}>Remove</button>`}
+          </div>
+        </div>
+        ${native && html`
+          <label className="community-release-confirm">
+            <input type="checkbox" checked=${releaseConfirmed} onChange=${(e) => setReleaseConfirmed(e.target.checked)} />
+            <span>I confirm this root link is the currently seeded production provision or multisig release line, not a versioned stage link.</span>
+          </label>
+        `}
         <div className="settings-row">
-          <button className="btn primary" onClick=${submit} disabled=${busy || !name.trim() || !link.trim()}>${busy ? 'Submitting…' : 'Submit for review'}</button>
+          <button className="btn primary" onClick=${submit} disabled=${busy || !name.trim() || !link.trim() || (native && (!version.trim() || targets.length === 0 || !releaseConfirmed))}>${busy ? 'Submitting…' : 'Submit catalogue receipt'}</button>
         </div>
       </div>
     </div>
@@ -2634,7 +2747,8 @@ function ModeratorPanel ({ rpc, C, onPreview }) {
         appKey,
         acknowledged: acknowledged[appKey] === true,
         reviewedAt: report && report.checkedAt,
-        reviewedDriveVersion: report && report.evidence && report.evidence.driveVersion,
+        reviewedReceiptDriveVersion: report && report.evidence && report.evidence.receiptDriveVersion,
+        reviewedTargetDriveVersion: report && report.evidence && report.evidence.targetDriveVersion,
         note,
         reason
       }, 60000)
@@ -2645,8 +2759,8 @@ function ModeratorPanel ({ rpc, C, onPreview }) {
         ? res.auditWarning
         : (approve
             ? (res && res.promoted && res.promoted.deferred
-                ? 'Relay pin approved. Community catalogue publication is still pending.'
-                : 'Relay pin approved and audited.')
+                ? 'Catalogue receipt approved. Community catalogue publication is still pending.'
+                : 'Catalogue receipt approved and audited.')
             : 'Rejected with an audit reason.'))
     } catch (e) { setErr(e.message) } finally { setBusy(null) }
   }
@@ -2667,11 +2781,11 @@ function ModeratorPanel ({ rpc, C, onPreview }) {
         <div className="settings-card">
           ${err && html`<div className="apps-error">${err}</div>`}
           ${notice && html`<div className="apps-ok">${notice}</div>`}
-          <p className="subtitle">Review signed seed requests before a relay stores their content. The relay must run in <code>review</code> mode. Approval authorizes replication only; publishing the approved metadata into the shared Community catalogue is a separate release step.</p>
+          <p className="subtitle">Review signed catalogue receipts. A receipt points to separately distributed Hyper content or a Pear v3 production identity; native release bytes stay on Pear's release line. Approval authorizes receipt replication only, while shared catalogue publication remains a separate release step.</p>
           <div className="mod-process">
             <span><strong>1</strong> Queue</span><span>→</span>
-            <span><strong>2</strong> Fetch evidence</span><span>→</span>
-            <span><strong>3</strong> Preview + decide</span><span>→</span>
+            <span><strong>2</strong> Fetch receipt + target</span><span>→</span>
+            <span><strong>3</strong> Review + decide</span><span>→</span>
             <span><strong>4</strong> Publish catalogue</span>
           </div>
           <div className="settings-row">
@@ -2714,7 +2828,7 @@ function ModeratorPanel ({ rpc, C, onPreview }) {
                   </div>
                   <div className="mod-review-actions">
                     <button className="btn small" onClick=${() => runReview(p, !!report)} disabled=${!!busy}>${busy === 'v:' + p.appKey ? 'Checking…' : (report ? 'Re-run checks' : 'Run due diligence')}</button>
-                    <button className="btn small subtle" onClick=${() => onPreview && onPreview(`hyper://${p.appKey}/`)} disabled=${!!busy}>Open preview</button>
+                    ${report && report.previewUrl && html`<button className="btn small subtle" onClick=${() => onPreview && onPreview(report.previewUrl)} disabled=${!!busy}>Open target preview</button>`}
                   </div>
                   ${report && html`
                     <div className="mod-summary">
@@ -2727,6 +2841,7 @@ function ModeratorPanel ({ rpc, C, onPreview }) {
                         <strong>${report.manifest.name}</strong>${report.manifest.version ? ` · v${report.manifest.version}` : ''}${report.manifest.author ? ` · ${report.manifest.author}` : ''}
                         ${report.manifest.description && html`<div>${report.manifest.description}</div>`}
                         ${report.manifest.categories && report.manifest.categories.length > 0 && html`<div className="settings-subtle">${report.manifest.categories.join(' · ')}</div>`}
+                        ${report.manifest.nativeDelivery?.installLink && html`<div className="mod-key">${report.manifest.nativeDelivery.installLink}</div>`}
                       </div>
                     `}
                     <div className="mod-checks">
@@ -2739,7 +2854,9 @@ function ModeratorPanel ({ rpc, C, onPreview }) {
                     </div>
                     <label className="mod-ack">
                       <input type="checkbox" checked=${acknowledged[p.appKey] === true} onChange=${(e) => setAcknowledged((current) => ({ ...current, [p.appKey]: e.target.checked }))} />
-                      I opened the preview, reviewed the warnings, and understand that passing automated checks is not a safety endorsement.
+                      ${report.submissionKind === 'pear-v3'
+                        ? 'I independently checked the publisher and Pear release metadata, reviewed every warning, and understand that receipt checks are not a safety endorsement.'
+                        : 'I opened the target preview, reviewed every warning, and understand that automated checks are not a safety endorsement.'}
                     </label>
                   `}
                   <div className="profile-field">
@@ -2751,7 +2868,7 @@ function ModeratorPanel ({ rpc, C, onPreview }) {
                     <input className="profile-input" placeholder="Required only when rejecting" value=${reasons[p.appKey] || ''} onInput=${(e) => setReasons((current) => ({ ...current, [p.appKey]: e.target.value }))} />
                   </div>
                   <div className="mod-decision-actions">
-                    <button className="btn small primary" onClick=${() => decide(p, true)} disabled=${!!busy || mode !== 'review' || !report || !report.approvalAllowed || !(notes[p.appKey] || '').trim() || (warningCount > 0 && acknowledged[p.appKey] !== true)}>${busy === 'a:' + p.appKey ? 'Approving…' : 'Approve relay pin'}</button>
+                    <button className="btn small primary" onClick=${() => decide(p, true)} disabled=${!!busy || mode !== 'review' || !report || !report.approvalAllowed || !(notes[p.appKey] || '').trim() || (warningCount > 0 && acknowledged[p.appKey] !== true)}>${busy === 'a:' + p.appKey ? 'Approving…' : 'Approve receipt'}</button>
                     <button className="btn small subtle" onClick=${() => decide(p, false)} disabled=${!!busy || mode !== 'review' || !(reasons[p.appKey] || '').trim()}>${busy === 'r:' + p.appKey ? 'Rejecting…' : 'Reject with reason'}</button>
                   </div>
                 </div>

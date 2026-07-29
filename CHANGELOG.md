@@ -4,6 +4,55 @@
 > only to explain past releases; they are not current installation, launch, or
 > recovery instructions. Current native delivery requires a verified package.
 
+## v0.8.0 — 2026-07-29
+
+Pear v3 application delivery and catalogue submission release. PearBrowser now
+separates native package installation from browsable Hyper content end to end,
+from publisher submission through moderation, catalogue transport, and launch.
+
+### Added
+
+- A host-owned Pear v3 native app launcher using pinned `pear-install`, with an
+  explicit OS confirmation and strict package identity, product, target,
+  destination, upgrade, and single-GUI-artifact validation.
+- A Pear v3 catalogue submission path for canonical root production links,
+  released version, exact product name, supported platform targets, and a
+  publisher production-release attestation.
+- Optional PNG, JPEG, WebP, GIF, or safe SVG catalogue icons, bounded in both
+  the form and backend and checked against their actual byte signatures.
+- Native-delivery round-trip coverage for published Hyperbee catalogues and
+  schema-sheets offline seeds.
+
+### Changed
+
+- Submissions now queue one bounded signed catalogue receipt. Hyper sites keep
+  content seeding separate; native releases remain distributed by Pear and are
+  never pinned or executed by the moderation relay.
+- Moderation loads the receipt first, fetches Hyper content only when relevant,
+  checks duplicate native identities, and binds approval to both receipt and
+  optional content versions.
+- The submission UI defaults to Pear v3, explains the
+  `build → stage → provision / multisig` release boundary, and retains a clear
+  Hyper-site alternative.
+- Mobile catalogue consumers preserve valid nested `nativeDelivery` metadata
+  as desktop-only listings while allowing only `hyper://` rows to navigate.
+
+### Security / release boundary
+
+- Legacy top-level `pear://` and `file://` values remain migration records and
+  are never supplied to `PearRuntime.run()` or the mobile browser runtime.
+- PearBrowser's own retained upgrade identity remains migration-only until its
+  human-controlled v3 production provision/multisig evidence is complete.
+- macOS notarization, Windows public-trust signing, and mobile store releases
+  remain gated on production credentials; package-proof assets must be labelled
+  accordingly and include SHA-256 sidecars.
+
+### Verification
+
+- Desktop suite: `700/700`.
+- Mobile suite: `566/566`.
+- iOS unsigned device build and Android debug Kotlin compilation pass.
+
 ## v0.7.1 — 2026-07-16
 
 Corrective desktop transport release. The backend RPC handlers were healthy,
