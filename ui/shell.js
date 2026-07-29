@@ -2691,6 +2691,8 @@ function appStableDedupeKey (app) {
   const hyperKey = /^hyper:\/\//i.test(link) ? driveKeyFromHyperRef(link) : ''
   if (driveKey || hyperKey) return 'drive:' + (driveKey || hyperKey)
   if (/^hyper:\/\/.+/i.test(link)) return 'link:' + link
+  const nativeInstallLink = String(app.nativeDelivery?.installLink || '').trim().toLowerCase().replace(/\/$/, '')
+  if (app.nativeDelivery?.status === 'available' && app.nativeDelivery?.kind === 'pear-v3' && /^pear:\/\/[13-9a-km-uw-z]{52}$/.test(nativeInstallLink)) return 'native:' + nativeInstallLink
   const legacyMigrationId = String(app.legacyMigrationId || '').trim().toLowerCase()
   if (/^[13-9a-km-uw-z]{52}$/.test(legacyMigrationId)) return 'legacy:' + legacyMigrationId
   const id = String(app.id || '').trim()
@@ -2794,6 +2796,8 @@ function Apps ({ rpc, C, onLaunch }) {
   // via user-data settings so they survive across launches.
   const [recentCatalogs, setRecentCatalogs] = useState([])
   const [installed, setInstalled] = useState([])
+  const [nativeApps, setNativeApps] = useState([])
+  const [nativeProgress, setNativeProgress] = useState(null)
   const [busy, setBusy] = useState(null)
   const [err, setErr] = useState('')
   const [autoLoadAttempted, setAutoLoadAttempted] = useState(false)
@@ -2882,6 +2886,78 @@ function Apps ({ rpc, C, onLaunch }) {
       setInstalled(Array.isArray(list) ? list : (list?.apps ?? []))
     } catch (e) {
       setErr(`list failed: ${e.message}`)
+    }
+  }
+
+  const refreshNativeApps = async () => {
+    try {
+      const host = globalThis.pearbrowserRuntime
+      if (!host || typeof host.listPearApps !== 'function') return setNativeApps([])
+      const list = await host.listPearApps()
+      setNativeApps(Array.isArray(list) ? list : [])
+    } catch (e) {
+      setErr(`native apps: ${e.message}`)
+    }
+  }
+
+  const nativeInstallLink = (app) => app?.nativeDelivery?.status === 'available' && app?.nativeDelivery?.kind === 'pear-v3'
+    ? String(app.nativeDelivery.installLink || '')
+    : ''
+
+  const nativeRecordFor = (app) => {
+    const link = nativeInstallLink(app)
+    if (!link) return null
+    return nativeApps.find((record) => record.link === link) || null
+  }
+
+  const installNativeApp = async (app) => {
+    const host = globalThis.pearbrowserRuntime
+    if (!host || typeof host.installPearApp !== 'function') {
+      setErr('Native Pear v3 installation is unavailable in this build.')
+      return
+    }
+    const link = nativeInstallLink(app)
+    if (!link) {
+      setErr(`${app?.name || 'This app'} has no valid Pear v3 install link.`)
+      return
+    }
+    setErr(''); setLaunched(''); setNativeProgress(null); setBusy(`native-install:${link}`)
+    try {
+      const result = await host.installPearApp({
+        id: app.id,
+        name: app.name,
+        verification: app.verification,
+        nativeDelivery: app.nativeDelivery
+      })
+      if (result?.cancelled) return
+      await refreshNativeApps()
+      setLaunched(result?.exists ? `${result.app || app.name} is already installed.` : `Installed ${result?.app || app.name} as a native Pear v3 app.`)
+      setTimeout(() => setLaunched(''), 5000)
+    } catch (e) {
+      setErr(`install ${app.name}: ${e.message}`)
+    } finally {
+      setBusy(null)
+      setNativeProgress(null)
+    }
+  }
+
+  const launchNativeApp = async (app) => {
+    const host = globalThis.pearbrowserRuntime
+    if (!host || typeof host.launchPearApp !== 'function') {
+      setErr('Native Pear v3 launching is unavailable in this build.')
+      return
+    }
+    const target = nativeInstallLink(app) || app?.link || app?.id
+    setErr(''); setLaunched(''); setBusy(`native-launch:${target}`)
+    try {
+      const result = await host.launchPearApp({ link: target, id: app?.id })
+      setLaunched(`Opened ${result?.app || app?.name || 'Pear app'} in its native window.`)
+      setTimeout(() => setLaunched(''), 4000)
+      await refreshNativeApps()
+    } catch (e) {
+      setErr(`launch ${app?.name || 'app'}: ${e.message}`)
+    } finally {
+      setBusy(null)
     }
   }
 
@@ -3141,6 +3217,7 @@ function Apps ({ rpc, C, onLaunch }) {
   // the aggregated store is populated, not just the most recent one.
   useEffect(() => {
     refreshInstalled()
+    refreshNativeApps()
     // Pull the aggregated store immediately so backend-registered catalogues
     // (e.g. the default schema-sheets catalogue, seeded on boot) show up without
     // waiting on a recent/relay catalog load to resolve.
@@ -3223,6 +3300,12 @@ function Apps ({ rpc, C, onLaunch }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  useEffect(() => {
+    const host = globalThis.pearbrowserRuntime
+    if (!host || typeof host.onPearAppProgress !== 'function') return
+    return host.onPearAppProgress((progress) => setNativeProgress(progress || null))
+  }, [])
+
   const installApp = async (app) => {
     setErr(''); setBusy(`install:${app.id}`)
     try {
@@ -3273,7 +3356,7 @@ function Apps ({ rpc, C, onLaunch }) {
     const q = query.normalize('NFKC').trim().toLowerCase()
     const matched = apps.filter((a) => {
       // Apps page presents browsable content and legacy migration records.
-      if (!a || (!a.link && !a.legacyMigrationId)) return false
+      if (!a || (!a.link && !a.legacyMigrationId && !nativeInstallLink(a))) return false
       if (source !== 'all' && a.catalogKey !== source) return false
       if (category !== 'all' && !appCategories(a).includes(category)) return false
       if (!q) return true
@@ -3284,7 +3367,7 @@ function Apps ({ rpc, C, onLaunch }) {
   }, [apps, query, category, source])
 
   // Total unique-app count (deduped, ignoring search/category) for the headers.
-  const uniqueAppCount = useMemo(() => dedupeApps(apps.filter((a) => a && (a.link || a.legacyMigrationId))).length, [apps])
+  const uniqueAppCount = useMemo(() => dedupeApps(apps.filter((a) => a && (a.link || a.legacyMigrationId || nativeInstallLink(a)))).length, [apps])
 
   const renderMyCatalogApp = (app) => {
     const savedId = app.id || app.driveKey || app.name || 'untitled'
@@ -3395,6 +3478,15 @@ function Apps ({ rpc, C, onLaunch }) {
         <p className="placeholder">Older remote app links cannot run in PearBrowser. Install only a publisher-provided, verified native v3 package.</p>
       </div>
       ${launched && html`<div className="apps-ok">${launched}</div>`}
+      ${nativeProgress && html`<div className="apps-ok">
+        ${nativeProgress.phase === 'downloading'
+          ? `Downloading native app · ${formatBytes(nativeProgress.download?.bytes || 0)} · ${nativeProgress.peers || 0} peer${nativeProgress.peers === 1 ? '' : 's'}`
+          : nativeProgress.phase === 'connecting'
+            ? 'Finding Pear v3 release peers…'
+            : nativeProgress.phase === 'installing'
+              ? `Installing ${nativeProgress.app || 'native app'}${nativeProgress.version ? ` v${nativeProgress.version}` : ''}…`
+              : 'Preparing native app…'}
+      </div>`}
 
       <h2>App Catalog</h2>
       <div className="catalog-loader">
@@ -3490,20 +3582,28 @@ function Apps ({ rpc, C, onLaunch }) {
                     ${app.version ? 'v' + app.version : ''} ${app.author ? '· ' + app.author : ''}
                     ${app.nativeDelivery?.status === 'migration-required'
                       ? html`<span style=${{ marginLeft: '6px', opacity: 0.75 }}>· verified native package required</span>`
-                      : (app.type === 'hypersite' ? html`<span style=${{ marginLeft: '6px', opacity: 0.75 }}>· opens in a tab</span>` : '')}
+                      : (nativeInstallLink(app)
+                          ? html`<span style=${{ marginLeft: '6px', opacity: 0.75 }}>· Pear v3 native app</span>`
+                          : (app.type === 'hypersite' ? html`<span style=${{ marginLeft: '6px', opacity: 0.75 }}>· opens in a tab</span>` : ''))}
                   </div>
                   ${app.catalogName && html`<div className="app-source-tag">${app.catalogName}</div>`}
                   <${AppMeta} rpc=${rpc} C=${C} app=${app} />
                 </div>
                 <div className="app-actions">
                   ${(() => {
+                    const installLink = nativeInstallLink(app)
+                    const nativeRecord = nativeRecordFor(app)
                     return html`
                       ${app.driveKey && /^[0-9a-f]{64}$/i.test(app.driveKey)
                         ? html`<button key="open-page" className="btn subtle" onClick=${() => openSite(app)} title="Open this app's P2P page in a tab">Open page</button>`
                         : ''}
-                      ${app.nativeDelivery?.status === 'migration-required'
-                        ? html`<button key="migration" className="btn primary" onClick=${() => showLegacyMigration(app)} disabled=${busy === 'legacy-migration'} title="Requires a verified native v3 package">Migration status</button>`
-                        : html`<button key="open-content" className="btn primary" onClick=${() => openSite(app)} title="Open browsable P2P content">Open</button>`}
+                      ${installLink
+                        ? (nativeRecord?.installed
+                            ? html`<button key="open-native" className="btn primary" onClick=${() => launchNativeApp(app)} disabled=${busy === `native-launch:${installLink}`} title="Open the installed native application">Open app</button>`
+                            : html`<button key="install-native" className="btn primary" onClick=${() => installNativeApp(app)} disabled=${busy === `native-install:${installLink}`} title="Install the Pear v3 build into your operating system">${busy === `native-install:${installLink}` ? 'Installing…' : 'Install app'}</button>`)
+                        : (app.nativeDelivery?.status === 'migration-required'
+                            ? html`<button key="migration" className="btn primary" onClick=${() => showLegacyMigration(app)} disabled=${busy === 'legacy-migration'} title="Requires a verified native v3 package">Migration status</button>`
+                            : html`<button key="open-content" className="btn primary" onClick=${() => openSite(app)} title="Open browsable P2P content">Open</button>`)}
                       ${canEditMyCatalog && app.catalogKey !== myCatalog.keyHex && !inMyCatalog([app.id, app.driveKey, app.link]) && html`
                         <button key="add-catalog" className="btn subtle" title="Add to my catalog" onClick=${() => addToMyCatalog(app)} disabled=${busy === `addcat:${app.id || app.driveKey || app.link}`}>+ Catalog</button>
                       `}
@@ -3582,9 +3682,27 @@ function Apps ({ rpc, C, onLaunch }) {
           </div>
         `}
 
-      <h2>Installed</h2>
+      <h2>Native Pear apps</h2>
+      ${nativeApps.length === 0
+        ? html`<p className="placeholder">No native Pear v3 apps installed through PearBrowser yet.</p>`
+        : html`<div className="app-grid">
+            ${nativeApps.map((app) => html`
+              <div className="app-card" key=${app.link}>
+                <div className="app-icon app-icon-fallback">${(app.app || app.displayName || '?').charAt(0)}</div>
+                <div className="app-info">
+                  <div className="app-name">${app.app || app.displayName}</div>
+                  <div className="app-meta">v${app.version || '?'} · native ${app.platform || ''}${app.installed ? '' : ' · not found at recorded OS location'}</div>
+                </div>
+                <div className="app-actions">
+                  <button key="launch-native-installed" className="btn primary" onClick=${() => launchNativeApp({ id: app.id, name: app.app, nativeDelivery: { status: 'available', kind: 'pear-v3', installLink: app.link } })} disabled=${!app.installed || busy === `native-launch:${app.link}`}>Open app</button>
+                </div>
+              </div>
+            `)}
+          </div>`}
+
+      <h2>Installed sites</h2>
       ${installed.length === 0
-        ? html`<p className="placeholder">No apps installed yet.</p>`
+        ? html`<p className="placeholder">No Hyperdrive sites installed yet.</p>`
         : html`<div className="app-grid">
             ${installed.map((app) => html`
               <div className="app-card" key=${app.id}>
@@ -3640,13 +3758,14 @@ function Apps ({ rpc, C, onLaunch }) {
                 ${detailApp.categories.map((c) => html`<span key=${c} style=${{ fontSize: '12px', padding: '2px 9px', borderRadius: '8px', background: 'rgba(255,255,255,0.06)', color: '#8b949e' }}>${c}</span>`)}
               </div>` : ''}
             <div style=${{ fontSize: '13px', color: '#8b949e', display: 'grid', gap: '6px', marginBottom: '18px' }}>
-              <div><strong style=${{ color: '#c9d1d9' }}>Runs:</strong> ${detailApp.type === 'hypersite' ? 'headless in a tab' : 'in its own window'}</div>
+              <div><strong style=${{ color: '#c9d1d9' }}>Runs:</strong> ${nativeInstallLink(detailApp) ? 'as a native Pear v3 OS application' : (detailApp.type === 'hypersite' ? 'headless in a tab' : 'in its own window')}</div>
               ${detailApp.version ? html`<div><strong style=${{ color: '#c9d1d9' }}>Version:</strong> v${detailApp.version}</div>` : ''}
               <div><strong style=${{ color: '#c9d1d9' }}>Verification:</strong> ${detailApp.verification || 'unverified'}</div>
               ${detailApp.homepage ? html`<div style=${{ wordBreak: 'break-all' }}><strong style=${{ color: '#c9d1d9' }}>Homepage:</strong> ${detailApp.homepage}</div>` : ''}
               ${detailApp.sourceUrl ? html`<div style=${{ wordBreak: 'break-all' }}><strong style=${{ color: '#c9d1d9' }}>Source:</strong> ${detailApp.sourceUrl}</div>` : ''}
               ${detailApp.license ? html`<div><strong style=${{ color: '#c9d1d9' }}>License:</strong> ${detailApp.license}</div>` : ''}
               ${detailApp.link ? html`<div style=${{ wordBreak: 'break-all' }}><strong style=${{ color: '#c9d1d9' }}>Link:</strong> ${detailApp.link}</div>` : ''}
+              ${nativeInstallLink(detailApp) ? html`<div style=${{ wordBreak: 'break-all' }}><strong style=${{ color: '#c9d1d9' }}>Install:</strong> ${nativeInstallLink(detailApp)}</div>` : ''}
               ${detailApp.driveKey ? html`<div style=${{ wordBreak: 'break-all' }}><strong style=${{ color: '#c9d1d9' }}>Drive:</strong> ${detailApp.driveKey}</div>` : ''}
               ${(detailApp._sources && detailApp._sources.length)
                 ? html`<div><strong style=${{ color: '#c9d1d9' }}>Catalogue${detailApp._sources.length > 1 ? 's' : ''}:</strong> ${detailApp._sources.join(', ')}</div>`
@@ -3654,15 +3773,21 @@ function Apps ({ rpc, C, onLaunch }) {
               ${detailApp.publisherKey ? html`<div style=${{ wordBreak: 'break-all' }}><strong style=${{ color: '#c9d1d9' }}>Publisher:</strong> ${shortKey(detailApp.publisherKey)}</div>` : ''}
             </div>
             <div style=${{ display: 'flex', gap: '8px' }}>
-              ${detailApp.type === 'hypersite'
-                ? (detailApp.driveKey && !detailApp.link
-                    ? html`<button key="detail-open-site" className="btn primary" onClick=${() => { openSite(detailApp); setDetailApp(null) }}>Open</button>`
-                    : html`<button key="detail-run-tab" className="btn primary" onClick=${() => { runInTab(detailApp); setDetailApp(null) }}>Run in tab</button>`)
-                : (detailApp.link && !detailApp.driveKey)
-                  ? html`<button key="detail-open-window" className="btn primary" onClick=${() => { launchFeaturedApp(detailApp); setDetailApp(null) }}>Open</button>`
-                  : (isInstalled(detailApp.id)
-                    ? html`<button key="detail-launch" className="btn primary" onClick=${() => { launchApp(detailApp); setDetailApp(null) }}>Launch</button>`
-                    : html`<button key="detail-install" className="btn primary" onClick=${() => { installApp(detailApp); setDetailApp(null) }}>Install</button>`)}
+              ${nativeInstallLink(detailApp)
+                ? (nativeRecordFor(detailApp)?.installed
+                    ? html`<button key="detail-open-native" className="btn primary" onClick=${() => { launchNativeApp(detailApp); setDetailApp(null) }}>Open app</button>`
+                    : html`<button key="detail-install-native" className="btn primary" onClick=${() => { installNativeApp(detailApp); setDetailApp(null) }}>Install app</button>`)
+                : detailApp.nativeDelivery?.status === 'migration-required'
+                  ? html`<button key="detail-migration" className="btn primary" onClick=${() => { showLegacyMigration(detailApp); setDetailApp(null) }}>Migration status</button>`
+                : detailApp.type === 'hypersite'
+                  ? (detailApp.driveKey && !detailApp.link
+                      ? html`<button key="detail-open-site" className="btn primary" onClick=${() => { openSite(detailApp); setDetailApp(null) }}>Open</button>`
+                      : html`<button key="detail-run-tab" className="btn primary" onClick=${() => { runInTab(detailApp); setDetailApp(null) }}>Run in tab</button>`)
+                  : (detailApp.link && !detailApp.driveKey)
+                    ? html`<button key="detail-open-window" className="btn primary" onClick=${() => { launchFeaturedApp(detailApp); setDetailApp(null) }}>Open</button>`
+                    : (isInstalled(detailApp.id)
+                        ? html`<button key="detail-launch" className="btn primary" onClick=${() => { launchApp(detailApp); setDetailApp(null) }}>Launch</button>`
+                        : html`<button key="detail-install" className="btn primary" onClick=${() => { installApp(detailApp); setDetailApp(null) }}>Install</button>`)}
               <button key="detail-close" className="btn" onClick=${() => setDetailApp(null)}>Close</button>
             </div>
           </div>

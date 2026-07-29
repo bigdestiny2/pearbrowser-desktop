@@ -52,8 +52,9 @@ your platform, and use the migration guidance in
 
 ### Apps
 - Open `hyper://` sites in a browser tab.
-- A compatible AppRelease v2 desktop package is a separate, verified install action; it is not a tab-runtime input.
-- A `pear://` or `file://` row is a **legacy migration record**. PearBrowser displays migration guidance and never launches it.
+- Install an explicitly configured Pear v3 build through a host-confirmed native action. Catalogue rows use `nativeDelivery: { status: "available", kind: "pear-v3", installLink: "pear://…" }`; the installed app owns its own runtime, storage, windows, and OTA lifecycle.
+- A top-level `pear://` or `file://` row remains a **legacy migration record**. PearBrowser never sends catalogue values to `PearRuntime.run()`.
+- Native Pear apps and installed Hyperdrive sites are tracked separately: sites launch through the tab proxy, while native apps launch through the operating system.
 - Load decentralized catalogues from Hyperdrive JSON, signed Hyperbee, Autobee, schema-sheets rooms, HiveRelay index rooms, default curated seeds, community submissions, and your own writable catalogues
 - Keep multiple catalogs loaded at once with search, category, and source filters across the aggregated app store
 - **My Catalog:** create a writable personal catalog, add apps from loaded catalogs or installed apps, rename it, edit saved metadata (name, description, version, author, categories), and share the catalog key; copies opened without the writer key stay read-only
@@ -163,7 +164,7 @@ npm run start # fails closed until the embedded v3 runtime host is configured
 
 Source installs are standalone. The desktop packages default to npm `latest` for HiveRelay; the root package defaults to npm `latest` for `p2p-hiverelay`, `p2p-hiverelay-client`, and `p2p-hiverelay-verifier`, with the current dist-tag resolving to `0.20.2` in the lockfile, so a clone of just this repo resolves them from the registry. `npm install` runs `scripts/check-hiverelay-layout.mjs`, which exits quietly for the registry line and fails only if the HiveRelay dependency/lockfile line drifts or you opt into incomplete/mismatched `file:` workspace dependencies. A sibling `../../00-core/hiverelay` checkout is optional and only needed for HiveRelay co-development.
 
-UI files use htm + React (no build step). Backend in `backend/` is CommonJS. The source checkout deliberately refuses to start through the removed v2 launcher until the v3 embedded-runtime host is complete; it does not accept remote app links as worker input.
+UI files use htm + React (no build step). Backend in `backend/` is CommonJS. The source checkout starts through the native Electron + embedded Pear v3 host; it does not accept remote app links as worker input. Third-party Pear v3 builds install through the narrow Electron-main `pear-install` boundary and then launch as ordinary OS applications.
 
 ## Release pipeline
 

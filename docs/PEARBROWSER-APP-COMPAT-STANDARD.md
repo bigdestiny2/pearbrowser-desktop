@@ -596,7 +596,8 @@ application.
 - **PB-RELEASE-2 (MUST).** The embedded runtime starts only a bundled local
   entrypoint (for example `PearRuntime.run(require.resolve('./worker.js'))`).
   A catalogue link, release identifier, or remote path must never become a
-  runtime argument.
+  runtime argument. A v3 catalogue install uses `pear-install`; after OS
+  installation, that application configures and starts its own runtime.
 - **PB-RELEASE-3 (MUST).** Test clean install, upgrade, data preservation,
   rollback, and local worker boot/shutdown for every supported target. A
   checksum alone is insufficient release evidence.
@@ -615,7 +616,9 @@ application.
 ### 13.3 Catalogue actions
 
 - **PB-RELEASE-6 (MUST).** A `hyper://` entry is browsable content. A compatible
-  signed AppRelease v2 record is an explicit native install action. A
+  Pear v3 build is represented separately as
+  `nativeDelivery:{status:'available',kind:'pear-v3',installLink:'pear://…'}`
+  and is an explicit, host-confirmed native install action. A top-level
   `pear://` or `file://` entry is legacy discovery metadata and must display
   **migration required**, never an install or run action.
 - **PB-RELEASE-7 (MUST).** Catalogue records include name, description, author,

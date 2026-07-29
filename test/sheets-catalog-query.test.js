@@ -6,7 +6,34 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import sheetsCatalog from '../backend/sheets-catalog.js'
 
-const { SheetsCatalog, safeJmesPath, MAX_QUERY_LEN, MAX_SHEETS_ROWS } = sheetsCatalog
+const { SheetsCatalog, APPS_SCHEMA, rowToApp, safeJmesPath, MAX_QUERY_LEN, MAX_SHEETS_ROWS } = sheetsCatalog
+
+test('sheets catalogue maps Pear v3 native delivery columns into the shared app contract', () => {
+  const key = 'a'.repeat(52)
+  assert.deepEqual(APPS_SCHEMA.anyOf.at(-1), {
+    properties: { nativeDeliveryStatus: { const: 'available' } },
+    required: ['nativeDeliveryStatus', 'nativeDeliveryKind', 'nativeInstallLink']
+  })
+  const app = rowToApp({
+    uuid: 'native-demo',
+    json: {
+      name: 'Native Demo',
+      type: 'standalone',
+      nativeDeliveryStatus: 'available',
+      nativeDeliveryKind: 'pear-v3',
+      nativeInstallLink: `pear://${key}`,
+      nativeProductName: 'Native Demo',
+      nativeTargets: ['linux-x64']
+    }
+  })
+  assert.deepEqual(app.nativeDelivery, {
+    status: 'available',
+    kind: 'pear-v3',
+    installLink: `pear://${key}`,
+    productName: 'Native Demo',
+    targets: ['linux-x64']
+  })
+})
 
 test('safeJmesPath treats empty/absent query as "no filter"', () => {
   assert.equal(safeJmesPath(undefined), undefined)

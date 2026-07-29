@@ -96,6 +96,47 @@ test('catalog app normalizer drops unsafe and executable targets', () => {
   assert.equal(hyper.link, `hyper://${driveKey}/app`)
 })
 
+test('catalog app normalizer accepts explicit Pear v3 native delivery without treating it as tab content', () => {
+  const installLink = `pear://${'a'.repeat(52)}`
+  const app = normalizeCatalogApp({
+    id: 'native-demo',
+    name: 'Native Demo',
+    verification: 'author-signed',
+    nativeDelivery: {
+      status: 'available',
+      kind: 'pear-v3',
+      installLink: installLink.toUpperCase(),
+      productName: 'Native Demo',
+      targets: ['darwin-arm64', 'linux-x64', '../bad']
+    }
+  })
+
+  assert.equal(app.link, undefined)
+  assert.deepEqual(app.nativeDelivery, {
+    status: 'available',
+    kind: 'pear-v3',
+    installLink,
+    productName: 'Native Demo',
+    targets: ['darwin-arm64', 'linux-x64']
+  })
+  assert.equal(catalogAppStableKey(app), `native:${installLink}`)
+  assert.ok(catalogAppSearchText(app).includes('linux-x64'))
+
+  const migrated = normalizeCatalogApp({
+    id: 'native-with-legacy-link',
+    name: 'Migrated Native Demo',
+    link: `pear://${'b'.repeat(52)}`,
+    nativeDelivery: app.nativeDelivery
+  })
+  assert.equal(migrated.link, undefined)
+  assert.equal(migrated.nativeDelivery.installLink, installLink)
+
+  assert.equal(normalizeCatalogApp({
+    name: 'Missing v3 metadata',
+    nativeDelivery: { status: 'available', kind: 'pear-v3', installLink: 'pear://keet' }
+  }), null)
+})
+
 test('shared catalog app normalizer builds stable target keys', () => {
   const driveKey = key('d')
   const app = normalizeCatalogApp({

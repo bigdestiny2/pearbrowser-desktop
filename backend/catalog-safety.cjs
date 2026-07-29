@@ -26,6 +26,7 @@ function catalogAppsFromEnvelope (catalog) {
 
 const HEX64_RE = /^[0-9a-f]{64}$/i
 const Z32_RE = /^[13-9a-km-uw-z]{52}$/i
+const PEAR_V3_LINK_RE = /^pear:\/\/[13-9a-km-uw-z]{52}\/?$/i
 // Catalog links are browsable content only. Native delivery must be represented
 // separately as a verified package or a non-executable migration record.
 const APP_LINK_RE = /^hyper:\/\/.+/i
@@ -99,8 +100,29 @@ function normalizeLegacyMigrationId (value) {
 }
 
 function normalizeNativeDelivery (value) {
-  const status = trimString(value && typeof value === 'object' ? value.status : value)
-  return NATIVE_DELIVERY_STATUSES.has(status) ? { status } : null
+  const source = value && typeof value === 'object' ? value : { status: value }
+  const status = trimString(source.status)
+  if (!NATIVE_DELIVERY_STATUSES.has(status)) return null
+  if (status === 'migration-required') return { status }
+
+  const kind = trimString(source.kind).toLowerCase()
+  const rawLink = trimString(source.installLink || source.link)
+  const installLink = PEAR_V3_LINK_RE.test(rawLink)
+    ? rawLink.replace(/\/$/, '').replace(/^PEAR:\/\//i, 'pear://').toLowerCase()
+    : ''
+  if (kind !== 'pear-v3' || !installLink) return null
+
+  const productName = trimString(source.productName).slice(0, 120)
+  const targets = Array.isArray(source.targets)
+    ? source.targets.map((target) => trimString(target).toLowerCase()).filter((target) => /^[a-z0-9_-]{3,40}$/.test(target)).slice(0, 12)
+    : []
+  return {
+    status,
+    kind,
+    installLink,
+    ...(productName ? { productName } : {}),
+    ...(targets.length ? { targets } : {})
+  }
 }
 
 function normalizeCatalogApp (app, opts = {}) {
@@ -117,8 +139,9 @@ function normalizeCatalogApp (app, opts = {}) {
   const driveKey = normalizeDriveKey(key) || driveKeyFromHyperLink(link)
   const legacyMigrationId = normalizeLegacyMigrationId(out.legacyMigrationId)
   const nativeDelivery = normalizeNativeDelivery(out.nativeDelivery)
-  const id = trimString(out.id) || driveKey || link || (legacyMigrationId ? `legacy:${legacyMigrationId}` : '')
-  if ((key && !driveKey && !link) || (rawLink && !link && !driveKey) || (!driveKey && !link && !legacyMigrationId) || !id) return null
+  const nativeInstallLink = nativeDelivery && nativeDelivery.status === 'available' ? nativeDelivery.installLink : ''
+  const id = trimString(out.id) || driveKey || link || nativeInstallLink || (legacyMigrationId ? `legacy:${legacyMigrationId}` : '')
+  if ((key && !driveKey && !link && !legacyMigrationId && !nativeInstallLink) || (rawLink && !link && !driveKey && !legacyMigrationId && !nativeInstallLink) || (!driveKey && !link && !legacyMigrationId && !nativeInstallLink) || !id) return null
 
   out.id = id || undefined
   out.name = trimString(out.name) || id || undefined
@@ -164,6 +187,8 @@ function catalogAppStableKey (app) {
   const driveKey = normalizeDriveKey(key) || driveKeyFromHyperLink(link)
   if (driveKey) return `drive:${driveKey}`
   if (link) return `link:${link}`
+  const nativeDelivery = normalizeNativeDelivery(app.nativeDelivery)
+  if (nativeDelivery && nativeDelivery.status === 'available') return `native:${nativeDelivery.installLink}`
   const legacyMigrationId = normalizeLegacyMigrationId(app.legacyMigrationId)
   if (legacyMigrationId) return `legacy:${legacyMigrationId}`
   const id = trimString(app.id)
@@ -256,6 +281,10 @@ function catalogAppSearchText (app) {
     app.verification,
     app.legacyMigrationId,
     app.nativeDelivery && app.nativeDelivery.status,
+    app.nativeDelivery && app.nativeDelivery.kind,
+    app.nativeDelivery && app.nativeDelivery.installLink,
+    app.nativeDelivery && app.nativeDelivery.productName,
+    ...(Array.isArray(app.nativeDelivery && app.nativeDelivery.targets) ? app.nativeDelivery.targets : []),
     app.link,
     app.driveKey,
     ...(Array.isArray(app.categories) ? app.categories : []),
@@ -279,6 +308,7 @@ function sanitizePersonalCatalogEntry (app) {
     version: str(app.version, 40),
     author: str(app.author, 200),
     icon: str(app.icon, 300),
+    nativeDelivery: normalizeNativeDelivery(app.nativeDelivery),
     // Launch gating (PBACS §9): explicit standalone (own window) vs hypersite
     // (inline tab). Only the two valid enum values survive; anything else drops.
     type: (['standalone', 'hypersite'].includes(String(app.type || '').trim()) ? String(app.type).trim() : undefined)
@@ -288,7 +318,7 @@ function sanitizePersonalCatalogEntry (app) {
   }
   for (const k of Object.keys(draft)) if (draft[k] === undefined || draft[k] === '') delete draft[k]
   const out = normalizeCatalogApp(draft)
-  if (!out) throw new Error('App needs a valid 64-hex drive key or hyper:// drive link.')
+  if (!out) throw new Error('App needs a valid 64-hex drive key, browsable hyper:// content, a legacy migration id, or a configured Pear v3 native delivery link.')
   return {
     id: out.id,
     name: out.name,
@@ -296,6 +326,7 @@ function sanitizePersonalCatalogEntry (app) {
     description: out.description || '',
     ...(out.driveKey ? { driveKey: out.driveKey } : {}),
     ...(out.link ? { link: out.link } : {}),
+    ...(out.nativeDelivery ? { nativeDelivery: out.nativeDelivery } : {}),
     version: out.version || '',
     author: out.author || '',
     categories: Array.isArray(out.categories) ? out.categories : [],

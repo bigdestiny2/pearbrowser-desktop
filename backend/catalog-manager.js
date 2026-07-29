@@ -625,8 +625,9 @@ class CatalogManager {
     const drive = await this._ensureMyCatalogDrive(keyHex)
     if (!drive.writable) throw new Error('This catalog is not editable on this device.')
     const entry = this._sanitizeCatalogEntry(app)
-    if (!entry.driveKey && !entry.link) throw new Error('App is missing a valid Hyperdrive key or hyper:// link.')
-    entry.id = entry.id || entry.driveKey || entry.link
+    const nativeInstallLink = entry.nativeDelivery?.status === 'available' ? entry.nativeDelivery.installLink : ''
+    if (!entry.driveKey && !entry.link && !nativeInstallLink) throw new Error('App is missing browsable content or a Pear v3 native delivery link.')
+    entry.id = entry.id || entry.driveKey || entry.link || nativeInstallLink
 
     const data = await this._readMyCatalogData(drive)
     const idx = data.apps.findIndex((a) => a && a.id === entry.id)
@@ -664,7 +665,8 @@ class CatalogManager {
     const existing = data.apps[idx]
     const stableId = existing.id || appId
     const entry = this._sanitizeCatalogEntry({ ...existing, ...(patch || {}), id: stableId })
-    if (!entry.driveKey && !entry.link) throw new Error('App is missing a valid Hyperdrive key or hyper:// link.')
+    const nativeInstallLink = entry.nativeDelivery?.status === 'available' ? entry.nativeDelivery.installLink : ''
+    if (!entry.driveKey && !entry.link && !nativeInstallLink) throw new Error('App is missing browsable content or a Pear v3 native delivery link.')
     entry.id = stableId
     data.apps[idx] = entry
 
