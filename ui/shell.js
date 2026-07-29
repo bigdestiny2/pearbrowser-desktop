@@ -2481,9 +2481,9 @@ function CollaborativeCatalog ({ rpc, C }) {
 }
 
 // "Submit your app" — anyone can propose an app for the COMMUNITY catalogue.
-// CMD_SUBMIT_APP publishes a manifest drive + seeds the app drive via HiveRelay;
-// the relay queues a pin request in `review` mode. The app appears in everyone's
-// Community list once a moderator approves it (ModeratorPanel below).
+// CMD_SUBMIT_APP publishes a submission receipt + seeds the app drive via
+// HiveRelay; the relay queues a pin request in `review` mode. Relay approval and
+// Community-catalogue publication are separate operator gates.
 function CommunitySubmit ({ rpc, C }) {
   const [name, setName] = useState('')
   const [link, setLink] = useState('')
@@ -2505,7 +2505,12 @@ function CommunitySubmit ({ rpc, C }) {
         name: name.trim(), link: link.trim(), description: description.trim(),
         author: author.trim(), categories
       }, 90000)
-      setOk(`Submitted "${(res && res.manifest && res.manifest.name) || name.trim()}" for review — it joins the Community list once a moderator approves it.`)
+      const submittedName = (res && res.manifest && res.manifest.name) || name.trim()
+      const relayStatus = res && res.status === 'pending-review'
+        ? `${res.acceptances} relay${res.acceptances === 1 ? '' : 's'} acknowledged the review request.`
+        : 'The request was broadcast, but no relay acknowledged it within the initial window; the client will retry and it is not yet confirmed in a review queue.'
+      const receiptStatus = res && res.receiptWarning ? ` ${res.receiptWarning}` : ''
+      setOk(`Submitted "${submittedName}". ${relayStatus}${receiptStatus} Catalogue publication remains a separate final gate.`)
       setName(''); setLink(''); setDescription(''); setAuthor(''); setCategories('')
     } catch (e) { setErr((e && e.message) || String(e)) } finally { setBusy(false) }
   }
@@ -2513,7 +2518,7 @@ function CommunitySubmit ({ rpc, C }) {
   return html`
     <div className="community-submit">
       <h2>Submit your app <span className="settings-subtle">→ Community list</span></h2>
-      <p className="subtitle">Add browsable Hyperdrive content to the community catalogue. HiveRelay replicates content; it never attests or delivers native executable code.</p>
+      <p className="subtitle">Add browsable Hyperdrive content to the community review queue. The drive should contain <code>/index.html</code> and a truthful <code>/manifest.json</code>. HiveRelay replication is not an endorsement, and native executable targets are rejected.</p>
       <div className="settings-card">
         ${err && html`<div className="apps-error">${err}</div>`}
         ${ok && html`<div className="apps-ok">${ok}</div>`}
@@ -2554,17 +2559,22 @@ function CommunitySubmit ({ rpc, C }) {
 }
 
 // In-app moderator panel — operator-gated (needs the relay management URL + API
-// key, saved to userdata settings). Lists the relay's pending pin-requests
-// (CMD_MOD_PENDING) and approves/rejects them (CMD_MOD_APPROVE / CMD_MOD_REJECT).
-// Collapsed by default since only the operator needs it. The relay must run in
-// `review` accept mode for submissions to queue here.
-function ModeratorPanel ({ rpc, C }) {
+// key, saved to userdata settings). Queue rows must pass content-drive checks
+// and receive a human preview acknowledgement before approval. Relay approval
+// only authorizes replication; publishing the Community catalogue remains a
+// separate operator-controlled step.
+function ModeratorPanel ({ rpc, C, onPreview }) {
   const [open, setOpen] = useState(false)
   const [url, setUrl] = useState('')
   const [apiKey, setApiKey] = useState('')
   const [saved, setSaved] = useState(false)
   const [pending, setPending] = useState(null) // null = not loaded yet
   const [mode, setMode] = useState(null)
+  const [reports, setReports] = useState({})
+  const [acknowledged, setAcknowledged] = useState({})
+  const [notes, setNotes] = useState({})
+  const [reasons, setReasons] = useState({})
+  const [audit, setAudit] = useState([])
   const [busy, setBusy] = useState(null)
   const [err, setErr] = useState('')
   const [notice, setNotice] = useState('')
@@ -2577,7 +2587,7 @@ function ModeratorPanel ({ rpc, C }) {
     }).catch(() => {})
   }, [])
 
-  const flash = (m) => { setNotice(m); setTimeout(() => setNotice(''), 1800) }
+  const flash = (m) => { setNotice(m); setTimeout(() => setNotice(''), 3500) }
 
   const saveConfig = async () => {
     setErr('')
@@ -2591,17 +2601,60 @@ function ModeratorPanel ({ rpc, C }) {
     setErr(''); setBusy('load')
     try {
       const res = await rpc.request(C.CMD_MOD_PENDING, {}, 30000)
-      setPending(res.pending || []); setMode(res.mode || null)
+      setPending(res.pending || []); setMode(res.mode || null); setAudit(res.audit || [])
+      setReports({}); setAcknowledged({})
     } catch (e) { setErr(e.message); setPending([]) } finally { setBusy(null) }
   }
 
-  const decide = async (appKey, approve) => {
+  const runReview = async (request, force = false) => {
+    const appKey = request.appKey
+    setErr(''); setBusy('v:' + appKey)
+    try {
+      const report = await rpc.request(C.CMD_MOD_REVIEW, {
+        appKey,
+        publisherPubkey: request.publisherPubkey,
+        force
+      }, 45000)
+      setReports((current) => ({ ...current, [appKey]: report }))
+      setAcknowledged((current) => ({ ...current, [appKey]: false }))
+    } catch (e) { setErr(e.message) } finally { setBusy(null) }
+  }
+
+  const decide = async (request, approve) => {
+    const appKey = request.appKey
+    const report = reports[appKey]
+    const reason = (reasons[appKey] || '').trim()
+    const note = (notes[appKey] || '').trim()
+    if (approve && !report) { setErr('Run due diligence before approving.'); return }
+    if (approve && !note) { setErr('Record what you checked in the reviewer note before approving.'); return }
+    if (!approve && !reason) { setErr('Add a rejection reason before rejecting.'); return }
     setErr(''); setBusy((approve ? 'a:' : 'r:') + appKey)
     try {
-      await rpc.request(approve ? C.CMD_MOD_APPROVE : C.CMD_MOD_REJECT, { appKey }, 60000)
+      const res = await rpc.request(approve ? C.CMD_MOD_APPROVE : C.CMD_MOD_REJECT, {
+        appKey,
+        acknowledged: acknowledged[appKey] === true,
+        reviewedAt: report && report.checkedAt,
+        reviewedDriveVersion: report && report.evidence && report.evidence.driveVersion,
+        note,
+        reason
+      }, 60000)
       setPending((list) => (list || []).filter((p) => p.appKey !== appKey))
-      flash(approve ? 'Approved + pinned.' : 'Rejected.')
+      if (res && res.audit) setAudit((current) => [res.audit, ...current].slice(0, 50))
+      setReports((current) => { const next = { ...current }; delete next[appKey]; return next })
+      flash(res && res.auditWarning
+        ? res.auditWarning
+        : (approve
+            ? (res && res.promoted && res.promoted.deferred
+                ? 'Relay pin approved. Community catalogue publication is still pending.'
+                : 'Relay pin approved and audited.')
+            : 'Rejected with an audit reason.'))
     } catch (e) { setErr(e.message) } finally { setBusy(null) }
+  }
+
+  const statusLabel = (report) => {
+    if (!report) return 'Not checked'
+    if (!report.approvalAllowed) return 'Blocked'
+    return 'Needs human review'
   }
 
   return html`
@@ -2614,7 +2667,13 @@ function ModeratorPanel ({ rpc, C }) {
         <div className="settings-card">
           ${err && html`<div className="apps-error">${err}</div>`}
           ${notice && html`<div className="apps-ok">${notice}</div>`}
-          <p className="subtitle">Review apps submitted to the Community list. Needs your relay's management URL + operator API key. The relay must run in <code>review</code> accept mode.</p>
+          <p className="subtitle">Review signed seed requests before a relay stores their content. The relay must run in <code>review</code> mode. Approval authorizes replication only; publishing the approved metadata into the shared Community catalogue is a separate release step.</p>
+          <div className="mod-process">
+            <span><strong>1</strong> Queue</span><span>→</span>
+            <span><strong>2</strong> Fetch evidence</span><span>→</span>
+            <span><strong>3</strong> Preview + decide</span><span>→</span>
+            <span><strong>4</strong> Publish catalogue</span>
+          </div>
           <div className="settings-row">
             <div className="profile-field">
               <div className="settings-label">Relay management URL</div>
@@ -2630,24 +2689,87 @@ function ModeratorPanel ({ rpc, C }) {
           </div>
           <div className="settings-row">
             <button className="btn primary" onClick=${loadPending} disabled=${busy === 'load' || !url.trim()}>${busy === 'load' ? 'Loading…' : 'Load pending'}</button>
-            ${mode && html`<span className="settings-subtle">relay mode: ${mode}</span>`}
+            ${mode && html`<span className=${'mod-mode ' + (mode === 'review' ? 'pass' : 'warning')}>relay mode: ${mode}</span>`}
+            ${pending && html`<span className="settings-subtle">${pending.length} queued</span>`}
           </div>
+          ${mode && mode !== 'review' && html`<div className="apps-error">This relay is not in review mode. Queue decisions are unsafe until its acceptance policy is set to <code>review</code>.</div>`}
           ${pending && pending.length === 0 && html`<div className="settings-subtle" style=${{ padding: '6px 0' }}>No pending submissions.</div>`}
           ${pending && pending.length > 0 && html`
             <div className="mod-pending">
-              ${pending.map((p) => html`
-                <div className="settings-row" key=${p.appKey}>
-                  <div style=${{ minWidth: 0 }}>
-                    <div className="settings-label" style=${{ fontFamily: 'monospace' }}>${(p.appKey || '').slice(0, 16)}…</div>
-                    <div className="settings-subtle">by ${(p.publisherPubkey || 'unknown').slice(0, 12)}…${p.currentRelays ? ` · ${p.currentRelays} relay(s)` : ''}</div>
+              ${pending.map((p) => {
+                const report = reports[p.appKey]
+                const warningCount = report && report.summary ? report.summary.warning : 0
+                const relayMeta = [p.source, p.contentType, p.privacyTier, p.storageClass, p.availabilityClass].filter(Boolean)
+                return html`
+                <div className="mod-review-card" key=${p.appKey}>
+                  <div className="mod-review-head">
+                    <div style=${{ minWidth: 0 }}>
+                      <div className="app-name">${(report && report.manifest && report.manifest.name) || p.name || p.appId || 'Unidentified app'}</div>
+                      <div className="mod-key">${p.appKey}</div>
+                      <div className="settings-subtle">publisher ${(p.publisherPubkey || 'unknown').slice(0, 16)}…${p.currentRelays ? ` · ${p.currentRelays} current relay(s)` : ''}${p.replicationFactor ? ` · requests ${p.replicationFactor}` : ''}</div>
+                      ${relayMeta.length > 0 && html`<div className="settings-subtle">relay metadata · ${relayMeta.join(' · ')}</div>`}
+                      ${p.discoveredAt && html`<div className="settings-subtle">queued ${new Date(p.discoveredAt).toLocaleString()}</div>`}
+                    </div>
+                    <span className=${'mod-mode ' + (!report ? '' : (report.approvalAllowed ? 'warning' : 'block'))}>${statusLabel(report)}</span>
                   </div>
-                  <div style=${{ display: 'flex', gap: '6px' }}>
-                    <button className="btn small primary" onClick=${() => decide(p.appKey, true)} disabled=${!!busy}>${busy === 'a:' + p.appKey ? '…' : 'Approve'}</button>
-                    <button className="btn small subtle" onClick=${() => decide(p.appKey, false)} disabled=${!!busy}>${busy === 'r:' + p.appKey ? '…' : 'Reject'}</button>
+                  <div className="mod-review-actions">
+                    <button className="btn small" onClick=${() => runReview(p, !!report)} disabled=${!!busy}>${busy === 'v:' + p.appKey ? 'Checking…' : (report ? 'Re-run checks' : 'Run due diligence')}</button>
+                    <button className="btn small subtle" onClick=${() => onPreview && onPreview(`hyper://${p.appKey}/`)} disabled=${!!busy}>Open preview</button>
+                  </div>
+                  ${report && html`
+                    <div className="mod-summary">
+                      <span className="mod-check pass">${report.summary.pass} pass</span>
+                      <span className="mod-check warning">${report.summary.warning} warning${report.summary.warning === 1 ? '' : 's'}</span>
+                      <span className="mod-check block">${report.summary.block} blocker${report.summary.block === 1 ? '' : 's'}</span>
+                    </div>
+                    ${report.manifest && html`
+                      <div className="mod-manifest">
+                        <strong>${report.manifest.name}</strong>${report.manifest.version ? ` · v${report.manifest.version}` : ''}${report.manifest.author ? ` · ${report.manifest.author}` : ''}
+                        ${report.manifest.description && html`<div>${report.manifest.description}</div>`}
+                        ${report.manifest.categories && report.manifest.categories.length > 0 && html`<div className="settings-subtle">${report.manifest.categories.join(' · ')}</div>`}
+                      </div>
+                    `}
+                    <div className="mod-checks">
+                      ${report.checks.map((check) => html`
+                        <div className=${'mod-check-row ' + check.status} key=${check.id}>
+                          <span className="mod-check-icon">${check.status === 'pass' ? '✓' : (check.status === 'block' ? '×' : '!')}</span>
+                          <div><strong>${check.label}</strong><div>${check.detail}</div></div>
+                        </div>
+                      `)}
+                    </div>
+                    <label className="mod-ack">
+                      <input type="checkbox" checked=${acknowledged[p.appKey] === true} onChange=${(e) => setAcknowledged((current) => ({ ...current, [p.appKey]: e.target.checked }))} />
+                      I opened the preview, reviewed the warnings, and understand that passing automated checks is not a safety endorsement.
+                    </label>
+                  `}
+                  <div className="profile-field">
+                    <div className="settings-label">Reviewer note <span className="settings-subtle">(required for approval)</span></div>
+                    <textarea className="profile-input mod-textarea" placeholder="What did you inspect? Record relevant provenance or caveats." value=${notes[p.appKey] || ''} onInput=${(e) => setNotes((current) => ({ ...current, [p.appKey]: e.target.value }))}></textarea>
+                  </div>
+                  <div className="profile-field">
+                    <div className="settings-label">Rejection reason</div>
+                    <input className="profile-input" placeholder="Required only when rejecting" value=${reasons[p.appKey] || ''} onInput=${(e) => setReasons((current) => ({ ...current, [p.appKey]: e.target.value }))} />
+                  </div>
+                  <div className="mod-decision-actions">
+                    <button className="btn small primary" onClick=${() => decide(p, true)} disabled=${!!busy || mode !== 'review' || !report || !report.approvalAllowed || !(notes[p.appKey] || '').trim() || (warningCount > 0 && acknowledged[p.appKey] !== true)}>${busy === 'a:' + p.appKey ? 'Approving…' : 'Approve relay pin'}</button>
+                    <button className="btn small subtle" onClick=${() => decide(p, false)} disabled=${!!busy || mode !== 'review' || !(reasons[p.appKey] || '').trim()}>${busy === 'r:' + p.appKey ? 'Rejecting…' : 'Reject with reason'}</button>
                   </div>
                 </div>
-              `)}
+              `})}
             </div>
+          `}
+          ${audit.length > 0 && html`
+            <details className="mod-audit">
+              <summary>Recent local decision audit · ${audit.length}</summary>
+              ${audit.slice(0, 20).map((entry) => html`
+                <div className="mod-audit-row" key=${entry.appKey + ':' + entry.decidedAt}>
+                  <span className=${'mod-mode ' + (entry.action === 'approve' ? 'pass' : 'block')}>${entry.action}</span>
+                  <code>${(entry.appKey || '').slice(0, 16)}…</code>
+                  <span>${entry.reason || entry.note || 'No note'}</span>
+                  <time>${entry.decidedAt ? new Date(entry.decidedAt).toLocaleString() : ''}</time>
+                </div>
+              `)}
+            </details>
           `}
         </div>
       `}
@@ -3731,7 +3853,7 @@ function Apps ({ rpc, C, onLaunch }) {
 
       <${CollaborativeCatalog} rpc=${rpc} C=${C} />
 
-      <${ModeratorPanel} rpc=${rpc} C=${C} />
+      <${ModeratorPanel} rpc=${rpc} C=${C} onPreview=${onLaunch} />
 
       ${detailApp && html`
         <div onClick=${() => setDetailApp(null)} style=${{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '24px' }}>

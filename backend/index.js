@@ -846,11 +846,160 @@ rpc.handle(C.CMD_MYCATALOG_UPDATE_APP, async (data) => {
 
 // Operator's relay management endpoint + API key (set via the moderator panel,
 // persisted in userdata settings). Empty until configured.
+const moderationPendingByKey = new Map()
+const moderationReviewCache = new Map()
+let moderationPendingMode = null
+let moderationPendingLoadedAt = 0
+const MODERATION_REVIEW_CACHE_MS = 5 * 60 * 1000
+const MAX_REVIEW_INDEX_BYTES = communitySubmit.MAX_INDEX_BYTES
+const MAX_REVIEW_MANIFEST_BYTES = 256 * 1024
+const MAX_RELAY_MANAGE_RESPONSE_BYTES = 2 * 1024 * 1024
+
 async function getModSettings () {
   try {
     const s = (await requireUserData().getSettings()) || {}
-    return { baseUrl: s.relayManageUrl || '', apiKey: s.relayManageKey || '' }
-  } catch { return { baseUrl: '', apiKey: '' } }
+    return {
+      baseUrl: s.relayManageUrl || '',
+      apiKey: s.relayManageKey || '',
+      audit: Array.isArray(s.communityReviewAudit) ? s.communityReviewAudit.slice(0, 50) : []
+    }
+  } catch { return { baseUrl: '', apiKey: '', audit: [] } }
+}
+
+function withReviewTimeout (promise, ms, label) {
+  let timer
+  const guard = new Promise((resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(label + ' timed out')), ms)
+  })
+  return Promise.race([promise, guard]).finally(() => clearTimeout(timer))
+}
+
+function boundedReviewText (value, max = 1000) {
+  return String(value == null ? '' : value).trim().slice(0, max)
+}
+
+async function readBoundedReviewFile (drive, path, maxBytes, timeoutMs, label) {
+  const entry = await withReviewTimeout(drive.entry(path, { wait: true }), timeoutMs, label + ' metadata fetch')
+  const blob = entry && entry.value && entry.value.blob
+  if (!blob) return { buffer: null, byteLength: 0, tooLarge: false }
+
+  const byteLength = Number(blob.byteLength) || 0
+  if (byteLength > maxBytes) return { buffer: null, byteLength, tooLarge: true }
+
+  const buffer = await withReviewTimeout(drive.get(path, { wait: true }), timeoutMs, label + ' fetch')
+  const actualByteLength = buffer ? buffer.length : 0
+  return {
+    buffer: actualByteLength > maxBytes ? null : buffer,
+    byteLength: actualByteLength,
+    tooLarge: actualByteLength > maxBytes
+  }
+}
+
+async function appendCommunityReviewAudit (entry) {
+  const store = requireUserData()
+  const settings = (await store.getSettings()) || {}
+  const previous = Array.isArray(settings.communityReviewAudit) ? settings.communityReviewAudit : []
+  const record = {
+    appKey: boundedReviewText(entry.appKey, 64).toLowerCase(),
+    publisherPubkey: boundedReviewText(entry.publisherPubkey, 64).toLowerCase(),
+    action: entry.action === 'approve' ? 'approve' : 'reject',
+    reason: boundedReviewText(entry.reason, 500),
+    note: boundedReviewText(entry.note, 1000),
+    reviewStatus: boundedReviewText(entry.reviewStatus, 40),
+    summary: entry.summary && typeof entry.summary === 'object'
+      ? {
+          pass: Number(entry.summary.pass) || 0,
+          warning: Number(entry.summary.warning) || 0,
+          block: Number(entry.summary.block) || 0
+        }
+      : null,
+    decidedAt: Date.now()
+  }
+  await store.setSettings({ communityReviewAudit: [record, ...previous].slice(0, 100) })
+  return record
+}
+
+async function appendCommunityReviewAuditSafely (entry) {
+  try {
+    return { audit: await appendCommunityReviewAudit(entry), auditWarning: '' }
+  } catch (err) {
+    const auditWarning = 'Relay decision succeeded, but the local audit record could not be saved: ' + boundedReviewText(err && err.message, 300)
+    console.error('[mod] ' + auditWarning)
+    return { audit: null, auditWarning }
+  }
+}
+
+async function reviewPendingSubmission (appKey, pending = {}, opts = {}) {
+  const normalizedKey = normalizeDriveKey(String(appKey || ''))
+  if (!/^[0-9a-f]{64}$/i.test(normalizedKey)) throw new Error('Due diligence needs a valid 64-hex appKey.')
+  const cached = moderationReviewCache.get(normalizedKey)
+  if (!opts.force && cached && Date.now() - cached.checkedAt < MODERATION_REVIEW_CACHE_MS) return cached
+
+  let driveVersion = 0
+  let indexBuf = null
+  let indexBytes = 0
+  let manifestBuf = null
+  let manifest = null
+  let manifestError = ''
+  let fetchError = ''
+
+  try {
+    const drive = await withReviewTimeout(ensureBrowseDrive(normalizedKey), 12000, 'Drive open')
+    try { await withReviewTimeout(drive.update({ wait: true }), 10000, 'Drive update') } catch (_) {}
+    driveVersion = Number(drive.version) || 0
+    try {
+      const indexFile = await readBoundedReviewFile(drive, '/index.html', MAX_REVIEW_INDEX_BYTES, 12000, 'index.html')
+      indexBuf = indexFile.buffer
+      indexBytes = indexFile.byteLength
+    } catch (err) {
+      fetchError = err && err.message ? err.message : String(err)
+    }
+    try {
+      const manifestFile = await readBoundedReviewFile(drive, '/manifest.json', MAX_REVIEW_MANIFEST_BYTES, 8000, 'manifest.json')
+      manifestBuf = manifestFile.buffer
+      if (manifestFile.tooLarge) {
+        manifestBuf = null
+        manifestError = `/manifest.json exceeds the ${MAX_REVIEW_MANIFEST_BYTES}-byte review cap.`
+      }
+    } catch (err) {
+      if (!/timed out/i.test(err && err.message)) manifestError = err && err.message ? err.message : String(err)
+    }
+  } catch (err) {
+    fetchError = err && err.message ? err.message : String(err)
+  }
+
+  if (manifestBuf) {
+    if (manifestBuf.length > MAX_REVIEW_MANIFEST_BYTES) {
+      manifestError = `/manifest.json exceeds the ${MAX_REVIEW_MANIFEST_BYTES}-byte review cap.`
+    } else {
+      try { manifest = safeJSONParse(Buffer.from(manifestBuf).toString('utf8')) } catch (err) {
+        manifestError = err && err.message ? err.message : String(err)
+      }
+    }
+  }
+
+  const duplicates = catalogManager
+    ? catalogManager.getAggregatedApps().filter((app) => {
+        const driveKey = normalizeDriveKey(String((app && app.driveKey) || ''))
+        const linkKey = driveKeyFromUrl(app && app.link)
+        return driveKey === normalizedKey || linkKey === normalizedKey
+      })
+    : []
+
+  const report = communitySubmit.buildReviewReport({
+    appKey: normalizedKey,
+    pending,
+    manifest,
+    manifestError,
+    indexText: indexBuf ? Buffer.from(indexBuf).toString('utf8') : '',
+    indexBytes,
+    driveVersion,
+    duplicates,
+    fetchError,
+    normalizeKey: normalizeDriveKey
+  }, Date.now())
+  moderationReviewCache.set(normalizedKey, report)
+  return report
 }
 
 // Minimal JSON HTTP(S) round-trip for the relay management API. bare-http1 has
@@ -858,12 +1007,20 @@ async function getModSettings () {
 // { status, json, text }.
 function relayManageHttp (spec, timeoutMs = 15000) {
   return new Promise((resolve, reject) => {
+    let settled = false
+    let timer
+    const fail = (err) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      reject(err)
+    }
     let u
-    try { u = new URL(spec.url) } catch { return reject(new Error('Bad relay URL: ' + spec.url)) }
+    try { u = new URL(spec.url) } catch { return fail(new Error('Bad relay URL: ' + spec.url)) }
     const isHttps = u.protocol === 'https:'
     let lib
     try { lib = isHttps ? require('bare-https') : require('bare-http1') } catch (e) {
-      return reject(new Error('HTTP client unavailable: ' + (e && e.message)))
+      return fail(new Error('HTTP client unavailable: ' + (e && e.message)))
     }
     const req = lib.request({
       method: spec.method || 'GET',
@@ -873,18 +1030,30 @@ function relayManageHttp (spec, timeoutMs = 15000) {
       headers: spec.headers || {}
     }, (res) => {
       const chunks = []
-      res.on('data', (c) => chunks.push(c))
+      let bytes = 0
+      res.on('data', (c) => {
+        if (settled) return
+        bytes += c.length
+        if (bytes > MAX_RELAY_MANAGE_RESPONSE_BYTES) {
+          try { req.destroy() } catch {}
+          fail(new Error('Relay management response exceeded the 2 MB safety limit.'))
+          return
+        }
+        chunks.push(c)
+      })
       res.on('end', () => {
+        if (settled) return
+        settled = true
         clearTimeout(timer)
         const text = Buffer.concat(chunks).toString('utf8')
         let json = null
         try { json = text ? JSON.parse(text) : null } catch {}
         resolve({ status: res.statusCode, json, text })
       })
-      res.on('error', (err) => { clearTimeout(timer); reject(err) })
+      res.on('error', fail)
     })
-    const timer = setTimeout(() => { try { req.destroy() } catch {} ; reject(new Error('Relay request timed out')) }, timeoutMs)
-    req.on('error', (err) => { clearTimeout(timer); reject(err) })
+    timer = setTimeout(() => { try { req.destroy() } catch {} ; fail(new Error('Relay request timed out')) }, timeoutMs)
+    req.on('error', fail)
     if (spec.body) req.write(spec.body)
     req.end()
   })
@@ -926,6 +1095,7 @@ rpc.handle(C.CMD_SUBMIT_APP, async (data = {}) => {
   // 1) Publish the submission manifest drive (durable metadata: name/desc/icon)
   //    so the moderator + mobile firehose can read it later. seed:true pins it.
   let manifestKey = null
+  let receiptWarning = ''
   try {
     const mdrive = await hiveRelay.publish(
       [{ path: '/manifest.json', content: JSON.stringify(manifest, null, 2) }],
@@ -936,7 +1106,9 @@ rpc.handle(C.CMD_SUBMIT_APP, async (data = {}) => {
     }
   } catch (err) {
     console.error('[submit] publish manifest failed:', err && err.message)
+    receiptWarning = 'The submission receipt could not be published yet.'
   }
+  if (!manifestKey && !receiptWarning) receiptWarning = 'The submission receipt publisher returned no drive key.'
 
   // 2) Seed the app's CONTENT drive. In `review` mode this queues a pin request
   //    in the relay's pending queue for the moderator to approve.
@@ -949,12 +1121,22 @@ rpc.handle(C.CMD_SUBMIT_APP, async (data = {}) => {
   }
 
   console.log(`[submit] queued "${manifest.name}" (${id}) drive=${driveKey.slice(0, 8)} acceptances=${acceptances}`)
-  return { ok: true, id, driveKey, manifestKey, acceptances, status: 'pending-review', manifest }
+  return {
+    ok: true,
+    id,
+    driveKey,
+    manifestKey,
+    receiptPublished: !!manifestKey,
+    receiptWarning,
+    acceptances,
+    status: acceptances > 0 ? 'pending-review' : 'awaiting-relay',
+    manifest
+  }
 })
 
 rpc.handle(C.CMD_MOD_PENDING, async () => {
   await whenReady()
-  const { baseUrl, apiKey } = await getModSettings()
+  const { baseUrl, apiKey, audit } = await getModSettings()
   const spec = communitySubmit.manageRequest('pending', { baseUrl, apiKey })
   if (spec.error) throw new Error(spec.error)
   const res = await relayManageHttp(spec)
@@ -963,45 +1145,120 @@ rpc.handle(C.CMD_MOD_PENDING, async () => {
   const requests = Array.isArray(res.json.requests) ? res.json.requests : []
   const toHex = (v) => typeof v === 'string' ? v : (v ? Buffer.from(v.data || v).toString('hex') : '')
   const pending = requests.map((r) => ({
-    appKey: toHex(r.appKey),
+    appKey: normalizeDriveKey(toHex(r.appKey)),
     publisherPubkey: toHex(r.publisherPubkey),
     discoveredAt: r.discoveredAt || null,
     ttlSeconds: r.ttlSeconds || null,
-    currentRelays: r.currentRelays || 0
+    currentRelays: r.currentRelays || 0,
+    replicationFactor: r.replicationFactor || null,
+    source: boundedReviewText(r.source, 80),
+    contentType: boundedReviewText(r.contentType || r.type, 80),
+    appId: boundedReviewText(r.appId || r.id, 80),
+    name: boundedReviewText(r.name, 160),
+    author: boundedReviewText(r.author, 160),
+    version: boundedReviewText(r.version, 40),
+    categories: Array.isArray(r.categories) ? r.categories.map((value) => boundedReviewText(value, 80)).filter(Boolean).slice(0, 12) : [],
+    privacyTier: boundedReviewText(r.privacyTier, 40),
+    storageClass: boundedReviewText(r.storageClass, 40),
+    availabilityClass: boundedReviewText(r.availabilityClass, 40),
+    blind: r.blind === true
   }))
-  return { ok: true, mode: res.json.mode || null, count: pending.length, pending }
+  moderationPendingMode = boundedReviewText(res.json.mode, 40) || null
+  moderationPendingLoadedAt = Date.now()
+  moderationPendingByKey.clear()
+  moderationReviewCache.clear()
+  for (const request of pending) if (request.appKey) moderationPendingByKey.set(request.appKey, request)
+  return { ok: true, mode: moderationPendingMode, count: pending.length, pending, audit }
+})
+
+rpc.handle(C.CMD_MOD_REVIEW, async (data = {}) => {
+  await whenReady()
+  const appKey = normalizeDriveKey(String(data.appKey || data.driveKey || ''))
+  const pending = moderationPendingByKey.get(appKey)
+  if (!pending) throw new Error('This app is not in the loaded relay queue. Refresh pending submissions before reviewing it.')
+  return await reviewPendingSubmission(appKey, pending, { force: data.force === true })
 })
 
 rpc.handle(C.CMD_MOD_APPROVE, async (data = {}) => {
   await whenReady()
   const appKey = normalizeDriveKey(String(data.appKey || data.driveKey || ''))
+  if (moderationPendingMode !== 'review') throw new Error('Relay decisions require a freshly loaded queue from a relay in review mode.')
+  if (Date.now() - moderationPendingLoadedAt > MODERATION_REVIEW_CACHE_MS) throw new Error('The relay queue is stale. Refresh pending submissions before approving.')
+  const pending = moderationPendingByKey.get(appKey)
+  if (!pending) throw new Error('This app is not in the loaded relay queue. Refresh pending submissions before approving it.')
+  const cachedReview = moderationReviewCache.get(appKey)
+  const reviewedDriveVersion = Number(data.reviewedDriveVersion)
+  if (!communitySubmit.reviewEvidenceMatches(data, cachedReview)) {
+    throw new Error('The due-diligence evidence does not match this approval. Re-run the review before approving.')
+  }
+  const review = await reviewPendingSubmission(appKey, pending, { force: true })
+  if (review.evidence.driveVersion !== reviewedDriveVersion) {
+    throw new Error(`The app changed from drive version ${reviewedDriveVersion} to ${review.evidence.driveVersion} after review. Inspect the new version before approving.`)
+  }
+  if (!review.approvalAllowed) {
+    const blockers = review.checks.filter((check) => check.status === 'block').map((check) => check.label).join(', ')
+    throw new Error('Due diligence blocked approval: ' + (blockers || 'review evidence failed') + '.')
+  }
+  if (review.requiresAcknowledgement && data.acknowledged !== true) {
+    throw new Error('A reviewer must preview the app and acknowledge the due-diligence warnings before approval.')
+  }
+  const note = boundedReviewText(data.note, 1000)
+  if (!note) throw new Error('Record a reviewer note describing the due diligence performed before approval.')
   const { baseUrl, apiKey } = await getModSettings()
   const spec = communitySubmit.manageRequest('approve', { baseUrl, apiKey, appKey })
   if (spec.error) throw new Error(spec.error)
   const res = await relayManageHttp(spec)
   if (res.status === 401) throw new Error('Relay rejected the moderator API key (401).')
   if (res.status >= 400) throw new Error('Relay approve failed (HTTP ' + res.status + ').')
-  // Best-effort promote into the community bee so desktop readers see it.
+  // Report the separate catalogue-publication gate; this currently performs no
+  // write because the secret-holding publisher is intentionally out-of-process.
   let promoted = null
-  if (data.manifest && typeof data.manifest === 'object') {
-    try { promoted = await promoteToCommunityCatalogue(data.manifest) } catch (err) {
+  if (review.manifest) {
+    try { promoted = await promoteToCommunityCatalogue(review.manifest) } catch (err) {
       console.error('[mod] community-bee write failed:', err && err.message)
       promoted = { ok: false, error: err && err.message }
     }
   }
-  return { ok: true, appKey, promoted }
+  const { audit, auditWarning } = await appendCommunityReviewAuditSafely({
+    appKey,
+    publisherPubkey: review.publisherPubkey,
+    action: 'approve',
+    note,
+    reviewStatus: review.status,
+    summary: review.summary
+  })
+  moderationPendingByKey.delete(appKey)
+  moderationReviewCache.delete(appKey)
+  return { ok: true, appKey, promoted, review, audit, auditWarning }
 })
 
 rpc.handle(C.CMD_MOD_REJECT, async (data = {}) => {
   await whenReady()
   const appKey = normalizeDriveKey(String(data.appKey || data.driveKey || ''))
+  const reason = boundedReviewText(data.reason, 500)
+  if (!reason) throw new Error('A rejection reason is required for the moderation audit trail.')
+  if (moderationPendingMode !== 'review') throw new Error('Relay decisions require a freshly loaded queue from a relay in review mode.')
+  if (Date.now() - moderationPendingLoadedAt > MODERATION_REVIEW_CACHE_MS) throw new Error('The relay queue is stale. Refresh pending submissions before rejecting.')
+  const pending = moderationPendingByKey.get(appKey)
+  if (!pending) throw new Error('This app is not in the loaded relay queue. Refresh pending submissions before rejecting it.')
   const { baseUrl, apiKey } = await getModSettings()
   const spec = communitySubmit.manageRequest('reject', { baseUrl, apiKey, appKey })
   if (spec.error) throw new Error(spec.error)
   const res = await relayManageHttp(spec)
   if (res.status === 401) throw new Error('Relay rejected the moderator API key (401).')
   if (res.status >= 400) throw new Error('Relay reject failed (HTTP ' + res.status + ').')
-  return { ok: true, appKey }
+  const { audit, auditWarning } = await appendCommunityReviewAuditSafely({
+    appKey,
+    publisherPubkey: pending.publisherPubkey,
+    action: 'reject',
+    reason,
+    note: data.note,
+    reviewStatus: moderationReviewCache.get(appKey)?.status || 'not-run',
+    summary: moderationReviewCache.get(appKey)?.summary || null
+  })
+  moderationPendingByKey.delete(appKey)
+  moderationReviewCache.delete(appKey)
+  return { ok: true, appKey, audit, auditWarning }
 })
 
 // Collaborative (Autobee) catalog authoring — Rollout Phase 3. All gated by

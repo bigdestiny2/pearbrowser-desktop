@@ -10,7 +10,10 @@ const {
   deriveKeyAndLink,
   buildSubmissionManifest,
   manageRequest,
-  communityBeeEntry
+  communityBeeEntry,
+  buildReviewReport,
+  reviewEvidenceMatches,
+  MAX_INDEX_BYTES
 } = communitySubmit
 
 // A real 64-hex content key + a known z-base-32 encoding of the SAME bytes, so
@@ -142,4 +145,128 @@ test('communityBeeEntry: maps a manifest to the app!<id> schema', () => {
   assert.equal(value.driveKey, HEX)
   assert.equal(value.publishedAt, 42) // carried from submittedAt
   assert.equal(value.name, 'Entry App')
+})
+
+test('buildReviewReport: eligible web content still requires human acknowledgement', () => {
+  const report = buildReviewReport({
+    appKey: HEX,
+    pending: { appKey: HEX, publisherPubkey: 'b'.repeat(64), discoveredAt: 1000 },
+    manifest: { name: 'Reviewed App', driveKey: HEX, type: 'hypersite', version: '1.0.0' },
+    indexText: '<!doctype html><html><body>Hello</body></html>',
+    indexBytes: 47,
+    driveVersion: 4,
+    duplicates: []
+  }, 2000)
+
+  assert.equal(report.approvalAllowed, true)
+  assert.equal(report.requiresAcknowledgement, true)
+  assert.equal(report.summary.block, 0)
+  assert.ok(report.summary.warning >= 3)
+  assert.equal(report.previewUrl, 'hyper://' + HEX + '/')
+  assert.equal(report.manifest.name, 'Reviewed App')
+  assert.equal(report.manifest.driveKey, HEX)
+  assert.equal(report.manifest.link, 'hyper://' + HEX + '/')
+  assert.ok(report.checks.some((check) => check.id === 'publisher-identity' && check.status === 'warning'))
+  assert.ok(report.checks.some((check) => check.id === 'mutable-content' && check.status === 'warning'))
+  assert.ok(report.checks.some((check) => check.id === 'human-preview' && check.status === 'warning'))
+})
+
+test('buildReviewReport: missing manifest or entrypoint blocks approval', () => {
+  const report = buildReviewReport({
+    appKey: HEX,
+    pending: { appKey: HEX, publisherPubkey: 'b'.repeat(64) },
+    driveVersion: 1,
+    indexBytes: 0,
+    manifest: null
+  })
+
+  assert.equal(report.approvalAllowed, false)
+  assert.ok(report.summary.block >= 2)
+  assert.ok(report.checks.some((check) => check.id === 'entrypoint' && check.status === 'block'))
+  assert.ok(report.checks.some((check) => check.id === 'manifest' && check.status === 'block'))
+})
+
+test('buildReviewReport: native delivery and mismatched targets are blockers', () => {
+  const OTHER = 'a'.repeat(64)
+  const native = buildReviewReport({
+    appKey: HEX,
+    pending: { appKey: HEX, publisherPubkey: 'b'.repeat(64) },
+    driveVersion: 1,
+    indexText: '<html><body>native</body></html>',
+    manifest: { name: 'Native App', type: 'standalone', pearLink: 'pear://example' }
+  })
+  assert.equal(native.approvalAllowed, false)
+  assert.ok(native.checks.some((check) => check.id === 'delivery-boundary' && check.status === 'block'))
+
+  const mismatch = buildReviewReport({
+    appKey: HEX,
+    pending: { appKey: HEX, publisherPubkey: 'b'.repeat(64) },
+    driveVersion: 1,
+    indexText: '<html><body>site</body></html>',
+    manifest: { name: 'Wrong Target', link: 'hyper://' + OTHER + '/' }
+  })
+  assert.equal(mismatch.approvalAllowed, false)
+  assert.match(mismatch.checks.find((check) => check.id === 'delivery-boundary').detail, /does not match/i)
+
+  const invalid = buildReviewReport({
+    appKey: HEX,
+    pending: { appKey: HEX, publisherPubkey: 'b'.repeat(64) },
+    driveVersion: 1,
+    indexText: '<html><body>site</body></html>',
+    manifest: { name: 'Clearnet Target', link: 'https://example.com/app' }
+  })
+  assert.equal(invalid.approvalAllowed, false)
+  assert.match(invalid.checks.find((check) => check.id === 'delivery-boundary').detail, /not a valid browsable Hyperdrive/i)
+})
+
+test('buildReviewReport: injected key normalization accepts a matching z32 manifest target', () => {
+  const report = buildReviewReport({
+    appKey: HEX,
+    pending: { appKey: HEX, publisherPubkey: 'b'.repeat(64) },
+    driveVersion: 1,
+    indexText: '<html><body>site</body></html>',
+    manifest: { name: 'Z32 Target', link: 'hyper://' + Z32 + '/' },
+    normalizeKey: fakeNormalize
+  })
+  assert.equal(report.approvalAllowed, true)
+  assert.equal(report.checks.find((check) => check.id === 'delivery-boundary').status, 'pass')
+})
+
+test('buildReviewReport: duplicates and external behavior are review warnings', () => {
+  const report = buildReviewReport({
+    appKey: HEX,
+    pending: { appKey: HEX, publisherPubkey: 'b'.repeat(64) },
+    driveVersion: 2,
+    indexText: '<html><script src="https://cdn.example/app.js"></script><form></form></html>',
+    manifest: { name: 'External App', driveKey: HEX },
+    duplicates: [{ id: 'existing', name: 'Existing App', catalogName: 'PearBrowser Network', driveKey: HEX }]
+  })
+
+  assert.equal(report.approvalAllowed, true)
+  assert.ok(report.checks.some((check) => check.id === 'duplicate' && check.status === 'warning'))
+  assert.ok(report.checks.some((check) => check.id === 'page-behavior' && check.status === 'warning'))
+  assert.deepEqual(report.evidence.externalOrigins, ['https://cdn.example'])
+  assert.deepEqual(report.evidence.behaviorSignals, ['form submission'])
+})
+
+test('buildReviewReport: oversized index.html is a blocker', () => {
+  const report = buildReviewReport({
+    appKey: HEX,
+    pending: { appKey: HEX, publisherPubkey: 'b'.repeat(64) },
+    driveVersion: 1,
+    indexText: '<html></html>',
+    indexBytes: MAX_INDEX_BYTES + 1,
+    manifest: { name: 'Too Large', driveKey: HEX }
+  })
+  assert.equal(report.approvalAllowed, false)
+  assert.ok(report.checks.some((check) => check.id === 'entrypoint' && check.status === 'block'))
+})
+
+test('reviewEvidenceMatches binds approval to the reviewed drive version', () => {
+  const report = { checkedAt: 1234, evidence: { driveVersion: 9 } }
+  assert.equal(reviewEvidenceMatches({ reviewedAt: 1234, reviewedDriveVersion: 9 }, report), true)
+  assert.equal(reviewEvidenceMatches({ reviewedAt: 1234, reviewedDriveVersion: 10 }, report), false)
+  assert.equal(reviewEvidenceMatches({ reviewedAt: 1235, reviewedDriveVersion: 9 }, report), false)
+  assert.equal(reviewEvidenceMatches({}, report), false)
+  assert.equal(reviewEvidenceMatches({ reviewedAt: 1234, reviewedDriveVersion: 9 }, null), false)
 })
