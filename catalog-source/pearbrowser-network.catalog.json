@@ -1,8 +1,8 @@
 {
   "name": "PearBrowser Network",
   "description": "Curated entry point for the Pear ecosystem — the browser itself plus its companion sites.",
-  "version": 10,
-  "publishedAt": "2026-07-16T00:00:00Z",
+  "version": 11,
+  "publishedAt": "2026-07-29T00:00:00Z",
   "publisher": "bigdestiny2",
   "apps": [
     {
@@ -10,13 +10,14 @@
       "name": "PearBrowser Desktop",
       "description": "P2P browser, decentralized app store, and site publisher. macOS / Windows / Linux. Talks to peers directly over Hyperswarm. Pinned 24/7 on HiveRelay.",
       "author": "bigdestiny2",
-      "version": "0.7.1",
+      "version": "0.8.0",
       "categories": [
         "browser",
         "tools",
         "p2p"
       ],
       "publishedAt": "2026-04-28T00:00:00Z",
+      "type": "standalone",
       "legacyMigrationId": "tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty",
       "nativeDelivery": { "status": "migration-required" },
       "driveKey": "03f0060a35451cfb6b68ad1dda1b8474ebb43fd9100071ccf7d67679a83ebb4f",

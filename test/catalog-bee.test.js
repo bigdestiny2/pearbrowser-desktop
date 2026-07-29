@@ -15,7 +15,20 @@ const SAMPLE = {
   version: 1,
   apps: [
     { id: 'keet', name: 'Keet', type: 'standalone', description: 'P2P chat', link: 'hyper://' + 'b'.repeat(64) + '/', categories: ['chat'], author: 'Holepunch', homepage: 'https://keet.io', source: 'https://github.com/holepunchto/keet', license: 'Apache-2.0' },
-    { id: 'pearpass', name: 'PearPass', driveKey: 'a'.repeat(64), version: '2.0' }
+    { id: 'pearpass', name: 'PearPass', driveKey: 'a'.repeat(64), version: '2.0' },
+    {
+      id: 'native-tool',
+      name: 'Native Tool',
+      type: 'standalone',
+      version: '3.2.1',
+      nativeDelivery: {
+        status: 'available',
+        kind: 'pear-v3',
+        installLink: 'pear://' + 'a'.repeat(52),
+        productName: 'Native Tool',
+        targets: ['darwin-arm64', 'linux-x64']
+      }
+    }
   ]
 }
 
@@ -23,7 +36,7 @@ test('normalizeManifest cleans input and applies defaults', () => {
   const n = normalizeManifest(SAMPLE, 1700000000000)
   assert.equal(n.name, 'Pear Picks') // trimmed
   assert.equal(n.version, 1)
-  assert.equal(n.apps.length, 2)
+  assert.equal(n.apps.length, 3)
   assert.equal(n.apps[0].publishedAt, 1700000000000) // injected default now
   assert.deepEqual(n.apps[0].categories, ['chat'])
   assert.equal(n.apps[0].sourceUrl, 'https://github.com/holepunchto/keet')
@@ -74,8 +87,8 @@ test('round-trips through a real Hyperbee using the loader query', async () => {
     assert.equal(data.name, 'Pear Picks')
     assert.equal(data.version, 1)
     assert.equal(data.sourceKey, keyHex)
-    assert.equal(data.count.total, 2)
-    assert.equal(data.apps.length, 2)
+    assert.equal(data.count.total, 3)
+    assert.equal(data.apps.length, 3)
 
     const byId = Object.fromEntries(data.apps.map((a) => [a.id, a]))
     assert.equal(byId.keet.name, 'Keet')
@@ -86,6 +99,14 @@ test('round-trips through a real Hyperbee using the loader query', async () => {
     assert.equal(byId.keet.homepage, 'https://keet.io')
     assert.equal(byId.keet.license, 'Apache-2.0')
     assert.equal(byId.pearpass.driveKey, 'a'.repeat(64))
+    assert.deepEqual(byId['native-tool'].nativeDelivery, {
+      status: 'available',
+      kind: 'pear-v3',
+      installLink: 'pear://' + 'a'.repeat(52),
+      productName: 'Native Tool',
+      targets: ['darwin-arm64', 'linux-x64']
+    })
+    assert.equal(byId['native-tool'].link, undefined)
 
     await store.close()
   } finally {

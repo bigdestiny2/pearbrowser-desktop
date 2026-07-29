@@ -4,21 +4,21 @@ A local-first peer-to-peer browser, app store, search engine, naming layer, Nost
 
 **No accounts. No DNS. Local-first data.** Sites are addressed by stable Hyperdrive keys and can be pinned on the [HiveRelay](https://github.com/bigdestiny2/P2P-Hiverelay) backbone. Native applications are installed from verified packages; a catalogue never turns a remote executable link into a runtime command.
 
-**Current release:** `v0.7.1` · stable Pear production length `92858`. The current hot-synced app adds private DuckDuckGo search on the browser-owned home tab: PearBrowser sends no search analytics and excludes submitted searches from the optional persistent visit log, while DuckDuckGo still receives the query and network address. The release also makes the renderer/backend RPC transport survive reload and live-update handoffs: pending calls fail immediately on disconnect, the per-launch authenticated socket reconnects during a bounded grace window, and the shell visibly resumes instead of reporting unrelated 30-second command timeouts. It retains all `v0.7.0` Content Shield, Pear Plugins, and P2P catalogue features. Catalogue version `9` advertises the release. See [docs/RELEASE_v0.7.1_OPERATOR.md](./docs/RELEASE_v0.7.1_OPERATOR.md) for the coordinated publish record.
+**Current release:** `v0.8.0`. PearBrowser now runs its backend through the embedded Pear v3 runtime, installs compatible native apps through a host-confirmed `pear-install` boundary, and keeps browsable `hyper://` content separate from native delivery. Catalogue submissions accept canonical provisioned Pear v3 production identities or Hyper sites, queue one signed review receipt, bind approval to the reviewed receipt/content versions, and support bounded validated icons. Private search, reconnect-safe RPC, Content Shield, Pear Plugins, and the local-first catalogue/search/naming stack remain included. Catalogue version `11` advertises the release metadata.
 
 **Current architecture:** start with [docs/ARCHITECTURE_AND_CAPABILITIES.md](./docs/ARCHITECTURE_AND_CAPABILITIES.md). The deeper catalogue/search/naming/Nostr audit is in [docs/DEEP_AUDIT_CATALOG_SEARCH_NAMING_NOSTR_2026-06-21.md](./docs/DEEP_AUDIT_CATALOG_SEARCH_NAMING_NOSTR_2026-06-21.md).
 
 ## Install it
 
 Primary desktop distribution is now native GitHub release packages. The
-`v0.7.1` release targets macOS, Windows, and Linux assets with SHA-256 sidecars
+`v0.8.0` release targets macOS, Windows, and Linux assets with SHA-256 sidecars
 and platform manifests. Download from the
-[`v0.7.1` release](https://github.com/bigdestiny2/pearbrowser-desktop/releases/tag/v0.7.1),
+[`v0.8.0` release](https://github.com/bigdestiny2/pearbrowser-desktop/releases/tag/v0.8.0),
 follow the [native install guide](./docs/INSTALL_NATIVE_PACKAGES.md), or resolve
 the recommended asset for your machine from a source checkout:
 
 ```sh
-npm run resolve:native-release -- --tag v0.7.1 --repo bigdestiny2/pearbrowser-desktop
+npm run resolve:native-release -- --tag v0.8.0 --repo bigdestiny2/pearbrowser-desktop
 ```
 
 The current package targets match the `cmake-pear` appling toolchain:
@@ -27,9 +27,10 @@ The current package targets match the `cmake-pear` appling toolchain:
 - Windows: `PearBrowser-<version>-windows-x64.msix` now
 - Linux: `PearBrowser-<version>-linux-x64.AppImage` now, distro packages such as `.deb` later if demand warrants them
 
-The previous stable `pear://` key is a **legacy migration record**, not an
-install or launch instruction. PearBrowser never passes a remote link to
-`PearRuntime.run()`. Keep legacy data intact, install the native package for
+The retained PearBrowser `upgrade` key is a **migration record** until the v3
+production provision/multisig quorum is independently verified; it is not an
+install instruction in the catalogue. PearBrowser never passes a remote link
+to `PearRuntime.run()`. Keep legacy data intact, install the native package for
 your platform, and use the migration guidance in
 [docs/PEAR_V3_MIGRATION.md](./docs/PEAR_V3_MIGRATION.md).
 
@@ -150,6 +151,7 @@ Three independent keypairs — BIP-39 identity, HiveRelay publisher key, Coresto
 | [Release evidence log](./docs/RELEASE_SMOKE_EVIDENCE_LOG_2026-06-23.md) | Operator-fillable proof table for final PASS/FAIL/DEFER release evidence and announcement decision. |
 | [Test command matrix](./docs/TEST-COMMAND-MATRIX-2026-06-23.md) | Separates deterministic local checks from GUI, real-DHT, third-party trust, release-drive, and mobile/native gates. |
 | [App compatibility standard](./docs/PEARBROWSER-APP-COMPAT-STANDARD.md) | Author-facing release contract for apps targeting desktop and mobile. |
+| [Community review process](./docs/COMMUNITY_REVIEW_PROCESS.md) | Submission queue, due-diligence evidence, guarded relay decisions, audit records, and the separate catalogue-publication gate. |
 | [Feature roadmap](./docs/P2P-BROWSER-FEATURE-ROADMAP.md) | Current shipped/next/parking-lot roadmap after the 2026 audit. |
 
 ## Develop
@@ -221,29 +223,29 @@ human approval of clean-install, upgrade, rollback, and data-continuity proof.
 
 ## Distribution
 
-The `appling/` directory contains the multi-architecture native shell — Bare + CMake builds for macOS / Windows / Linux. GitHub release assets are produced by `.github/workflows/desktop-native-release.yml`, which builds the appling on hosted macOS, Windows, and Linux runners, collects the native artifacts, writes SHA-256 sidecars, and attaches them to the matching release tag. Run the workflow manually with tag `v0.7.1` and `source_ref` set to the release commit to produce or refresh the attached release assets.
+The `appling/` directory contains the multi-architecture native shell — Bare + CMake builds for macOS / Windows / Linux. GitHub release assets are produced by `.github/workflows/desktop-native-release.yml`, which builds the appling on hosted macOS, Windows, and Linux runners, collects the native artifacts, writes SHA-256 sidecars, and attaches them to the matching release tag. Run the workflow manually with tag `v0.8.0` and `source_ref` set to the release commit to produce or refresh the attached release assets.
 
 Current generated artifacts are `.app.zip` on macOS, `.msix` on Windows, and `.AppImage` on Linux. The workflow uses `npm ci --prefix appling`, so update `appling/package-lock.json` deliberately when the native wrapper toolchain changes.
 
 ```sh
-npm run check:appling-release -- --tag v0.7.1
+npm run check:appling-release -- --tag v0.8.0
 npm run check:linux-appimage-metadata
-npm run resolve:native-release -- --tag v0.7.1 --repo bigdestiny2/pearbrowser-desktop
-npm run -s generate:native-signing-secret-plan -- --repo bigdestiny2/pearbrowser-desktop --tag v0.7.1 --source-ref <release-commit>
-npm run -s generate:native-install-snippet -- --tag v0.7.1 --repo bigdestiny2/pearbrowser-desktop
-npm run -s generate:native-install-guide -- --tag v0.7.1 --repo bigdestiny2/pearbrowser-desktop
-npm run -s generate:native-install-smoke-plan -- --tag v0.7.1 --repo bigdestiny2/pearbrowser-desktop --source-ref <release-commit>
-npm run generate:package-manager-manifests -- --tag v0.7.1 --repo bigdestiny2/pearbrowser-desktop --trust-mode package-proof
+npm run resolve:native-release -- --tag v0.8.0 --repo bigdestiny2/pearbrowser-desktop
+npm run -s generate:native-signing-secret-plan -- --repo bigdestiny2/pearbrowser-desktop --tag v0.8.0 --source-ref <release-commit>
+npm run -s generate:native-install-snippet -- --tag v0.8.0 --repo bigdestiny2/pearbrowser-desktop
+npm run -s generate:native-install-guide -- --tag v0.8.0 --repo bigdestiny2/pearbrowser-desktop
+npm run -s generate:native-install-smoke-plan -- --tag v0.8.0 --repo bigdestiny2/pearbrowser-desktop --source-ref <release-commit>
+npm run generate:package-manager-manifests -- --tag v0.8.0 --repo bigdestiny2/pearbrowser-desktop --trust-mode package-proof
 npm run check:native-signing -- --require-public-trust --secret-source github --repo bigdestiny2/pearbrowser-desktop
-npm run check:public-trust-readiness -- --tag v0.7.1 --repo bigdestiny2/pearbrowser-desktop --source-ref <release-commit> --signing-secret-source github
-npm run -s generate:public-trust-operator-report -- --tag v0.7.1 --repo bigdestiny2/pearbrowser-desktop --source-ref <release-commit> --signing-secret-source github
+npm run check:public-trust-readiness -- --tag v0.8.0 --repo bigdestiny2/pearbrowser-desktop --source-ref <release-commit> --signing-secret-source github
+npm run -s generate:public-trust-operator-report -- --tag v0.8.0 --repo bigdestiny2/pearbrowser-desktop --source-ref <release-commit> --signing-secret-source github
 npm run -s generate:release-evidence-handoff
 cd appling
 npm ci
 npm run generate
 npm run build
 cd ..
-npm run package:appling -- --tag v0.7.1
+npm run package:appling -- --tag v0.8.0
 ```
 
 Code signing is per-platform:

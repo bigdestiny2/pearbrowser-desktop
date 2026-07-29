@@ -180,12 +180,14 @@ const CMD_NOSTR_QUERY = 192        // { filter } → { events } (NIP-01 filter o
 
 // Community app submission + moderation (2026-06-22). Anyone can submit their
 // app to the COMMUNITY catalogue (5d961fdc…); an in-app moderator panel reviews
-// the relay queue and, on approve, writes the app into the community Hyperbee +
-// re-pins it. See backend/community-submit.js + ui/shell.js (submit form + panel).
-const CMD_SUBMIT_APP = 210   // { name, link|driveKey, description?, author?, categories?, iconData? } → publish manifest + seed → { id, status:'pending-review' }
+// relay pin requests. Approval authorizes replication only; publishing into the
+// shared community Hyperbee is a separate operator step. See
+// backend/community-submit.cjs + ui/shell.js (submit form + panel).
+const CMD_SUBMIT_APP = 210   // { submissionKind:'pear-v3'|'hyper', name, link, version?, productName?, targets?, iconData? } → queue one receipt → status
 const CMD_MOD_PENDING = 211  // → { pending: [...] } pulled from the relay review queue
-const CMD_MOD_APPROVE = 212  // { id } → relay approve + write app into community bee + re-pin
-const CMD_MOD_REJECT = 213   // { id, reason? } → relay reject
+const CMD_MOD_APPROVE = 212  // { appKey, acknowledged, reviewedAt, reviewedReceiptDriveVersion, reviewedTargetDriveVersion, note } → guarded receipt approval + local audit
+const CMD_MOD_REJECT = 213   // { appKey, reason, note? } → relay reject + local audit
+const CMD_MOD_REVIEW = 214   // { appKey } → fetch receipt + optional Hyper target and return due-diligence evidence
 
 // Browser chrome-owned local AI. Unlike /api/ai/* these commands are not
 // callable by Hyperdrive pages: only PearBrowser's renderer can use them.
@@ -332,7 +334,7 @@ module.exports = {
   CMD_IDENTITY_BINDING_PUBLISH, CMD_IDENTITY_BINDING_RESOLVE, CMD_SEARCH_FEDERATED,
   CMD_NOSTR_GET_IDENTITY, CMD_NOSTR_BIND, CMD_NOSTR_REVOKE,
   CMD_NOSTR_PUBLISH, CMD_NOSTR_QUERY,
-  CMD_SUBMIT_APP, CMD_MOD_PENDING, CMD_MOD_APPROVE, CMD_MOD_REJECT,
+  CMD_SUBMIT_APP, CMD_MOD_PENDING, CMD_MOD_APPROVE, CMD_MOD_REJECT, CMD_MOD_REVIEW,
   CMD_ASK_BROWSER_CAPABILITIES, CMD_ASK_BROWSER_START, CMD_ASK_BROWSER_CANCEL,
   CMD_SHIELD_STATUS, CMD_SHIELD_LOAD_LIST, CMD_SHIELD_REMOVE_LIST,
   CMD_SHIELD_SET_ALLOW, CMD_SHIELD_SET_STRICT,

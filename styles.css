@@ -2364,6 +2364,211 @@ p { color: var(--pear-color-muted); margin-bottom: 12px; }
 .search-fed-toggle input { cursor: pointer; }
 .search-fed-toggle .fed-status { color: var(--pear-color-link); font-style: italic; }
 
+/* Community catalogue submission and moderation queue. */
+.community-kind {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.community-release-note {
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--pear-color-link);
+  border-radius: 7px;
+  background: var(--pear-color-surface-soft);
+  color: var(--pear-color-muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.community-release-note strong { color: var(--pear-color-text); }
+.community-targets {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px 12px;
+  margin: 6px 0 14px;
+}
+.community-targets label,
+.community-release-confirm {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--pear-color-text);
+  font-size: 12px;
+  cursor: pointer;
+}
+.community-targets input,
+.community-release-confirm input {
+  margin-top: 2px;
+  accent-color: var(--pear-color-link);
+}
+.community-icon-upload {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin: 7px 0 14px;
+}
+.community-icon-upload img,
+.community-icon-upload .app-icon {
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  border-radius: 10px;
+  object-fit: cover;
+}
+.community-icon-upload label.btn { cursor: pointer; }
+.community-icon-upload input[type="file"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.community-release-confirm {
+  margin: 4px 0 16px;
+  padding: 11px 12px;
+  border: 1px solid rgba(185,120,18,0.28);
+  border-radius: 8px;
+  background: rgba(185,120,18,0.08);
+}
+.mod-process {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin: 10px 0 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--pear-color-line);
+  border-radius: 8px;
+  background: var(--pear-color-surface-soft);
+  color: var(--pear-color-muted);
+  font-size: 12px;
+}
+.mod-process strong {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-right: 3px;
+  border-radius: 50%;
+  background: var(--pear-color-surface);
+  color: var(--pear-color-text);
+}
+.mod-mode,
+.mod-check {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 1px 8px;
+  border: 1px solid var(--pear-color-line);
+  border-radius: 999px;
+  color: var(--pear-color-muted);
+  background: var(--pear-color-surface);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.mod-mode.pass,
+.mod-check.pass { color: var(--pear-color-success); border-color: rgba(22,131,79,0.28); background: rgba(22,131,79,0.08); }
+.mod-mode.warning,
+.mod-check.warning { color: var(--pear-color-warning); border-color: rgba(185,120,18,0.30); background: rgba(185,120,18,0.10); }
+.mod-mode.block,
+.mod-check.block { color: var(--pear-color-error); border-color: rgba(194,65,47,0.30); background: rgba(194,65,47,0.08); }
+.mod-pending { display: grid; gap: 12px; margin-top: 12px; }
+.mod-review-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--pear-color-line);
+  border-radius: 10px;
+  background: var(--pear-color-canvas);
+}
+.mod-review-head,
+.mod-review-actions,
+.mod-decision-actions,
+.mod-summary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.mod-review-actions,
+.mod-decision-actions,
+.mod-summary { justify-content: flex-start; }
+.mod-key {
+  margin: 3px 0;
+  color: var(--pear-color-muted);
+  font: 10px/1.4 var(--pear-font-mono);
+  overflow-wrap: anywhere;
+}
+.mod-manifest {
+  padding: 10px 12px;
+  border-left: 3px solid var(--pear-color-link);
+  border-radius: 6px;
+  background: var(--pear-color-surface);
+  color: var(--pear-color-muted);
+  font-size: 12px;
+}
+.mod-manifest strong { color: var(--pear-color-text); }
+.mod-checks { display: grid; gap: 6px; }
+.mod-check-row {
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--pear-color-line);
+  border-radius: 7px;
+  background: var(--pear-color-surface);
+  color: var(--pear-color-muted);
+  font-size: 11px;
+}
+.mod-check-row strong { color: var(--pear-color-text); }
+.mod-check-row.pass { border-left: 3px solid var(--pear-color-success); }
+.mod-check-row.warning { border-left: 3px solid var(--pear-color-warning); }
+.mod-check-row.block { border-left: 3px solid var(--pear-color-error); }
+.mod-check-icon { font-size: 15px; font-weight: 800; text-align: center; }
+.mod-check-row.pass .mod-check-icon { color: var(--pear-color-success); }
+.mod-check-row.warning .mod-check-icon { color: var(--pear-color-warning); }
+.mod-check-row.block .mod-check-icon { color: var(--pear-color-error); }
+.mod-ack {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid rgba(185,120,18,0.28);
+  border-radius: 8px;
+  background: rgba(185,120,18,0.08);
+  color: var(--pear-color-text);
+  font-size: 12px;
+  cursor: pointer;
+}
+.mod-ack input { margin-top: 2px; accent-color: var(--pear-color-warning); }
+.mod-textarea { min-height: 72px; resize: vertical; font-family: inherit; }
+.mod-audit { margin-top: 16px; border-top: 1px solid var(--pear-color-line); padding-top: 12px; }
+.mod-audit summary { cursor: pointer; color: var(--pear-color-muted); font-size: 12px; }
+.mod-audit-row {
+  display: grid;
+  grid-template-columns: auto minmax(110px, auto) 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--pear-color-surface-soft);
+  color: var(--pear-color-muted);
+  font-size: 11px;
+}
+.mod-audit-row code { color: var(--pear-color-text); }
+.mod-audit-row time { white-space: nowrap; }
+@media (max-width: 760px) {
+  .community-targets { grid-template-columns: 1fr; }
+  .mod-audit-row { grid-template-columns: auto 1fr; }
+  .mod-audit-row span:nth-child(3), .mod-audit-row time { grid-column: 1 / -1; }
+}
+
 /* Lighthouse Phase 2 — trusted-peers (contact invite exchange) panel. */
 .trusted-peers { margin: 0 0 16px; border: 1px solid var(--pear-color-line); border-radius: 8px; background: var(--pear-color-canvas); }
 .trusted-peers summary { padding: 10px 12px; cursor: pointer; font-size: 13px; color: var(--pear-color-text); user-select: none; }

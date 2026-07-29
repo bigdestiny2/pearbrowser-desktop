@@ -52,7 +52,7 @@ test('mobile Bookmarks, History, and More hub expose local data workflows and st
     'removeBookmark(url)',
     'onPress={() => onOpen(b.url)}',
     'No bookmarks yet',
-    'Bookmark sites while browsing',
+    'Save the current site from Page actions while browsing.',
   ])
 
   includesAll(history, [
@@ -182,22 +182,27 @@ test('mobile site editor supports block editing, theme selection, preview, save,
   ])
 })
 
-test('mobile native Explore screens preserve safe catalog targets like React Native Explore', { skip: !hasMobileCheckout && 'mobile checkout is not present in this isolated desktop worktree' }, () => {
+test('mobile Explore screens preserve Pear v3 metadata without executing native links', { skip: !hasMobileCheckout && 'mobile checkout is not present in this isolated desktop worktree' }, () => {
   const rn = source('app/screens/ExploreScreen.tsx')
   const ios = source('ios-native/PearBrowser/Sources/UI/Screens/ExploreScreen.swift')
   const android = source('android-native/app/src/main/java/com/pearbrowser/app/ui/screens/ExploreScreen.kt')
 
   includesAll(rn, [
     'normalizeEntry',
-    'site.link',
-    'onVisit(site.link)',
+    'normalizeNativeDelivery',
+    'nativeDelivery?: NativeDelivery',
+    'catalogAction',
+    'onVisit(action.target)',
+    'Desktop only',
     'filter((site): site is SiteInfo => !!site)',
   ])
 
   includesAll(ios, [
     'let driveKey: String?',
     'let link: String?',
+    'let nativeDelivery: NativeDelivery?',
     'normalizeCatalogLink',
+    'normalizeNativeDelivery',
     'normalizeDriveKey',
     'driveKeyFromHyperLink',
     'onVisit(link)',
@@ -207,10 +212,12 @@ test('mobile native Explore screens preserve safe catalog targets like React Nat
   includesAll(android, [
     'val driveKey: String?',
     'val link: String?',
+    'val nativeDelivery: NativeDelivery?',
     'normalizeCatalogLink',
+    'normalizeNativeDelivery',
     'normalizeDriveKey',
     'driveKeyFromHyperLink',
-    'val target = site.link',
+    'val target = if (site.desktopPackage) null else',
     '"pear", "file" ->',
   ])
 })

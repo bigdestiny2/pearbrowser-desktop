@@ -269,7 +269,7 @@ test('Pear stage ignore excludes local release/operator scratch files', () => {
   assert.ok(ignored.includes('/test'))
 })
 
-test('PearBrowser catalogue row is a migration-required native record, not a remote launcher', () => {
+test('PearBrowser catalogue row stays migration-only until its Pear v3 production quorum is released', () => {
   const source = catalogSource.apps.find((app) => app.id === 'pearbrowser-desktop')
   const seed = SEED_APPS.find((app) => app.name === 'PearBrowser Desktop')
   const homepageKey = '03f0060a35451cfb6b68ad1dda1b8474ebb43fd9100071ccf7d67679a83ebb4f'
@@ -277,13 +277,15 @@ test('PearBrowser catalogue row is a migration-required native record, not a rem
   assert.ok(source, 'catalogue source row missing')
   assert.ok(seed, 'offline catalogue seed row missing')
   assert.equal(source.version, pkg.version)
+  assert.equal(source.type, 'standalone')
   assert.equal(source.legacyMigrationId, pkg.upgrade.replace(/^pear:\/\//, ''))
-  assert.equal(source.nativeDelivery?.status, 'migration-required')
+  assert.deepEqual(source.nativeDelivery, { status: 'migration-required' })
   assert.equal(source.driveKey, homepageKey)
   assert.equal(source.homepage, `hyper://${homepageKey}/`)
   assert.equal(source.link, source.homepage)
   assert.equal(seed.version, source.version)
   assert.equal(seed.nativeDeliveryStatus, source.nativeDelivery.status)
+  assert.equal(seed.nativeInstallLink, undefined)
   assert.equal(seed.link, source.link)
   assert.equal(seed.driveKey, source.driveKey)
   assert.equal(seed.homepage, source.homepage)
@@ -390,6 +392,7 @@ test('HiveRelay local workspace guard still fails for missing file dependencies'
 })
 
 test('desktop CI checks out and guards the HiveRelay 0.20.2 release contract', () => {
+  assert.match(desktopCiWorkflow, /repository: bigdestiny2\/PearBrowser\s+ref: 5c1c920b8b42ffe895f78c49c43d176d5ca93086/)
   assert.match(desktopCiWorkflow, /Checkout HiveRelay release contract/)
   assert.match(desktopCiWorkflow, /ref: v0\.20\.2/)
   assert.match(desktopCiWorkflow, /Guard HiveRelay 0\.20\.2 workspace layout/)
@@ -2254,7 +2257,9 @@ test('release story smoke covers browse, catalogue, local stories, and opt-in si
 
 test('live catalogue verifier asserts PearBrowser release contract and Peercord provenance metadata', () => {
   assert.match(liveCatalogVerifier, /PearBrowser version mismatch/)
-  assert.match(liveCatalogVerifier, /PearBrowser link mismatch/)
+  assert.match(liveCatalogVerifier, /PearBrowser native install link mismatch/)
+  assert.match(liveCatalogVerifier, /PearBrowser native delivery must be an available Pear v3 release/)
+  assert.match(liveCatalogVerifier, /PearBrowser migration identity mismatch/)
   assert.match(liveCatalogVerifier, /PearBrowser homepage mismatch/)
   assert.match(liveCatalogVerifier, /Peercord sourceUrl mismatch/)
   assert.match(liveCatalogVerifier, /https:\/\/git\.churchofmalware\.org\/mastercodeon\/Peercord/)
