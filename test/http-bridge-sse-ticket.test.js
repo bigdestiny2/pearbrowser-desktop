@@ -20,7 +20,7 @@ function makeReq (method, path, { headers = {}, body } = {}) {
   return req
 }
 
-function makeRes () {
+function makeRes ({ write } = {}) {
   const res = new EventEmitter()
   res.statusCode = 200
   res.headers = {}
@@ -29,7 +29,7 @@ function makeRes () {
   res.setHeader = (name, value) => { res.headers[name.toLowerCase()] = value }
   res.write = (chunk) => {
     if (chunk) res.chunks.push(Buffer.from(chunk))
-    return true
+    return write ? write(chunk, res.chunks.length) : true
   }
   res.end = (chunk) => {
     if (chunk) res.chunks.push(Buffer.from(chunk))
@@ -41,18 +41,24 @@ function makeRes () {
       res.json = null
     }
   }
+  res.destroy = () => {
+    if (res.destroyed) return
+    res.destroyed = true
+    res.emit('close')
+  }
   return res
 }
 
 async function request (bridge, method, path, opts = {}) {
-  const req = makeReq(method, path, opts)
-  const res = makeRes()
+  const { response, ...requestOpts } = opts
+  const req = makeReq(method, path, requestOpts)
+  const res = response || makeRes()
   const url = new URL(path, 'http://127.0.0.1')
   const handled = await bridge.handle(req, res, url)
   return { handled, req, res }
 }
 
-function makeBridge () {
+function makeBridge ({ maxSseQueue, maxSseQueueBytes } = {}) {
   const attached = []
   const swarmBridge = {
     attachStream (id, stream) {
@@ -66,7 +72,9 @@ function makeBridge () {
   const http = new HttpBridge({}, null, null, {
     validateToken: (token) => token === 'good' ? driveKey : null,
     swarmBridge,
-    sseTicketTtlMs: 30000
+    sseTicketTtlMs: 30000,
+    maxSseQueue,
+    maxSseQueueBytes
   })
   return { http, attached }
 }
@@ -111,4 +119,70 @@ test('HttpBridge swarm events use one-time SSE tickets, not bearer query tokens'
   const reused = await request(http, 'GET', `/api/swarm/events?channelId=${channelId}&ticket=${ticket}`)
   assert.equal(reused.res.statusCode, 401)
   assert.equal(reused.res.json.error, 'Invalid SSE ticket')
+})
+
+test('HttpBridge bounds a stalled SSE page and flushes queued events in order', async () => {
+  const { http, attached } = makeBridge({ maxSseQueue: 2 })
+  const writes = []
+  let stallNextEvent = true
+  const response = makeRes({
+    write (chunk) {
+      const frame = String(chunk)
+      writes.push(frame)
+      if (frame.startsWith('data:') && stallNextEvent) {
+        stallNextEvent = false
+        return false
+      }
+      return true
+    }
+  })
+  const ticket = await issueTicket(http)
+  await request(http, 'GET', `/api/swarm/events?channelId=${channelId}&ticket=${ticket}`, { response })
+  const stream = attached[0].stream
+
+  stream.send({ seq: 1 })
+  stream.send({ seq: 2 })
+  stream.send({ seq: 3 })
+  assert.deepEqual(writes.filter(frame => frame.startsWith('data:')), [
+    'data: {"seq":1}\n\n'
+  ])
+
+  response.emit('drain')
+  assert.deepEqual(writes.filter(frame => frame.startsWith('data:')), [
+    'data: {"seq":1}\n\n',
+    'data: {"seq":2}\n\n',
+    'data: {"seq":3}\n\n'
+  ])
+
+  let closed = 0
+  stream.onClose(() => { closed++ })
+  stallNextEvent = true
+  stream.send({ seq: 4 })
+  stream.send({ seq: 5 })
+  stream.send({ seq: 6 })
+  stream.send({ seq: 7 })
+
+  assert.equal(response.destroyed, true, 'queue overflow closes the stalled stream')
+  assert.equal(closed, 1, 'stream cleanup runs exactly once')
+  response.emit('error', new Error('late socket error'))
+  assert.equal(closed, 1, 'late socket events do not repeat cleanup')
+})
+
+test('HttpBridge also bounds stalled SSE queue bytes', async () => {
+  const { http, attached } = makeBridge({ maxSseQueue: 100, maxSseQueueBytes: 24 })
+  let dataWrites = 0
+  const response = makeRes({
+    write (chunk) {
+      if (String(chunk).startsWith('data:')) dataWrites++
+      return dataWrites === 1 ? false : true
+    }
+  })
+  const ticket = await issueTicket(http)
+  await request(http, 'GET', `/api/swarm/events?channelId=${channelId}&ticket=${ticket}`, { response })
+  const stream = attached[0].stream
+
+  stream.send({ seq: 1 })
+  stream.send({ payload: 'this frame exceeds the queued-byte budget' })
+
+  assert.equal(response.destroyed, true, 'oversized queued data closes the stalled stream')
 })

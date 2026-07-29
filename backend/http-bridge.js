@@ -39,6 +39,8 @@ class HttpBridge {
     this._sseTickets = new Map()
     this._sseTicketTtlMs = opts.sseTicketTtlMs || 30000
     this._maxSseTickets = opts.maxSseTickets || 4096
+    this._maxSseQueue = opts.maxSseQueue || 1024
+    this._maxSseQueueBytes = opts.maxSseQueueBytes || (4 * 1024 * 1024)
   }
 
   // Simple rate limit check
@@ -572,11 +574,12 @@ class HttpBridge {
       // --- swarm.v1 (direct Hyperswarm access for hyper:// pages — see docs/SWARM-V1.md) ---
       //
       //   POST /api/swarm/join       — open a channel; returns channelId
+      //   POST /api/swarm/ticket     — mint a one-time credential for EventSource
       //   GET  /api/swarm/events     — SSE stream of peer/message events
       //   POST /api/swarm/send       — send to a peer
       //   POST /api/swarm/leave      — close the channel
       //
-      // All four are gated by the per-app token + Origin check above.
+      // All five are gated by the per-app token or its origin-bound SSE ticket.
       // Tier C topic joins additionally fire EVT_SWARM_REQUEST and wait
       // on the user's consent reply before resolving.
 
@@ -595,27 +598,122 @@ class HttpBridge {
           res.setHeader('Cache-Control', 'no-cache, no-transform')
           res.setHeader('Connection', 'keep-alive')
           res.setHeader('X-Accel-Buffering', 'no')
-          // Initial comment to flush headers immediately.
-          res.write(': pear.swarm.v1 stream\n\n')
-
           const closeHandlers = []
+          const queue = []
+          const maxSseQueue = this._maxSseQueue
+          const maxSseQueueBytes = this._maxSseQueueBytes
+          let queuedBytes = 0
+          let ended = false
+          let cleaned = false
+          let draining = false
+          let drainBound = false
+
+          // EventSource has no application-level flow-control signal. Honour
+          // Node/Bare's writable backpressure and keep only a bounded number
+          // of frames while the page socket is stalled. A client that falls
+          // further behind gets a closed stream and must rejoin with a fresh
+          // channel and one-time ticket instead of growing host memory.
+          const cleanup = () => {
+            if (cleaned) return
+            cleaned = true
+            ended = true
+            queue.length = 0
+            queuedBytes = 0
+            closeHandlers.forEach((fn) => { try { fn() } catch {} })
+          }
+          const closeStalledStream = () => {
+            ended = true
+            queue.length = 0
+            queuedBytes = 0
+            try {
+              if (typeof res.destroy === 'function') res.destroy()
+              else res.end()
+            } catch {}
+            cleanup()
+          }
+          const bindDrain = () => {
+            if (drainBound || ended) return
+            drainBound = true
+            res.once('drain', () => {
+              drainBound = false
+              flushQueue()
+            })
+          }
+          const flushQueue = () => {
+            draining = false
+            while (queue.length > 0) {
+              if (ended || res.writableEnded || res.destroyed) {
+                queue.length = 0
+                queuedBytes = 0
+                return
+              }
+              const queued = queue.shift()
+              queuedBytes -= queued.bytes
+              let writable
+              try { writable = res.write(queued.frame) } catch {
+                closeStalledStream()
+                return
+              }
+              if (writable === false) {
+                draining = true
+                bindDrain()
+                return
+              }
+            }
+          }
+
+          // Initial comment flushes headers immediately and participates in
+          // the same backpressure state as subsequent event frames.
+          try {
+            if (res.write(': pear.swarm.v1 stream\n\n') === false) {
+              draining = true
+              bindDrain()
+            }
+          } catch {
+            closeStalledStream()
+          }
+          if (ended) return true
           const stream = {
             send (eventObj) {
-              try {
-                res.write('data: ' + JSON.stringify(eventObj) + '\n\n')
-              } catch {}
+              if (ended || res.writableEnded || res.destroyed) return
+              let frame
+              try { frame = 'data: ' + JSON.stringify(eventObj) + '\n\n' } catch { return }
+              if (draining) {
+                const bytes = b4a.byteLength(frame)
+                if (queue.length >= maxSseQueue || queuedBytes + bytes > maxSseQueueBytes) {
+                  closeStalledStream()
+                  return
+                }
+                queue.push({ frame, bytes })
+                queuedBytes += bytes
+                bindDrain()
+                return
+              }
+              let writable
+              try { writable = res.write(frame) } catch {
+                closeStalledStream()
+                return
+              }
+              if (writable === false) {
+                draining = true
+                bindDrain()
+              }
             },
             close () {
+              if (ended) return
+              ended = true
+              queue.length = 0
+              queuedBytes = 0
               try { res.end() } catch {}
             },
             onClose (fn) {
               closeHandlers.push(fn)
             }
           }
-          const cleanup = () => closeHandlers.forEach((fn) => { try { fn() } catch {} })
           req.on('close', cleanup)
           req.on('error', cleanup)
           res.on('close', cleanup)
+          res.on('error', cleanup)
 
           this._swarmBridge.attachStream(channelId, stream)
           // attachStream sends the 'unknown channelId' error + closes itself
