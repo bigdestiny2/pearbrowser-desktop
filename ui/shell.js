@@ -2597,9 +2597,17 @@ function CommunitySubmit ({ rpc, C }) {
         iconData
       }, 90000)
       const submittedName = (res && res.manifest && res.manifest.name) || name.trim()
-      const relayStatus = res && res.status === 'pending-review'
-        ? `${res.acceptances} relay${res.acceptances === 1 ? '' : 's'} acknowledged the catalogue receipt.`
-        : 'The request was broadcast, but no relay acknowledged it within the initial window; the client will retry and it is not yet confirmed in a review queue.'
+      let relayStatus
+      if (res && res.status === 'pending-review') {
+        const queued = Number(res.queuedForReview) || 0
+        const accepted = Number(res.acceptances) || 0
+        relayStatus = `${queued} relay${queued === 1 ? '' : 's'} queued the catalogue receipt for human review.${accepted > 0 ? ` ${accepted} other relay${accepted === 1 ? '' : 's'} accepted receipt replication.` : ''}`
+      } else if (res && res.status === 'relay-accepted') {
+        const accepted = Number(res.acceptances) || 0
+        relayStatus = `${accepted} relay${accepted === 1 ? '' : 's'} accepted receipt replication, but no human-review queue acknowledgement was observed.`
+      } else {
+        relayStatus = 'The receipt request was broadcast, but no relay accepted it or confirmed a review queue entry within the initial window; the client will retry.'
+      }
       const receiptStatus = res && res.receiptWarning ? ` ${res.receiptWarning}` : ''
       setOk(`Submitted "${submittedName}". ${relayStatus}${receiptStatus} Catalogue publication remains a separate final gate.`)
       setName(''); setLink(''); setVersion(''); setProductName(''); setTargets([]); setReleaseConfirmed(false)

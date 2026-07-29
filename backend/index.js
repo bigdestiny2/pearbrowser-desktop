@@ -1119,6 +1119,19 @@ rpc.handle(C.CMD_SUBMIT_APP, async (data = {}) => {
   // target drive but could not retrieve the separately published form metadata.
   let manifestKey = null
   let acceptances = 0
+  const seedDenials = []
+  const onSeedDenied = (event = {}) => {
+    const rawKey = Buffer.isBuffer(event.appKey) ? event.appKey.toString('hex') : String(event.appKey || '')
+    const appKey = normalizeDriveKey(rawKey)
+    if (!appKey) return
+    seedDenials.push({
+      appKey,
+      relay: boundedReviewText(event.relay, 64),
+      reasonCode: boundedReviewText(event.reasonCode, 128),
+      terminal: event.terminal !== false
+    })
+  }
+  if (typeof hiveRelay.on === 'function') hiveRelay.on('seed-denied', onSeedDenied)
   try {
     const mdrive = await hiveRelay.publish(
       [{ path: '/manifest.json', content: JSON.stringify(manifest, null, 2) }],
@@ -1131,13 +1144,17 @@ rpc.handle(C.CMD_SUBMIT_APP, async (data = {}) => {
   } catch (err) {
     console.error('[submit] publish manifest failed:', err && err.message)
     throw new Error('The catalogue receipt could not be published: ' + boundedReviewText(err && err.message, 300))
+  } finally {
+    if (typeof hiveRelay.removeListener === 'function') hiveRelay.removeListener('seed-denied', onSeedDenied)
   }
   if (!manifestKey) throw new Error('The catalogue receipt publisher returned no valid drive key.')
 
-  const receiptWarning = acceptances > 0
+  const denials = seedDenials.filter((denial) => denial.appKey === manifestKey)
+  const relayOutcome = communitySubmit.submissionRelayOutcome({ acceptances, denials })
+  const receiptWarning = relayOutcome.status !== 'awaiting-relay'
     ? ''
     : 'No relay acknowledged the review receipt yet; keep this browser online and retry if it does not appear in the operator queue.'
-  console.log(`[submit] queued "${manifest.name}" (${id}) kind=${kind} receipt=${manifestKey.slice(0, 8)} acceptances=${acceptances}`)
+  console.log(`[submit] "${manifest.name}" (${id}) kind=${kind} receipt=${manifestKey.slice(0, 8)} status=${relayOutcome.status} acceptances=${relayOutcome.acceptances} queued=${relayOutcome.queuedForReview}`)
   return {
     ok: true,
     id,
@@ -1147,8 +1164,10 @@ rpc.handle(C.CMD_SUBMIT_APP, async (data = {}) => {
     manifestKey,
     receiptPublished: true,
     receiptWarning,
-    acceptances,
-    status: acceptances > 0 ? 'pending-review' : 'awaiting-relay',
+    acceptances: relayOutcome.acceptances,
+    queuedForReview: relayOutcome.queuedForReview,
+    terminalDenials: relayOutcome.terminalDenials,
+    status: relayOutcome.status,
     manifest
   }
 })

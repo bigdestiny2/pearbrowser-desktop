@@ -74,11 +74,22 @@ the old flow seeded a metadata drive and the app drive independently, while the
 moderator only knew the app key and therefore could not reliably retrieve the
 form metadata.
 
+Submission status follows authenticated relay responses:
+
+- `pending-review` requires at least one signed `seed-denied` response whose
+  reason is `queued-for-review`;
+- `relay-accepted` means at least one relay accepted receipt replication, but
+  no human-review queue acknowledgement was observed; and
+- `awaiting-relay` means no relay accepted the receipt or confirmed a queue
+  entry within the initial response window.
+
 ## Automated due diligence
 
-All reviews verify a canonical receipt key, relay-visible publisher key,
-bounded receipt manifest, supported receipt version, duplicate target state,
-and queue freshness.
+All reviews verify a canonical receipt key, direct `seed-protocol` queue
+provenance, a relay-visible publisher key, bounded receipt manifest, supported
+receipt version, duplicate target state, and queue freshness. Federation,
+remote-catalogue, missing, and unknown queue sources cannot reuse a
+publisher-shaped key as signature evidence.
 
 Hyper reviews additionally verify the declared target key, target replication
 version, bounded root `/index.html`, and high-signal page behavior. Pear v3
@@ -93,10 +104,11 @@ They never affect trust or launch decisions.
 
 ## Decision records
 
-Approval fails closed when evidence changes, any blocker remains, the review
-queue is stale or not in `review` mode, the human acknowledgement is missing,
-or no reviewer note is recorded. Evidence binds approval to both the receipt
-drive version and, for Hyper submissions, the target drive version.
+Approval fails closed when evidence changes, any blocker remains, the queue
+source is not the direct `seed-protocol`, the review queue is stale or not in
+`review` mode, the human acknowledgement is missing, or no reviewer note is
+recorded. Evidence binds approval to both the receipt drive version and, for
+Hyper submissions, the target drive version.
 
 Approvals and rejections are written to a bounded local audit trail containing
 the receipt key, publisher key, action, note or rejection reason, decision
@@ -105,6 +117,8 @@ time, and check counts. Operator credentials are never copied into audit data.
 ## Operator checklist
 
 - Confirm the relay reports `review` mode.
+- Confirm the row reports direct `seed-protocol` provenance; reject federated,
+  remote-catalogue, or unknown queue sources.
 - Refresh and run due diligence immediately before the decision.
 - For a Hyper site, open the target preview and investigate warnings.
 - For a Pear v3 app, independently verify publisher provenance, `pear info`,

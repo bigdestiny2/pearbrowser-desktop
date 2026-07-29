@@ -10,6 +10,7 @@ const SAFE_PRODUCT_NAME = /^[a-zA-Z0-9][a-zA-Z0-9 ._()+@-]{0,119}$/
 const MAX_INDEX_BYTES = 2 * 1024 * 1024
 const MAX_ICON_DATA_CHARS = 20000
 const MAX_REVIEW_TEXT = 500
+const DIRECT_QUEUE_SOURCE = 'seed-protocol'
 const NATIVE_TARGETS = new Set([
   'darwin-arm64',
   'darwin-x64',
@@ -305,10 +306,44 @@ function reviewEvidenceMatches (input = {}, report = null) {
     Number.isFinite(Number(evidence.receiptDriveVersion))
 }
 
+/**
+ * Classify observable relay responses without treating replication acceptance
+ * as proof that a moderator queue received the catalogue receipt.
+ */
+function submissionRelayOutcome (input = {}) {
+  const acceptances = Math.max(0, Number(input.acceptances) || 0)
+  const denials = Array.isArray(input.denials) ? input.denials : []
+  const seen = new Set()
+  let queuedForReview = 0
+  let terminalDenials = 0
+
+  for (const denial of denials) {
+    if (!denial || typeof denial !== 'object') continue
+    const reasonCode = boundedText(denial.reasonCode, 128).toLowerCase()
+    const relay = boundedText(denial.relay, 64).toLowerCase()
+    const key = `${relay || 'unknown'}:${reasonCode}`
+    if (!reasonCode || seen.has(key)) continue
+    seen.add(key)
+    if (reasonCode === 'queued-for-review') queuedForReview++
+    else if (denial.terminal !== false) terminalDenials++
+  }
+
+  return {
+    status: queuedForReview > 0
+      ? 'pending-review'
+      : (acceptances > 0 ? 'relay-accepted' : 'awaiting-relay'),
+    acceptances,
+    queuedForReview,
+    terminalDenials
+  }
+}
+
 function buildReviewReport (input = {}, now = Date.now()) {
   const pending = input.pending && typeof input.pending === 'object' ? input.pending : {}
   const receiptKey = boundedText(input.appKey || pending.appKey, 64).toLowerCase()
   const publisherPubkey = boundedText(pending.publisherPubkey, 64).toLowerCase()
+  const queueSource = boundedText(pending.source, 80).toLowerCase()
+  const directSeedRequest = queueSource === DIRECT_QUEUE_SOURCE
   const manifest = input.manifest && typeof input.manifest === 'object' && !Array.isArray(input.manifest)
     ? input.manifest
     : null
@@ -322,10 +357,15 @@ function buildReviewReport (input = {}, now = Date.now()) {
   checks.push(HEX64.test(receiptKey)
     ? reviewCheck('receipt-key', 'Submission receipt', 'pass', 'The relay queued a canonical 64-hex receipt drive key.')
     : reviewCheck('receipt-key', 'Submission receipt', 'block', 'The queue entry does not contain a valid 64-hex receipt drive key.'))
-  checks.push(HEX64.test(publisherPubkey)
-    ? reviewCheck('publisher', 'Publisher signature', 'pass', 'The relay queue carries a 32-byte publisher public key and verifies the signed receipt seed request.')
-    : reviewCheck('publisher', 'Publisher signature', 'block', 'No canonical publisher public key is visible for the signed receipt request.'))
-  if (HEX64.test(publisherPubkey)) {
+  checks.push(directSeedRequest
+    ? reviewCheck('queue-source', 'Queue source', 'pass', 'The receipt request came directly from the relay seed protocol.')
+    : reviewCheck('queue-source', 'Queue source', 'block', `The queue source is ${queueSource ? `“${queueSource}”` : 'missing'}. Only direct seed-protocol requests carry relay-verified publisher-signature evidence.`))
+  checks.push(directSeedRequest && HEX64.test(publisherPubkey)
+    ? reviewCheck('publisher', 'Publisher signature', 'pass', 'The direct seed-protocol queue entry carries a 32-byte publisher public key and verifies the signed receipt request.')
+    : reviewCheck('publisher', 'Publisher signature', 'block', directSeedRequest
+        ? 'No canonical publisher public key is visible for the signed receipt request.'
+        : 'Publisher-signature evidence is not accepted from federation, remote-catalogue, or unknown queue sources.'))
+  if (directSeedRequest && HEX64.test(publisherPubkey)) {
     checks.push(reviewCheck('publisher-identity', 'Publisher identity', 'warning', 'The signing key authenticates this receipt request, not a real-world identity or every claim in the receipt. Verify provenance independently.'))
   }
 
@@ -442,6 +482,7 @@ function buildReviewReport (input = {}, now = Date.now()) {
     appKey: receiptKey,
     receiptKey,
     publisherPubkey,
+    queueSource,
     submissionKind: kind || 'unknown',
     previewUrl,
     status: summary.block ? 'blocked' : 'review-needed',
@@ -452,6 +493,8 @@ function buildReviewReport (input = {}, now = Date.now()) {
     checks,
     manifest: projectedManifest,
     evidence: {
+      queueSource,
+      directSeedRequest,
       driveVersion: kind === 'hyper' ? targetDriveVersion : receiptDriveVersion,
       receiptDriveVersion,
       targetDriveVersion,
@@ -478,5 +521,6 @@ module.exports = {
   manageRequest,
   communityBeeEntry,
   buildReviewReport,
-  reviewEvidenceMatches
+  reviewEvidenceMatches,
+  submissionRelayOutcome
 }

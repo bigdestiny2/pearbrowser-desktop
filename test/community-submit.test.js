@@ -13,7 +13,8 @@ const {
   manageRequest,
   communityBeeEntry,
   buildReviewReport,
-  reviewEvidenceMatches
+  reviewEvidenceMatches,
+  submissionRelayOutcome
 } = communitySubmit
 
 const RECEIPT = 'f5fb7500bccd60a976d2b1d24246108f4444a210b9ca591533114dffc089934d'
@@ -179,7 +180,7 @@ test('Hyper review binds the receipt to a separately fetched target drive', () =
   }, { now: 1000, normalizeKey: fakeNormalize }).manifest
   const report = buildReviewReport({
     appKey: RECEIPT,
-    pending: { appKey: RECEIPT, publisherPubkey: PUBLISHER, discoveredAt: 1000 },
+    pending: { appKey: RECEIPT, publisherPubkey: PUBLISHER, source: 'seed-protocol', discoveredAt: 1000 },
     manifest,
     receiptDriveVersion: 2,
     targetDriveKey: TARGET,
@@ -196,6 +197,9 @@ test('Hyper review binds the receipt to a separately fetched target drive', () =
   assert.equal(report.manifest.driveKey, TARGET)
   assert.equal(report.evidence.receiptDriveVersion, 2)
   assert.equal(report.evidence.targetDriveVersion, 4)
+  assert.equal(report.evidence.queueSource, 'seed-protocol')
+  assert.equal(report.evidence.directSeedRequest, true)
+  assert.ok(report.checks.some((check) => check.id === 'queue-source' && check.status === 'pass'))
   assert.ok(report.checks.some((check) => check.id === 'mutable-content' && check.status === 'warning'))
 })
 
@@ -203,7 +207,7 @@ test('Pear v3 review validates metadata without pretending to execute or pin the
   const manifest = buildSubmissionManifest(nativeInput(), { now: 1000 }).manifest
   const report = buildReviewReport({
     appKey: RECEIPT,
-    pending: { appKey: RECEIPT, publisherPubkey: PUBLISHER },
+    pending: { appKey: RECEIPT, publisherPubkey: PUBLISHER, source: 'seed-protocol' },
     manifest,
     receiptDriveVersion: 3,
     duplicates: []
@@ -222,7 +226,7 @@ test('Pear v3 review validates metadata without pretending to execute or pin the
 test('review blocks missing receipts and unavailable Hyper targets', () => {
   const missing = buildReviewReport({
     appKey: RECEIPT,
-    pending: { appKey: RECEIPT, publisherPubkey: PUBLISHER },
+    pending: { appKey: RECEIPT, publisherPubkey: PUBLISHER, source: 'seed-protocol' },
     receiptDriveVersion: 0,
     receiptFetchError: 'offline'
   })
@@ -232,7 +236,7 @@ test('review blocks missing receipts and unavailable Hyper targets', () => {
   const manifest = buildSubmissionManifest({ name: 'Offline Site', submissionKind: 'hyper', link: TARGET }, { normalizeKey: fakeNormalize }).manifest
   const offline = buildReviewReport({
     appKey: RECEIPT,
-    pending: { appKey: RECEIPT, publisherPubkey: PUBLISHER },
+    pending: { appKey: RECEIPT, publisherPubkey: PUBLISHER, source: 'seed-protocol' },
     receiptDriveVersion: 1,
     manifest,
     targetDriveKey: TARGET,
@@ -247,7 +251,7 @@ test('review surfaces duplicates, external behavior, and oversized entrypoints',
   const manifest = buildSubmissionManifest({ name: 'External', submissionKind: 'hyper', link: TARGET }, { normalizeKey: fakeNormalize }).manifest
   const report = buildReviewReport({
     appKey: RECEIPT,
-    pending: { appKey: RECEIPT, publisherPubkey: PUBLISHER },
+    pending: { appKey: RECEIPT, publisherPubkey: PUBLISHER, source: 'seed-protocol' },
     receiptDriveVersion: 1,
     manifest,
     targetDriveKey: TARGET,
@@ -262,7 +266,7 @@ test('review surfaces duplicates, external behavior, and oversized entrypoints',
 
   const oversized = buildReviewReport({
     appKey: RECEIPT,
-    pending: { appKey: RECEIPT, publisherPubkey: PUBLISHER },
+    pending: { appKey: RECEIPT, publisherPubkey: PUBLISHER, source: 'seed-protocol' },
     receiptDriveVersion: 1,
     manifest,
     targetDriveKey: TARGET,
@@ -272,6 +276,56 @@ test('review surfaces duplicates, external behavior, and oversized entrypoints',
   })
   assert.equal(oversized.approvalAllowed, false)
   assert.ok(oversized.checks.some((check) => check.id === 'entrypoint' && check.status === 'block'))
+})
+
+test('review rejects publisher-shaped keys outside direct seed-protocol entries', () => {
+  const manifest = buildSubmissionManifest({ name: 'Untrusted', submissionKind: 'hyper', link: TARGET }, { normalizeKey: fakeNormalize }).manifest
+  for (const source of ['federation', 'remote-catalogue', 'unknown', undefined]) {
+    const report = buildReviewReport({
+      appKey: RECEIPT,
+      pending: { appKey: RECEIPT, publisherPubkey: PUBLISHER, source },
+      receiptDriveVersion: 1,
+      manifest,
+      targetDriveKey: TARGET,
+      targetDriveVersion: 2,
+      indexText: '<html><body>site</body></html>'
+    })
+
+    assert.equal(report.approvalAllowed, false)
+    assert.equal(report.evidence.queueSource, source || '')
+    assert.equal(report.evidence.directSeedRequest, false)
+    assert.equal(report.checks.find((check) => check.id === 'queue-source').status, 'block')
+    assert.equal(report.checks.find((check) => check.id === 'publisher').status, 'block')
+  }
+})
+
+test('submissionRelayOutcome distinguishes moderation queues from replication acceptance', () => {
+  assert.deepEqual(submissionRelayOutcome({
+    acceptances: 1,
+    denials: [
+      { relay: 'a'.repeat(64), reasonCode: 'queued-for-review', terminal: false },
+      { relay: 'a'.repeat(64), reasonCode: 'queued-for-review', terminal: false }
+    ]
+  }), {
+    status: 'pending-review',
+    acceptances: 1,
+    queuedForReview: 1,
+    terminalDenials: 0
+  })
+  assert.deepEqual(submissionRelayOutcome({ acceptances: 2 }), {
+    status: 'relay-accepted',
+    acceptances: 2,
+    queuedForReview: 0,
+    terminalDenials: 0
+  })
+  assert.deepEqual(submissionRelayOutcome({
+    denials: [{ relay: 'c'.repeat(64), reasonCode: 'capacity', terminal: true }]
+  }), {
+    status: 'awaiting-relay',
+    acceptances: 0,
+    queuedForReview: 0,
+    terminalDenials: 1
+  })
 })
 
 test('reviewEvidenceMatches binds approval to receipt and target versions', () => {
