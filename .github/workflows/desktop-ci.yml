@@ -22,7 +22,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: bigdestiny2/PearBrowser
-          ref: de85d420c942d433905324c3e098acc34458a23a
+          ref: 5c1c920b8b42ffe895f78c49c43d176d5ca93086
           path: pear-ecosystem/01-browser/PearBrowser
 
       - name: Checkout HiveRelay release contract

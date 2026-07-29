@@ -392,6 +392,7 @@ test('HiveRelay local workspace guard still fails for missing file dependencies'
 })
 
 test('desktop CI checks out and guards the HiveRelay 0.20.2 release contract', () => {
+  assert.match(desktopCiWorkflow, /repository: bigdestiny2\/PearBrowser\s+ref: 5c1c920b8b42ffe895f78c49c43d176d5ca93086/)
   assert.match(desktopCiWorkflow, /Checkout HiveRelay release contract/)
   assert.match(desktopCiWorkflow, /ref: v0\.20\.2/)
   assert.match(desktopCiWorkflow, /Guard HiveRelay 0\.20\.2 workspace layout/)
