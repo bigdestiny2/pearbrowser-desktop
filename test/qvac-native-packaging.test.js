@@ -35,6 +35,12 @@ test('QVAC native smoke package is excluded from production Pear staging', () =>
   assert.ok(pkg.pear.stage.entrypoints.includes('/backend/ai/qvac-runtime.mjs'))
 })
 
+test('QVAC host statically links the runtime to avoid Pear dynamic-import crashes', () => {
+  const source = readFileSync(join(root, 'backend', 'ai', 'qvac-host.mjs'), 'utf8')
+  assert.match(source, /import \{ createQvacAdapter \} from '\.\/qvac-runtime\.mjs'/)
+  assert.doesNotMatch(source, /\bimport\s*\(/)
+})
+
 test('injected page AI shim is valid browser JavaScript', () => {
   const source = readFileSync(join(root, 'backend', 'pear-bridge.js'), 'utf8')
   const template = source.match(/const PEAR_SYNC_SHIM = `<script>([\s\S]*?)<\/script>`/)
