@@ -1,18 +1,22 @@
 import { QvacService } from './qvac-service.mjs'
 import { QVAC_MODEL_CATALOG } from './qvac-model-catalog.mjs'
+import { createQvacAdapter } from './qvac-runtime.mjs'
 
 /**
- * Create the browser service without loading any QVAC/native-addon module.
- * The first approved model operation performs the import from this ESM file,
- * which gives Bare a valid referrer while preserving normal browser startup
- * when AI is unused or unavailable.
+ * Create the browser service with lazy adapter and model initialization.
+ *
+ * Keep qvac-runtime as a static ESM dependency. Pear's Bare host can crash in
+ * bare_module__on_dynamic_import when the first Ask request dynamically loads
+ * this module, which takes the browser backend down and strands the renderer
+ * in its reconnect screen. Static linkage avoids that host callback while the
+ * adapter itself and its model remain lazy until the first approved operation.
  */
 export function createLazyQvacService (opts = {}) {
   let adapterPromise = null
   const getAdapter = async () => {
     if (!adapterPromise) {
-      adapterPromise = import('./qvac-runtime.mjs')
-        .then(mod => mod.createQvacAdapter({ homeDir: opts.homeDir }))
+      adapterPromise = Promise.resolve()
+        .then(() => createQvacAdapter({ homeDir: opts.homeDir }))
         .catch(err => {
           adapterPromise = null
           throw err
@@ -41,4 +45,3 @@ export function createLazyQvacService (opts = {}) {
     idleUnloadMs: opts.idleUnloadMs
   })
 }
-
