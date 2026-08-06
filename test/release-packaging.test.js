@@ -393,16 +393,16 @@ function runHiveRelayGuardWithClientSpec (clientSpec, label) {
 
 test('HiveRelay registry guard accepts explicit semver ranges alongside latest', () => {
   // HiveRelay is renumbering off the `latest` dist-tag, so the guard must not
-  // block npm install the moment these pins become real semver ranges.
+  // block npm install the moment these pins become real semver ranges. These
+  // ranges all admit the contracted release line; ranges that do not are
+  // covered by the rejection test below.
   const acceptedSpecs = [
     'latest',
-    '^0.26.0',
-    '~0.26.0',
-    '0.26.0',
-    '>=0.26.0 <1',
-    '0.26.x',
-    '^0.26.0 || ^1.0.0',
-    '^0.26.0-rc.1'
+    '^0.20.2',
+    '~0.20.2',
+    '0.20.2',
+    '^0.20.0',
+    '^0.20.2 || ^1.0.0'
   ]
 
   for (const spec of acceptedSpecs) {
@@ -411,6 +411,32 @@ test('HiveRelay registry guard accepts explicit semver ranges alongside latest',
     assert.equal(result.stdout, '', `${spec} should be quiet on stdout`)
     assert.equal(result.stderr, '', `${spec} should be quiet on stderr`)
   }
+})
+
+test('HiveRelay registry guard rejects a well-formed range for the wrong release line', () => {
+  // The point of the guard is that the declared spec and the contracted version
+  // agree. A syntactically perfect range aimed at a different line is drift, and
+  // must fail here rather than as an opaque install-time resolution error.
+  for (const spec of ['^0.26.0', '~0.26.0', '0.26.0', '^1.0.0']) {
+    const result = runHiveRelayGuardWithClientSpec(spec, 'range')
+    assert.equal(result.status, 1, `${spec} targets the wrong release line and should be rejected`)
+    assert.match(result.stderr, /cannot resolve the contracted HiveRelay/)
+  }
+})
+
+test('HiveRelay registry guard grammar cannot backtrack catastrophically', () => {
+  // This runs as a preinstall hook, so an exponential-backtracking range check
+  // is a hang on `npm install`, not merely a slow test. The earlier grammar had
+  // an ambiguous `comparator ( \s+ comparator )*` rule where a comparator could
+  // itself start with `\s*`, so a run of k spaces had k valid splits. Drive the
+  // real guard binary with that pathological shape.
+  const evil = Array(40).fill('1').join('   ') + '!'
+  const started = Date.now()
+  const result = runHiveRelayGuardWithClientSpec(evil, 'range')
+  const elapsed = Date.now() - started
+
+  assert.equal(result.status, 1, 'a non-range spec must still be rejected')
+  assert.ok(elapsed < 5000, `range check took ${elapsed}ms; the grammar is backtracking`)
 })
 
 test('HiveRelay registry guard still rejects specs that are not registry ranges', () => {

@@ -33,32 +33,58 @@ const expected = [
 // is only a transitive dependency here (via @electron/get and @qvac/bare-sdk),
 // and nothing is installed yet when this runs.
 //
-// Accepted grammar (a deliberately strict subset of node-semver ranges):
-//   range      := set ( '||' set )*
-//   set        := hyphen | comparator ( <space> comparator )*
-//   hyphen     := partial ' - ' partial
-//   comparator := op? partial
-//   op         := '^' | '~' | '~>' | '>' | '>=' | '<' | '<=' | '=' | 'v'
-//   partial    := major ( '.' minor ( '.' patch )? )? prerelease? build?
-//   major      := 0 | [1-9][0-9]*   -- numeric only
-//   minor,patch:= major | 'x' | 'X' | '*'
+// The accepted grammar is deliberately much narrower than node-semver's:
 //
-// Requiring a numeric major means the wildcard-only ranges ('*', 'x', '') are
-// rejected: they express no release contract at all. Everything that is not a
-// range is likewise rejected — other dist-tags ('next', 'beta'), npm aliases
-// ('npm:pkg@1'), git/github shorthands, and http(s) tarball URLs.
+//   range   := simple ( ' || ' simple )*
+//   simple  := ( '^' | '~' | '=' )? version
+//   version := major '.' minor '.' patch prerelease? build?
+//
+// All three version parts are required and numeric. That is not laziness, it
+// buys two properties this guard needs:
+//
+//   1. NO CATASTROPHIC BACKTRACKING. There is no optional internal whitespace
+//      and no repeated space-separated comparator, so the regex is unambiguous
+//      by construction. The previous grammar allowed `comparator ( \s+
+//      comparator )*` where a comparator could itself begin with `\s*`; a run
+//      of k spaces then had k valid splits, giving exponential blowup on a
+//      non-matching spec. In a preinstall hook that is a hang on `npm install`.
+//   2. NO ACCIDENTAL WILDCARDS. Ranges like `>=0`, `>=0.0.0`, `0.x` and
+//      `0.26.0 || >=0` all normalise to `*` in node-semver and admit any
+//      version whatsoever. Dropping the comparison operators and the x-ranges
+//      removes that class entirely rather than trying to detect it.
+//
+// Everything outside the grammar is refused: other dist-tags ('next', 'beta'),
+// npm aliases ('npm:pkg@1'), git/github shorthands, http(s) tarball URLs,
+// hyphen ranges, and bare wildcards.
 const NUMERIC = '(?:0|[1-9]\\d{0,9})'
-const WILDCARD = `(?:${NUMERIC}|[xX*])`
 const PRERELEASE = '(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?'
 const BUILD = '(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?'
-const PARTIAL = `${NUMERIC}(?:\\.${WILDCARD}(?:\\.${WILDCARD})?)?${PRERELEASE}${BUILD}`
-const COMPARATOR = `(?:\\^|~>?|>=?|<=?|=|v)?\\s*${PARTIAL}`
-const HYPHEN_RANGE = `${PARTIAL}\\s+-\\s+${PARTIAL}`
-const COMPARATOR_SET = `(?:${HYPHEN_RANGE}|${COMPARATOR}(?:\\s+${COMPARATOR})*)`
-const SEMVER_RANGE = new RegExp(`^${COMPARATOR_SET}(?:\\s*\\|\\|\\s*${COMPARATOR_SET})*$`)
+const VERSION = `${NUMERIC}\\.${NUMERIC}\\.${NUMERIC}${PRERELEASE}${BUILD}`
+const SIMPLE = `[\\^~=]?${VERSION}`
+const SEMVER_RANGE = new RegExp(`^${SIMPLE}(?: \\|\\| ${SIMPLE})*$`)
 
 function isSemverRange (spec) {
   return typeof spec === 'string' && SEMVER_RANGE.test(spec)
+}
+
+// Does `spec` admit `version`? Only the operators the grammar above allows need
+// handling, and only against one concrete target, so this stays small.
+function rangeAdmits (spec, version) {
+  if (spec === 'latest') return true
+  return spec.split('||').some((part) => {
+    const simple = part.trim()
+    const op = /^[\^~=]/.test(simple) ? simple[0] : '='
+    const target = simple.replace(/^[\^~=]/, '')
+    if (op === '=') return target === version
+    // Compare on the release tuple; a prerelease target only admits an exact
+    // match or a later build of the same tuple, which equality already covers.
+    const [tMajor, tMinor] = target.split(/[.\-+]/).map(Number)
+    const [vMajor, vMinor] = version.split(/[.\-+]/).map(Number)
+    if (tMajor !== vMajor) return false
+    // Caret on a 0.x version is same-minor, exactly like tilde.
+    if (op === '~' || tMajor === 0) return tMinor === vMinor
+    return true
+  })
 }
 
 // A registry spec is one npm resolves from the npm registry: either the
@@ -83,8 +109,16 @@ const dependencyDrift = []
 for (const { name, spec, isFile } of specs) {
   // file: specs are validated by the workspace layout check further down.
   if (isFile) continue
-  if (isRegistrySpec(spec)) continue
-  dependencyDrift.push(`${name} expected latest or a semver range, found ${spec || '(missing)'}`)
+  if (!isRegistrySpec(spec)) {
+    dependencyDrift.push(`${name} expected latest or a semver range, found ${spec || '(missing)'}`)
+    continue
+  }
+  // A well-formed range that cannot resolve EXPECTED_HIVERELAY_VERSION is drift
+  // too — otherwise a range pointing at a different release line passes here and
+  // only fails later, at install time, as an opaque resolution error.
+  if (!rangeAdmits(spec, EXPECTED_HIVERELAY_VERSION)) {
+    dependencyDrift.push(`${name} spec ${spec} cannot resolve the contracted HiveRelay ${EXPECTED_HIVERELAY_VERSION}`)
+  }
 }
 
 if (fileSpecCount > 0 && fileSpecCount !== expected.length) {
