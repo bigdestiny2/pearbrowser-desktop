@@ -4,10 +4,12 @@
 **Status:** design complete, ready to build. **Scope:** additive, **no fork of `p2p-hiverelay`.**
 **Full design:** [`HIVERELAY-SCHEMA-SHEETS-DESIGN.md`](./HIVERELAY-SCHEMA-SHEETS-DESIGN.md) (Design B, §5/§6/§8).
 
-**Version boundary:** the shipping compatibility baseline is HiveRelay
-`v0.24.3`. Any `v0.25.0-rc.*` or blind-substrate implementation is an explicit
-candidate opt-in. This handover does not promote those tracks or make them a
-PearBrowser release dependency.
+**Version boundary:** the relay fleet/source baseline is HiveRelay `v0.24.3`.
+PearBrowser's bundled npm dependencies remain on the compatible `0.20.2` line
+because no exact `0.24.3` packages were published; signed relay capability
+documents guard the network boundary. Any `v0.25.0-rc.*` or blind-substrate
+implementation is an explicit candidate opt-in. This handover does not promote
+those tracks or make them a PearBrowser release dependency.
 
 > ⚠️ **Off-GitHub:** this doc + the design name relay operator/ops details. Keep it in a
 > private repo or share directly — do not push to a public remote.

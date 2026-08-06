@@ -4,12 +4,14 @@ A local-first peer-to-peer browser, app store, search engine, naming layer, Nost
 
 **No accounts. No DNS. Local-first data.** Sites are addressed by stable Hyperdrive keys and can be pinned on the [HiveRelay](https://github.com/bigdestiny2/P2P-Hiverelay) backbone. Native applications are installed from verified packages; a catalogue never turns a remote executable link into a runtime command.
 
-**HiveRelay compatibility baseline:** operator and publishing documentation
-uses stable HiveRelay `v0.24.3`. The `v0.25.0-rc.*` fleet and the separate
-blind-substrate track are candidate/development surfaces; PearBrowser does not
-present either as stable or require them for its `v0.8.0` release. Relay
-capabilities remain feature-detected so an opted-in canary can be tested without
-silently changing the stable contract.
+**HiveRelay compatibility baseline:** the relay fleet/source stable line is
+HiveRelay `v0.24.3`. HiveRelay never published exact `0.24.3` npm packages, so
+PearBrowser's reproducible bundled client dependencies remain on the compatible
+npm `0.20.2` line and CI guards that fact explicitly. Network compatibility is
+verified through signed capability documents rather than by pretending those
+two distribution versions are the same. The `v0.25.0-rc.*` fleet and separate
+blind-substrate track remain candidate/development opt-ins; neither is required
+or presented as stable by PearBrowser `v0.8.0`.
 
 **Current release:** `v0.8.0`. PearBrowser now runs its backend through the embedded Pear v3 runtime, installs compatible native apps through a host-confirmed `pear-install` boundary, and keeps browsable `hyper://` content separate from native delivery. Catalogue submissions accept canonical provisioned Pear v3 production identities or Hyper sites, queue one signed review receipt, bind approval to the reviewed receipt/content versions, and support bounded validated icons. Private search, reconnect-safe RPC, Content Shield, Pear Plugins, and the local-first catalogue/search/naming stack remain included. Catalogue version `11` advertises the release metadata.
 
