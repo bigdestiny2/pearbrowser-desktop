@@ -69,16 +69,20 @@ until an app-specific migration adapter has completed discover, preserve,
 migrate, validate, and rollback evidence. HiveRelay durability is availability
 evidence, not a substitute for package signature or local data validation.
 
-## Release gate
+## Current release state and remaining gates
 
-This source branch contains the pinned `pear-runtime@1.3.1` native host and
-local-worker boundary, and tests the source contract. Promotion remains
-blocked until all of the following have independent evidence:
+PearBrowser `v0.8.0` was published on 2026-07-29 with package-proof native
+assets and SHA-256 sidecars for macOS, Windows, and Linux. The source includes
+the pinned `pear-runtime@1.3.1` host and local-worker boundary. This GitHub
+release does not claim macOS Developer ID notarization, Windows public-trust
+signing, or completion of the separate Pear production upgrade line.
 
-- a real Electron launch plus worker/backend handshake on each supported OS;
-- a v3 `pear build` deployment assembled from those signed OS artifacts;
-- stage → provision → multisig release evidence for the production upgrade
-  link (the signing quorum is human-controlled);
+Before the retained `package.json#upgrade` identity can stop being a migration
+record and become the public Pear v3 production channel, it still needs:
+
+- independently verified platform signing and native runner evidence;
+- stage → provision → multisig evidence for the production upgrade link (the
+  signing quorum is human-controlled);
 - storage discovery, migration, validation, and rollback evidence for an
   existing v2 profile; and
 - installer/update/recovery UX evidence that treats HiveRelay as availability,

@@ -22,6 +22,9 @@ test('submission RPC queues exactly one catalogue receipt instead of the target 
   assert.match(handler, /mdrive\.replicas\.accepted/)
   assert.doesNotMatch(handler, /hiveRelay\.seed\s*\(/)
   assert.match(handler, /installLink/)
+  assert.match(handler, /hiveRelay\.on\('seed-denied'/)
+  assert.match(handler, /submissionRelayOutcome/)
+  assert.match(handler, /queuedForReview/)
 })
 
 test('moderation fetches the receipt first and Hyper target content separately', () => {
