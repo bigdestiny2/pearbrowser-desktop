@@ -324,11 +324,31 @@ test('HiveRelay source install defaults to npm latest packages locked at 0.20.2'
     assert.match(entry?.resolved || '', new RegExp(`registry\\.npmjs\\.org/${name}/-/${name}-0\\.20\\.2\\.tgz`))
   }
 
-  assert.match(hiveRelayLayout, /usesNpmLatestDefaults/)
-  assert.match(hiveRelayLayout, /verify npm latest resolves to HiveRelay 0\.20\.2/)
+  assert.match(hiveRelayLayout, /usesNpmRegistrySpecs/)
+  assert.match(hiveRelayLayout, /verify the npm dist-tag resolves to EXPECTED_HIVERELAY_VERSION/)
   assert.match(hiveRelayLayout, /entry\.version !== version/)
-  assert.match(hiveRelayLayout, /Use latest for standalone installs/)
+  assert.match(hiveRelayLayout, /Use latest or an explicit semver range/)
   assert.match(hiveRelayLayout, /process\.exit\(0\)/)
+})
+
+test('HiveRelay guard keeps the expected release version as one named constant', () => {
+  assert.match(hiveRelayLayout, /const EXPECTED_HIVERELAY_VERSION = '0\.20\.2'/)
+
+  // The version must not be re-hardcoded anywhere else in the guard, otherwise
+  // moving the HiveRelay release line silently leaves half the checks behind.
+  const literals = hiveRelayLayout.match(/0\.20\.2/g) || []
+  assert.equal(
+    literals.length,
+    1,
+    `expected 0.20.2 to appear only in EXPECTED_HIVERELAY_VERSION, found ${literals.length} occurrences`
+  )
+
+  // The guard runs as a preinstall hook, so it cannot import semver: nothing is
+  // installed yet, and semver is only a transitive dependency of this repo.
+  assert.doesNotMatch(hiveRelayLayout, /from 'semver'/)
+  assert.doesNotMatch(hiveRelayLayout, /require\('semver'\)/)
+  assert.equal(pkg.dependencies?.semver, undefined)
+  assert.equal(pkg.devDependencies?.semver, undefined)
 })
 
 test('HiveRelay registry guard is quiet for standalone source installs', () => {
@@ -351,24 +371,87 @@ test('HiveRelay registry guard is quiet for standalone source installs', () => {
   }
 })
 
-test('HiveRelay registry guard fails when the npm release line drifts', () => {
-  const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'pear-hiverelay-drift-')))
+// Runs the guard against a throwaway package.json whose HiveRelay specs are
+// `latest` except for p2p-hiverelay-client, which gets the spec under test.
+// No package-lock.json is written, so the guard exercises the spec check only.
+function runHiveRelayGuardWithClientSpec (clientSpec, label) {
+  const fixture = realpathSync(mkdtempSync(join(tmpdir(), `pear-hiverelay-${label}-`)))
   try {
     const dependencies = {}
     for (const name of npmHiveRelayPackages) dependencies[name] = 'latest'
-    dependencies['p2p-hiverelay-client'] = '^0.21.0'
+    dependencies['p2p-hiverelay-client'] = clientSpec
     writeFileSync(join(fixture, 'package.json'), JSON.stringify({ dependencies }, null, 2))
 
-    const result = spawnSync(process.execPath, [hiveRelayCheckPath], {
+    return spawnSync(process.execPath, [hiveRelayCheckPath], {
       cwd: fixture,
       encoding: 'utf8'
     })
-
-    assert.equal(result.status, 1)
-    assert.match(result.stderr, /p2p-hiverelay-client expected latest, found \^0\.21\.0/)
   } finally {
     rmSync(fixture, { recursive: true, force: true })
   }
+}
+
+test('HiveRelay registry guard accepts explicit semver ranges alongside latest', () => {
+  // HiveRelay is renumbering off the `latest` dist-tag, so the guard must not
+  // block npm install the moment these pins become real semver ranges.
+  const acceptedSpecs = [
+    'latest',
+    '^0.26.0',
+    '~0.26.0',
+    '0.26.0',
+    '>=0.26.0 <1',
+    '0.26.x',
+    '^0.26.0 || ^1.0.0',
+    '^0.26.0-rc.1'
+  ]
+
+  for (const spec of acceptedSpecs) {
+    const result = runHiveRelayGuardWithClientSpec(spec, 'range')
+    assert.equal(result.status, 0, `${spec} should be accepted: ${result.stderr || result.stdout}`)
+    assert.equal(result.stdout, '', `${spec} should be quiet on stdout`)
+    assert.equal(result.stderr, '', `${spec} should be quiet on stderr`)
+  }
+})
+
+test('HiveRelay registry guard still rejects specs that are not registry ranges', () => {
+  // A semver range is now fine, but anything that is not a registry-resolvable
+  // range still has to fail: unauditable sources and wide-open wildcards.
+  const rejectedSpecs = [
+    'next',
+    'beta',
+    'npm:p2p-hiverelay-client@^0.26.0',
+    'git+https://github.com/bigdestiny2/P2P-Hiverelay.git',
+    'git+ssh://git@github.com/bigdestiny2/P2P-Hiverelay.git',
+    'github:bigdestiny2/P2P-Hiverelay',
+    'bigdestiny2/P2P-Hiverelay#v0.26.0',
+    'https://example.com/p2p-hiverelay-client.tgz',
+    'workspace:*',
+    'link:../../00-core/hiverelay/packages/client',
+    '*',
+    'x',
+    ''
+  ]
+
+  for (const spec of rejectedSpecs) {
+    const result = runHiveRelayGuardWithClientSpec(spec, 'drift')
+    assert.equal(result.status, 1, `${spec || '(empty)'} should be rejected`)
+    assert.match(result.stderr, /p2p-hiverelay-client expected latest or a semver range/)
+  }
+})
+
+test('HiveRelay registry guard names the offending spec when it drifts', () => {
+  const result = runHiveRelayGuardWithClientSpec('next', 'drift')
+
+  assert.equal(result.status, 1)
+  assert.match(result.stderr, /p2p-hiverelay-client expected latest or a semver range, found next/)
+  assert.match(result.stderr, /for example \^0\.26\.0/)
+})
+
+test('HiveRelay guard still rejects mixing file: and registry specs', () => {
+  const result = runHiveRelayGuardWithClientSpec('file:../../00-core/hiverelay/packages/client', 'mixed')
+
+  assert.equal(result.status, 1)
+  assert.match(result.stderr, /either all npm registry specs or all file: workspace specs/)
 })
 
 test('HiveRelay local workspace guard still fails for missing file dependencies', () => {
