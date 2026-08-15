@@ -799,21 +799,18 @@ test('a prepared fee above the ceiling is rejected before signing', async (t) =>
   const { service, engine } = await makeUnlocked(t)
   await service.connect(makeTuple(), 'doc-token', MANIFEST)
   engine.feeAtomic = '100000000000000001' // ceiling is 1e17
-  const prompt = await service.requestPayment(makeTuple(), 'doc-token', paymentInput())
-  assert.equal(await codeOf(service.resolvePrompt(prompt.intentId, true)), 'cap-exceeded')
+  // The pre-approval quote enforces the ceiling before a prompt ever opens —
+  // the user is never asked to approve a payment that cannot be afforded.
+  assert.equal(await codeOf(service.requestPayment(makeTuple(), 'doc-token', paymentInput())), 'cap-exceeded')
   assert.equal(engine.signPreparedCalls, 0, 'the fee check must fire before signing')
   assert.equal(engine.broadcasts.length, 0)
-  const outcome = service._journal.entries.at(-1)
-  assert.equal(outcome.type, 'outcome')
-  assert.equal(outcome.state, 'error')
-  assert.equal(outcome.code, 'cap-exceeded')
+  assert.equal(service._journal.entries.some(e => e.type === 'prompt'), false)
 })
 
 test('the worst-case maxFeeAtomic is checked against the ceiling', async (t) => {
   const { service, engine } = await makeUnlocked(t)
   await service.connect(makeTuple(), 'doc-token', MANIFEST)
   engine.maxFeeAtomic = '100000000000000001' // estimate is under, worst case is over
-  const prompt = await service.requestPayment(makeTuple(), 'doc-token', paymentInput())
-  assert.equal(await codeOf(service.resolvePrompt(prompt.intentId, true)), 'cap-exceeded')
+  assert.equal(await codeOf(service.requestPayment(makeTuple(), 'doc-token', paymentInput())), 'cap-exceeded')
   assert.equal(engine.signPreparedCalls, 0)
 })

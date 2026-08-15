@@ -122,6 +122,7 @@ test('list returns safe summaries without mutable internals', () => {
   assert.equal(Object.isFrozen(list), true)
   assert.equal(Object.isFrozen(list[0]), true)
   assert.deepEqual(Object.keys(list[0]).sort(), [
+    'appName',
     'assetId',
     'browserSessionId',
     'chainId',

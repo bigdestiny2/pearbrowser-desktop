@@ -10,6 +10,7 @@
 //   utf8ToB64/b64ToUtf8 base64 for the JSON-only RPC frame (no atob/Buffer)
 //   walletErrorMessage  coded backend errors → human messages
 //   passphraseStrength  create-form strength hint
+//   MIN_PASSPHRASE_CHARS / passphraseMeetsMinimum  client-side ≥12-char rule
 //   activityLabel       projected journal entry → one-line description
 
 // Amounts cross as base-10 integer strings; the conversion is pure string
@@ -32,8 +33,9 @@ export function truncateAddress (address) {
 }
 
 // Recovery-phrase textarea → words, or null when the word count is not a
-// valid BIP-39 length (the wallet uses 24; 12 is accepted for imports of
-// standard phrases). Case/word validity is checked by the engine, not here.
+// valid BIP-39 length. The engine persists only 24-word wallets, so the
+// import form additionally requires exactly 24 words before submitting.
+// Case/word validity is checked by the engine, not here.
 export function normalizeMnemonic (text) {
   if (typeof text !== 'string') return null
   const words = text.trim().toLowerCase().split(/\s+/).filter(Boolean)
@@ -126,6 +128,23 @@ export function walletErrorMessage (err) {
     return 'Rate limited — wait a moment and try again.'
   }
   if (m.includes('prompt-expired')) return 'That approval prompt expired — try the action again.'
+  if (m.includes('at least 12')) return 'The passphrase must be at least 12 characters long.'
+  if (m.includes('bad-request') || m.includes('24 words') || m.includes('invalid mnemonic') || m.includes('checksum')) {
+    return "That recovery phrase isn't valid — check each word and its order, and enter the full 24-word phrase."
+  }
+  if (m.includes('vault-corrupt') || m.includes('corrupt or tampered')) {
+    return 'The wallet vault is corrupt or tampered. Reset app data, then restore from your recovery phrase.'
+  }
+  if (m.includes('restart required') || m.includes('recovery-required')) {
+    return 'The wallet engine hit an internal fault — restart PearBrowser, then try again.'
+  }
+  if (m.includes('wallet-busy')) return 'The wallet is busy with another operation — wait a moment and try again.'
+  if (m.includes('insufficient-funds')) return 'Insufficient balance to cover this payment and its network fee.'
+  if (m.includes('ceremony-active')) return 'A recovery-phrase reveal is already open — finish or cancel it first.'
+  if (m.includes('ceremony-failed') || m.includes('initialization-failed') || m.includes('operation-failed')) {
+    return 'The wallet operation failed — please try again. If you were importing, double-check every word of the recovery phrase.'
+  }
+  if (m.includes('not-authorized')) return 'That action is not authorized for this app.'
   if (m.includes('not-found') || m.includes('not available') || m.includes('vault is absent')) {
     return 'The wallet is not available yet — the worklet may still be booting. Try again in a moment.'
   }
@@ -134,6 +153,22 @@ export function walletErrorMessage (err) {
 }
 
 // --- passphrase strength hint (create form) ----------------------------------
+// The vault requires at least 12 Unicode scalar values
+// (backend/wallet/wallet-vault.cjs) — enforce the same rule client-side so a
+// short passphrase fails before the ceremony runs, not after.
+export const MIN_PASSPHRASE_CHARS = 12
+
+// Counts code points, matching the backend's Unicode-scalar rule closely
+// enough for UI validation (the vault remains the authoritative check).
+export function passphraseCharCount (passphrase) {
+  if (typeof passphrase !== 'string') return 0
+  return Array.from(passphrase).length
+}
+
+export function passphraseMeetsMinimum (passphrase) {
+  return passphraseCharCount(passphrase) >= MIN_PASSPHRASE_CHARS
+}
+
 export function passphraseStrength (passphrase) {
   if (typeof passphrase !== 'string' || passphrase.length === 0) {
     return { score: 0, label: '', hint: 'Use 12+ characters — a short sentence works well.' }

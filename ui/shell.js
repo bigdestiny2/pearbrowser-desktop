@@ -27,7 +27,8 @@ import {
 import { PRIVATE_SEARCH_PROVIDER, buildPrivateSearchUrl } from './lib/private-search.js'
 import {
   formatAtomic, truncateAddress, normalizeMnemonic, utf8ToB64, b64ToUtf8,
-  walletErrorMessage, passphraseStrength, activityLabel
+  walletErrorMessage, passphraseStrength, activityLabel,
+  MIN_PASSPHRASE_CHARS, passphraseMeetsMinimum
 } from './lib/wallet.js'
 
 function copyText (text) {
@@ -2141,6 +2142,7 @@ function WalletConsent ({ rpc, C, request, onClose }) {
   const [busy, setBusy] = useState(null)
   const [err, setErr] = useState('')
   const [now, setNow] = useState(Date.now())
+  const [copiedRecipient, setCopiedRecipient] = useState(false)
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000)
@@ -2158,9 +2160,14 @@ function WalletConsent ({ rpc, C, request, onClose }) {
       await rpc.request(cmd, { intentId: request.intentId, approved })
       onClose()
     } catch (e) {
-      setErr(`could not resolve: ${e.message}`)
+      setErr(walletErrorMessage(e))
       setBusy(null)
     }
+  }
+
+  const copyRecipient = () => {
+    if (!request.recipient) return
+    try { navigator.clipboard.writeText(request.recipient); setCopiedRecipient(true); setTimeout(() => setCopiedRecipient(false), 1500) } catch {}
   }
 
   const appLabel = request.appName || 'A Pear app'
@@ -2179,7 +2186,7 @@ function WalletConsent ({ rpc, C, request, onClose }) {
   const [approveBusy, approveIdle] = approveLabels[request.type] || ['Working…', 'Approve']
 
   return html`
-    <div className="modal-overlay" role="dialog" aria-modal="true" onClick=${(e) => e.target.classList.contains('modal-overlay') && decide(false)}>
+    <div className="modal-overlay" role="dialog" aria-modal="true">
       <div className="modal-card login-consent">
         <div className="login-header">
           <div className="login-app-icon" style=${{ background: 'linear-gradient(135deg, #f7b731, #e25822)' }}>👛</div>
@@ -2214,8 +2221,28 @@ function WalletConsent ({ rpc, C, request, onClose }) {
                 <div className="login-scope-label">Recipient</div>
                 <div className="login-scope-detail" style=${{ wordBreak: 'break-all' }}>${request.recipient}</div>
               </div>
+              <button className="btn small subtle" onClick=${copyRecipient} data-testid="wallet-consent-copy-recipient">
+                ${copiedRecipient ? 'Copied' : 'Copy'}
+              </button>
             </div>
+            ${request.estimatedFeeAtomic && html`
+              <div className="login-scope on">
+                <div className="login-scope-meta">
+                  <div className="login-scope-label">Network fee — est. ${formatAtomic(request.estimatedFeeAtomic, 18)} USDT0</div>
+                  <div className="login-scope-detail">never more than ${formatAtomic(request.maxFeeAtomic, 18)} USDT0 (test gas)</div>
+                </div>
+              </div>
+              <div className="login-scope on">
+                <div className="login-scope-meta">
+                  <div className="login-scope-label">Total debit (max) ${formatAtomic(request.maxTotalDebitAtomic, 18)} USD₮0</div>
+                  <div className="login-scope-detail">payment amount + maximum network fee</div>
+                </div>
+              </div>
+            `}
           </div>
+          ${!request.estimatedFeeAtomic && html`
+            <div className="login-existing">The network fee could not be estimated (the testnet may be unreachable). The enforced fee ceiling still applies after approval.</div>
+          `}
           ${request.reference && html`<div className="login-reason">"${request.reference}"</div>`}
         `}
 
@@ -2239,9 +2266,17 @@ function WalletConsent ({ rpc, C, request, onClose }) {
             Every payment will still require a fresh approval. Connecting does not reveal
             your address or balance.
           </div>
+          <div className="login-existing">
+            This app will be able to: see its connection status
+            ${request.permissions?.pay ? html` · <strong>request payments</strong> (each one still needs your approval)` : ''}
+            ${request.permissions?.signApp ? html` · <strong>request app-payload signatures</strong>` : ''}
+            ${!request.permissions?.pay && !request.permissions?.signApp ? ' — nothing else' : ''}
+          </div>
         `}
 
-        <div className="login-existing">Prompt expires in ${secondsLeft}s.</div>
+        ${request.expiresAt
+          ? html`<div className="login-existing">Prompt expires in ${secondsLeft}s.</div>`
+          : html`<div className="login-existing">This prompt stays open until you decide.</div>`}
 
         ${err && html`<div className="apps-error">${err}</div>`}
 
@@ -6057,36 +6092,42 @@ function WalletTestnetBadge () {
 }
 
 // State absent: create a new wallet, or import one from a recovery phrase.
-function WalletSetupView ({ rpc, C, onChanged, onError }) {
+function WalletSetupView ({ rpc, C, onChanged, onError, onNotice }) {
   const [pw, setPw] = useState('')
   const [confirmPw, setConfirmPw] = useState('')
   const [busy, setBusy] = useState(null) // 'create' | 'import'
   const [showImport, setShowImport] = useState(false)
   const [mnemonic, setMnemonic] = useState('')
   const [importPw, setImportPw] = useState('')
+  const [importConfirmPw, setImportConfirmPw] = useState('')
   const strength = passphraseStrength(pw)
   const words = showImport ? normalizeMnemonic(mnemonic) : null
+  // The engine persists only 24-word wallets — don't let a 12-word entry
+  // through to fail late with a raw engine error.
+  const wordsReady = !!(words && words.length === 24)
 
   const create = async () => {
-    if (!pw || pw !== confirmPw || busy) return
+    if (!passphraseMeetsMinimum(pw) || pw !== confirmPw || busy) return
     onError(''); setBusy('create')
     try {
       await rpc.request(C.CMD_WALLET_CREATE, { passphrase: pw }, 120000)
       setPw(''); setConfirmPw('')
       onChanged()
+      onNotice('Wallet created. Now back it up: open “Back up…” below, write the 24 words down offline and keep them safe — they are the only way back if the passphrase is lost.')
     } catch (e) { onError(walletErrorMessage(e)) }
     finally { setBusy(null) }
   }
 
   const doImport = async () => {
-    if (!words || !importPw || busy) return
+    if (!wordsReady || !passphraseMeetsMinimum(importPw) || importPw !== importConfirmPw || busy) return
     onError(''); setBusy('import')
     try {
       // The RPC frame is JSON-only — the phrase crosses as base64 and the
       // backend zeroes its decoded copy after the ceremony (spec §3.1).
       await rpc.request(C.CMD_WALLET_IMPORT, { passphrase: importPw, mnemonicB64: utf8ToB64(words.join(' ')) }, 120000)
-      setMnemonic(''); setImportPw(''); setShowImport(false)
+      setMnemonic(''); setImportPw(''); setImportConfirmPw(''); setShowImport(false)
       onChanged()
+      onNotice('Wallet imported. Unlock it with your new passphrase to use it.')
     } catch (e) { onError(walletErrorMessage(e)) }
     finally { setBusy(null) }
   }
@@ -6097,7 +6138,7 @@ function WalletSetupView ({ rpc, C, onChanged, onError }) {
         <div className="settings-label">Create wallet</div>
         <div className="settings-subtle">
           Sets up a testnet wallet on this device, encrypted with your passphrase.
-          <strong> Losing the passphrase loses the wallet</strong> — write down the recovery phrase afterwards (unlock → Back up recovery phrase). There is no reset.
+          <strong> Losing the passphrase loses the wallet</strong> — right after creating, open “Back up…” below and write down the 24-word recovery phrase. There is no reset.
         </div>
       </div>
     </div>
@@ -6108,14 +6149,13 @@ function WalletSetupView ({ rpc, C, onChanged, onError }) {
       <input className="profile-input" type="password" placeholder="Confirm passphrase" value=${confirmPw}
              autoComplete="new-password" data-testid="wallet-create-confirm"
              onInput=${(e) => setConfirmPw(e.target.value)} />
-      ${pw && html`
-        <div className="settings-subtle" data-testid="wallet-create-strength">
-          Strength: ${strength.label} — ${strength.hint}
-        </div>
-      `}
+      <div className="settings-subtle" data-testid="wallet-create-strength">
+        ${pw ? `Strength: ${strength.label} — ${strength.hint}` : `A passphrase of at least ${MIN_PASSPHRASE_CHARS} characters is required — a short sentence works well.`}
+      </div>
+      ${pw && !passphraseMeetsMinimum(pw) && html`<div className="apps-error">Passphrase must be at least ${MIN_PASSPHRASE_CHARS} characters long.</div>`}
       ${confirmPw && pw !== confirmPw && html`<div className="apps-error">Passphrases do not match.</div>`}
       <div className="restore-actions">
-        <button className="btn primary" onClick=${create} disabled=${!pw || pw !== confirmPw || busy !== null} data-testid="wallet-create-submit">
+        <button className="btn primary" onClick=${create} disabled=${!passphraseMeetsMinimum(pw) || pw !== confirmPw || busy !== null} data-testid="wallet-create-submit">
           ${busy === 'create' ? 'Creating…' : 'Create wallet'}
         </button>
       </div>
@@ -6135,12 +6175,17 @@ function WalletSetupView ({ rpc, C, onChanged, onError }) {
                   placeholder="Paste your 24-word recovery phrase here, separated by spaces"
                   value=${mnemonic} data-testid="wallet-import-mnemonic"
                   onInput=${(e) => setMnemonic(e.target.value)}></textarea>
-        ${mnemonic.trim() && !words && html`<div className="apps-error">Enter the full 24-word phrase (12-word standard phrases also accepted).</div>`}
+        ${mnemonic.trim() && !wordsReady && html`<div className="apps-error">Enter the full 24-word recovery phrase.</div>`}
         <input className="profile-input" type="password" placeholder="New passphrase for this device" value=${importPw}
                autoComplete="new-password" data-testid="wallet-import-passphrase"
                onInput=${(e) => setImportPw(e.target.value)} />
+        <input className="profile-input" type="password" placeholder="Confirm new passphrase" value=${importConfirmPw}
+               autoComplete="new-password" data-testid="wallet-import-confirm"
+               onInput=${(e) => setImportConfirmPw(e.target.value)} />
+        ${importPw && !passphraseMeetsMinimum(importPw) && html`<div className="apps-error">Passphrase must be at least ${MIN_PASSPHRASE_CHARS} characters long.</div>`}
+        ${importConfirmPw && importPw !== importConfirmPw && html`<div className="apps-error">Passphrases do not match.</div>`}
         <div className="restore-actions">
-          <button className="btn primary" onClick=${doImport} disabled=${!words || !importPw || busy !== null} data-testid="wallet-import-submit">
+          <button className="btn primary" onClick=${doImport} disabled=${!wordsReady || !passphraseMeetsMinimum(importPw) || importPw !== importConfirmPw || busy !== null} data-testid="wallet-import-submit">
             ${busy === 'import' ? 'Importing…' : 'Import wallet'}
           </button>
         </div>
@@ -6167,7 +6212,7 @@ function WalletLockedView ({ rpc, C, onChanged, onError, onNotice }) {
   useEffect(() => () => {
     const open = ceremonyRef.current
     if (open) {
-      rpc.request(C.CMD_WALLET_BACKUP, { phase: 'finish', ceremonyId: open.ceremonyId, outcome: 'cancelled' }).catch(() => {})
+      rpc.request(C.CMD_WALLET_BACKUP, { phase: 'finish', ceremonyId: open.ceremonyId, outcome: 'cancel' }).catch(() => {})
     }
   }, [rpc, C])
 
@@ -6202,7 +6247,7 @@ function WalletLockedView ({ rpc, C, onChanged, onError, onNotice }) {
     onError(''); setBusy('backup-finish')
     try {
       await rpc.request(C.CMD_WALLET_BACKUP, { phase: 'finish', ceremonyId: open.ceremonyId, outcome })
-      if (outcome === 'completed') onNotice('Backup complete. The phrase is gone from this screen — it is your only way back if the passphrase is lost.')
+      if (outcome === 'complete') onNotice('Backup complete. The phrase is gone from this screen — it is your only way back if the passphrase is lost.')
     } catch (e) { onError(walletErrorMessage(e)) }
     finally { setBusy(null) }
   }
@@ -6223,8 +6268,8 @@ function WalletLockedView ({ rpc, C, onChanged, onError, onNotice }) {
           Write these ${ceremony.words.length} words down offline, in order. Anyone with them controls this wallet — never type them into a website or show them on a shared screen.
         </div>
         <div className="restore-actions">
-          <button className="btn subtle" onClick=${() => finishBackup('cancelled')} disabled=${busy === 'backup-finish'} data-testid="wallet-backup-cancel">Cancel</button>
-          <button className="btn primary" onClick=${() => finishBackup('completed')} disabled=${busy === 'backup-finish'} data-testid="wallet-backup-done">
+          <button className="btn subtle" onClick=${() => finishBackup('cancel')} disabled=${busy === 'backup-finish'} data-testid="wallet-backup-cancel">Cancel</button>
+          <button className="btn primary" onClick=${() => finishBackup('complete')} disabled=${busy === 'backup-finish'} data-testid="wallet-backup-done">
             ${busy === 'backup-finish' ? 'Finishing…' : 'I have written it down'}
           </button>
         </div>
@@ -6282,20 +6327,30 @@ function WalletUnlockedView ({ rpc, C, status, onChanged, onError }) {
   const [busy, setBusy] = useState(null) // 'lock' | 'balances' | connection key being revoked
   const [copied, setCopied] = useState(false)
 
+  // A wallet-locked error means the view is stale (e.g. the 15-minute
+  // auto-lock fired while settings were open) — refresh status so the shell
+  // swaps back to the locked view instead of showing a misleading
+  // "network unreachable" message.
+  const refreshIfLocked = (e) => {
+    const m = String(e?.message || e || '').toLowerCase()
+    if (m.includes('wallet-locked') || m.includes('wallet is locked')) { onChanged(); return true }
+    return false
+  }
+
   const loadBalances = () =>
     rpc.request(C.CMD_WALLET_BALANCES)
       .then(setBalances)
-      .catch(() => setBalances({ unavailable: true, code: 'unavailable' }))
+      .catch((e) => { if (!refreshIfLocked(e)) setBalances({ unavailable: true, code: 'unavailable' }) })
 
   const loadActivity = () =>
     rpc.request(C.CMD_WALLET_TRANSACTIONS, { limit: 20 })
       .then((res) => setActivity(res?.transactions || []))
-      .catch(() => {})
+      .catch((e) => { refreshIfLocked(e) })
 
   const loadConnections = () =>
     rpc.request(C.CMD_WALLET_CONNECTIONS_LIST)
       .then((res) => setConnections(res?.connections || []))
-      .catch(() => {})
+      .catch((e) => { refreshIfLocked(e) })
 
   useEffect(() => {
     loadBalances(); loadActivity(); loadConnections()
@@ -6350,7 +6405,7 @@ function WalletUnlockedView ({ rpc, C, status, onChanged, onError }) {
         ${balances === null && html`<div className="settings-subtle">Loading…</div>`}
         ${balances && balances.unavailable && html`
           <div className="settings-subtle" data-testid="wallet-balances-unavailable">
-            Unavailable — the testnet RPC is not reachable (${balances.code || 'offline'}). Funds are safe; retry when online.
+            Unavailable — the testnet RPC is not reachable right now. Funds are safe; retry when online.
           </div>
         `}
         ${balances && !balances.unavailable && html`
@@ -6397,8 +6452,9 @@ function WalletUnlockedView ({ rpc, C, status, onChanged, onError }) {
               ${connections.map((conn) => html`
                 <div className="settings-row" key=${conn.driveKey + ':' + conn.tabId} style=${{ paddingTop: '4px', paddingBottom: '4px' }}>
                   <div>
-                    <div className="settings-label" style=${{ fontSize: '13px' }}>${shortKey(conn.driveKey)}</div>
+                    <div className="settings-label" style=${{ fontSize: '13px' }}>${conn.appName || shortKey(conn.driveKey)}</div>
                     <div className="settings-subtle">
+                      ${conn.appName ? `${shortKey(conn.driveKey)} · ` : ''}
                       ${['connect', conn.permissions?.pay && 'pay', conn.permissions?.signApp && 'sign'].filter(Boolean).join(' · ')}
                       ${conn.connectedAt ? ` · since ${new Date(conn.connectedAt).toLocaleDateString()}` : ''}
                     </div>
@@ -6467,16 +6523,20 @@ function WalletSection ({ rpc, C }) {
         <div>
           <div className="settings-label">Testnet wallet <${WalletTestnetBadge} /></div>
           <div className="settings-subtle">
-            ${state === 'absent' && 'No wallet on this device yet.'}
-            ${state === 'locked' && 'Wallet locked.'}
-            ${state === 'unlocked' && 'Wallet unlocked.'}
+            ${status === null && 'Wallet status unavailable.'}
+            ${status && state === 'absent' && 'No wallet on this device yet.'}
+            ${status && state === 'locked' && 'Wallet locked.'}
+            ${status && state === 'unlocked' && 'Wallet unlocked.'}
             ${status?.networkId ? ` Network: ${status.networkId}.` : ''}
           </div>
         </div>
+        ${status === null && html`
+          <button className="btn small subtle" onClick=${refresh} data-testid="wallet-status-retry">Retry</button>
+        `}
       </div>
       ${err && html`<div className="apps-error">${err.replace(/^status: /, '')}</div>`}
       ${notice && html`<div className="apps-ok">${notice}</div>`}
-      ${status && state === 'absent' && html`<${WalletSetupView} rpc=${rpc} C=${C} onChanged=${onChanged} onError=${setErr} />`}
+      ${status && state === 'absent' && html`<${WalletSetupView} rpc=${rpc} C=${C} onChanged=${onChanged} onError=${setErr} onNotice=${setNotice} />`}
       ${status && state === 'locked' && html`<${WalletLockedView} rpc=${rpc} C=${C} onChanged=${onChanged} onError=${setErr} onNotice=${setNotice} />`}
       ${status && state === 'unlocked' && html`<${WalletUnlockedView} rpc=${rpc} C=${C} status=${status} onChanged=${onChanged} onError=${setErr} />`}
       <div className="settings-row">
@@ -6617,7 +6677,7 @@ function Settings ({ rpc, C, status, storagePath, log, appearanceTheme, onAppear
   }
 
   const resetApp = async () => {
-    if (!confirm('Reset app data?\n\nThis will:\n  1. Unseed every pinned site from HiveRelay\n  2. Wipe all local state (sites, apps, bookmarks, identity)\n  3. Quit the app\n\nCopy any drive keys you want to keep first!')) return
+    if (!confirm('Reset app data?\n\nThis will:\n  1. Unseed every pinned site from HiveRelay\n  2. Wipe all local state (sites, apps, bookmarks, identity)\n  3. PERMANENTLY DELETE the testnet wallet on this device — without its 24-word recovery phrase it is gone forever\n  4. Quit the app\n\nBack up your wallet recovery phrase (Settings → Wallet → Back up…) and copy any drive keys you want to keep first!')) return
     if (!confirm('Are you ABSOLUTELY sure? This cannot be undone.')) return
     setErr(''); setBusy('reset')
     try {
@@ -6854,7 +6914,7 @@ function Settings ({ rpc, C, status, storagePath, log, appearanceTheme, onAppear
         <div className="settings-row">
           <div>
             <div className="settings-label">Reset app data</div>
-            <div className="settings-subtle">Unseeds every published site from HiveRelay first (only possible while your publisher keypair is intact), then wipes local storage and quits. You'll start fresh on next launch. <strong>Copy your drive keys before doing this.</strong></div>
+            <div className="settings-subtle">Unseeds every published site from HiveRelay first (only possible while your publisher keypair is intact), then wipes local storage and quits. You'll start fresh on next launch. <strong>Copy your drive keys before doing this.</strong> <strong>This also deletes the testnet wallet on this device</strong> — back up its 24-word recovery phrase (Wallet → Back up…) first, or the wallet is unrecoverable.</div>
           </div>
           <button className="btn subtle danger" onClick=${resetApp} disabled=${busy === 'reset'}>${busy === 'reset' ? 'Resetting…' : 'Reset data'}</button>
         </div>

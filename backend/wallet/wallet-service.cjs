@@ -432,7 +432,12 @@ class WalletService {
       manifestSha256: grants.manifestSha256,
       chainId: STABLE_TESTNET.chain.caip2,
       assetId: STABLE_TESTNET.paymentAsset.id,
-      permissions: { connect: grants.connect, pay: grants.pay, signApp: grants.signApp }
+      permissions: { connect: grants.connect, pay: grants.pay, signApp: grants.signApp },
+      // Self-declared, display-only — shown in chrome prompts and the
+      // connected-apps list so the user can tell apps apart.
+      appName: typeof manifest.name === 'string' && manifest.name.length > 0
+        ? manifest.name.slice(0, 128)
+        : null
     })
     await this._journalSafe({
       type: 'connect',
@@ -541,7 +546,12 @@ class WalletService {
         type: kind,
         intentId,
         intent,
-        expiresAt: pending.expiresAt
+        expiresAt: pending.expiresAt,
+        // Display-only fields for the chrome consent prompt (never journaled
+        // as part of the canonical intent): the self-declared app name and,
+        // for payments, the pre-approval fee quote.
+        appName: typeof connection.appName === 'string' ? connection.appName : null,
+        quote: pending.quote || null
       })
     } catch (err) {
       this._policy.releasePrompt(intentId)
@@ -585,9 +595,17 @@ class WalletService {
     // current state; the same key with a different fingerprint conflicts.
     const replay = await this._idempotentReplay(connection, intent.idempotencyKey, intentDigest)
     if (replay) return replay
+    // Pre-approval fee quote (spec §3.3 step 4): the chrome consent must show
+    // the estimated fee, the hard maximum fee and the total debit — approving
+    // blind is not acceptable. Best-effort: when the testnet RPC is
+    // unreachable the prompt still opens (quote: null) and the ceiling check
+    // at settlement remains the enforcement. A quote that breaks the compiled
+    // fee ceiling fails the request outright instead of prompting.
+    const quote = await this._quotePaymentBestEffort(intent)
     try {
       return await this._openPrompt('payment', key, intent, {
         intentDigest,
+        quote,
         idempotency: {
           driveKey: connection.driveKey,
           manifestSha256: connection.manifestSha256,
@@ -603,6 +621,31 @@ class WalletService {
         if (settled) return settled
       }
       throw err
+    }
+  }
+
+  // Best-effort pre-approval fee quote. Returns null when the engine or the
+  // network cannot produce one; rethrows policy/ceiling violations so a
+  // payment whose fee already exceeds the compiled ceiling never prompts.
+  async _quotePaymentBestEffort (intent) {
+    if (!this._engine || typeof this._engine.prepareTransfer !== 'function') return null
+    try {
+      const prepared = await this._engine.prepareTransfer(intent.recipient, intent.amountAtomic)
+      const maxFeeAtomic = typeof prepared.maxFeeAtomic === 'string' ? prepared.maxFeeAtomic : prepared.estimatedFeeAtomic
+      this._policy.checkFee(maxFeeAtomic)
+      // The 6-decimal ERC-20 amount and the 18-decimal native fee are the same
+      // USD₮0 asset on Stable; the total debit is expressed in 18-decimal
+      // native units (amount scaled by 10^12, never float math).
+      const maxTotalDebitAtomic = (BigInt(intent.amountAtomic) * 1000000000000n + BigInt(maxFeeAtomic)).toString()
+      return Object.freeze({
+        estimatedFeeAtomic: prepared.estimatedFeeAtomic,
+        maxFeeAtomic,
+        maxTotalDebitAtomic
+      })
+    } catch (err) {
+      const code = err && typeof err.code === 'string' ? err.code : ''
+      if (code === 'cap-exceeded' || code === 'fee-too-high') throw err
+      return null
     }
   }
 

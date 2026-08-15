@@ -1162,14 +1162,16 @@ class HttpBridge {
           intent.appName = manifest.name.slice(0, 128)
         }
         // The connect prompt carries { token, manifest } parked server-side;
-        // on approval the broker calls walletService.connect with them.
+        // on approval the broker calls walletService.connect with them. The
+        // permissions projection is display-only, for the consent modal.
         const prompt = {
           type: 'connect',
           intentId: newWalletIntentId(),
           intent,
           expiresAt: Date.now() + (this._walletService.promptTtlMs || 120000),
           token: ctx.docToken,
-          manifest
+          manifest,
+          permissions: { pay: grants.pay === true, signApp: grants.signApp === true }
         }
         const result = await this._requestWalletConsent(prompt, ctx.tuple)
         return this._walletOk(res, result)

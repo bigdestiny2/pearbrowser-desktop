@@ -37,6 +37,31 @@ behind `experimentalWalletWdk`). Specification: `docs/WDK_WALLET_V0.9_SPEC.md`.
 
 ### Fixed
 
+- Wallet backup ceremony could never complete from the settings UI: the shell
+  sent `completed`/`cancelled` outcomes while the engine accepts only
+  `complete`/`cancel`, so "I have written it down" always failed with a raw
+  `ceremony-failed` and left the ceremony stuck active. The UI now speaks the
+  engine vocabulary.
+- Wallet creation/import UX: the ≥12-character passphrase rule is enforced
+  client-side (and stated up front) instead of failing late inside the vault
+  with a raw error; import requires the full 24-word phrase (the engine
+  persists 24-word wallets only) and a passphrase confirmation; coded backend
+  errors (`bad-request`, `vault-corrupt`, `ceremony-failed`, engine faults, …)
+  now map to actionable human messages.
+- After create/import the wallet silently landed on "Wallet locked."; a success
+  notice now routes the user straight into the backup ceremony.
+- A stale unlocked view after the 15-minute auto-lock reported every read as
+  "testnet RPC not reachable"; `wallet-locked` errors now swap the view back
+  to the unlock form.
+- Reset app data never mentioned that it permanently deletes the wallet; both
+  the danger-zone copy and the confirm dialogs now warn and point at the
+  recovery-phrase backup first.
+- Payment consent no longer approves blind: the wallet service takes a
+  best-effort pre-approval fee quote and the modal shows the estimated fee,
+  the hard maximum fee and the maximum total debit (a quote over the compiled
+  ceiling fails before any prompt). Payment prompts and the connected-apps
+  list now show the app's self-declared name instead of bare truncated hex,
+  and the connect prompt lists the capabilities being granted.
 - Terminating a Bare worker after `bare-https` TLS traffic SIGSEGV'd the whole
   runtime; the production WDK worker now routes ethers' HTTP(S) through
   `bare-fetch` (`FetchRequest.registerGetUrl`) and disposes the provider on

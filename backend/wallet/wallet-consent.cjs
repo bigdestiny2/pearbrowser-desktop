@@ -72,16 +72,37 @@ class WalletConsentBroker {
       manifestSha256: typeof intent.manifestSha256 === 'string' ? intent.manifestSha256 : null,
       expiresAt: prompt.expiresAt
     }
-    if (typeof intent.appName === 'string') payload.appName = intent.appName
+    // Display-only app name: payment/sign prompts carry it on the prompt
+    // (from the connection record); connect intents carry it on the intent.
+    const appName = typeof prompt.appName === 'string' && prompt.appName.length > 0
+      ? prompt.appName
+      : intent.appName
+    if (typeof appName === 'string' && appName.length > 0) payload.appName = appName
     if (prompt.type === 'payment') {
       payload.recipient = intent.recipient || null
       payload.amountAtomic = intent.amountAtomic || null
       if (typeof intent.reference === 'string') payload.reference = intent.reference
+      // Pre-approval fee quote (display fields only; all 18-decimal native
+      // atomic strings computed by the wallet service).
+      const quote = prompt.quote
+      if (quote && typeof quote === 'object' && !Array.isArray(quote)) {
+        if (typeof quote.estimatedFeeAtomic === 'string') payload.estimatedFeeAtomic = quote.estimatedFeeAtomic
+        if (typeof quote.maxFeeAtomic === 'string') payload.maxFeeAtomic = quote.maxFeeAtomic
+        if (typeof quote.maxTotalDebitAtomic === 'string') payload.maxTotalDebitAtomic = quote.maxTotalDebitAtomic
+      }
     } else if (prompt.type === 'sign-app') {
       payload.payloadHash = intent.payloadHash || null
     } else {
       payload.chainId = intent.chainId || null
       payload.assetId = intent.assetId || null
+      // Granted capabilities, so the connect prompt can say what the app
+      // will be allowed to do (pay / sign-app), not just "connect".
+      if (prompt.permissions && typeof prompt.permissions === 'object') {
+        payload.permissions = Object.freeze({
+          pay: prompt.permissions.pay === true,
+          signApp: prompt.permissions.signApp === true
+        })
+      }
     }
     return payload
   }

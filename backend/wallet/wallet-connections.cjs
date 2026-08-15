@@ -68,7 +68,9 @@ class WalletConnections {
       chainId: record.chainId,
       assetId: record.assetId,
       permissions: Object.freeze({ ...record.permissions }),
-      connectedAt: record.connectedAt
+      connectedAt: record.connectedAt,
+      // Display-only (self-declared manifest name); never part of the binding.
+      appName: typeof record.appName === 'string' ? record.appName : null
     })
   }
 
@@ -89,6 +91,11 @@ class WalletConnections {
     // Fail closed: omitted permissions grant nothing. Callers (the wallet
     // service) always pass the explicit manifest-derived grants.
     const permissions = requirePermissions(tuple.permissions || { connect: false, pay: false, signApp: false })
+    // Self-declared manifest name, display-only (chrome prompts and the
+    // connected-apps list) — the binding never depends on it.
+    const appName = typeof tuple.appName === 'string' && tuple.appName.length > 0
+      ? tuple.appName.slice(0, 128)
+      : null
 
     const mapKey = keyOf(key)
     const existing = this._connections.get(mapKey)
@@ -102,6 +109,8 @@ class WalletConnections {
       existing.permissions.pay === permissions.pay &&
       existing.permissions.signApp === permissions.signApp
     ) {
+      // A rename alone must not rotate the connection record.
+      existing.appName = appName
       return this._summary(existing)
     }
     const record = {
@@ -111,7 +120,8 @@ class WalletConnections {
       chainId,
       assetId,
       permissions,
-      connectedAt: this._now()
+      connectedAt: this._now(),
+      appName
     }
     this._connections.set(mapKey, record)
     return this._summary(record)
