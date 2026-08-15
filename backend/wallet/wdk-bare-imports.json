@@ -1,0 +1,10 @@
+{
+  "bufferutil": {
+    "bare": "data:text/javascript,throw new Error('optional ws peer bufferutil is unavailable under Bare')",
+    "default": "bufferutil"
+  },
+  "utf-8-validate": {
+    "bare": "data:text/javascript,throw new Error('optional ws peer utf-8-validate is unavailable under Bare')",
+    "default": "utf-8-validate"
+  }
+}

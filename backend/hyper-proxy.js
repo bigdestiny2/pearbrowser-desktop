@@ -12,6 +12,9 @@ const http = require('bare-http1')
 const crypto = require('bare-crypto')
 const { PAGE_CONTEXT_SHIM, PAGE_CONTEXT_SHIM_HASH, pageContextMeta } = require('./page-context-bridge.cjs')
 const { escapeStyleText } = require('./html-raw-text.cjs')
+const { WalletDocuments, tabKeyForDrive } = require('./wallet/wallet-documents.cjs')
+const { validateWalletManifest } = require('./wallet/wallet-manifest.cjs')
+const WALLET_RELEASE_POSTURE = require('./wallet/networks/stable-testnet.cjs').releasePosture
 
 const USER_FRIENDLY_ERRORS = {
   'Invalid drive key': 'This link appears to be broken or incomplete',
@@ -254,6 +257,25 @@ class HyperProxy {
      */
     this._anongptShim = ''
     this._anongptDriveKey = ''
+    /**
+     * Page-side window.pear.wallet.v1 shim (docs/WDK_WALLET_V0.9_SPEC.md §4/§5).
+     * Injected only when _shouldInjectWalletShim() passes: the
+     * experimentalWalletWdk settings flag is on, the build posture is
+     * testnet-preview, the content is a Hyperdrive app/page (this method only
+     * ever runs for /hyper/* and /app/* HTML) and the drive's manifest.json
+     * declares pear.wallet.v1.connect. Empty by default — fail-closed.
+     */
+    this._pearWalletShim = ''
+    this._pearWalletShimHash = ''
+    this._walletEnabled = false
+    // Per top-level-document wallet tokens (spec §4.5). Minted here at
+    // injection time; verified by the wallet HTTP routes and the wallet
+    // service. One live token per drive — see wallet-documents.cjs.
+    this.walletDocuments = new WalletDocuments()
+    // Cache of wallet manifest gate results per drive key, same TTL
+    // rationale as the anongpt gate cache.
+    this._walletManifestCache = new Map()
+    this._walletManifestTtlMs = 60 * 1000
     // Cache of validated manifest results per drive key:
     //   Map<driveKeyHex, { ok: boolean, reason?: string, checkedAt: number }>
     // TTL is small because a publisher pushing a new release should
@@ -347,6 +369,91 @@ class HyperProxy {
    */
   setAnongptDriveKey (driveKeyHex) {
     this._anongptDriveKey = typeof driveKeyHex === 'string' ? driveKeyHex.toLowerCase() : ''
+  }
+
+  /**
+   * Set the page-side window.pear.wallet.v1 shim string. Empty string
+   * disables the surface entirely — no drive sees window.pear.wallet.
+   */
+  setPearWalletShim (shimHtml) {
+    this._pearWalletShim = String(shimHtml || '')
+    this._pearWalletShimHash = this._pearWalletShim ? sha256ScriptBody(this._pearWalletShim) : ''
+  }
+
+  /**
+   * Live mirror of the experimentalWalletWdk user-data settings flag
+   * (spec §5 gate 1). Pushed from index.js applyPrivacyFromSettings() on
+   * boot and on every settings write; off by default.
+   */
+  setWalletEnabled (enabled) {
+    this._walletEnabled = enabled === true
+    if (!this._walletEnabled) this._walletManifestCache.clear()
+  }
+
+  /**
+   * Wallet injection gate (spec §5). All conditions must hold:
+   *   1. the shim string is set (setPearWalletShim),
+   *   2. the experimentalWalletWdk settings flag is enabled,
+   *   3. the build is compiled as testnet-preview (the wallet stack's
+   *      compiled-in network manifest releasePosture — there is no separate
+   *      build-flag mechanism; see spec §5 deviation note),
+   *   4. the content is a Hyperdrive app/page — structurally guaranteed:
+   *      _injectHtmlHead() only ever runs for /hyper/* and /app/* HTML, never
+   *      for clearnet (which is served by clearnet-proxy.cjs),
+   *   5. the drive's manifest.json is reachable, valid and declares
+   *      pear.wallet.v1.connect (fetched server-side, cached 60s per drive).
+   * Spec §5 gate 4 (per-tab exclusive wallet origin) is NOT implemented —
+   * the architecture has no per-tab listeners; see the §4.4 addendum for the
+   * document-token equivalence argument.
+   */
+  async _shouldInjectWalletShim (driveKeyHex) {
+    if (!this._pearWalletShim) return false
+    if (this._walletEnabled !== true) return false
+    if (WALLET_RELEASE_POSTURE !== 'testnet-preview') return false
+    if (typeof driveKeyHex !== 'string' || !/^[0-9a-f]{64}$/.test(driveKeyHex.toLowerCase())) return false
+
+    const cached = this._walletManifestCache.get(driveKeyHex.toLowerCase())
+    if (cached && (Date.now() - cached.checkedAt) < this._walletManifestTtlMs) {
+      return cached.ok
+    }
+
+    const result = await this._validateWalletManifest(driveKeyHex)
+    this._walletManifestCache.set(driveKeyHex.toLowerCase(), {
+      ok: result.ok,
+      reason: result.ok ? null : result.reason,
+      checkedAt: Date.now()
+    })
+    if (!result.ok) {
+      console.warn('[wallet-gate] manifest gate FAILED for', driveKeyHex.slice(0, 12) + '…', '—', result.reason)
+    }
+    return result.ok
+  }
+
+  /**
+   * Read manifest.json from the drive and require a valid wallet manifest
+   * declaring at least pear.wallet.v1.connect. Fail-closed on any error.
+   */
+  async _validateWalletManifest (driveKeyHex) {
+    let manifest
+    try {
+      const fetched = await this._fetchP2P(driveKeyHex, '/manifest.json')
+      if (!fetched || !fetched.content) {
+        return { ok: false, reason: 'manifest.json not reachable' }
+      }
+      manifest = JSON.parse(fetched.content.toString('utf-8'))
+    } catch (err) {
+      return { ok: false, reason: 'manifest.json parse error: ' + (err && err.message) }
+    }
+    let grants
+    try {
+      grants = validateWalletManifest(manifest)
+    } catch (err) {
+      return { ok: false, reason: 'manifest.json invalid: ' + (err && err.message) }
+    }
+    if (!grants.connect) {
+      return { ok: false, reason: 'manifest.json does not declare pear.wallet.v1.connect' }
+    }
+    return { ok: true }
   }
 
   /**
@@ -445,7 +552,8 @@ class HyperProxy {
 
   /**
    * Inject `<base>` + per-page `pear-api-token` meta + swarm.v1 shim
-   * (always) + anongpt shim (gated) into an HTML response body. Used by
+   * (always) + anongpt shim (gated) + wallet shim + `pear-wallet-doc` meta
+   * (gated, top-level documents only) into an HTML response body. Used by
    * both the cache HIT and cache MISS paths so a reloaded page still
    * gets a fresh token. The token is per-request, never cached.
    *
@@ -453,9 +561,14 @@ class HyperProxy {
    * @param {string}        driveKeyHex
    * @param {string}        reqPath   request URL path (used to choose
    *                                  `/app/` vs `/hyper/` for <base>)
+   * @param {string}        [documentOrigin]
+   * @param {object}        [injectOpts]
+   * @param {string}        [injectOpts.secFetchDest] — request's
+   *                        Sec-Fetch-Dest; anything other than `document`
+   *                        withholds the wallet surface (nested frames)
    * @returns {Buffer}                response body with the head block injected
    */
-  async _injectHtmlHead (content, driveKeyHex, reqPath, documentOrigin = null) {
+  async _injectHtmlHead (content, driveKeyHex, reqPath, documentOrigin = null, injectOpts = {}) {
     const html = (Buffer.isBuffer(content) ? content : Buffer.from(content)).toString('utf-8')
     const keyHex = normalizeDriveKeyHex(driveKeyHex)
     const prefix = reqPath.startsWith('/app/') ? '/app/' : '/hyper/'
@@ -474,6 +587,30 @@ class HyperProxy {
     const includeAnongpt = await this._shouldInjectAnongptShim(keyHex)
     if (includeAnongpt) {
       console.log('[anongpt-gate] injecting shim for', keyHex.slice(0, 12) + '…')
+    }
+    // Wallet gate (spec §5). When it passes we ALSO mint the per-document
+    // wallet token (spec §4.5): one live token per drive, so this reload /
+    // navigation / second-tab load revokes the predecessor document's token.
+    // Nested frames are excluded: a child-frame HTML response (Sec-Fetch-Dest
+    // other than `document`) must not mint a token or receive the shim —
+    // otherwise an app embedding same-drive content in an iframe would have
+    // its root document's wallet authority revoked by its own child frame.
+    // Requests without fetch metadata (older clients, non-browser fetchers)
+    // are treated as top-level, matching the rest of the injection pipeline.
+    const secFetchDest = typeof injectOpts.secFetchDest === 'string'
+      ? injectOpts.secFetchDest.toLowerCase()
+      : ''
+    const isTopLevelDocument = secFetchDest === '' || secFetchDest === 'document'
+    const includeWallet = isTopLevelDocument && await this._shouldInjectWalletShim(keyHex)
+    let walletDocMeta = ''
+    if (includeWallet) {
+      const doc = this.walletDocuments.issue({
+        driveKeyHex: keyHex,
+        origin,
+        tabKey: tabKeyForDrive(keyHex)
+      })
+      walletDocMeta = `<meta name="pear-wallet-doc" content="${doc.token}">`
+      console.log('[wallet-gate] injecting shim for', keyHex.slice(0, 12) + '…')
     }
     // Cosmetic element hiding, scriptlets, plugin styles/scripts, and optional
     // strict third-party CSP ride the same injection path as the browser shims.
@@ -525,6 +662,7 @@ class HyperProxy {
     if (this._pearSwarmShim && this._pearSwarmShimHash) hashesToAuthorize.push(this._pearSwarmShimHash)
     if (this._pearSyncShim && this._pearSyncShimHash) hashesToAuthorize.push(this._pearSyncShimHash)
     if (includeAnongpt && this._anongptShimHash) hashesToAuthorize.push(this._anongptShimHash)
+    if (includeWallet && this._pearWalletShimHash) hashesToAuthorize.push(this._pearWalletShimHash)
     for (const h of scriptletHashes) hashesToAuthorize.push(h)
     for (const h of pluginScriptHashes) hashesToAuthorize.push(h)
 
@@ -535,6 +673,7 @@ class HyperProxy {
     const headInjection =
       `<base href="${baseHref}">` +
       `<meta name="pear-api-token" content="${apiToken}">` +
+      walletDocMeta +
       pageContextMeta(contextToken) +
       strictMeta +
       HYPER_LINK_BRIDGE_SHIM +
@@ -542,6 +681,7 @@ class HyperProxy {
       (this._pearSwarmShim || '') +
       (this._pearSyncShim || '') +
       (includeAnongpt ? this._anongptShim : '') +
+      (includeWallet ? this._pearWalletShim : '') +
       scriptletTags.join('') +
       pluginScriptTags.join('') +
       (shieldCss ? `<style data-pear-shield>${escapeStyleText(shieldCss)}</style>` : '') +
@@ -840,7 +980,9 @@ class HyperProxy {
         // injection HTML would leak tokens across requests, so we
         // re-inject on every HIT instead.
         if (cached.contentType.includes('text/html')) {
-          const injected = await this._injectHtmlHead(cached.content, driveKeyHex, path, documentOrigin)
+          const injected = await this._injectHtmlHead(cached.content, driveKeyHex, path, documentOrigin, {
+            secFetchDest: req.headers['sec-fetch-dest']
+          })
           res.statusCode = 200
           return res.end(injected)
         }
@@ -875,7 +1017,9 @@ class HyperProxy {
       // the gate passes. Logic lives in _injectHtmlHead() so cache HIT
       // and cache MISS use the identical injection path.
       if (contentType.includes('text/html')) {
-        const injected = await this._injectHtmlHead(content, driveKeyHex, path, documentOrigin)
+        const injected = await this._injectHtmlHead(content, driveKeyHex, path, documentOrigin, {
+          secFetchDest: req.headers['sec-fetch-dest']
+        })
         res.statusCode = 200
         return res.end(injected)
       }

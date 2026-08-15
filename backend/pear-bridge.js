@@ -969,4 +969,97 @@ const PEAR_ANONGPT_SHIM = `<script>(function () {
   window.pear.anongpt.infer = infer
 })();</script>`
 
-module.exports = { PearBridge, PEAR_SWARM_V1_SHIM, PEAR_SYNC_SHIM, PEAR_ANONGPT_SHIM }
+/**
+ * Page-side window.pear.wallet.v1 shim (docs/WDK_WALLET_V0.9_SPEC.md §4).
+ * Injected ONLY when the wallet gate passes (feature flag + testnet-preview
+ * posture + Hyperdrive origin + manifest declaring pear.wallet.v1.connect —
+ * see backend/hyper-proxy.js _shouldInjectWalletShim).
+ *
+ * Thin fetch wrappers over the token-authenticated same-origin routes under
+ * /api/wallet/v1/. Every call carries TWO credentials from the metas the
+ * proxy injects alongside this script: the general page token (X-Pear-Token)
+ * and the per-document wallet token (X-Pear-Wallet-Doc, spec §4.5). No
+ * secrets are baked into this static string.
+ *
+ * LONG-POLL NOTE: connect(), requestPayment() and signAppPayload() block
+ * until the browser-chrome consent prompt resolves — up to the prompt TTL
+ * (~120s). The shim sets no client-side timeout beyond that; pages should
+ * await them without racing their own short timeout.
+ *
+ * Errors reject with an Error carrying a stable `.code` (wallet-locked,
+ * wallet-busy, not-connected, not-authorized, prompt-expired, …). There is
+ * deliberately NO generic request() method — the surface is exactly the
+ * seven versioned methods below.
+ *
+ * Page authors should always feature-detect:
+ *
+ *   if (window.pear?.wallet?.v1) {
+ *     const caps = await window.pear.wallet.v1.capabilities()
+ *   }
+ */
+const PEAR_WALLET_V1_SHIM = `<script>(function () {
+  if (window.pear && window.pear.wallet && window.pear.wallet.v1) return
+  function readMeta (name) {
+    var m = document.querySelector('meta[name="' + name + '"]')
+    return m ? m.content : ''
+  }
+  async function call (method, route, body) {
+    var headers = {
+      'X-Pear-Token': readMeta('pear-api-token'),
+      'X-Pear-Wallet-Doc': readMeta('pear-wallet-doc')
+    }
+    var init = { method: method, headers: headers }
+    if (body !== undefined) {
+      headers['Content-Type'] = 'application/json'
+      init.body = JSON.stringify(body)
+    }
+    var res = await fetch('/api/wallet/v1/' + route, init)
+    var json = null
+    try { json = await res.json() } catch (_) {}
+    if (!json || typeof json !== 'object' || json.ok !== true) {
+      var code = (json && json.error && typeof json.error.code === 'string')
+        ? json.error.code
+        : 'http-' + res.status
+      var message = (json && json.error && typeof json.error.message === 'string')
+        ? json.error.message
+        : ('pear.wallet: HTTP ' + res.status)
+      var err = new Error(message)
+      err.code = code
+      throw err
+    }
+    delete json.ok
+    return json
+  }
+  var v1 = {
+    capabilities: function () { return call('GET', 'capabilities') },
+    connect: function (request) { return call('POST', 'connect', request || {}) },
+    status: function () { return call('GET', 'status') },
+    requestPayment: function (request) { return call('POST', 'payment', request || {}) },
+    signAppPayload: function (request) { return call('POST', 'sign-app', request || {}) },
+    transaction: function (intentId) {
+      return call('GET', 'transaction?intentId=' + encodeURIComponent(String(intentId || '')))
+    },
+    disconnect: function () { return call('POST', 'disconnect', {}) }
+  }
+  function deepFreeze (value) {
+    if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value
+    var keys = Object.keys(value)
+    for (var i = 0; i < keys.length; i++) deepFreeze(value[keys[i]])
+    return Object.freeze(value)
+  }
+  if (!window.pear) {
+    Object.defineProperty(window, 'pear', {
+      value: {}, enumerable: true, configurable: false, writable: false
+    })
+  }
+  if (!window.pear.wallet) {
+    Object.defineProperty(window.pear, 'wallet', {
+      value: {}, enumerable: true, configurable: false, writable: false
+    })
+  }
+  Object.defineProperty(window.pear.wallet, 'v1', {
+    value: deepFreeze(v1), enumerable: true, configurable: false, writable: false
+  })
+})();</script>`
+
+module.exports = { PearBridge, PEAR_SWARM_V1_SHIM, PEAR_SYNC_SHIM, PEAR_ANONGPT_SHIM, PEAR_WALLET_V1_SHIM }

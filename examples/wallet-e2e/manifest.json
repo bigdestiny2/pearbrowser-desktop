@@ -1,0 +1,8 @@
+{
+  "name": "WDK E2E Testnet Smoke",
+  "permissions": [
+    "pear.wallet.v1.connect",
+    "pear.wallet.v1.pay",
+    "pear.wallet.v1.sign-app"
+  ]
+}

@@ -1,6 +1,6 @@
 # P2P Browser Feature Roadmap
 
-Last updated: 2026-06-23
+Last updated: 2026-08-13
 
 This roadmap tracks the current browser direction after the catalogue, search,
 naming, Nostr, and mobile-parity audit. For a system map, see
@@ -28,10 +28,9 @@ only a `hyper://` viewer:
   contacts, `/api/*`, and gated anonGPT inference.
 - Settings: identity, profile, connected apps, relays, trusted peers, device
   sync, Nostr, names, experimental capabilities, storage cleanup, and reset.
-- Tests: desktop `npm test` passing with 415 tests; GitHub Actions Desktop CI
-  also passes install, tests, and high-severity audit on the release PR branch;
-  mobile sibling `npm test` passing with 136 tests; high-severity dependency
-  audits pass after the safe mobile lockfile refresh.
+- Tests: v0.8 release evidence records desktop at 700/700 and mobile at 566/566;
+  the current head and high-severity dependency audits must be rerun for every
+  release candidate.
 
 ## Shipped Since The Original Roadmap
 
@@ -97,9 +96,34 @@ only a `hyper://` viewer:
 - Developer diagnostics: active drives, swarm channels, relay health, sync
   groups, Autobase writers, API tokens, and grants.
 
+## Next Release — v0.9 WDK Wallet Preview
+
+**Status: implemented in source** (engine, service layer, settings UI, page
+bridge, consent flow); **release proof pending** — the packaged-target smoke
+matrix and an explorer-confirmed funded test payment are still open
+(`WDK_WALLET_V0.9_SPEC.md` §12, Milestone 4).
+
+The next release adds a desktop-only, opt-in and testnet-only Tether WDK wallet
+preview. It is deliberately a structured payment capability rather than a
+generic injected signer:
+
+- one Stable Testnet account and test USD₮0 asset;
+- separate WDK seed and encrypted wallet vault;
+- browser-owned receive, balance and activity UI;
+- manifest-declared app connection on an exclusive per-wallet-tab origin;
+- one exact `window.pear.wallet.v1.requestPayment()` operation;
+- fresh browser-chrome approval for every payment;
+- durable intent journalling and on-chain finality reconciliation;
+- no mainnet, `window.ethereum`, arbitrary signing/calldata, x402, wallet seed
+  sync, extra chains or mobile page injection.
+
+The implementation and release gates are defined in
+[`WDK_WALLET_V0.9_SPEC.md`](./WDK_WALLET_V0.9_SPEC.md).
+
 ## Research Parking Lot
 
-- Payments and signed receipt op-logs.
+- Broader payments: signed P2P receipt op-logs, POS settlement, refunds, escrow,
+  x402, Lightning and additional chains.
 - Privacy routing and relay-directory privacy defaults.
 - Public Nostr relay integration, if it becomes a product goal.
 - App capability declarations at install time.

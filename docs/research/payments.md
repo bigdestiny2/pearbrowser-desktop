@@ -8,6 +8,24 @@
 `docs/HIVERELAY-BACKBONE-HANDOVER.md` / `docs/HIVERELAY-SCHEMA-SHEETS-DESIGN.md` (relay durability, "index not authority"),
 `docs/P2P-SEARCH-RESEARCH.md` (independent confirmation of the identity-binding gap).
 
+> **Browser-wallet scope note (2026-08-13):** PearBrowser's next-release WDK
+> wallet is intentionally narrower than this cross-application payments plan.
+> [`../WDK_WALLET_V0.9_SPEC.md`](../WDK_WALLET_V0.9_SPEC.md) is authoritative
+> for the v0.9 desktop testnet wallet, page API, custody boundary and release
+> gates. This document remains authoritative for the broader Pear POS,
+> signed-receipt, escrow, FX and multi-rail program.
+
+> **Browser-wallet implementation note (2026-08-14):** the v0.9 WDK wallet
+> preview is now implemented in source end to end — Bare-worker WDK engine
+> (golden vectors reproduced in-worker), vault/service/journal layer, settings
+> UI, document-token connection boundary, consent-brokered structured payment
+> and scoped app-payload signing — with the cohort, live-network and Bare-smoke
+> gates green and an env-gated live testnet proof
+> (`scripts/wdk-e2e-testnet.mjs`). Remaining before the spec's Milestone 4 exit:
+> the packaged-target evidence matrix, an explorer-confirmed funded test
+> payment, and manual chrome-approval evidence. The spec's §12 milestone
+> statuses are authoritative for the details.
+
 > **Current implementation note (2026-06-22):** this proposal predates the
 > shipped `identity.verify()` / identity-binding substrate. Treat references to
 > that verifier as a historical prerequisite that has since been satisfied;
@@ -185,9 +203,12 @@ Every path below was read for this doc; line numbers are approximate to current 
   good model for a payment finality enum.
 - **Consent-gated swarm:** `backend/swarm-grants.js` — per-`(driveKey, topic)` consent grants; the boundary to
   rate-limit/gate payment-channel joins.
-- **Command numbering:** `backend/constants.js` — numeric RPC IDs grouped by feature with gaps; mirrored into
-  `ui/boot.js`. Free ranges exist for a payments namespace (e.g. **210–249**; the 200s currently hold only
-  `CMD_BRIDGE=200`, `CMD_RUN_APP_IN_TAB=201`).
+- **Command numbering:** `backend/constants.js` — numeric RPC IDs grouped by feature and mirrored into
+  `ui/boot.js`. The original 210–229 proposal is no longer free: 210–214 are community moderation and
+  220–222 are Ask Browser. This design therefore reserves **340–351** for its 12 not-yet-implemented payment
+  commands; that block is absent from both live maps as of 2026-08-14 and `test/constants-mirror.test.js`
+  rejects any future live allocation that conflicts with the reservation. The v0.9 WDK draft separately uses
+  300–313.
 
 ---
 
@@ -488,22 +509,24 @@ multi-source median + outlier rejection (`rejectOutliers`, `minSources`). Stamp 
 at}` into the receipt (§7.2) so the buyer sees which/how-many sources priced the sale.
 
 ### 7.6 RPC commands & constants (mirror `constants.js` ↔ `ui/boot.js`)
-New payments namespace in the free **210–229** range (POS keeps its own dot-notation RPC; these are the
-PearBrowser-side identity/receipt/verify commands the shared layer needs):
+Reserved payments namespace **340–351** (POS keeps its own dot-notation RPC; these are the PearBrowser-side
+identity/receipt/verify commands the shared layer needs). The reservation is guarded against the live
+`backend/constants.js` map by `test/constants-mirror.test.js`; when these commands are implemented, add each
+symbol to `backend/constants.js`, mirror it into `ui/boot.js`, and keep the same guard passing:
 ```
 CMD_IDENTITY_VERIFY        = 75    // un-stub receipt verification
-CMD_MERCHANT_BIND_PUBLISH  = 210   // publish self-certifying merchant binding (dht.mutablePut)
-CMD_MERCHANT_BIND_RESOLVE  = 211   // resolve + re-verify a merchant binding (dht.mutableGet)
-CMD_RECEIPT_ISSUE          = 212   // append receipt.issue op + sign
-CMD_RECEIPT_VERIFY         = 213   // verify a receipt against merchant binding (buyer side)
-CMD_RECEIPT_LIST           = 214   // range-scan the receipt ledger
-CMD_RECEIPT_FINALIZE       = 215   // flip finality on confirmation/redeem
-CMD_REFUND_VOUCHER_ISSUE   = 216   // merchant-signed refund obligation
-CMD_ESCROW_FUND            = 220   // POS-side escrow fund (routes to createEscrowAPI)
-CMD_ESCROW_RELEASE         = 221
-CMD_ESCROW_REFUND          = 222
-CMD_DISPUTE_OPEN           = 223
-CMD_DISPUTE_EVIDENCE       = 224
+CMD_MERCHANT_BIND_PUBLISH  = 340   // publish self-certifying merchant binding (dht.mutablePut)
+CMD_MERCHANT_BIND_RESOLVE  = 341   // resolve + re-verify a merchant binding (dht.mutableGet)
+CMD_RECEIPT_ISSUE          = 342   // append receipt.issue op + sign
+CMD_RECEIPT_VERIFY         = 343   // verify a receipt against merchant binding (buyer side)
+CMD_RECEIPT_LIST           = 344   // range-scan the receipt ledger
+CMD_RECEIPT_FINALIZE       = 345   // flip finality on confirmation/redeem
+CMD_REFUND_VOUCHER_ISSUE   = 346   // merchant-signed refund obligation
+CMD_ESCROW_FUND            = 347   // POS-side escrow fund (routes to createEscrowAPI)
+CMD_ESCROW_RELEASE         = 348
+CMD_ESCROW_REFUND          = 349
+CMD_DISPUTE_OPEN           = 350
+CMD_DISPUTE_EVIDENCE       = 351
 ```
 On the POS side these map to new `api.js` methods (dot-notation, e.g. `payments.confirmCrypto`,
 `receipts.issue`, `escrow.fund`) reachable via `worker.js`. Rail credentials (mint URL, Esplora endpoint,
@@ -689,5 +712,5 @@ Internal source files read for this doc (all absolute):
 - `backend/autobee-catalog-ops.cjs` (op schema + `validateOp` tri-state template)
 - `backend/relay-record.js` (self-certifying `dht.mutableGet` pattern for merchant binding)
 - `backend/relay-client.js` (`listRelays` re-verify-don't-trust, "index not authority")
-- `backend/constants.js` (RPC numbering convention; free 210–229 range in the original proposal)
+- `backend/constants.js` (live RPC numbering convention; 340–351 payments reservation verified free on 2026-08-14)
 - `docs/AUTOBEE-RESEARCH.md`, `docs/HIVERELAY-BACKBONE-HANDOVER.md`, `docs/HIVERELAY-SCHEMA-SHEETS-DESIGN.md`, `docs/P2P-SEARCH-RESEARCH.md`

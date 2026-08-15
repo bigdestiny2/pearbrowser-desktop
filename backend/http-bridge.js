@@ -16,6 +16,55 @@
 // bare-crypto would throw `require.addon is not a function` under Node.
 const hypercoreCrypto = require('hypercore-crypto')
 const b4a = require('b4a')
+const { tabKeyForDrive } = require('./wallet/wallet-documents.cjs')
+const { validateWalletManifest } = require('./wallet/wallet-manifest.cjs')
+
+// Transport cap for wallet request bodies (spec §4.2 — the wallet request
+// body is capped at 16 KiB).
+const WALLET_BODY_MAX_BYTES = 16 * 1024
+
+// service err.code → HTTP status for /api/wallet/v1/* routes.
+const WALLET_ERROR_STATUS = {
+  'not-connected': 403,
+  'not-authorized': 403,
+  'bad-request': 400,
+  'unsupported-chain': 400,
+  'unsupported-asset': 400,
+  'not-found': 404,
+  'rate-limited': 429,
+  'wallet-busy': 429,
+  'cap-exceeded': 429,
+  'wallet-locked': 423,
+  'prompt-expired': 410,
+  'idempotency-conflict': 409,
+  'wallet-unavailable': 503
+}
+
+// Conservative transport-level rate limits per drive (the wallet service
+// enforces its own stricter policy limits on top — spec §4.2).
+const WALLET_RATE_BUCKETS = {
+  connect: { max: 5, windowMs: 60000 },
+  payment: { max: 10, windowMs: 60000 },
+  'sign-app': { max: 10, windowMs: 60000 },
+  transaction: { max: 60, windowMs: 60000 },
+  default: { max: 30, windowMs: 60000 }
+}
+
+function walletFail (code, message) {
+  const err = new Error(message || code)
+  err.code = code
+  return err
+}
+
+function newWalletIntentId () {
+  return 'wpi_' + b4a.toString(hypercoreCrypto.randomBytes(12), 'hex')
+}
+
+function hexOrString (value) {
+  if (typeof value === 'string') return value
+  if (b4a.isBuffer(value) || value instanceof Uint8Array) return b4a.toString(value, 'hex')
+  return value
+}
 
 class HttpBridge {
   constructor (pearBridge, swarm, getDriveFn, opts = {}) {
@@ -35,6 +84,17 @@ class HttpBridge {
     this._aiManifestCache = new Map()
     this._aiManifestTtlMs = opts.aiManifestTtlMs || 30000
     this._aiRequestOwners = new Map()
+    // WDK wallet preview (docs/WDK_WALLET_V0.9_SPEC.md §4.4). All optional —
+    // without them /api/wallet/v1/* fails closed with wallet-unavailable.
+    this._walletService = opts.walletService || null
+    this._walletDocuments = opts.walletDocuments || null
+    this._requestWalletConsent = typeof opts.requestWalletConsent === 'function'
+      ? opts.requestWalletConsent
+      : null
+    this._walletSessionId = typeof opts.browserSessionId === 'string' && opts.browserSessionId.length > 0
+      ? opts.browserSessionId
+      : 'http-bridge'
+    this._walletRateLimiter = new Map()
     this._rateLimiter = new Map() // Simple rate limiting per IP
     this._sseTickets = new Map()
     this._sseTicketTtlMs = opts.sseTicketTtlMs || 30000
@@ -173,6 +233,113 @@ class HttpBridge {
     this._jsonError(res, 'Unauthorized', 401)
     return null
   }
+
+  // --- WDK wallet helpers (spec §4.4) ---
+
+  /** Override the chrome-consent entry point (tests; boot wires the broker). */
+  setWalletConsentHandler (fn) {
+    this._requestWalletConsent = typeof fn === 'function' ? fn : null
+  }
+
+  _walletOk (res, result) {
+    res.statusCode = 200
+    res.end(JSON.stringify({ ok: true, ...result }))
+    return true
+  }
+
+  // Wallet routes answer with the { ok: false, error: { code, message } }
+  // shape the page shim rejects on. Mapped codes carry the service's
+  // sanitized message; unmapped codes are internal failures and get a
+  // generic message so internals never leak to the page.
+  _walletError (res, err) {
+    const code = err && typeof err.code === 'string' ? err.code : 'internal-error'
+    const known = Object.prototype.hasOwnProperty.call(WALLET_ERROR_STATUS, code)
+    const status = known ? WALLET_ERROR_STATUS[code] : 500
+    const message = known ? (err.message || code) : 'wallet operation failed'
+    res.statusCode = status
+    res.end(JSON.stringify({ ok: false, error: { code, message } }))
+    return true
+  }
+
+  // The wallet connection tuple for this page. browserSessionId identifies
+  // this browser run; tabId is the per-drive document slot (see
+  // wallet-documents.cjs — the architecture has no per-tab listeners, so
+  // one live wallet document per drive is the binding); driveKey and
+  // walletTabOrigin come from the validated api token.
+  _walletTuple (auth) {
+    return {
+      browserSessionId: this._walletSessionId,
+      tabId: tabKeyForDrive(auth.driveKeyHex),
+      driveKey: auth.driveKeyHex,
+      walletTabOrigin: auth.origin || null
+    }
+  }
+
+  /**
+   * Token gate for wallet routes. Always requires the general page token
+   * (origin-checked). When docToken is required (connect / payment /
+   * sign-app / transaction / disconnect) the per-document wallet token must
+   * also verify against the tuple. State-changing requests additionally
+   * require an exact Origin header — no originless POST fallback (spec §4.4).
+   */
+  async _requireWalletAuth (req, res, { method, docToken = true }) {
+    const auth = this._requireToken(req, res)
+    if (!auth) return null
+    if (req.method === 'POST') {
+      const origin = Array.isArray(req.headers.origin) ? req.headers.origin[0] : req.headers.origin
+      if (typeof origin !== 'string' || origin.length === 0) {
+        this._walletError(res, walletFail('not-authorized', 'Origin header is required'))
+        return null
+      }
+    }
+    const tuple = this._walletTuple(auth)
+    if (!docToken) return { auth, tuple, docToken: null }
+    if (!this._walletDocuments) {
+      this._walletError(res, walletFail('not-authorized', 'wallet document registry is not available'))
+      return null
+    }
+    const rawDoc = req.headers['x-pear-wallet-doc']
+    const presented = Array.isArray(rawDoc) ? rawDoc[0] : rawDoc
+    const verified = await this._walletDocuments.verify({ tuple, token: presented, method })
+    if (verified !== true) {
+      this._walletError(res, walletFail('not-authorized', 'document token is not authorized'))
+      return null
+    }
+    return { auth, tuple, docToken: presented }
+  }
+
+  _checkWalletRateLimit (driveKeyHex, bucket) {
+    const { max, windowMs } = WALLET_RATE_BUCKETS[bucket] || WALLET_RATE_BUCKETS.default
+    const now = Date.now()
+    const key = driveKeyHex + ':' + bucket
+    let entry = this._walletRateLimiter.get(key)
+    if (!entry || now > entry.resetAt) {
+      entry = { count: 0, resetAt: now + windowMs }
+      this._walletRateLimiter.set(key, entry)
+    }
+    entry.count++
+    return entry.count <= max
+  }
+
+  // Server-side manifest fetch for the connect route (spec §3.2 — the
+  // manifest is re-fetched and re-validated; a cached connection record is
+  // never proof of current eligibility).
+  async _fetchWalletManifest (driveKeyHex) {
+    const keyHex = String(driveKeyHex || '').toLowerCase()
+    if (!/^[0-9a-f]{64}$/.test(keyHex) || !this._getDrive) return null
+    try {
+      const drive = await this._getDrive(keyHex)
+      let timer = null
+      const raw = drive && await Promise.race([
+        drive.get('/manifest.json', { wait: true }),
+        new Promise(resolve => { timer = setTimeout(() => resolve(null), 10000) })
+      ]).finally(() => { if (timer) clearTimeout(timer) })
+      return raw ? JSON.parse(raw.toString('utf8')) : null
+    } catch {
+      return null
+    }
+  }
+
 
   _pruneSseTickets (now = Date.now()) {
     for (const [ticket, entry] of this._sseTickets) {
@@ -880,6 +1047,12 @@ class HttpBridge {
         return this._json(res, { ok: await this._aiService.cancel(requestId) })
       }
 
+      // --- WDK wallet preview (docs/WDK_WALLET_V0.9_SPEC.md §4.4) ---
+
+      if (path.startsWith('/api/wallet/v1/')) {
+        return this._handleWallet(req, res, url, body)
+      }
+
       // --- Status ---
 
       if (req.method === 'GET' && path === '/api/bridge/status') {
@@ -903,6 +1076,208 @@ class HttpBridge {
       res.statusCode = 500
       res.end(JSON.stringify({ error: err.message }))
       return true
+    }
+  }
+
+  /**
+   * /api/wallet/v1/* — token-authenticated same-origin wallet routes
+   * (spec §4.4). capabilities/status need only the general page token
+   * (spec §4.1); every other route additionally requires the per-document
+   * wallet token (spec §4.5), verified against the connection tuple. The
+   * consent-bound routes (connect / payment / sign-app) open a pending
+   * prompt in the wallet service, then park it with the chrome consent
+   * broker and answer with the resolution — the request can take up to the
+   * prompt TTL (~120s); the page shim deliberately sets no shorter timeout.
+   */
+  async _handleWallet (req, res, url, body) {
+    const route = url.pathname.slice('/api/wallet/v1/'.length)
+    try {
+      if (!this._walletService) {
+        return this._walletError(res, walletFail('wallet-unavailable', 'wallet is not available'))
+      }
+      // Transport-level body cap (spec §4.2): 16 KiB per wallet request.
+      if (req.method === 'POST' && body && b4a.byteLength(JSON.stringify(body), 'utf8') > WALLET_BODY_MAX_BYTES) {
+        res.statusCode = 413
+        res.end(JSON.stringify({ ok: false, error: { code: 'bad-request', message: 'wallet request body exceeds 16 KiB' } }))
+        return true
+      }
+
+      if (req.method === 'GET' && route === 'capabilities') {
+        const auth = this._requireToken(req, res)
+        if (!auth) return true
+        if (!this._checkWalletRateLimit(auth.driveKeyHex, 'default')) {
+          return this._walletError(res, walletFail('rate-limited', 'rate limit exceeded'))
+        }
+        return this._walletOk(res, this._walletService.capabilities())
+      }
+
+      if (req.method === 'POST' && route === 'connect') {
+        const ctx = await this._requireWalletAuth(req, res, { method: 'connect' })
+        if (!ctx) return true
+        if (!this._checkWalletRateLimit(ctx.auth.driveKeyHex, 'connect')) {
+          return this._walletError(res, walletFail('rate-limited', 'too many connect attempts'))
+        }
+        // Re-fetch + re-validate the manifest server-side at connect time
+        // (spec §3.2): a declaration establishes eligibility only.
+        const manifest = await this._fetchWalletManifest(ctx.auth.driveKeyHex)
+        if (!manifest) {
+          return this._walletError(res, walletFail('bad-request', 'manifest.json is not reachable'))
+        }
+        let grants
+        try {
+          grants = validateWalletManifest(manifest)
+        } catch (err) {
+          return this._walletError(res, err)
+        }
+        if (!grants.connect) {
+          return this._walletError(res, walletFail('bad-request', 'manifest does not declare pear.wallet.v1.connect'))
+        }
+        const caps = this._walletService.capabilities()
+        // A connect request may narrow to a subset of the compiled-in
+        // chains/assets; anything else is rejected before prompting.
+        if (body && body.chainIds !== undefined &&
+          (!Array.isArray(body.chainIds) || body.chainIds.some((c) => !caps.chainIds.includes(c)))) {
+          return this._walletError(res, walletFail('unsupported-chain', 'chainIds must be a subset of the supported chains'))
+        }
+        if (body && body.assetIds !== undefined &&
+          (!Array.isArray(body.assetIds) || body.assetIds.some((a) => !caps.assetIds.includes(a)))) {
+          return this._walletError(res, walletFail('unsupported-asset', 'assetIds must be a subset of the supported assets'))
+        }
+        // Fail fast on a locked/absent wallet instead of parking a prompt
+        // the user cannot meaningfully approve. service.connect re-checks.
+        const walletState = await this._walletService.status()
+        if (walletState.state !== 'unlocked') {
+          return this._walletError(res, walletFail('wallet-locked', 'wallet is locked'))
+        }
+        if (typeof this._requestWalletConsent !== 'function') {
+          return this._walletError(res, walletFail('wallet-unavailable', 'wallet consent is not available'))
+        }
+        const intent = {
+          driveKey: ctx.auth.driveKeyHex,
+          manifestSha256: grants.manifestSha256,
+          chainId: caps.chainIds[0],
+          assetId: caps.assetIds[0]
+        }
+        if (typeof manifest.name === 'string' && manifest.name.length > 0) {
+          intent.appName = manifest.name.slice(0, 128)
+        }
+        // The connect prompt carries { token, manifest } parked server-side;
+        // on approval the broker calls walletService.connect with them.
+        const prompt = {
+          type: 'connect',
+          intentId: newWalletIntentId(),
+          intent,
+          expiresAt: Date.now() + (this._walletService.promptTtlMs || 120000),
+          token: ctx.docToken,
+          manifest
+        }
+        const result = await this._requestWalletConsent(prompt, ctx.tuple)
+        return this._walletOk(res, result)
+      }
+
+      if (req.method === 'GET' && route === 'status') {
+        const auth = this._requireToken(req, res)
+        if (!auth) return true
+        if (!this._checkWalletRateLimit(auth.driveKeyHex, 'default')) {
+          return this._walletError(res, walletFail('rate-limited', 'rate limit exceeded'))
+        }
+        const tuple = this._walletTuple(auth)
+        const connection = this._walletService.listConnections().find((c) =>
+          c.browserSessionId === tuple.browserSessionId &&
+          c.tabId === tuple.tabId &&
+          c.driveKey === tuple.driveKey &&
+          c.walletTabOrigin === tuple.walletTabOrigin
+        ) || null
+        const walletState = await this._walletService.status()
+        // Spec §4.1: report whether the app is connected and whether the
+        // wallet can accept a request — without distinguishing absent vs
+        // locked (fingerprinting) and never revealing the address.
+        const walletReady = walletState.state === 'unlocked'
+        const result = {
+          connected: connection !== null,
+          canAcceptRequests: connection !== null && walletReady,
+          walletReady
+        }
+        if (connection) {
+          result.chainId = connection.chainId
+          result.assetId = connection.assetId
+          result.permissions = connection.permissions
+          result.manifestSha256 = connection.manifestSha256
+        }
+        return this._walletOk(res, result)
+      }
+
+      if (req.method === 'POST' && route === 'payment') {
+        const ctx = await this._requireWalletAuth(req, res, { method: 'requestPayment' })
+        if (!ctx) return true
+        if (!this._checkWalletRateLimit(ctx.auth.driveKeyHex, 'payment')) {
+          return this._walletError(res, walletFail('rate-limited', 'too many payment attempts'))
+        }
+        if (typeof this._requestWalletConsent !== 'function') {
+          return this._walletError(res, walletFail('wallet-unavailable', 'wallet consent is not available'))
+        }
+        // Open the pending prompt (validates the connection, manifest grant,
+        // chain, asset and input), then park it for chrome consent. The
+        // promise settles with the service's resolvePrompt() outcome —
+        // { intentId, state: 'submitted', transactionHash, … } or rejected.
+        const prompt = await this._walletService.requestPayment(ctx.tuple, ctx.docToken, body || {})
+        // Idempotent replay (spec §8.3): an already-settled reservation
+        // returns its recorded outcome instead of a prompt — nothing to
+        // park. A replay of a still-open prompt returns the live prompt
+        // record and the broker fails the duplicate park with wallet-busy,
+        // so the retry never raises a second consent modal.
+        if (prompt && typeof prompt.state === 'string') {
+          return this._walletOk(res, prompt)
+        }
+        const result = await this._requestWalletConsent(prompt, ctx.tuple)
+        return this._walletOk(res, result)
+      }
+
+      if (req.method === 'POST' && route === 'sign-app') {
+        const ctx = await this._requireWalletAuth(req, res, { method: 'signAppPayload' })
+        if (!ctx) return true
+        if (!this._checkWalletRateLimit(ctx.auth.driveKeyHex, 'sign-app')) {
+          return this._walletError(res, walletFail('rate-limited', 'too many sign attempts'))
+        }
+        if (typeof this._requestWalletConsent !== 'function') {
+          return this._walletError(res, walletFail('wallet-unavailable', 'wallet consent is not available'))
+        }
+        const prompt = await this._walletService.signAppPayload(ctx.tuple, ctx.docToken, body || {})
+        const result = await this._requestWalletConsent(prompt, ctx.tuple)
+        // The service returns raw engine values (frozen); the wire format
+        // is hex strings — copy before normalizing.
+        const out = result && typeof result === 'object' ? { ...result } : result
+        if (out && typeof out === 'object') {
+          if (out.signature !== undefined) out.signature = hexOrString(out.signature)
+          if (out.digest !== undefined) out.digest = hexOrString(out.digest)
+        }
+        return this._walletOk(res, out)
+      }
+
+      if (req.method === 'GET' && route === 'transaction') {
+        const ctx = await this._requireWalletAuth(req, res, { method: 'transaction' })
+        if (!ctx) return true
+        if (!this._checkWalletRateLimit(ctx.auth.driveKeyHex, 'transaction')) {
+          return this._walletError(res, walletFail('rate-limited', 'rate limit exceeded'))
+        }
+        const intentId = url.searchParams.get('intentId') || url.searchParams.get('id')
+        const result = await this._walletService.transaction(ctx.tuple, ctx.docToken, intentId)
+        return this._walletOk(res, result)
+      }
+
+      if (req.method === 'POST' && route === 'disconnect') {
+        const ctx = await this._requireWalletAuth(req, res, { method: 'disconnect' })
+        if (!ctx) return true
+        if (!this._checkWalletRateLimit(ctx.auth.driveKeyHex, 'default')) {
+          return this._walletError(res, walletFail('rate-limited', 'rate limit exceeded'))
+        }
+        const result = await this._walletService.disconnect(ctx.tuple, ctx.docToken)
+        return this._walletOk(res, result)
+      }
+
+      return this._walletError(res, walletFail('not-found', 'unknown wallet endpoint'))
+    } catch (err) {
+      return this._walletError(res, err)
     }
   }
 

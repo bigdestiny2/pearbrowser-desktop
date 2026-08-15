@@ -88,7 +88,7 @@ Sequence follows the overview (Slice 0 verify → naming → payments → nostr 
 
 **Phase/spike count:** 30 build phases (P0=1; SEC0=1; N0–N6=7; PAY0–PAY6=7; NOSTR0–NOSTR8=9; PRIV0–PRIV4=5) + 3 gating spikes (`SPIKE-AUTOBEE-DURABILITY`, `SPIKE-SCHNORR-BARE`, `SPIKE-LN`) = **33 sequenced items.** (SEC0 and the two new spikes are this revision's lock-down additions; durability and Schnorr-under-Bare are now *proven before* they're depended on, and seed-at-rest gates first real-user money/identity.)
 
-**Constant-numbering ground truth (verified):** `CMD_IDENTITY_SIGN=74`, `CMD_LOAD_CATALOG_INDEX=176`, sync `180–187`, `CMD_BRIDGE=200`, `CMD_RUN_APP_IN_TAB=201`. **Free CMD ranges:** `75` (verify), `188–199` (nostr), `210–249` (payments), `250–269` (naming), `270–289` (routing). **EVT ground truth:** EVT block is occupied through `EVT_PEAR_APP_EXITED=108`; **next free EVT id is 109** (the nostr doc's draft `EVT_NOSTR_EVENT=108` collides — use `109+`). **Every new CMD_/EVT_ MUST be added to `backend/constants.js` AND mirrored by hand into `ui/boot.js`.**
+**Constant-numbering ground truth (reconciled 2026-08-14):** `CMD_IDENTITY_SIGN=74`, `CMD_IDENTITY_VERIFY=75`, `CMD_LOAD_CATALOG_INDEX=176`, sync `180–187`, `CMD_BRIDGE=200`, and `CMD_RUN_APP_IN_TAB=201`. The old “free ranges” table is obsolete: 210–214 now belong to community moderation, 220–222 to Ask Browser, 230–247 to Content Shield/plugins, and 250–270 to naming/search. The v0.9 WDK draft reserves 300–313; the broader payments program authoritatively reserves **340–351**, guarded against live command collisions by `test/constants-mirror.test.js`. Recheck `backend/constants.js` immediately before allocating anything else. **Every new CMD_/EVT_ MUST be added to `backend/constants.js` AND mirrored by hand into `ui/boot.js`.**
 
 ---
 
@@ -216,7 +216,7 @@ Sequence follows the overview (Slice 0 verify → naming → payments → nostr 
   - CREATE `backend/payment-receipt-{ops,apply}.cjs` + `backend/payment-receipt-manager.cjs` (clone Autobee trio). Ops: `receipt.issue`/`receipt.finalize`/`receipt.refund`/`dispute.open`/`dispute.evidence`. `SCHEMA_VERSION=1`, `MAX_OP_BYTES=16*1024`, `validateOp` tri-state, `hasUnsafeKey`, **no wall-clock**.
   - Reducer rules: `finality` **monotonic** (`pending<settling<final`); `receipt.issue` whole-record keyed `receiptId=sha256(merchantSub‖saleNonce)`; **apply re-verifies `sig`** via `identity.verifyForApp` before materializing (unverifiable op retained-but-excluded). View keys: `receipt!<id>`, `receipt-by-sale!<saleId>`, `finality!<id>`, `voucher!<refundId>`, `dispute!<id>!<seq>`.
   - **Encrypted Autobase** (`encryptionKey`) per merchant ledger via the **shared encrypted-Autobase blind-pin helper (§4)** — build it here if PAY1 lands before PRIV0, else import it from PRIV0; do **not** hand-roll the `encryptionKey` setup twice. Writer membership gated to counterparties; lazily required behind `experimentalSignedReceipts`.
-  - TOUCH `backend/constants.js`+`ui/boot.js`: `CMD_RECEIPT_ISSUE=212`, `CMD_RECEIPT_VERIFY=213`, `CMD_RECEIPT_LIST=214`, `CMD_RECEIPT_FINALIZE=215`, `CMD_REFUND_VOUCHER_ISSUE=216` (mirror).
+  - TOUCH `backend/constants.js`+`ui/boot.js`: `CMD_RECEIPT_ISSUE=342`, `CMD_RECEIPT_VERIFY=343`, `CMD_RECEIPT_LIST=344`, `CMD_RECEIPT_FINALIZE=345`, `CMD_REFUND_VOUCHER_ISSUE=346` (mirror).
   - Reuses: primitives #1, #3, #5; P0 verify; shared blind-pin helper (§4).
 - **Tests/verification.** `test/payment-receipt-apply.test.js` (concurrent issue/finalize, restart determinism, forged-sig rejection, monotonic finality). Two-writer smoke: convergence + non-counterparty replicates bytes but reads nothing (encryption). Durability smoke (from `SPIKE-AUTOBEE-DURABILITY`): both writers offline → relay re-serves the ledger. **Exit:** deterministic, encrypted, forge-resistant ledger; no settlement wiring yet.
 - **Depends on.** PAY0; `SPIKE-AUTOBEE-DURABILITY` (go) — a receipt ledger that vanishes when both counterparties go offline is not a ledger; the spike proves it re-serves from HiveRelay.
@@ -242,8 +242,8 @@ Sequence follows the overview (Slice 0 verify → naming → payments → nostr 
 - **Track / doc-section.** payments §9 Phase 3; §7.1b.
 - **Deliverables.**
   - CREATE `backend/merchant-record.js` (clone `relay-record.js`): doc `{v, merchantRootPubkey, posSubPubkey, storefrontDriveKey, displayName, issuedAt}`, signed by root, `dht.mutablePut(rootPubkey)`. **Same `IdentityBinding` family as N2 — see §4.**
-  - TOUCH `backend/index.js`+constants+boot: `CMD_MERCHANT_BIND_PUBLISH=210`, `CMD_MERCHANT_BIND_RESOLVE=211` (mirror). `CMD_RECEIPT_VERIFY` (PAY1) resolves the binding + `verifyForApp`s the receipt → `verify.ok=true`.
-  - **Selective-disclosure boundary:** merchant publicly bound (accountability); buyer never bound — each invoice derives an ephemeral per-invoice subkey (consumed by privacy-routing PRIV0). 
+  - TOUCH `backend/index.js`+constants+boot: `CMD_MERCHANT_BIND_PUBLISH=340`, `CMD_MERCHANT_BIND_RESOLVE=341` (mirror). `CMD_RECEIPT_VERIFY=343` (PAY1) resolves the binding + `verifyForApp`s the receipt → `verify.ok=true`.
+  - **Selective-disclosure boundary:** merchant publicly bound (accountability); buyer never bound — each invoice derives an ephemeral per-invoice subkey (consumed by privacy-routing PRIV0).
   - Reuses: primitive #2, #4; P0 verify.
 - **Tests/verification.** `test/merchant-record.test.js` (self-certify resolve, forged binding dropped); buyer-side receipt verify smoke. **Exit:** buyer verifies a receipt against a re-verified merchant binding.
 - **Depends on.** PAY1, P0.
@@ -260,7 +260,7 @@ Sequence follows the overview (Slice 0 verify → naming → payments → nostr 
 ### PAY5 — Payments: escrow + disputes in POS (flagged, experimental)
 - **Goal.** Held-funds / marketplace flows with non-custodial 2-of-3 dispute resolution.
 - **Track / doc-section.** payments §9 Phase 5; §7.4.
-- **Deliverables.** CREATE `pear-pos/app/backend/processors/escrow.js` wrapping `pear-exchange` `createEscrowAPI` (2-of-3 P2WSH; arbiter key is a **third party**, not the operator — T9/legal). `CMD_ESCROW_FUND=220`/`RELEASE=221`/`REFUND=222`, `CMD_DISPUTE_OPEN=223`/`EVIDENCE=224` (mirror). Encrypted append-only evidence log (PAY1 dispute ops); `pending→escrowed→settling→final` UI state machine. Reuses PAY1, vendored escrow.
+- **Deliverables.** CREATE `pear-pos/app/backend/processors/escrow.js` wrapping `pear-exchange` `createEscrowAPI` (2-of-3 P2WSH; arbiter key is a **third party**, not the operator — T9/legal). `CMD_ESCROW_FUND=347`, `CMD_ESCROW_RELEASE=348`, `CMD_ESCROW_REFUND=349`, `CMD_DISPUTE_OPEN=350`, and `CMD_DISPUTE_EVIDENCE=351` (mirror). Encrypted append-only evidence log (PAY1 dispute ops); `pending→escrowed→settling→final` UI state machine. Reuses PAY1, vendored escrow.
 - **Tests/verification.** State-machine + signature-threshold tests; dispute-evidence immutability. **Exit:** funds release only on 2-of-3; evidence un-rewritable. MVP = single pre-agreed arbiter.
 - **Depends on.** PAY2, PAY3. **Effort.** L. **Flagged?** Yes.
 

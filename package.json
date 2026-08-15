@@ -28,6 +28,8 @@
     "generate:origin-isolation-smoke-plan": "node scripts/generate-origin-isolation-smoke-plan.mjs",
     "generate:package-manager-manifests": "node scripts/generate-package-manager-manifests.mjs",
     "check:public-trust-readiness": "node scripts/check-public-trust-readiness.mjs",
+    "check:wdk-cohort": "node scripts/check-wdk-cohort.mjs",
+    "check:wdk-network": "node scripts/check-wdk-network.mjs",
     "generate:public-trust-operator-report": "node scripts/generate-public-trust-operator-report.mjs",
     "package:appling": "node scripts/collect-appling-artifacts.mjs",
     "package:macos-dmg": "node scripts/create-macos-dmg.mjs",
@@ -37,6 +39,12 @@
     "smoke:ask-browser:ui": "node qvac-smoke/ask-browser-ui.mjs",
     "smoke:ask-browser:native": "node node_modules/bare/bin/bare qvac-smoke/ask-browser.mjs",
     "smoke:runtime": "node scripts/runtime-rpc-smoke.mjs",
+    "smoke:wdk:node": "node scripts/wdk-bare-smoke.mjs",
+    "smoke:wdk:bare": "node node_modules/bare/bin/bare scripts/wdk-bare-smoke.mjs",
+    "smoke:wdk:ceremony": "node node_modules/bare/bin/bare scripts/wdk-ceremony-smoke.mjs",
+    "smoke:wdk:isolate": "node node_modules/bare/bin/bare scripts/wdk-isolate-smoke.mjs",
+    "smoke:wdk:evm": "node node_modules/bare/bin/bare scripts/wdk-evm-worklet-smoke.mjs",
+    "smoke:wdk:e2e": "node node_modules/bare/bin/bare scripts/wdk-e2e-testnet.mjs",
     "smoke:release-stories": "node scripts/release-rpc-story-smoke.mjs",
     "test": "node --test 'test/*.test.js'"
   },
@@ -89,6 +97,9 @@
     "@noble/secp256k1": "^3.1.0",
     "@qvac/bare-sdk": "0.14.1",
     "@qvac/llm-llamacpp": "0.36.3",
+    "@tetherto/pear-wrk-wdk": "1.0.0-beta.11",
+    "@tetherto/wdk": "1.0.0-beta.16",
+    "@tetherto/wdk-wallet-evm": "1.0.0-beta.16",
     "autobase": "^7.27.3",
     "b4a": "^1.8.0",
     "bare-crypto": "^1.13.4",
@@ -118,9 +129,14 @@
     "pear-runtime": "1.3.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "schema-sheets": "^3.1.1"
+    "schema-sheets": "^3.1.1",
+    "sodium-universal": "5.0.1"
   },
   "devDependencies": {
+    "@tetherto/wdk-worklet-bundler": "1.0.0-beta.9",
     "bare": "1.30.3"
+  },
+  "overrides": {
+    "@tetherto/wdk-wallet": "1.0.0-beta.16"
   }
 }

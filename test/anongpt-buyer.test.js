@@ -97,8 +97,10 @@ async function runBuyerWith (serverResult, req = {}) {
       ServiceRegistry: FakeServiceRegistry,
       ServiceProtocol: FakeServiceProtocol
     },
-    dialTimeoutMs: 100,
-    inferTimeoutMs: 100
+    // The full suite runs native crypto and Argon2 tests in parallel. Keep this
+    // synthetic transport deadline above scheduler jitter; no test waits for it.
+    dialTimeoutMs: 2000,
+    inferTimeoutMs: 2000
   })
   buyer._resolveModules = () => ({
     ServiceRegistry: FakeServiceRegistry,

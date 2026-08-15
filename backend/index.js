@@ -34,7 +34,7 @@ const { CatalogManager } = require('./catalog-manager.js')
 const communitySubmit = require('./community-submit.cjs')
 const { AppManager } = require('./app-manager.js')
 const { SiteManager } = require('./site-manager.js')
-const { PearBridge, PEAR_SWARM_V1_SHIM, PEAR_SYNC_SHIM, PEAR_ANONGPT_SHIM } = require('./pear-bridge.js')
+const { PearBridge, PEAR_SWARM_V1_SHIM, PEAR_SYNC_SHIM, PEAR_ANONGPT_SHIM, PEAR_WALLET_V1_SHIM } = require('./pear-bridge.js')
 const { HttpBridge } = require('./http-bridge.js')
 const { AskBrowserService } = require('./ai/ask-browser-service.cjs')
 const { ContentShield } = require('./content-shield.cjs')
@@ -63,6 +63,15 @@ const { createSearchHandler } = require('./search-handler.js')
 const { PersonalIndex } = require('./personal-index.cjs')
 const { SwarmBridge } = require('./swarm-bridge.js')
 const { SwarmGrants } = require('./swarm-grants.js')
+const { WalletService } = require('./wallet/wallet-service.cjs')
+const { WalletJournal } = require('./wallet/wallet-journal.cjs')
+const { WdkEngineAdapter } = require('./wallet/wdk-engine.cjs')
+const { WalletConsentBroker } = require('./wallet/wallet-consent.cjs')
+const {
+  normalizeListLimit,
+  projectJournalEntries,
+  balancesUnavailable
+} = require('./wallet/wallet-chrome-reads.cjs')
 const C = require('./constants.js')
 
 const { IPC } = BareKit
@@ -143,6 +152,12 @@ const pendingLogins = new Map()
 /** Map<requestId, { resolve, reject, timer }> for swarm.join() consent ceremonies. */
 const pendingSwarmConsents = new Map()
 const SWARM_CONSENT_TIMEOUT_MS = 2 * 60 * 1000  // 2 minutes
+// WDK wallet preview (docs/WDK_WALLET_V0.9_SPEC.md). walletConsent owns the
+// pending-prompt map (keyed by intentId) — see backend/wallet/wallet-consent.cjs.
+let wdkEngine = null // WdkEngineAdapter — spawns the EVM worklet on demand
+let walletJournal = null // WalletJournal — sanitized lifecycle log on the shared Corestore
+let walletService = null // WalletService — chrome-owned wallet orchestrator
+let walletConsent = null // WalletConsentBroker — parks prompts for chrome approval
 let peerCount = 0
 let browseDrives = new Map() // keyHex → Hyperdrive (for ad-hoc browsing)
 let storageTimer = null // handle for the periodic storage-quota check
@@ -1947,6 +1962,11 @@ function applyPrivacyFromSettings (settings) {
   if (proxy && typeof proxy.setPrivacySettings === 'function') {
     proxy.setPrivacySettings(privacySettings)
   }
+  // WDK wallet preview flag (spec §5 gate 1): pushed live so toggling it in
+  // Settings takes effect on the next HTML response without a restart.
+  if (proxy && typeof proxy.setWalletEnabled === 'function') {
+    proxy.setWalletEnabled(merged.experimentalWalletWdk === true)
+  }
   if (contentShield && typeof merged.contentShield === 'boolean') {
     contentShield.setEnabled(merged.contentShield !== false)
   }
@@ -2592,6 +2612,181 @@ rpc.handle(C.CMD_SWARM_REVOKE_ALL_FOR_APP, async ({ driveKey } = {}) => {
 rpc.handle(C.CMD_CONTACTS_REMOVE, async ({ pubkey } = {}) => {
   await requireContacts().remove(pubkey)
   return { ok: true }
+})
+
+// --- WDK wallet preview (docs/WDK_WALLET_V0.9_SPEC.md) ----------------------
+//
+// Chrome-only RPC: Hyperdrive pages never reach these commands — Phase D
+// wires them to the HTTP bridge contract (spec §4) and enters the consent
+// flow through requestWalletConsent(). Coded service errors follow the
+// existing RPC convention: rpc.js serializes handler errors as err.message;
+// the stable err.code vocabulary stays in-process for Phase D's HTTP routes.
+//
+// Passphrases cross as JSON strings — managed, immutable copies that cannot
+// be zeroed; the spec (§3.1) accepts those managed-string copies inside the
+// trusted chrome ceremony for the testnet preview.
+
+function walletError (code, message) {
+  const err = new Error(message || code)
+  err.code = code
+  return err
+}
+
+function requireWalletService () {
+  if (!walletService) throw walletError('not-found', 'wallet is not available — worklet still booting')
+  return walletService
+}
+
+function requireWalletConsent () {
+  if (!walletConsent) throw walletError('not-found', 'wallet consent is not available — worklet still booting')
+  return walletConsent
+}
+
+// Phase D's HTTP wallet routes call this to request chrome consent for a
+// pending wallet prompt. Returns a Promise of the resolution result (the
+// walletService.resolvePrompt() outcome for payment/sign-app, the connect
+// result for connect). See backend/wallet/wallet-consent.cjs.
+function requestWalletConsent (prompt, tuple) {
+  return requireWalletConsent().request(prompt, tuple)
+}
+
+// Phase D installs the real document-token registry through this setter;
+// until then every page-facing wallet call fails closed with not-authorized.
+let walletDocumentTokenVerifier = async () => false
+function setWalletDocumentTokenVerifier (fn) {
+  walletDocumentTokenVerifier = typeof fn === 'function' ? fn : async () => false
+  if (walletService) walletService.setDocumentTokenVerifier(walletDocumentTokenVerifier)
+}
+
+rpc.handle(C.CMD_WALLET_STATUS, async () => {
+  return requireWalletService().status()
+})
+
+rpc.handle(C.CMD_WALLET_CREATE, async ({ passphrase } = {}) => {
+  if (typeof passphrase !== 'string' || passphrase.length === 0) {
+    throw walletError('bad-request', 'passphrase must be a non-empty string')
+  }
+  return requireWalletService().createWallet(passphrase)
+})
+
+rpc.handle(C.CMD_WALLET_IMPORT, async ({ passphrase, mnemonicB64 } = {}) => {
+  if (typeof passphrase !== 'string' || passphrase.length === 0) {
+    throw walletError('bad-request', 'passphrase must be a non-empty string')
+  }
+  if (typeof mnemonicB64 !== 'string' || mnemonicB64.length === 0) {
+    throw walletError('bad-request', 'mnemonicB64 must be a base64 string')
+  }
+  // The RPC frame is JSON-only (backend/rpc.js), so the restore mnemonic
+  // crosses as base64 and is decoded into a mutable buffer here. The engine
+  // overwrites the caller's buffer before its ceremony settles; we zero our
+  // copy in finally for the error paths.
+  let mnemonic = null
+  try {
+    mnemonic = b4a.from(mnemonicB64, 'base64')
+    return await requireWalletService().restoreWallet(passphrase, mnemonic)
+  } finally {
+    try { if (mnemonic) mnemonic.fill(0) } catch {}
+  }
+})
+
+// One command for the two-step backup challenge (spec allocation 303):
+//   { phase: 'begin',  passphrase }          → { ceremonyId, mnemonicB64 }
+//   { phase: 'finish', ceremonyId, outcome } → { completed: true }
+// The mnemonic Buffer crosses to the trusted chrome ceremony as base64 (the
+// frame is JSON-only) and our copy is zeroed immediately after encoding.
+rpc.handle(C.CMD_WALLET_BACKUP, async (data = {}) => {
+  const svc = requireWalletService()
+  if (data.phase === 'begin') {
+    if (typeof data.passphrase !== 'string' || data.passphrase.length === 0) {
+      throw walletError('bad-request', 'passphrase must be a non-empty string')
+    }
+    const begun = await svc.backupWallet(data.passphrase)
+    let mnemonicB64
+    try {
+      mnemonicB64 = b4a.toString(begun.mnemonic, 'base64')
+    } finally {
+      try { begun.mnemonic.fill(0) } catch {}
+    }
+    return { ceremonyId: begun.ceremonyId, mnemonicB64 }
+  }
+  if (data.phase === 'finish') {
+    return svc.finishBackup({ ceremonyId: data.ceremonyId, outcome: data.outcome })
+  }
+  throw walletError('bad-request', 'phase must be begin or finish')
+})
+
+rpc.handle(C.CMD_WALLET_UNLOCK, async ({ passphrase } = {}) => {
+  if (typeof passphrase !== 'string' || passphrase.length === 0) {
+    throw walletError('bad-request', 'passphrase must be a non-empty string')
+  }
+  return requireWalletService().unlock(passphrase)
+})
+
+rpc.handle(C.CMD_WALLET_LOCK, async () => {
+  // Reject parked chrome prompts first; lock() cancels the service-side
+  // pending prompt and revokes every connection.
+  if (walletConsent) walletConsent.rejectAll('wallet-lock')
+  return requireWalletService().lock()
+})
+
+rpc.handle(C.CMD_WALLET_CONNECTIONS_LIST, async () => {
+  return { connections: requireWalletService().listConnections() }
+})
+
+rpc.handle(C.CMD_WALLET_CONNECTION_REVOKE, async ({ browserSessionId, tabId, driveKey } = {}) => {
+  // Chrome-driven revoke: the trusted chrome path holds no document token,
+  // so it uses the service's chrome-only revokeConnection() — never the
+  // page-facing disconnect().
+  return requireWalletService().revokeConnection({ browserSessionId, tabId, driveKey })
+})
+
+rpc.handle(C.CMD_WALLET_CONNECT_RESOLVE, async ({ intentId, approved } = {}) => {
+  if (typeof intentId !== 'string') throw walletError('bad-request', 'intentId must be a string')
+  return requireWalletConsent().resolve(intentId, approved === true, 'connect')
+})
+
+rpc.handle(C.CMD_WALLET_PAYMENT_RESOLVE, async ({ intentId, approved } = {}) => {
+  if (typeof intentId !== 'string') throw walletError('bad-request', 'intentId must be a string')
+  return requireWalletConsent().resolve(intentId, approved === true, ['payment', 'sign-app'])
+})
+
+// Chrome-owned read commands (spec §10 allocations 306–308). Pages never
+// reach this RPC channel; only the trusted settings UI calls these.
+rpc.handle(C.CMD_WALLET_ADDRESS, async () => {
+  const status = await requireWalletService().status()
+  if (status.state !== 'unlocked' || typeof status.address !== 'string') {
+    throw walletError('wallet-locked', 'wallet is locked — unlock it to read the address')
+  }
+  return { address: status.address }
+})
+
+rpc.handle(C.CMD_WALLET_BALANCES, async () => {
+  const status = await requireWalletService().status()
+  if (status.state !== 'unlocked') {
+    throw walletError('wallet-locked', 'wallet is locked — unlock it to read balances')
+  }
+  // The balance read goes through the live chain RPC; when the network is
+  // down degrade to { unavailable: true, code } instead of failing the
+  // settings screen.
+  try {
+    return await wdkEngine.getBalances()
+  } catch (err) {
+    return balancesUnavailable(err)
+  }
+})
+
+rpc.handle(C.CMD_WALLET_TRANSACTIONS, async ({ limit } = {}) => {
+  requireWalletService()
+  const normalized = normalizeListLimit(limit)
+  if (normalized === null) throw walletError('bad-request', 'limit must be an integer between 1 and 200')
+  const entries = walletJournal ? await walletJournal.listRecent(normalized) : []
+  return { transactions: projectJournalEntries(entries) }
+})
+
+// Spec §10 allocation 313: reconcile ships with a later phase. Registered so
+// the chrome mirror is complete; fails closed until implemented.
+rpc.handle(C.CMD_WALLET_RECONCILE, async () => {
+  throw walletError('not-implemented', 'CMD_WALLET_RECONCILE is reserved and not implemented in v0.9')
 })
 
 
@@ -3299,6 +3494,48 @@ async function boot () {
     requestConsent: (args) => openSwarmConsent(args),
   })
 
+  // WDK wallet preview (docs/WDK_WALLET_V0.9_SPEC.md). Chrome-owned stack:
+  // WdkEngineAdapter spawns the EVM worklet on demand (default Bare spawner),
+  // WalletJournal records sanitized lifecycle entries on the shared
+  // Corestore, WalletService orchestrates under <storagePath>/wallet/wdk-v1/,
+  // and WalletConsentBroker parks prompts for chrome approval. Best-effort —
+  // a wallet init failure must not block browsing; the CMD_WALLET_* handlers
+  // then fail closed with not-found.
+  try {
+    const walletLogger = {
+      info: (entry) => console.log('[wallet]', entry.operation, entry.outcomeCode, entry.lifecycleState)
+    }
+    wdkEngine = new WdkEngineAdapter({ logger: walletLogger })
+    walletJournal = new WalletJournal({ store })
+    await walletJournal.ready()
+    walletService = new WalletService({
+      storage: storagePath,
+      engine: wdkEngine,
+      journal: walletJournal,
+      logger: walletLogger,
+      // Phase D replaces this deny placeholder through
+      // setWalletDocumentTokenVerifier(); until then page-facing calls fail
+      // closed with not-authorized.
+      verifyDocumentToken: (args) => walletDocumentTokenVerifier(args)
+    })
+    walletConsent = new WalletConsentBroker({
+      walletService,
+      emit: (evt, data) => rpc.event(evt, data),
+      events: {
+        connect: C.EVT_WALLET_CONNECT_REQUEST,
+        payment: C.EVT_WALLET_PAYMENT_REQUEST,
+        txUpdate: C.EVT_WALLET_TX_UPDATE
+      }
+    })
+    console.log('Wallet service ready')
+  } catch (err) {
+    console.error('Wallet init failed:', err && err.message)
+    wdkEngine = null
+    walletJournal = null
+    walletService = null
+    walletConsent = null
+  }
+
   rpc.event(C.EVT_BOOT_PROGRESS, { stage: 'managers-ready', message: 'Managers loaded' })
 
   // Restore persisted app/site state from disk
@@ -3505,6 +3742,13 @@ async function boot () {
   proxy.setAnongptDriveKey(C.ANONGPT_DRIVE_KEY)
   aiService = globalThis._pearbrowserEsmModules?.aiService || null
 
+  // WDK wallet preview (spec §4/§5): the shim string, the document-token
+  // verifier the wallet service uses for every page-facing call, and the
+  // browser-session id that scopes wallet connections to this browser run.
+  proxy.setPearWalletShim(PEAR_WALLET_V1_SHIM)
+  setWalletDocumentTokenVerifier((args) => proxy.walletDocuments.verify(args))
+  const walletBrowserSessionId = require('crypto').randomBytes(16).toString('hex')
+
   // Mount direct HTTP bridge (WebView → localhost → Bare, bypasses RN relay)
   const httpBridge = new HttpBridge(pearBridge, swarm, getDriveForProxy, {
     validateToken: (token) => proxy ? proxy.validateApiToken(token) : null,
@@ -3515,6 +3759,13 @@ async function boot () {
     anongptBuyer,
     anongptDriveKey: C.ANONGPT_DRIVE_KEY,
     aiService,
+    // WDK wallet routes (spec §4.4): the service, the per-document token
+    // registry (owned by the proxy, minted at injection time), the chrome
+    // consent broker entry point and the browser-session id for tuples.
+    walletService,
+    walletDocuments: proxy.walletDocuments,
+    requestWalletConsent: (prompt, tuple) => requestWalletConsent(prompt, tuple),
+    browserSessionId: walletBrowserSessionId,
     // Login ceremony plumbing — http-bridge calls requestLogin() when a
     // page invokes pear.login(). We fire EVT_LOGIN_REQUEST up to the
     // UI, which calls CMD_LOGIN_RESOLVE after the user decides. See
@@ -3612,6 +3863,12 @@ async function shutdown () {
   if (storageTimer) { clearInterval(storageTimer); storageTimer = null }
   try { shieldListSync?.stop() } catch {}
   try { await askBrowserService.close() } catch {}
+  // Wallet: reject every parked chrome prompt, then lock — this disposes the
+  // WDK worklet and revokes connections before the shared Corestore closes.
+  if (walletConsent) { try { walletConsent.rejectAll('shutdown') } catch {} walletConsent = null }
+  if (walletService) { try { await walletService.lock() } catch {} walletService = null }
+  wdkEngine = null
+  walletJournal = null
   if (aiService) { try { await aiService.close() } catch {}; aiService = null }
   if (swarmBridge) { try { await swarmBridge.destroy() } catch {} swarmBridge = null }
   if (proxy) { try { await proxy.stop() } catch {} proxy = null }

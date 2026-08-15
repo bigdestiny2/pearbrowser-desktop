@@ -55,6 +55,9 @@ class WorkletRPC extends EventEmitter {
    * Register a command handler
    */
   handle (cmd, fn) {
+    if (this._handlers.has(cmd)) {
+      throw new Error(`RPC handler already registered for command: ${cmd}`)
+    }
     this._handlers.set(cmd, fn)
   }
 
@@ -259,7 +262,7 @@ class WorkletRPC extends EventEmitter {
     this._setConnectionState('disconnecting')
 
     // Reject all pending requests
-    for (const [id, pending] of this._pending) {
+    for (const pending of this._pending.values()) {
       clearTimeout(pending.timer)
       pending.reject(new Error('RPC connection closed'))
     }

@@ -4,6 +4,51 @@
 > only to explain past releases; they are not current installation, launch, or
 > recovery instructions. Current native delivery requires a verified package.
 
+## Unreleased
+
+WDK wallet preview (experimental, desktop-only, testnet-only, off by default
+behind `experimentalWalletWdk`). Specification: `docs/WDK_WALLET_V0.9_SPEC.md`.
+
+### Added
+
+- A browser-owned Tether WDK wallet on Stable Testnet: separate BIP-39 seed,
+  `pb-wdk-vault-v1` passphrase vault, frozen binary secret envelopes, and a
+  narrow `WdkEngineAdapter` that runs the full EVM graph inside a dedicated
+  Bare worker thread (golden account/signature vectors reproduced in-worker).
+- One-shot mnemonic ceremony worklet (`wdk-ceremony-worker.mjs`): wallet
+  create/restore/backup now run end to end through the engine's default
+  `spawnCeremonyWorklet` in a dedicated Bare worker thread — `bip39-mnemonic`
+  generation/validation, seed derivation, binary `pb-wdk-secrets-v1` envelope
+  handoff with a fresh random key, coded tamper rejection and enforced
+  one-shot semantics; the e2e script uses the real `restoreWallet`/`backupWallet`
+  genesis path instead of writing vault files directly.
+- Wallet service layer: canonical payment/app-sign intents, policy ceilings
+  and rate limits, session connections, append-only sanitized journal,
+  document-token registry, and a consent broker that parks one prompt at a
+  time for browser-chrome approval.
+- Page-facing `window.pear.wallet.v1` (connect, pay, sign-app, status,
+  transaction, disconnect) over a manifest-gated, CSP-hash-authorized shim
+  with per-document tokens and `/api/wallet/v1/*` routes.
+- Wallet settings section (create/import/backup, unlock/lock, address,
+  balance, activity, connection list with revoke) and the consent modal.
+- `scripts/wdk-e2e-testnet.mjs` (`smoke:wdk:e2e`): env-gated live Stable
+  Testnet proof across the real production stack; skips cleanly without
+  `WDK_E2E_MNEMONIC`.
+
+### Fixed
+
+- Terminating a Bare worker after `bare-https` TLS traffic SIGSEGV'd the whole
+  runtime; the production WDK worker now routes ethers' HTTP(S) through
+  `bare-fetch` (`FetchRequest.registerGetUrl`) and disposes the provider on
+  lock, so network-active workers terminate cleanly.
+- `WalletService` dropped `walletTabOrigin` before document-token
+  verification, which would have failed every page call closed against the
+  real registry; the full tuple now reaches the verifier, pinned by a
+  regression test.
+- The Bare isolate/EVM worklet smoke tests flaked under full-suite parallel
+  load; they now serialize on a cross-process file lock and use load-tolerant
+  spawn/readiness/terminate timeouts.
+
 ## v0.8.0 — 2026-07-29
 
 Pear v3 application delivery and catalogue submission release. PearBrowser now
