@@ -9,6 +9,9 @@
   "upgrade": "pear://tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty",
   "scripts": {
     "preinstall": "node scripts/check-hiverelay-layout.mjs",
+    "build:ui": "esbuild ui/main.js --bundle --format=esm --outfile=ui/main.bundle.js --define:process.env.NODE_ENV=\\\"production\\\"",
+    "watch:ui": "esbuild ui/main.js --bundle --format=esm --outfile=ui/main.bundle.js --define:process.env.NODE_ENV=\\\"development\\\" --sourcemap --watch",
+    "prestart": "npm run build:ui",
     "start": "electron electron/main.cjs",
     "run": "electron electron/main.cjs",
     "check:release-evidence": "node scripts/check-release-evidence.mjs",
@@ -134,7 +137,8 @@
   },
   "devDependencies": {
     "@tetherto/wdk-worklet-bundler": "1.0.0-beta.9",
-    "bare": "1.30.3"
+    "bare": "1.30.3",
+    "esbuild": "^0.28.1"
   },
   "overrides": {
     "@tetherto/wdk-wallet": "1.0.0-beta.16"

@@ -22,3 +22,7 @@ examples/headless-tab/*.png
 # agent session scratch
 outputs/
 .landing-seed.mjs
+
+# Renderer bundle — regenerate with `npm run build:ui`
+ui/main.bundle.js
+ui/main.bundle.js.map
