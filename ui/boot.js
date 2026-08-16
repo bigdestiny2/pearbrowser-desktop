@@ -15,6 +15,10 @@ import { RpcClient } from './rpc-client.js'
 // holding 9876.
 const RPC_PORT_BASE = 9876
 const RPC_PORT_COUNT = 5
+// How long the renderer keeps rescanning the port range while the Bare
+// backend is still coming up, and how long it pauses between full scans.
+const BOOT_CONNECT_TIMEOUT_MS = 20000
+const BOOT_RETRY_DELAY_MS = 400
 const RPC_PROBE_ID = 900000001
 const RPC_SESSION_TOKEN = String(globalThis.pearbrowserRuntime?.sessionToken || '')
 
@@ -417,16 +421,26 @@ function tryConnect (url, timeoutMs) {
 export async function startBackend () {
   let pipe = null
   let connectedPort = null
-  const errors = []
-  for (let p = RPC_PORT_BASE; p < RPC_PORT_BASE + RPC_PORT_COUNT; p++) {
-    try {
-      pipe = await tryConnect(rendererUrlFor(p), 1500)
-      connectedPort = p
-      console.log('[rpc] connected on :' + p)
-      break
-    } catch (err) {
-      errors.push(`:${p} ${err.message}`)
+  let errors = []
+  // The renderer and the Bare backend start concurrently, and the backend
+  // needs a few seconds to bind its WS port. A single port scan therefore
+  // loses a startup race it has no reason to lose, so keep rescanning until
+  // the deadline before declaring the host dead.
+  const deadline = Date.now() + BOOT_CONNECT_TIMEOUT_MS
+  while (!pipe) {
+    errors = []
+    for (let p = RPC_PORT_BASE; p < RPC_PORT_BASE + RPC_PORT_COUNT; p++) {
+      try {
+        pipe = await tryConnect(rendererUrlFor(p), 1500)
+        connectedPort = p
+        console.log('[rpc] connected on :' + p)
+        break
+      } catch (err) {
+        errors.push(`:${p} ${err.message}`)
+      }
     }
+    if (pipe || Date.now() >= deadline) break
+    await new Promise((resolve) => setTimeout(resolve, BOOT_RETRY_DELAY_MS))
   }
   if (!pipe) {
     // None of the ports accepted. The Bare main process is either not
@@ -440,9 +454,10 @@ export async function startBackend () {
     // remote app reference; reinstall the verified signed native package.
     throw new Error(
       `Could not reach backend on any port ${RPC_PORT_BASE}-${RPC_PORT_BASE + RPC_PORT_COUNT - 1} ` +
-      `(${errors.join('; ')}). The Bare main process appears not to be running. ` +
-      `Most likely cause: an interrupted installation. Reinstall the verified ` +
-      `signed native package and relaunch it.`
+      `after ${Math.round(BOOT_CONNECT_TIMEOUT_MS / 1000)}s (${errors.join('; ')}). ` +
+      `The Bare main process appears not to be running. Most likely cause: an ` +
+      `interrupted installation. Reinstall the verified signed native package ` +
+      `and relaunch it.`
     )
   }
   const rpc = new RpcClient(pipe)
