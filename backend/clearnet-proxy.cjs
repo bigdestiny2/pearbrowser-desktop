@@ -85,8 +85,19 @@ function parseClearnetPath (pathname, search = '') {
   const target = decodeClearnetTarget(encoded)
   if (!target) return null
   // Extra path after the blob is not used — full URL is in the blob.
-  // search on the proxy request is ignored; target carries its own query.
-  return { target, encoded, search }
+  // A query on the proxy request comes from an in-page GET form submit: the
+  // rewritten form action is a bare /clearnet/<blob> and the browser appends
+  // the field values. Mirror HTML form semantics and let it REPLACE the
+  // target query, otherwise every on-page search box silently loses its input.
+  let resolved = target
+  if (typeof search === 'string' && search.length > 1) {
+    try {
+      const u = new URL(target)
+      u.search = search
+      resolved = u.toString()
+    } catch {}
+  }
+  return { target: resolved, encoded, search }
 }
 
 /**
