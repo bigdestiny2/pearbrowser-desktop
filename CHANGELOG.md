@@ -4,10 +4,12 @@
 > only to explain past releases; they are not current installation, launch, or
 > recovery instructions. Current native delivery requires a verified package.
 
-## Unreleased
+## v0.9.0 — 2026-08-17
 
-WDK wallet preview (experimental, desktop-only, testnet-only, off by default
-behind `experimentalWalletWdk`). Specification: `docs/WDK_WALLET_V0.9_SPEC.md`.
+WDK wallet preview release (experimental, desktop-only, testnet-only, off by
+default behind `experimentalWalletWdk`), plus corrective fixes accumulated
+since v0.8.0 — including a Bare boot regression that killed the HTTP proxy
+before it started. Specification: `docs/WDK_WALLET_V0.9_SPEC.md`.
 
 ### Added
 
@@ -73,6 +75,27 @@ behind `experimentalWalletWdk`). Specification: `docs/WDK_WALLET_V0.9_SPEC.md`.
 - The Bare isolate/EVM worklet smoke tests flaked under full-suite parallel
   load; they now serialize on a cross-process file lock and use load-tolerant
   spawn/readiness/terminate timeouts.
+- **Boot regression:** the wallet wiring called `require('crypto')` in the
+  boot path; under Bare that throws `MODULE_NOT_FOUND` after the wallet
+  service came up, so boot died before `proxy.start()` and the shell hung
+  with a dead HTTP proxy. All inline node-builtin requires in Bare-run
+  sources now use the `bare-*` equivalents (including two latent sites in
+  command handlers and the swarm.v1 Tier-A topic derivation), and a static
+  CI guard (`test/bare-runtime-require-guard.test.js`) fails the suite if a
+  node-only builtin require reappears.
+- QVAC host: avoided a dynamic-import runtime crash in the native AI path.
+- The release-preflight HiveRelay layout guard now accepts semver-range and
+  `latest` dependency specs while still enforcing the pinned release line,
+  and its pin matching is range-aware without a ReDoS-vulnerable regex.
+- The release story smoke's catalogue search required `app.link`, which the
+  same script's Peercord migration contract forbids; native-delivery rows now
+  count as searchable, matching the catalogue UI.
+
+### Docs
+
+- Pinned the HiveRelay stable compatibility boundary (fleet/source `v0.24.3`,
+  bundled npm client line `0.20.2`) and aligned release-state and dependency
+  security notes.
 
 ## v0.8.0 — 2026-07-29
 
