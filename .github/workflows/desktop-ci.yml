@@ -25,6 +25,11 @@ jobs:
           ref: 5c1c920b8b42ffe895f78c49c43d176d5ca93086
           path: pear-ecosystem/01-browser/PearBrowser
 
+      # The v0.20.2 ref below and the 0.20.2 literals in the guard step must move
+      # together with EXPECTED_HIVERELAY_VERSION in
+      # scripts/check-hiverelay-layout.mjs. They pin the HiveRelay *release
+      # line*, not the dependency spec: package.json may express that line as
+      # the `latest` dist-tag or as an explicit semver range.
       - name: Checkout HiveRelay release contract
         uses: actions/checkout@v4
         with:
