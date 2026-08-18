@@ -1,7 +1,7 @@
 {
   "name": "pearbrowser-desktop",
   "productName": "PearBrowser",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Local-first P2P browser, catalogue, and publishing platform with an embedded Pear OTA runtime.",
   "license": "Apache-2.0 AND MIT",
   "type": "module",
@@ -106,7 +106,7 @@
     "bare-env": "3.0.0",
     "bare-events": "^2.0.0",
     "bare-fs": "^4.0.0",
-    "bare-http1": "^4.5.5",
+    "bare-http1": "^4.5.8",
     "bare-https": "^2.1.3",
     "bare-path": "^3.0.0",
     "bare-process": "4.5.0",
