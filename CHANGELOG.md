@@ -4,6 +4,30 @@
 > only to explain past releases; they are not current installation, launch, or
 > recovery instructions. Current native delivery requires a verified package.
 
+## v0.9.1 — 2026-08-18
+
+Corrective release for two user-facing defects found by post-release visual QA
+of v0.9.0 — both invisible to the nonvisual release gates.
+
+### Fixed
+
+- **Blank window under the embedded Electron host.** The shell's bare module
+  specifiers (`react-dom/client`, `htm/react`) can never resolve when
+  index.html loads over `file://`; the window rendered blank from the Pear v3
+  migration onward. The UI is now an esbuild bundle
+  (`npm run build:ui` → committed `ui/dist/main.bundle.js`) that loads
+  identically under `file://` and pear-served hosts, and a guard test pins
+  index.html to the bundle.
+- The renderer's backend port scan (9876–9880) ran once and raced the Bare
+  worker binding its WS server, showing "Boot failed / reinstall" on healthy
+  installs; the scan now retries under a 25-second deadline.
+- Every https relay capability check in Settings failed with
+  `transport.get is not a function`: `bare-https@2` exports `request()` only
+  (the `get()` shorthand exists on `bare-http1` alone). Relay GETs now go
+  through `request()+end()`, verified live against the US gateway's signed
+  capability document; the transport mocks mirror the real modules and a
+  regression test pins the shape.
+
 ## v0.9.0 — 2026-08-17
 
 WDK wallet preview release (experimental, desktop-only, testnet-only, off by

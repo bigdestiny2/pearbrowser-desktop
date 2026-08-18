@@ -20,6 +20,7 @@
   </categories>
   <url type="homepage">https://github.com/bigdestiny2/pearbrowser-desktop</url>
   <releases>
+    <release version="0.9.1" date="2026-08-18"/>
     <release version="0.9.0" date="2026-08-17"/>
     <release version="0.8.0" date="2026-07-29"/>
     <release version="0.7.0" date="2026-07-16"/>
