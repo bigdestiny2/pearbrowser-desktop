@@ -5,7 +5,10 @@
     <meta name="description" content="PearBrowser Desktop: a local-first peer-to-peer browser, app catalogue, search, naming, Nostr bridge, and P2P site publisher." />
     <title>PearBrowser Desktop</title>
     <link rel="stylesheet" href="./styles.css" />
-    <script type="module" src="./ui/main.js"></script>
+    <!-- Bundled UI (npm run build:ui): the embedded-Electron host loads this
+         page over file://, where bare specifiers like 'react-dom/client'
+         cannot resolve. The bundle keeps the shell working in every host. -->
+    <script type="module" src="./ui/dist/main.bundle.js"></script>
   </head>
   <body class="pear-ui">
     <div id="app"></div>

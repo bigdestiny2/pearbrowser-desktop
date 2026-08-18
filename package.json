@@ -46,7 +46,9 @@
     "smoke:wdk:evm": "node node_modules/bare/bin/bare scripts/wdk-evm-worklet-smoke.mjs",
     "smoke:wdk:e2e": "node node_modules/bare/bin/bare scripts/wdk-e2e-testnet.mjs",
     "smoke:release-stories": "node scripts/release-rpc-story-smoke.mjs",
-    "test": "node --test 'test/*.test.js'"
+    "test": "node --test 'test/*.test.js'",
+    "build:ui": "esbuild ui/main.js --bundle --format=esm --outfile=ui/dist/main.bundle.js --define:process.env.NODE_ENV='\"production\"' --minify",
+    "prestart": "npm run -s build:ui"
   },
   "pear": {
     "name": "pearbrowser-desktop",
@@ -134,7 +136,8 @@
   },
   "devDependencies": {
     "@tetherto/wdk-worklet-bundler": "1.0.0-beta.9",
-    "bare": "1.30.3"
+    "bare": "1.30.3",
+    "esbuild": "^0.28.2"
   },
   "overrides": {
     "@tetherto/wdk-wallet": "1.0.0-beta.16"
