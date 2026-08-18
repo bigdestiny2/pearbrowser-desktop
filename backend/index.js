@@ -1795,7 +1795,7 @@ rpc.handle(C.CMD_SYNC_CREATE, async () => {
     return { key: existing.key, encKey: s.syncEncKey, writerKey: existing.localKey, writable: existing.writable, ...st }
   }
   const { BrowserStateSync } = require('./browser-state-sync.cjs')
-  const encKey = require('crypto').randomBytes(32).toString('hex')
+  const encKey = crypto.randomBytes(32).toString('hex')
   // Mint the autobase key, then reopen by key (mirrors ensureNameRegistry). The
   // store is namespaced inside BrowserStateSync by a FIXED substore, so mint and
   // reopen-by-key share that substore (reopen stays writable) and mint.close()
@@ -2561,7 +2561,7 @@ rpc.handle(C.CMD_NAMEREG_REVOKE, async ({ name } = {}) => {
 
 async function openSwarmConsent ({ driveKeyHex, appName, reason, topicHex, protocol }) {
   return await new Promise((resolve, reject) => {
-    const requestId = require('crypto').randomBytes(16).toString('hex')
+    const requestId = crypto.randomBytes(16).toString('hex')
     const timer = setTimeout(() => {
       if (pendingSwarmConsents.has(requestId)) {
         pendingSwarmConsents.delete(requestId)
@@ -3747,7 +3747,7 @@ async function boot () {
   // browser-session id that scopes wallet connections to this browser run.
   proxy.setPearWalletShim(PEAR_WALLET_V1_SHIM)
   setWalletDocumentTokenVerifier((args) => proxy.walletDocuments.verify(args))
-  const walletBrowserSessionId = require('crypto').randomBytes(16).toString('hex')
+  const walletBrowserSessionId = crypto.randomBytes(16).toString('hex')
 
   // Mount direct HTTP bridge (WebView → localhost → Bare, bypasses RN relay)
   const httpBridge = new HttpBridge(pearBridge, swarm, getDriveForProxy, {

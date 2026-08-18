@@ -813,7 +813,10 @@ function runCatalogueStory (catalogResult) {
   const searches = {}
 
   for (const term of CATALOG_SEARCH_TERMS) {
-    const hits = apps.filter((app) => app?.link && catalogAppSearchText(app).includes(term))
+    // Searchable = anything the catalogue UI can present an action for:
+    // browsable link/drive OR a native-delivery row (including
+    // migration-required apps like Peercord, which must NOT carry a link).
+    const hits = apps.filter((app) => (app?.link || app?.driveKey || app?.nativeDelivery) && catalogAppSearchText(app).includes(term))
     if (hits.length === 0) throw new Error(`catalogue story search returned no results for ${term}`)
     const exact = hits.find((app) => sameNameOrId(app, term)) || hits[0]
     searches[term] = {

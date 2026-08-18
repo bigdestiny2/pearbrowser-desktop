@@ -26,6 +26,7 @@
  */
 
 const crypto = require('hypercore-crypto')
+const { createHash } = require('bare-crypto')
 const b4a = require('b4a')
 
 const TIER_A_PREFIX = 'pear.swarm.v1:'
@@ -43,7 +44,7 @@ const DEFAULT_LIMITS = {
  * because only their drive's owner can address this namespace.
  */
 function deriveTierATopic (driveKeyHex, subtopic) {
-  const h = require('crypto').createHash('sha256')
+  const h = createHash('sha256')
   h.update(TIER_A_PREFIX)
   h.update(driveKeyHex)
   if (subtopic) h.update(String(subtopic))
