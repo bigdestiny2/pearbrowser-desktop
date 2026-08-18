@@ -24,8 +24,12 @@ function makeResponse () {
   return res
 }
 
-function makeTransport () {
-  return {
+// Mirrors the real transports: bare-http1 exposes request() AND get(), but
+// bare-https@2 exposes request() ONLY. RelayClient must therefore never call
+// transport.get() — under Bare that threw "transport.get is not a function"
+// for every https relay and broke the Settings capability checks.
+function makeTransport ({ withGet } = {}) {
+  const t = {
     autoRespond: true,
     calls: [],
     reset () {
@@ -35,35 +39,29 @@ function makeTransport () {
       this.lastRequest = null
       this.lastResponse = null
     },
-    get (opts, cb) {
-      const req = makeRequest()
-      const res = makeResponse()
-      this.lastOptions = opts
-      this.lastRequest = req
-      this.lastResponse = res
-      this.calls.push({ method: 'GET', opts, req, res })
-      if (this.autoRespond) process.nextTick(() => cb(res))
-      return req
-    },
     request (opts, cb) {
       const req = makeRequest()
       const res = makeResponse()
       this.lastOptions = opts
       this.lastRequest = req
       this.lastResponse = res
-      this.calls.push({ method: 'POST', opts, req, res })
+      this.calls.push({ method: (opts && opts.method) || 'GET', opts, req, res })
       if (this.autoRespond) process.nextTick(() => cb(res))
       return req
     }
   }
+  if (withGet) {
+    t.get = function (opts, cb) { return this.request({ ...opts, method: 'GET' }, cb) }
+  }
+  return t
 }
 
 function tick () {
   return new Promise(resolve => setImmediate(resolve))
 }
 
-const httpTransport = makeTransport()
-const httpsTransport = makeTransport()
+const httpTransport = makeTransport({ withGet: true })
+const httpsTransport = makeTransport({ withGet: false })
 const origLoad = Module._load
 Module._load = function (request, parent, isMain) {
   if (request === 'bare-http1') return httpTransport
@@ -167,4 +165,22 @@ test('RelayClient capability check reports HTTP failures without throwing', asyn
 
   const result = await request
   assert.deepEqual(result, { ok: false, status: 502, error: 'HTTP 502' })
+})
+
+test('https GETs go through request()+end() — bare-https has no get() shorthand', async () => {
+  resetTransports()
+  const client = new RelayClient()
+  const pending = client.checkCapability('https://relay.example.com', 1000)
+  await tick()
+
+  assert.equal(httpsTransport.calls.length, 1)
+  assert.equal(httpsTransport.calls[0].method, 'GET')
+  assert.equal(httpsTransport.lastRequest.ended, true,
+    'GET requests must be end()ed — request() without end() never flushes')
+
+  httpsTransport.lastResponse.emit('data', Buffer.from('{"schemaVersion":1}'))
+  httpsTransport.lastResponse.emit('end')
+  const result = await pending
+  assert.equal(result.ok, true)
+  assert.equal(result.doc.schemaVersion, 1)
 })

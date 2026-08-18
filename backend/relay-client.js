@@ -348,7 +348,9 @@ class RelayClient {
       }, timeout)
 
       try {
-        req = transport.get(relayRequestOptions(parsed), (res) => {
+        // bare-https exposes request() but not the get() shorthand
+        // (bare-http1 has both) — request+end keeps http and https uniform.
+        req = transport.request(relayRequestOptions(parsed), (res) => {
           const chunks = []
           let total = 0
           res.on('data', (chunk) => {
@@ -371,6 +373,7 @@ class RelayClient {
           res.on('error', fail)
         })
         req.on('error', fail)
+        req.end()
       } catch (err) {
         fail(err)
       }

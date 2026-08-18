@@ -516,7 +516,9 @@ test('RelayClient uses scheme-aware transport for public HTTPS gateways', () => 
   assert.match(relayClient, /const https = require\('bare-https'\)/)
   assert.match(relayClient, /function relayTransportForUrl/)
   assert.match(relayClient, /parsed\.protocol === 'https:' \? 443 : 80/)
-  assert.match(relayClient, /transport\.get\(relayRequestOptions\(parsed\)/)
+  // bare-https has no get() shorthand — GETs must go through request()+end().
+  assert.match(relayClient, /transport\.request\(relayRequestOptions\(parsed\)/)
+  assert.doesNotMatch(relayClient, /transport\.get\(/)
   assert.match(relayClient, /transport\.request\(\{/)
   assert.match(relayClient, /DEFAULT_MAX_RESPONSE_BYTES = 16 \* 1024 \* 1024/)
   assert.match(relayClient, /DEFAULT_MAX_CONTROL_RESPONSE_BYTES = 1024 \* 1024/)
