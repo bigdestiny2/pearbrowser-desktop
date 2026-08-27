@@ -3252,7 +3252,7 @@ function Apps ({ rpc, C, onLaunch }) {
   // Recent catalog keys (loaded successfully at least once) — persisted
   // via user-data settings so they survive across launches.
   const [recentCatalogs, setRecentCatalogs] = useState([])
-  const [installed, setInstalled] = useState([])
+  const [savedCopies, setSavedCopies] = useState([])
   const [nativeApps, setNativeApps] = useState([])
   const [nativeProgress, setNativeProgress] = useState(null)
   const [busy, setBusy] = useState(null)
@@ -3337,12 +3337,12 @@ function Apps ({ rpc, C, onLaunch }) {
     setTimeout(() => setLaunched(''), 3500)
   }
 
-  const refreshInstalled = async () => {
+  const refreshSavedCopies = async () => {
     try {
       const list = await rpc.request(C.CMD_LIST_INSTALLED)
-      setInstalled(Array.isArray(list) ? list : (list?.apps ?? []))
+      setSavedCopies(Array.isArray(list) ? list : (list?.apps ?? []))
     } catch (e) {
-      setErr(`list failed: ${e.message}`)
+      setErr(`saved copies: ${e.message}`)
     }
   }
 
@@ -3418,8 +3418,8 @@ function Apps ({ rpc, C, onLaunch }) {
     }
   }
 
-  // Ask the backend which installed apps are behind the loaded catalog's
-  // version. Non-critical — a failure just means no update badges.
+  // Ask the backend which saved static copies are behind the loaded catalog's
+  // version. Non-critical — a failure just means no refresh badges.
   const refreshUpdates = async () => {
     try {
       const list = await rpc.request(C.CMD_CHECK_UPDATES)
@@ -3433,13 +3433,13 @@ function Apps ({ rpc, C, onLaunch }) {
     }
   }
 
-  // Re-install an installed app at its catalog's newer version. Re-running
-  // install re-syncs the drive and bumps the stored version, so the same
-  // path that installs an app also updates it.
-  const updateApp = async (id) => {
+  // Refresh a saved static copy from its catalog entry. The legacy backend RPC
+  // calls this "install", but this path only syncs browsable Hyperdrive bytes;
+  // it never installs or launches native application code.
+  const refreshSavedCopy = async (id) => {
     const catalogApp = apps.find((a) => a.id === id)
-    if (!catalogApp) { setErr(`update ${id}: not in any loaded catalog`); return }
-    await installApp(catalogApp)
+    if (!catalogApp) { setErr(`refresh ${id}: not in any loaded catalog`); return }
+    await saveOffline(catalogApp)
     await refreshUpdates()
   }
 
@@ -3670,10 +3670,10 @@ function Apps ({ rpc, C, onLaunch }) {
     }
   }
 
-  // First mount: fetch installed list, then load every known catalog so
+  // First mount: fetch saved static copies, then load every known catalog so
   // the aggregated store is populated, not just the most recent one.
   useEffect(() => {
-    refreshInstalled()
+    refreshSavedCopies()
     refreshNativeApps()
     // Pull the aggregated store immediately so backend-registered catalogues
     // (e.g. the default schema-sheets catalogue, seeded on boot) show up without
@@ -3763,43 +3763,48 @@ function Apps ({ rpc, C, onLaunch }) {
     return host.onPearAppProgress((progress) => setNativeProgress(progress || null))
   }, [])
 
-  const installApp = async (app) => {
-    setErr(''); setBusy(`install:${app.id}`)
+  const saveOffline = async (app) => {
+    setErr(''); setBusy(`save-offline:${app.id}`)
     try {
       await rpc.request(C.CMD_INSTALL_APP, app, 120000)
-      await refreshInstalled()
+      await refreshSavedCopies()
     } catch (e) {
-      setErr(`install ${app.name}: ${e.message}`)
+      setErr(`save ${app.name} offline: ${e.message}`)
     } finally {
       setBusy(null)
     }
   }
 
-  const uninstallApp = async (app) => {
-    setErr(''); setBusy(`uninstall:${app.id}`)
+  const removeSavedCopy = async (app) => {
+    setErr(''); setBusy(`remove-saved:${app.id}`)
     try {
       await rpc.request(C.CMD_UNINSTALL_APP, { id: app.id })
-      await refreshInstalled()
+      await refreshSavedCopies()
     } catch (e) {
-      setErr(`uninstall ${app.name}: ${e.message}`)
+      setErr(`remove saved copy of ${app.name}: ${e.message}`)
     } finally {
       setBusy(null)
     }
   }
 
-  const launchApp = async (app) => {
-    setErr(''); setBusy(`launch:${app.id}`)
+  const openSavedSite = async (app) => {
+    setErr(''); setBusy(`open-saved:${app.id}`)
     try {
       const res = await rpc.request(C.CMD_LAUNCH_APP, { id: app.id })
       onLaunch(res.localUrl)
     } catch (e) {
-      setErr(`launch ${app.name}: ${e.message}`)
+      setErr(`open ${app.name}: ${e.message}`)
     } finally {
       setBusy(null)
     }
   }
 
-  const isInstalled = (id) => installed.some((a) => a.id === id)
+  const isSavedOffline = (id) => savedCopies.some((a) => a.id === id)
+
+  const openStaticContent = (app) => {
+    if (isSavedOffline(app.id)) return openSavedSite(app)
+    openSite(app)
+  }
 
   // Category facets across all loaded catalogs, plus the filtered view.
   // Recomputed only when the aggregate or filters change.
@@ -4050,9 +4055,16 @@ function Apps ({ rpc, C, onLaunch }) {
                   ${(() => {
                     const installLink = nativeInstallLink(app)
                     const nativeRecord = nativeRecordFor(app)
+                    const hasStaticContent = !!(app.driveKey && /^[0-9a-f]{64}$/i.test(app.driveKey))
+                    const savedOffline = isSavedOffline(app.id)
                     return html`
-                      ${app.driveKey && /^[0-9a-f]{64}$/i.test(app.driveKey)
-                        ? html`<button key="open-page" className="btn subtle" onClick=${() => openSite(app)} title="Open this app's P2P page in a tab">Open page</button>`
+                      ${hasStaticContent
+                        ? html`<button key="open-content" className=${'btn ' + (installLink || app.nativeDelivery?.status === 'migration-required' ? 'subtle' : 'primary')} onClick=${() => openStaticContent(app)} title="Open this browsable Hyperdrive content in a tab">Open</button>`
+                        : ''}
+                      ${hasStaticContent
+                        ? (savedOffline
+                            ? html`<button key="remove-saved-copy" className="btn subtle" onClick=${() => removeSavedCopy(app)} disabled=${busy === `remove-saved:${app.id}`} title="Remove this device's saved content while keeping the catalogue entry">${busy === `remove-saved:${app.id}` ? 'Removing…' : 'Remove saved copy'}</button>`
+                            : html`<button key="save-offline" className="btn subtle" onClick=${() => saveOffline(app)} disabled=${busy === `save-offline:${app.id}`} title="Save browsable content on this device for offline use">${busy === `save-offline:${app.id}` ? 'Saving…' : 'Save offline'}</button>`)
                         : ''}
                       ${installLink
                         ? (nativeRecord?.installed
@@ -4060,7 +4072,7 @@ function Apps ({ rpc, C, onLaunch }) {
                             : html`<button key="install-native" className="btn primary" onClick=${() => installNativeApp(app)} disabled=${busy === `native-install:${installLink}`} title="Install the Pear v3 build into your operating system">${busy === `native-install:${installLink}` ? 'Installing…' : 'Install app'}</button>`)
                         : (app.nativeDelivery?.status === 'migration-required'
                             ? html`<button key="migration" className="btn primary" onClick=${() => showLegacyMigration(app)} disabled=${busy === 'legacy-migration'} title="Requires a verified native v3 package">Migration status</button>`
-                            : html`<button key="open-content" className="btn primary" onClick=${() => openSite(app)} title="Open browsable P2P content">Open</button>`)}
+                            : '')}
                       ${canEditMyCatalog && app.catalogKey !== myCatalog.keyHex && !inMyCatalog([app.id, app.driveKey, app.link]) && html`
                         <button key="add-catalog" className="btn subtle" title="Add to my catalog" onClick=${() => addToMyCatalog(app)} disabled=${busy === `addcat:${app.id || app.driveKey || app.link}`}>+ Catalog</button>
                       `}
@@ -4157,25 +4169,25 @@ function Apps ({ rpc, C, onLaunch }) {
             `)}
           </div>`}
 
-      <h2>Installed sites</h2>
-      ${installed.length === 0
-        ? html`<p className="placeholder">No Hyperdrive sites installed yet.</p>`
+      <h2>Saved for offline use</h2>
+      ${savedCopies.length === 0
+        ? html`<p className="placeholder">No Hyperdrive content saved for offline use yet.</p>`
         : html`<div className="app-grid">
-            ${installed.map((app) => html`
+            ${savedCopies.map((app) => html`
               <div className="app-card" key=${app.id}>
                 <${AppIcon} rpc=${rpc} C=${C} driveKey=${app.driveKey} iconRef=${app.icon} iconData=${app.iconData} name=${app.name} />
                 <div className="app-info">
                   <div className="app-name">${app.name}</div>
-                  <div className="app-meta">v${app.version || '?'}${updates[app.id] ? ` · update available → v${updates[app.id]}` : ''}</div>
+                  <div className="app-meta">Saved v${app.version || '?'}${updates[app.id] ? ` · newer content available → v${updates[app.id]}` : ''}</div>
                 </div>
                 <div className="app-actions">
                   ${updates[app.id] && html`
-                    <button key="update" className="btn primary" onClick=${() => updateApp(app.id)} disabled=${busy === `install:${app.id}`}>
-                      ${busy === `install:${app.id}` ? 'Updating…' : 'Update'}
+                    <button key="refresh-saved-copy" className="btn primary" onClick=${() => refreshSavedCopy(app.id)} disabled=${busy === `save-offline:${app.id}`}>
+                      ${busy === `save-offline:${app.id}` ? 'Refreshing…' : 'Refresh saved copy'}
                     </button>
                   `}
-                  <button key="launch" className="btn" onClick=${() => launchApp(app)} disabled=${busy === `launch:${app.id}`}>Launch</button>
-                  <button key="uninstall" className="btn subtle" onClick=${() => uninstallApp(app)} disabled=${busy === `uninstall:${app.id}`}>Uninstall</button>
+                  <button key="open-saved" className="btn" onClick=${() => openSavedSite(app)} disabled=${busy === `open-saved:${app.id}`}>Open</button>
+                  <button key="remove-saved" className="btn subtle" onClick=${() => removeSavedCopy(app)} disabled=${busy === `remove-saved:${app.id}`}>${busy === `remove-saved:${app.id}` ? 'Removing…' : 'Remove saved copy'}</button>
                   ${canEditMyCatalog && !inMyCatalog([app.id, app.driveKey, app.link]) && html`
                     <button key="add-installed" className="btn subtle" title="Add to my catalog" onClick=${() => addToMyCatalog(app)} disabled=${busy === `addcat:${app.id || app.driveKey || app.link}`}>+ Catalog</button>
                   `}
@@ -4215,7 +4227,13 @@ function Apps ({ rpc, C, onLaunch }) {
                 ${detailApp.categories.map((c) => html`<span key=${c} style=${{ fontSize: '12px', padding: '2px 9px', borderRadius: '8px', background: 'rgba(255,255,255,0.06)', color: '#8b949e' }}>${c}</span>`)}
               </div>` : ''}
             <div style=${{ fontSize: '13px', color: '#8b949e', display: 'grid', gap: '6px', marginBottom: '18px' }}>
-              <div><strong style=${{ color: '#c9d1d9' }}>Runs:</strong> ${nativeInstallLink(detailApp) ? 'as a native Pear v3 OS application' : (detailApp.type === 'hypersite' ? 'headless in a tab' : 'in its own window')}</div>
+              <div><strong style=${{ color: '#c9d1d9' }}>Delivery:</strong> ${detailApp.driveKey
+                ? `browsable Hyperdrive content opened in a browser tab${nativeInstallLink(detailApp) ? '; signed Pear v3 native package also available' : ''}`
+                : (nativeInstallLink(detailApp)
+                    ? 'signed Pear v3 native OS application'
+                    : (detailApp.nativeDelivery?.status === 'migration-required'
+                        ? 'legacy native record; verified Pear v3 package required'
+                        : 'catalogue link'))}</div>
               ${detailApp.version ? html`<div><strong style=${{ color: '#c9d1d9' }}>Version:</strong> v${detailApp.version}</div>` : ''}
               <div><strong style=${{ color: '#c9d1d9' }}>Verification:</strong> ${detailApp.verification || 'unverified'}</div>
               ${detailApp.homepage ? html`<div style=${{ wordBreak: 'break-all' }}><strong style=${{ color: '#c9d1d9' }}>Homepage:</strong> ${detailApp.homepage}</div>` : ''}
@@ -4230,21 +4248,23 @@ function Apps ({ rpc, C, onLaunch }) {
               ${detailApp.publisherKey ? html`<div style=${{ wordBreak: 'break-all' }}><strong style=${{ color: '#c9d1d9' }}>Publisher:</strong> ${shortKey(detailApp.publisherKey)}</div>` : ''}
             </div>
             <div style=${{ display: 'flex', gap: '8px' }}>
+              ${detailApp.driveKey && html`
+                <button key="detail-open-site" className="btn primary" onClick=${() => { openStaticContent(detailApp); setDetailApp(null) }}>Open</button>
+                ${isSavedOffline(detailApp.id)
+                  ? html`<button key="detail-remove-saved" className="btn subtle" onClick=${() => { removeSavedCopy(detailApp); setDetailApp(null) }}>Remove saved copy</button>`
+                  : html`<button key="detail-save-offline" className="btn subtle" onClick=${() => { saveOffline(detailApp); setDetailApp(null) }}>Save offline</button>`}
+              `}
               ${nativeInstallLink(detailApp)
                 ? (nativeRecordFor(detailApp)?.installed
                     ? html`<button key="detail-open-native" className="btn primary" onClick=${() => { launchNativeApp(detailApp); setDetailApp(null) }}>Open app</button>`
                     : html`<button key="detail-install-native" className="btn primary" onClick=${() => { installNativeApp(detailApp); setDetailApp(null) }}>Install app</button>`)
                 : detailApp.nativeDelivery?.status === 'migration-required'
                   ? html`<button key="detail-migration" className="btn primary" onClick=${() => { showLegacyMigration(detailApp); setDetailApp(null) }}>Migration status</button>`
-                : detailApp.type === 'hypersite'
-                  ? (detailApp.driveKey && !detailApp.link
-                      ? html`<button key="detail-open-site" className="btn primary" onClick=${() => { openSite(detailApp); setDetailApp(null) }}>Open</button>`
-                      : html`<button key="detail-run-tab" className="btn primary" onClick=${() => { runInTab(detailApp); setDetailApp(null) }}>Run in tab</button>`)
-                  : (detailApp.link && !detailApp.driveKey)
-                    ? html`<button key="detail-open-window" className="btn primary" onClick=${() => { launchFeaturedApp(detailApp); setDetailApp(null) }}>Open</button>`
-                    : (isInstalled(detailApp.id)
-                        ? html`<button key="detail-launch" className="btn primary" onClick=${() => { launchApp(detailApp); setDetailApp(null) }}>Launch</button>`
-                        : html`<button key="detail-install" className="btn primary" onClick=${() => { installApp(detailApp); setDetailApp(null) }}>Install</button>`)}
+                  : !detailApp.driveKey && detailApp.type === 'hypersite'
+                    ? html`<button key="detail-run-tab" className="btn primary" onClick=${() => { runInTab(detailApp); setDetailApp(null) }}>Run in tab</button>`
+                    : !detailApp.driveKey
+                        ? html`<button key="detail-open-window" className="btn primary" onClick=${() => { launchFeaturedApp(detailApp); setDetailApp(null) }}>Open</button>`
+                        : ''}
               <button key="detail-close" className="btn" onClick=${() => setDetailApp(null)}>Close</button>
             </div>
           </div>
