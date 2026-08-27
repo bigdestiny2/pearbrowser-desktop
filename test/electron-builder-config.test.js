@@ -9,6 +9,11 @@ const require = createRequire(import.meta.url)
 const root = fileURLToPath(new URL('..', import.meta.url))
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
 const configSource = readFileSync(new URL('../electron-builder.config.cjs', import.meta.url), 'utf8')
+const immutableSourceRef = '0123456789abcdef0123456789abcdef01234567'
+
+// GitHub Actions sets CI for the test job as well as packaging jobs. The
+// builder config intentionally requires an immutable source in either case.
+if (process.env.CI && !process.env.SOURCE_REF) process.env.SOURCE_REF = immutableSourceRef
 
 test('Electron builder uses the pinned runtime, hybrid ASAR, fuses, and current native formats', () => {
   const config = require('../electron-builder.config.cjs')
