@@ -122,7 +122,8 @@ function collectProductionSource (root) {
     join(root, 'README.md'),
     join(root, 'docs', 'INSTALL_NATIVE_PACKAGES.md'),
     join(root, 'docs', 'PEARBROWSER-APP-COMPAT-STANDARD.md'),
-    join(root, 'docs', 'PEAR_V3_MIGRATION.md')
+    join(root, 'docs', 'PEAR_V3_MIGRATION.md'),
+    join(root, 'docs', 'CURRENT_STATUS_AUDIT_2026-06-23.md')
   ]) {
     if (existsSync(path)) files.push(path)
   }

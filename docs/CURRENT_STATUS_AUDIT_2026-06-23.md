@@ -82,7 +82,7 @@ validation, and broader real-device smoke.
   with binding, revocation, event verification, quarantine/hidden diagnostics,
   and no default public `wss://` relay behavior.
 - Release operations have clear scripts for staging/release/pin/verification,
-  plus explicit caveats around Pear `pear run` / `pear release` deprecation and
+  plus explicit caveats around the retired shared-CLI launch/release path and
   the future native-installer path.
 
 ## Validated In This Loop
@@ -158,8 +158,13 @@ node scripts/verify-app-full.js --key 82110be69e2a531e840bc886dc7b9cab16729c5878
 Human/operator checks:
 
 ```bash
-pear run pear://tco5k7h38uoxatedp1wongdbhjxow1x7jiwm3t1i9cujbebhsbty
+npm start
+# In a second terminal after the native host is ready:
+npm run smoke:runtime
 ```
+
+The former shared-CLI pointer is retired and is not an executable release check.
+Public native verification must use a signed package bound to its AppRelease.
 
 Then follow `docs/MANUAL_RELEASE_SMOKE_2026-06-23.md` and record machine,
 commit SHA, screenshots/logs, and pass/fail notes beside each checked item.
