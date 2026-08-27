@@ -1,110 +1,129 @@
 # Install Native Packages
 
-Current release: `v0.9.1`.
+Latest published release: `v0.9.0`.
 
-These are package-proof desktop builds. Linux uses checksums only. macOS is
-ad-hoc signed but not notarized, and Windows packages are unsigned until the
-public-trust signing credentials are configured. Treat macOS/Windows OS trust
-prompts as expected for this release lane, not as the final public-trust
-experience. On macOS, Gatekeeper may say Apple could not verify that
-PearBrowser is free of malware until a signed and notarized DMG is published.
+Current release candidate: `v0.9.1`. Do not treat `v0.9.1` as downloadable or
+live until its GitHub Release is published and the public-download verifier
+passes. Signing credentials and clean-host evidence are still external release
+prerequisites.
 
-## Choose A Package
+Package-proof builds are ad-hoc/unsigned GitHub Actions artifacts for release
+engineering only. They are never attached to or published as a GitHub Release
+and are not end-user downloads.
 
-Download directly from the
-[`v0.9.1` GitHub release](https://github.com/bigdestiny2/pearbrowser-desktop/releases/tag/v0.9.1).
+## `v0.9.1` public-trust packages
 
-| Machine | Recommended package | Checksum sidecar |
+Once the `v0.9.1` public-trust release is published, use these formats:
+
+| Machine | Installer | Companion artifact |
 | --- | --- | --- |
-| macOS Apple Silicon | [PearBrowser-0.9.1-macos-arm64.app.zip](https://github.com/bigdestiny2/pearbrowser-desktop/releases/download/v0.9.1/PearBrowser-0.9.1-macos-arm64.app.zip) | [PearBrowser-0.9.1-macos-arm64.app.zip.sha256](https://github.com/bigdestiny2/pearbrowser-desktop/releases/download/v0.9.1/PearBrowser-0.9.1-macos-arm64.app.zip.sha256) |
-| macOS Intel | [PearBrowser-0.9.1-macos-x64.app.zip](https://github.com/bigdestiny2/pearbrowser-desktop/releases/download/v0.9.1/PearBrowser-0.9.1-macos-x64.app.zip) | [PearBrowser-0.9.1-macos-x64.app.zip.sha256](https://github.com/bigdestiny2/pearbrowser-desktop/releases/download/v0.9.1/PearBrowser-0.9.1-macos-x64.app.zip.sha256) |
-| Windows x64 | [PearBrowser-0.9.1-windows-x64.msix](https://github.com/bigdestiny2/pearbrowser-desktop/releases/download/v0.9.1/PearBrowser-0.9.1-windows-x64.msix) | [PearBrowser-0.9.1-windows-x64.msix.sha256](https://github.com/bigdestiny2/pearbrowser-desktop/releases/download/v0.9.1/PearBrowser-0.9.1-windows-x64.msix.sha256) |
-| Linux x64 | [PearBrowser-0.9.1-linux-x64.AppImage](https://github.com/bigdestiny2/pearbrowser-desktop/releases/download/v0.9.1/PearBrowser-0.9.1-linux-x64.AppImage) | [PearBrowser-0.9.1-linux-x64.AppImage.sha256](https://github.com/bigdestiny2/pearbrowser-desktop/releases/download/v0.9.1/PearBrowser-0.9.1-linux-x64.AppImage.sha256) |
+| macOS Apple Silicon | `PearBrowser-0.9.1-macos-arm64.dmg` | `PearBrowser-0.9.1-macos-arm64.app.zip` |
+| macOS Intel | `PearBrowser-0.9.1-macos-x64.dmg` | `PearBrowser-0.9.1-macos-x64.app.zip` |
+| Windows x64 | `PearBrowser-0.9.1-windows-x64.exe` | Authenticode-signed NSIS installer |
+| Linux x64 | `PearBrowser-0.9.1-linux-x64.AppImage` | executable AppImage |
 
-The Linux release contains exactly one product AppImage. Packaging now rejects
-ambiguous AppImages and excludes build tools such as AppImageTool.
+Every listed file must have a matching `.sha256` sidecar. The macOS app archive
+and DMG must be Developer ID signed and notarized; the DMG must be stapled. The
+Windows NSIS installer must report a valid Authenticode signature. Linux uses
+checksum verification.
 
-For the future public-trust macOS lane, the resolver will prefer notarized
-`.dmg` assets over `.app.zip` once those assets are attached by the signed
-native release workflow.
-
-From a source checkout, ask the resolver for the current machine:
+After publication, resolve the recommended artifact for the current machine:
 
 ```sh
-npm run resolve:native-release -- --tag v0.9.1 --repo bigdestiny2/pearbrowser-desktop
+npm run resolve:native-release -- \
+  --tag v0.9.1 \
+  --repo bigdestiny2/pearbrowser-desktop
 ```
 
-Or specify a target:
+Release operators must verify all public downloads before sharing the release:
 
 ```sh
-npm run resolve:native-release -- --tag v0.9.1 --repo bigdestiny2/pearbrowser-desktop --platform macos --arch x64
+npm run verify:native-downloads -- \
+  --tag v0.9.1 \
+  --repo bigdestiny2/pearbrowser-desktop \
+  --all
 ```
 
-Release operators can verify every recommended package download and checksum
-sidecar in one pass:
+## Verify the download
+
+Download the artifact and its identically named `.sha256` sidecar from the
+published `v0.9.1` GitHub Release.
+
+macOS:
 
 ```sh
-npm run verify:native-downloads -- --tag v0.9.1 --repo bigdestiny2/pearbrowser-desktop --all
+shasum -a 256 -c PearBrowser-0.9.1-macos-arm64.dmg.sha256
+codesign --verify --deep --strict --verbose=2 /Applications/PearBrowser.app
+xcrun stapler validate /Applications/PearBrowser.app
+spctl --assess --type execute --verbose /Applications/PearBrowser.app
 ```
 
-Release operators can regenerate this guide from the same resolver rules:
-
-```sh
-npm run -s generate:native-install-guide -- --tag v0.9.1 --repo bigdestiny2/pearbrowser-desktop
-```
-
-## Verify The Download
-
-macOS and Linux:
-
-```sh
-shasum -a 256 -c PearBrowser-0.9.1-macos-arm64.app.zip.sha256
-```
-
-Use the matching filename for your package. A passing check prints `OK`.
+Use `x64` instead of `arm64` on an Intel Mac. Run the signature commands after
+copying `PearBrowser.app` to `/Applications`.
 
 Windows PowerShell:
 
 ```powershell
-$package = "PearBrowser-0.9.1-windows-x64.msix"
+$package = "PearBrowser-0.9.1-windows-x64.exe"
 $expected = (Get-Content "$($package).sha256").Split(" ")[0].ToLowerInvariant()
 $actual = (Get-FileHash $package -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($actual -ne $expected) { throw "SHA-256 mismatch for $package" }
+
+$signature = Get-AuthenticodeSignature $package
+$signature | Format-List
+if ($signature.Status -ne "Valid") { throw "Authenticode signature is not valid" }
 ```
+
+Linux:
+
+```sh
+sha256sum -c PearBrowser-0.9.1-linux-x64.AppImage.sha256
+```
+
+Stop if a checksum or signature check fails. Do not bypass an unexpected OS
+trust warning on a public-trust build.
 
 ## Install
 
-macOS:
+### macOS
 
-1. Unzip the `.app.zip`.
-2. Move `PearBrowser.app` to `/Applications`.
-3. Verify the SHA-256 sidecar for the downloaded archive before first launch.
-4. Open it from Finder. For package-proof builds, macOS may show an unidentified
-   developer or malware-verification warning because the app is not notarized.
-5. If the first launch is blocked, use Control-click `PearBrowser.app` -> Open
-   -> Open, or open System Settings -> Privacy & Security and choose Open Anyway
-   for PearBrowser. Continue only if you intentionally trust this package and
-   its checksum.
+1. Open the architecture-matched `.dmg`.
+2. Drag `PearBrowser.app` to `/Applications`.
+3. Verify the signature, notarization staple, and Gatekeeper assessment.
+4. Open PearBrowser from Finder.
 
-Windows:
+### Windows
 
-1. Install `PearBrowser-0.9.1-windows-x64.msix`.
-2. For package-proof builds, Windows SmartScreen may warn because the installer
-   is not yet Authenticode-signed. Continue only if you intentionally trust this
-   package and its checksum.
+1. Run `PearBrowser-0.9.1-windows-x64.exe`.
+2. Confirm Windows reports a valid signed publisher before continuing.
+3. Complete the NSIS installer and launch PearBrowser from the Start menu.
 
-Linux:
+### Linux
 
 ```sh
 chmod +x PearBrowser-0.9.1-linux-x64.AppImage
 ./PearBrowser-0.9.1-linux-x64.AppImage
 ```
 
-## Legacy Pear records
+## Data and upgrades
 
-There is no Pear-runtime fallback for this v3 release. A legacy `pear://`
-record is migration metadata, not an install or troubleshooting instruction.
-If a native package fails, keep the old installation and its data intact,
-collect the package checksum and local diagnostics, then follow the
-[PearBrowser v3 migration guide](./PEAR_V3_MIGRATION.md). Do not run a remote
-link through a local runtime.
+Installing a native package must not require deleting the existing PearBrowser
+profile. Back up important data before changing versions, then confirm tabs,
+bookmarks, history, identity, and application state after first launch.
+
+Runtime OTA download/apply is intentionally disabled. The retained Pear
+`upgrade` identity is a migration record, not an update channel, until the Pear
+v3 production identity, signer roster, provision, and multisig ceremony are
+independently verified. Use verified native installers for upgrades and
+rollback until that gate is complete.
+
+See [Pear v3 migration](./PEAR_V3_MIGRATION.md) for legacy-data guidance and
+[Native release packaging](./NATIVE_RELEASE_PACKAGING.md) for the operator
+contract.
+
+## Historical packages
+
+Older releases used a different native-launcher experiment and different
+Windows package formats. Those downloads are historical migration inputs, not
+the `v0.9.1` package contract. Never substitute an older launcher artifact for
+the reviewed Electron application.

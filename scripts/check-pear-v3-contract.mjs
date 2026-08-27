@@ -30,6 +30,26 @@ const ignoredDirectories = new Set([
   'pearbrowser-storage'
 ])
 const sourceExtensions = new Set(['.cjs', '.js', '.mjs', '.sh'])
+const reviewedUpstreamCohort = Object.freeze({
+  cli: '3.3.0',
+  build: '1.2.0',
+  install: '1.2.2',
+  runtime: '1.3.1',
+  updater: '3.4.0'
+})
+const releaseDependencyRanges = Object.freeze({
+  autobase: '^7.28.1',
+  corestore: '^7.12.2',
+  hypercore: '^11.35.2',
+  hyperdrive: '^13.3.3'
+})
+const releaseResolvedVersions = Object.freeze({
+  autobase: '7.28.1',
+  corestore: '7.12.2',
+  hypercore: '11.35.2',
+  hyperdrive: '13.3.3',
+  hyperdht: '6.33.2'
+})
 const retiredCommandPatterns = [
   ['shared CLI launcher', /\bpear\s+run\b/i],
   ['v2 release mutation', /\bpear\s+release\b/i],
@@ -136,9 +156,10 @@ export function checkPearV3Contract ({ root = defaultRoot } = {}) {
   const packagePath = join(root, 'package.json')
   const lockPath = join(root, 'package-lock.json')
   const hostPath = join(root, 'electron', 'main.cjs')
+  const otaPath = join(root, 'electron', 'pear-ota-lifecycle.cjs')
   const workerPath = join(root, 'workers', 'main.js')
 
-  for (const path of [packagePath, lockPath, hostPath, workerPath]) {
+  for (const path of [packagePath, lockPath, hostPath, otaPath, workerPath]) {
     if (!existsSync(path)) errors.push(`required v3 contract file is missing: ${displayPath(root, path)}`)
   }
   if (errors.length) throw new Error(`Pear v3 contract failed:\n- ${errors.join('\n- ')}`)
@@ -151,10 +172,13 @@ export function checkPearV3Contract ({ root = defaultRoot } = {}) {
   if (!/^pear:\/\/[13-9a-km-uw-z]{52}$/.test(String(pkg.upgrade || ''))) {
     errors.push('package upgrade must remain a canonical root Pear OTA key')
   }
+  if (pkg.updates !== false) {
+    errors.push('package updates must remain false until the production multisig upgrade channel is independently verified')
+  }
 
   const expectedDirect = {
-    'pear-install': '1.2.2',
-    'pear-runtime': '1.3.1'
+    'pear-install': reviewedUpstreamCohort.install,
+    'pear-runtime': reviewedUpstreamCohort.runtime
   }
   for (const [name, version] of Object.entries(expectedDirect)) {
     if (pkg.dependencies?.[name] !== version) {
@@ -165,10 +189,21 @@ export function checkPearV3Contract ({ root = defaultRoot } = {}) {
     }
     assertExactRegistryEntry(errors, lock, name, version)
   }
+  for (const [name, version] of Object.entries(releaseDependencyRanges)) {
+    if (pkg.dependencies?.[name] !== version) {
+      errors.push(`${name} must declare the reviewed Pear 3.3 cohort range ${version}`)
+    }
+    if (lock.packages?.['']?.dependencies?.[name] !== version) {
+      errors.push(`${name} lockfile root must match the reviewed Pear 3.3 cohort range ${version}`)
+    }
+  }
+  for (const [name, version] of Object.entries(releaseResolvedVersions)) {
+    assertExactRegistryEntry(errors, lock, name, version)
+  }
   if (allDependencies(pkg).some(({ name }) => name === 'pear-runtime-updater')) {
     errors.push('pear-runtime-updater must remain transitive through pear-runtime')
   }
-  assertExactRegistryEntry(errors, lock, 'pear-runtime-updater', '3.4.0')
+  assertExactRegistryEntry(errors, lock, 'pear-runtime-updater', reviewedUpstreamCohort.updater)
   if (lock.packages?.['node_modules/pear-runtime']?.dependencies?.['pear-runtime-updater'] !== '^3.0.0') {
     errors.push('pear-runtime must retain its audited ^3.0.0 updater dependency boundary')
   }
@@ -222,7 +257,7 @@ export function checkPearV3Contract ({ root = defaultRoot } = {}) {
   const runtimeConstructors = []
   for (const path of executableSource) {
     const source = readFileSync(path, 'utf8')
-    runtimeImports.push(...Array.from(source.matchAll(/require\s*\(\s*['"]pear-runtime['"]\s*\)|from\s+['"]pear-runtime['"]/g), () => path))
+    runtimeImports.push(...Array.from(source.matchAll(/(?:require|runtimeRequire)\s*\(\s*['"]pear-runtime['"]\s*\)|from\s+['"]pear-runtime['"]/g), () => path))
     runtimeConstructors.push(...Array.from(source.matchAll(/\bnew\s+PearRuntime\s*\(/g), () => path))
     runtimeCalls.push(...Array.from(source.matchAll(/\bpearRuntime\s*\.\s*run\s*\(/g), () => path))
   }
@@ -238,9 +273,39 @@ export function checkPearV3Contract ({ root = defaultRoot } = {}) {
   }
 
   const host = readFileSync(hostPath, 'utf8')
-  const localWorkerCall = /\bpearRuntime\s*\.\s*run\s*\(\s*require\.resolve\s*\(\s*(['"])\.\.\/workers\/main\.js\1\s*\)\s*,\s*\[\s*pearRuntime\.storage\s*,\s*sessionToken\s*\]\s*\)/
-  if (!localWorkerCall.test(host)) {
+  const ota = readFileSync(otaPath, 'utf8')
+  const packagedRuntimeRoot = /const\s+unpackedRoot\s*=\s*path\.join\(\s*process\.resourcesPath,\s*['"]app\.asar\.unpacked['"]\s*\)/
+  const packagedRuntimeRequire = /createRequire\s*\(\s*path\.join\(\s*unpackedRoot,\s*['"]package\.json['"]\s*\)\s*\)/
+  const packagedWorkerEntry = /path\.join\(\s*unpackedRoot,\s*['"]workers['"],\s*['"]main\.js['"]\s*\)/
+  const localWorkerEntry = /require\.resolve\(\s*(['"])\.\.\/workers\/main\.js\1\s*\)/
+  const localWorkerCall = /\bpearRuntime\s*\.\s*run\s*\(\s*workerEntry\s*,\s*\[\s*pearRuntime\.storage\s*,\s*sessionToken\s*\]\s*\)/
+  if (!packagedRuntimeRoot.test(host) || !packagedRuntimeRequire.test(host) || !packagedWorkerEntry.test(host) || !localWorkerEntry.test(host) || !localWorkerCall.test(host)) {
     errors.push('electron/main.cjs must start only the bundled workers/main.js entrypoint with host-owned arguments')
+  }
+  const runtimeIntegrityCall = host.indexOf('verifyRuntimeIntegrity({')
+  const runtimeImport = host.indexOf("runtimeRequire('pear-runtime')")
+  if (runtimeIntegrityCall === -1 || runtimeImport === -1 || runtimeIntegrityCall >= runtimeImport) {
+    errors.push('electron/main.cjs must verify the signed physical runtime tree before importing pear-runtime')
+  }
+  if (!/name:\s*otaArtifactName/.test(host)) {
+    errors.push('electron/main.cjs must pass the platform-qualified Pear OTA artifact name')
+  }
+  if (!/updates:\s*app\.isPackaged\s*&&\s*pkg\.updates\s*===\s*true/.test(host)) {
+    errors.push('electron/main.cjs must fail closed when package OTA updates are disabled')
+  }
+  if (!/pearRuntime\.updater\.on\(\s*['"]error['"]/.test(host)) {
+    errors.push('electron/main.cjs must handle pear-runtime-updater error events')
+  }
+  if (!/updater:\s*pearRuntime\.updater,\s*app/.test(host)) {
+    errors.push('electron/main.cjs must route the updated event through the guarded apply/restart lifecycle')
+  }
+  for (const [label, pattern] of [
+    ['platform artifact extensions', /darwin:[\s\S]*?\.app[\s\S]*?linux:[\s\S]*?\.AppImage[\s\S]*?win32:[\s\S]*?\.exe/],
+    ['atomic update application', /await\s+updater\.applyUpdate\(\)/],
+    ['post-update relaunch', /app\.relaunch\(/],
+    ['post-update quit', /app\.quit\(\)/]
+  ]) {
+    if (!pattern.test(ota)) errors.push(`electron/pear-ota-lifecycle.cjs is missing ${label}`)
   }
   if (lstatSync(workerPath).isSymbolicLink()) {
     errors.push('workers/main.js must not be a symbolic link')
@@ -256,8 +321,10 @@ export function checkPearV3Contract ({ root = defaultRoot } = {}) {
 
   return {
     ok: true,
+    reviewedUpstream: reviewedUpstreamCohort,
     direct: expectedDirect,
-    updater: '3.4.0',
+    updater: reviewedUpstreamCohort.updater,
+    releaseDependencies: releaseResolvedVersions,
     worker: displayPath(root, workerPath),
     checkedPackages: packageFiles.map(path => displayPath(root, path)),
     checkedLocks: lockFiles.map(path => displayPath(root, path)),

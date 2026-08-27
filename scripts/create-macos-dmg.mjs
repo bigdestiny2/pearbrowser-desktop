@@ -9,7 +9,7 @@ const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url),
 const args = parseArgs(process.argv.slice(2))
 const version = args.tag ? versionFromTag(args.tag) : (args.version || pkg.version)
 const appName = args.appName || 'PearBrowser'
-const buildDir = resolve(args.buildDir || 'appling/build')
+const buildDir = resolve(args.buildDir || 'dist/electron')
 const out = resolve(args.out || join(buildDir, `${appName}-${version}.dmg`))
 const appleId = process.env.PEARBROWSER_MACOS_NOTARY_APPLE_ID || ''
 const password = process.env.PEARBROWSER_MACOS_NOTARY_PASSWORD || ''
@@ -96,14 +96,14 @@ function parseArgs (argv) {
 
 function usage (code, message = '') {
   if (message) console.error(`error: ${message}`)
-  console.error('usage: node scripts/create-macos-dmg.mjs [--tag v0.5.0] [--build-dir appling/build] [--out path] [--app-name PearBrowser]')
+  console.error('usage: node scripts/create-macos-dmg.mjs [--tag vX.Y.Z] [--build-dir dist/electron] [--out path] [--app-name PearBrowser]')
   process.exit(code)
 }
 
 function versionFromTag (tag) {
   const normalized = String(tag || '').replace(/^refs\/tags\//, '')
-  if (!/^v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$/.test(normalized)) {
-    usage(2, `release tag must look like vX.Y.Z, got ${tag}`)
+  if (!/^v[0-9]+\.[0-9]+\.[0-9]+$/.test(normalized)) {
+    usage(2, `release tag must be a stable vX.Y.Z tag, got ${tag}`)
   }
   return normalized.slice(1)
 }
@@ -132,7 +132,7 @@ function findAppBundle (root, preferredName) {
 }
 
 function shouldSkipDir (name) {
-  return name === 'CMakeFiles' || name === '_deps' || name === '.cmake' || name === 'node_modules'
+  return name === 'node_modules' || name === 'app.asar.unpacked'
 }
 
 function run (command, args) {

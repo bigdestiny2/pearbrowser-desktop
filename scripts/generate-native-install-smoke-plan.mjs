@@ -17,7 +17,11 @@ const tag = normalizeTag(args.tag || `v${pkg.version}`)
 const version = versionFromTag(tag)
 const repo = args.repo || process.env.GH_REPO || 'bigdestiny2/pearbrowser-desktop'
 const trustMode = normalizeTrustMode(args.trustMode || 'package-proof')
-const sourceRef = normalizeSourceRef(args.sourceRef || 'main')
+const sourceRef = normalizeSourceSha(args.sourceRef || process.env.GITHUB_SHA || '')
+
+if (trustMode === 'package-proof' && !args.fixture) {
+  fail('package-proof artifacts live in GitHub Actions only; pass --fixture with the downloaded artifact metadata instead of reading or creating a GitHub Release')
+}
 
 let release
 try {
@@ -64,8 +68,8 @@ function requireValue (argv, index, flag) {
 
 function usage (code, message = '') {
   if (message) console.error(`error: ${message}`)
-  console.error('usage: node scripts/generate-native-install-smoke-plan.mjs [--tag v0.5.0] [--repo owner/repo] [--trust-mode package-proof|public-trust] [--source-ref main] [--json]')
-  console.error('       node scripts/generate-native-install-smoke-plan.mjs --fixture release.json [--tag v0.5.0] [--trust-mode package-proof|public-trust] [--source-ref main] [--json]')
+  console.error('usage: node scripts/generate-native-install-smoke-plan.mjs --tag v0.9.1 --repo owner/repo --trust-mode public-trust --source-ref <40-hex-commit-sha> [--json]')
+  console.error('       node scripts/generate-native-install-smoke-plan.mjs --fixture actions-artifacts.json --tag v0.9.1 --trust-mode package-proof --source-ref <40-hex-commit-sha> [--json]')
   process.exit(code)
 }
 
@@ -90,8 +94,8 @@ function fail (message) {
 
 function normalizeTag (tag) {
   const normalized = String(tag || '').replace(/^refs\/tags\//, '')
-  if (!/^v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$/.test(normalized)) {
-    usage(2, `release tag must look like vX.Y.Z, got ${tag}`)
+  if (!/^v[0-9]+\.[0-9]+\.[0-9]+$/.test(normalized)) {
+    usage(2, `release tag must be stable vX.Y.Z, got ${tag}`)
   }
   return normalized
 }
@@ -106,13 +110,12 @@ function normalizeTrustMode (value) {
   usage(2, `unsupported trust mode: ${value}`)
 }
 
-function normalizeSourceRef (value) {
+function normalizeSourceSha (value) {
   const ref = String(value || '').trim()
-  if (!ref) usage(2, '--source-ref cannot be empty')
-  if (!/^[A-Za-z0-9._/@+-]+$/.test(ref)) {
-    usage(2, `--source-ref contains unsupported characters: ${value}`)
+  if (!/^[a-f0-9]{40}$/i.test(ref)) {
+    usage(2, '--source-ref must be the exact immutable 40-character release commit SHA')
   }
-  return ref
+  return ref.toLowerCase()
 }
 
 function loadFixture (path) {
@@ -150,6 +153,7 @@ function buildSmokePlan (release, options) {
     if (release?.isDraft) errors.push('public-trust clean-install smoke requires a published release')
     if (release?.isPrerelease) errors.push('public-trust clean-install smoke requires a non-prerelease release')
   } else {
+    warnings.push('package-proof artifacts are unsigned/ad-hoc GitHub Actions outputs only; they are never attached to or published as a GitHub Release')
     warnings.push('package-proof clean-install smoke may include expected macOS or Windows OS trust prompts')
   }
 
@@ -200,14 +204,17 @@ function resolveReleaseAsset (release, options) {
   const candidates = assets
     .filter((asset) => asset.name.startsWith(prefix))
     .filter((asset) => !asset.name.endsWith('.sha256'))
-    .filter((asset) => isPrimaryArtifact(options.platform, asset.name))
+    .filter((asset) => isPrimaryArtifact(options.platform, asset.name, options.trustMode))
     .sort((a, b) => {
-      return artifactRank(options.platform, a.name) - artifactRank(options.platform, b.name) ||
+      return artifactRank(options.platform, a.name, options.trustMode) - artifactRank(options.platform, b.name, options.trustMode) ||
         a.name.length - b.name.length ||
         a.name.localeCompare(b.name)
     })
 
   if (candidates.length === 0) {
+    if (options.platform === 'macos' && options.trustMode === 'public-trust') {
+      throw new Error('public-trust clean-install smoke requires notarized macOS DMG assets')
+    }
     throw new Error(`no native artifact found for ${options.tag}`)
   }
 
@@ -244,18 +251,18 @@ function normalizeAssets (assets) {
     .filter((asset) => asset.name)
 }
 
-function isPrimaryArtifact (platform, name) {
-  if (platform === 'macos') return /\.(?:dmg|pkg|app\.zip|zip)$/i.test(name)
-  if (platform === 'windows') return /\.(?:exe|msix|msi|zip)$/i.test(name)
-  if (platform === 'linux') return /\.(?:AppImage|deb|rpm|snap|tar\.gz|tgz|tar\.xz|zip)$/i.test(name)
+function isPrimaryArtifact (platform, name, trustMode) {
+  if (platform === 'macos') return trustMode === 'public-trust' ? /\.dmg$/i.test(name) : /\.app\.zip$/i.test(name)
+  if (platform === 'windows') return /\.exe$/i.test(name)
+  if (platform === 'linux') return /\.AppImage$/i.test(name)
   return false
 }
 
-function artifactRank (platform, name) {
+function artifactRank (platform, name, trustMode) {
   const order = {
-    macos: [/\.dmg$/i, /\.pkg$/i, /\.app\.zip$/i, /\.zip$/i],
-    windows: [/\.exe$/i, /\.msix$/i, /\.msi$/i, /\.zip$/i],
-    linux: [/\.AppImage$/i, /\.deb$/i, /\.rpm$/i, /\.snap$/i, /\.tar\.gz$/i, /\.tgz$/i, /\.tar\.xz$/i, /\.zip$/i]
+    macos: trustMode === 'public-trust' ? [/\.dmg$/i] : [/\.app\.zip$/i],
+    windows: [/\.exe$/i],
+    linux: [/\.AppImage$/i]
   }[platform] || []
   const index = order.findIndex((pattern) => pattern.test(name))
   return index === -1 ? order.length : index
@@ -335,14 +342,14 @@ function windowsCommands (resolved, options) {
     `$expected = (Get-Content .\\${resolved.checksum.name}).Split(' ')[0].ToUpperInvariant()`,
     `$actual = (Get-FileHash .\\${resolved.asset.name} -Algorithm SHA256).Hash`,
     'if ($actual -ne $expected) { throw "SHA256 mismatch" }',
-    `Get-AuthenticodeSignature .\\${resolved.asset.name} | Format-List`
+    `$signature = Get-AuthenticodeSignature .\\${resolved.asset.name}`,
+    '$signature | Format-List'
   ]
 
-  if (/\.msix$/i.test(resolved.asset.name)) {
-    commands.push(`Add-AppxPackage .\\${resolved.asset.name}`)
-  } else {
-    commands.push(`Start-Process .\\${resolved.asset.name} -Wait`)
+  if (options.trustMode === 'public-trust') {
+    commands.push('if ($signature.Status -ne "Valid") { throw "Authenticode signature is not valid" }')
   }
+  commands.push(`Start-Process .\\${resolved.asset.name} -Wait`)
   commands.push('# Launch PearBrowser from the Start menu, then run the diagnostic smoke below.')
   commands.push(...runtimeSmokeCommands('powershell', options))
   return commands

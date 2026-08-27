@@ -4,9 +4,47 @@
 > only to explain past releases; they are not current installation, launch, or
 > recovery instructions. Current native delivery requires a verified package.
 
-## v0.9.1 — 2026-08-18
+## Unreleased
 
-Corrective release for two user-facing defects found by post-release visual QA
+### Changed
+
+- Aligned the embedded Pear v3 cohort with the stable Pear 3.3.0 release:
+  `pear-runtime@1.3.1`, `pear-install@1.2.2`,
+  `pear-runtime-updater@3.4.0`, Autobase 7.28.1, Hypercore 11.35.2,
+  Corestore 7.12.2, and Hyperdrive 13.3.3. Native release preflight now accepts
+  only the reviewed stable Pear CLI 3.3.0 and rejects v2, prerelease, and future
+  unreviewed releases.
+- Kept OTA download/apply disabled while the retained upgrade key is a
+  migration placeholder rather than the approved production multisig channel.
+- Replaced the legacy native-launcher release target with packaging of the
+  reviewed Electron application through pinned electron-builder. The current
+  public-trust contract is signed/notarized macOS `.app.zip` plus `.dmg`, a
+  PFX/Authenticode-signed Windows NSIS `.exe`, and a Linux AppImage. Package
+  proof stays in GitHub Actions only; public trust is manual, exact-SHA,
+  create-only, and draft-first.
+- Added a build-unique Ed25519 signature over an exact SHA-256 inventory of the
+  unpacked Pear runtime. The protected ASAR public key now gates every physical
+  worker, backend, dependency, and native sidecar byte before runtime loading;
+  Electron production fuses also disable Node injection surfaces and enable
+  cookie encryption.
+- Deferred Azure Trusted Signing because electron-builder 26's current route
+  installs a mutable TrustedSigning PowerShell module during the build. The
+  Windows `v0.9.1` public-trust lane requires the complete external PFX
+  certificate/password pair.
+
+### Fixed
+
+- Pear OTA now resolves the platform-qualified deployment artifact
+  (`PearBrowser.app`, `PearBrowser.AppImage`, or `PearBrowser.exe`) and has a
+  tested apply/relaunch path ready for the production channel. Previously the
+  extensionless name could not resolve a Pear-built artifact, and the
+  `updated` handler only logged before the staged update was deleted on the
+  next launch. Updater errors are now handled at their source, and a failed OS
+  swap stays latched until a fresh updater instance is created on restart.
+
+## v0.9.1 — release candidate
+
+Corrective release candidate for two user-facing defects found by post-release visual QA
 of v0.9.0 — both invisible to the nonvisual release gates.
 
 ### Fixed

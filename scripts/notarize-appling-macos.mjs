@@ -1,13 +1,15 @@
 #!/usr/bin/env node
 
-import { mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { basename, join } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
-const buildDir = join(root, 'appling', 'build')
+const args = parseArgs(process.argv.slice(2))
+const buildDir = resolve(root, args.buildDir || 'dist/electron')
+const appName = args.appName || 'PearBrowser'
 const appleId = process.env.PEARBROWSER_MACOS_NOTARY_APPLE_ID || ''
 const password = process.env.PEARBROWSER_MACOS_NOTARY_PASSWORD || ''
 const teamId = process.env.PEARBROWSER_MACOS_NOTARY_TEAM_ID || ''
@@ -20,11 +22,14 @@ if (!appleId && !password && !teamId) {
 if (!appleId || !password || !teamId) {
   fail('macOS notarization requires PEARBROWSER_MACOS_NOTARY_APPLE_ID, PEARBROWSER_MACOS_NOTARY_PASSWORD, and PEARBROWSER_MACOS_NOTARY_TEAM_ID')
 }
+if (!existsSync(buildDir)) fail(`Electron build directory does not exist: ${buildDir}`)
 
 const apps = findApps(buildDir)
-const app = apps.find((candidate) => basename(candidate) === 'PearBrowser.app') || apps[0]
-if (!app) fail(`No .app bundle found under ${buildDir}`)
-if (apps.length > 1) console.log(`Found ${apps.length} .app bundles; notarizing ${app}`)
+const preferred = apps.filter((candidate) => basename(candidate) === `${appName}.app`)
+if (preferred.length !== 1) {
+  fail(`Expected exactly one ${appName}.app under ${buildDir}, found ${preferred.length}: ${apps.join(', ') || '(none)'}`)
+}
+const app = preferred[0]
 
 const workDir = mkdtempSync(join(tmpdir(), 'pearbrowser-notary-'))
 const archive = join(workDir, 'PearBrowser-notary.zip')
@@ -53,6 +58,29 @@ try {
   }
 } finally {
   rmSync(workDir, { recursive: true, force: true })
+}
+
+function parseArgs (argv) {
+  const options = new Map([
+    ['--build-dir', 'buildDir'],
+    ['--app-name', 'appName']
+  ])
+  const parsed = {}
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]
+    const key = options.get(arg)
+    if (!key) usage(2, `unknown argument: ${arg}`)
+    const value = argv[++i] || ''
+    if (!value || value.startsWith('--')) usage(2, `${arg} requires a value`)
+    parsed[key] = value
+  }
+  return parsed
+}
+
+function usage (code, message = '') {
+  if (message) console.error(`error: ${message}`)
+  console.error('usage: node scripts/notarize-appling-macos.mjs [--build-dir dist/electron] [--app-name PearBrowser]')
+  process.exit(code)
 }
 
 function findApps (dir) {

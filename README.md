@@ -11,36 +11,50 @@ npm `0.20.2` line and CI guards that fact explicitly. Network compatibility is
 verified through signed capability documents rather than by pretending those
 two distribution versions are the same. The `v0.25.0-rc.*` fleet and separate
 blind-substrate track remain candidate/development opt-ins; neither is required
-or presented as stable by PearBrowser `v0.9.1`.
+or presented as stable by the latest published PearBrowser release, `v0.9.0`.
 
-**Current release:** `v0.9.1`. This corrective release makes the embedded-Electron window render (the shell is now an esbuild bundle — bare specifiers never resolved over `file://`), stops the renderer racing backend boot, and repairs the Settings relay capability checks (`bare-https` has no `get()` shorthand). It retains everything from `v0.9.0`: the experimental WDK wallet preview (desktop-only, Stable Testnet only, off by default behind `experimentalWalletWdk`; see [docs/WDK_WALLET_V0.9_SPEC.md](./docs/WDK_WALLET_V0.9_SPEC.md)), the Bare boot fix, the embedded Pear v3 runtime backend, host-confirmed `pear-install` native delivery separate from browsable `hyper://` content, signed catalogue submission/moderation receipts, private search, reconnect-safe RPC, Content Shield, Pear Plugins, and the local-first catalogue/search/naming stack. See [docs/RELEASE_NOTES_v0.9.1.md](./docs/RELEASE_NOTES_v0.9.1.md).
+**Latest published release:** `v0.9.0`. **Current release candidate:** `v0.9.1`.
+The candidate makes the embedded-Electron window render (the shell is now an
+esbuild bundle — bare specifiers never resolved over `file://`), stops the
+renderer racing backend boot, repairs the Settings relay capability checks
+(`bare-https` has no `get()` shorthand), and aligns the reviewed runtime cohort
+with Pear 3.3.0. It is not a published release until its public-trust native
+assets and release gates pass. See
+[docs/RELEASE_NOTES_v0.9.1.md](./docs/RELEASE_NOTES_v0.9.1.md).
 
 **Current architecture:** start with [docs/ARCHITECTURE_AND_CAPABILITIES.md](./docs/ARCHITECTURE_AND_CAPABILITIES.md). The deeper catalogue/search/naming/Nostr audit is in [docs/DEEP_AUDIT_CATALOG_SEARCH_NAMING_NOSTR_2026-06-21.md](./docs/DEEP_AUDIT_CATALOG_SEARCH_NAMING_NOSTR_2026-06-21.md).
 
 ## Install it
 
-Primary desktop distribution is now native GitHub release packages. The
-`v0.9.1` release targets macOS, Windows, and Linux assets with SHA-256 sidecars
-and platform manifests. Download from the
-[`v0.9.1` release](https://github.com/bigdestiny2/pearbrowser-desktop/releases/tag/v0.9.1),
-follow the [native install guide](./docs/INSTALL_NATIVE_PACKAGES.md), or resolve
-the recommended asset for your machine from a source checkout:
+Primary desktop distribution is a verified public-trust GitHub Release. The
+latest published release is still `v0.9.0`; `v0.9.1` remains a release
+candidate and must not be described as live until its signing, notarization,
+clean-install, and public-download gates pass. After publication, use the
+[native install guide](./docs/INSTALL_NATIVE_PACKAGES.md) or resolve the
+recommended `v0.9.1` asset:
 
 ```sh
 npm run resolve:native-release -- --tag v0.9.1 --repo bigdestiny2/pearbrowser-desktop
 ```
 
-The current package targets match the `cmake-pear` appling toolchain:
+The supported `v0.9.1` artifacts are built from the reviewed Electron source
+with the pinned electron-builder toolchain:
 
-- macOS: `PearBrowser-<version>-macos-arm64.app.zip` and `PearBrowser-<version>-macos-x64.app.zip` now; public-trust runs create signed/notarized `.dmg` assets once Developer ID credentials are wired in
-- Windows: `PearBrowser-<version>-windows-x64.msix` now
-- Linux: `PearBrowser-<version>-linux-x64.AppImage` now, distro packages such as `.deb` later if demand warrants them
+- macOS Apple Silicon and Intel: signed/notarized `.app.zip` plus a signed,
+  notarized, and stapled `.dmg` for each architecture
+- Windows x64: Authenticode-signed NSIS `.exe`
+- Linux x64: `.AppImage`
 
-The retained PearBrowser `upgrade` key is a **migration record** until the v3
-production provision/multisig quorum is independently verified; it is not an
-install instruction in the catalogue. PearBrowser never passes a remote link
-to `PearRuntime.run()`. Keep legacy data intact, install the native package for
-your platform, and use the migration guidance in
+Every artifact has a matching SHA-256 sidecar and platform manifest.
+Package-proof outputs are ad-hoc/unsigned GitHub Actions artifacts only; they
+are never attached to or published as a GitHub Release.
+
+The retained PearBrowser `upgrade` key is a **migration record**. Runtime OTA
+download/apply remains disabled until the Pear v3 production identity, signer
+roster, provision, and multisig quorum are independently verified; the key is
+not an install instruction or release fallback. PearBrowser never passes a
+remote link to `PearRuntime.run()`. Keep legacy data intact, install the native
+package for your platform, and use the migration guidance in
 [docs/PEAR_V3_MIGRATION.md](./docs/PEAR_V3_MIGRATION.md).
 
 ## What's inside
@@ -129,7 +143,7 @@ your platform, and use the migration guidance in
 ## Architecture
 
 ```
-Renderer UI (React + htm, no build step)
+Renderer UI (React + htm, committed esbuild bundle)
   Browse / Apps / Publish / Library / Search / Names / Nostr / Settings
   iframe sandbox + page shims
         |
@@ -175,7 +189,15 @@ npm run start # fails closed until the embedded v3 runtime host is configured
 
 Source installs are standalone. The desktop packages default to npm `latest` for HiveRelay; the root package defaults to npm `latest` for `p2p-hiverelay`, `p2p-hiverelay-client`, and `p2p-hiverelay-verifier`, with the current dist-tag resolving to `0.20.2` in the lockfile, so a clone of just this repo resolves them from the registry. `npm install` runs `scripts/check-hiverelay-layout.mjs`, which exits quietly for the registry line and fails only if the HiveRelay dependency/lockfile line drifts or you opt into incomplete/mismatched `file:` workspace dependencies. The guard accepts either the `latest` dist-tag or an explicit semver range (for example `^0.26.0`) for those three specs, so the pins can move to a numbered release line without the `preinstall` hook blocking installs; it still refuses dist-tags other than `latest`, `npm:` aliases, git/`http(s)` specs, and bare wildcards. A sibling `../../00-core/hiverelay` checkout is optional and only needed for HiveRelay co-development.
 
-UI files use htm + React (no build step). Backend in `backend/` is CommonJS. The source checkout starts through the native Electron + embedded Pear v3 host; it does not accept remote app links as worker input. Third-party Pear v3 builds install through the narrow Electron-main `pear-install` boundary and then launch as ordinary OS applications.
+UI source files use htm + React and are compiled into the committed
+`ui/dist/main.bundle.js` with `npm run build:ui`; `npm start` rebuilds that
+bundle through its `prestart` hook. Before release, regenerate the bundle and
+confirm `git diff --exit-code -- ui/dist/main.bundle.js` is clean so the
+checked-in output is deterministic. Backend code in `backend/` is CommonJS. The
+source checkout starts through the native Electron + embedded Pear v3 host; it
+does not accept remote app links as worker input. Third-party Pear v3 builds
+install through the narrow Electron-main `pear-install` boundary and then
+launch as ordinary OS applications.
 
 ## Release pipeline
 
@@ -193,9 +215,11 @@ node scripts/publish-catalog-bee.js catalog-source/pearbrowser-network.catalog.j
 node scripts/verify-live-catalog.js --expect-app peercord --expect-app peerit --expect-app hiveworm
 ```
 
-The preflight never stages or publishes a release. Promotion requires a signed
-native package, an AppRelease v2 record, independent availability evidence, and
-human approval of clean-install, upgrade, rollback, and data-continuity proof.
+The preflight never stages or publishes a release. Promotion requires the
+exact reviewed 40-character source commit SHA, signed/notarized Electron
+artifacts for the supported platforms, verified checksums and public downloads,
+and human approval of clean-install, upgrade, rollback, and data-continuity
+evidence. Signing credentials remain external operator prerequisites.
 
 ## Operator scripts
 
@@ -219,10 +243,10 @@ human approval of clean-install, upgrade, rollback, and data-continuity proof.
 | `npm run -s generate:native-signing-secret-plan` | Emits the public-trust GitHub Actions secret inventory, guarded `gh secret set` command templates, and follow-up signing/readiness checks. |
 | `npm run -s generate:native-install-snippet -- --tag <tag>` | Emits release-note/install-page Markdown for the recommended desktop packages and checksum sidecars. |
 | `npm run -s generate:native-install-guide -- --tag <tag>` | Emits the full user-facing native install guide with direct package and checksum links. |
-| `npm run -s generate:native-install-smoke-plan -- --tag <tag>` | Emits clean-host install smoke commands, source-free runtime diagnostics, and evidence bullets for macOS, Windows, and Linux. |
+| `npm run -s generate:native-install-smoke-plan -- --tag <tag> --source-ref <40-hex-sha>` | Emits clean-host install smoke commands, a commit-pinned runtime diagnostic, and evidence bullets for macOS, Windows, and Linux. Package-proof mode requires downloaded Actions artifact metadata via `--fixture`. |
 | `npm run -s generate:origin-isolation-smoke-evidence -- --plan docs/origin-isolation-smoke-plan-peerit-pearfeed-2026-07-02.json --out docs/origin-isolation-smoke-evidence-peerit-pearfeed-2026-07-04.json --json` | Runs the automated Peerit/Pearfeed per-drive-origin verifier and writes the evidence artifact consumed by `check:origin-isolation-smoke-evidence`. |
 | `npm run generate:package-manager-manifests -- --tag <tag>` | Emits Homebrew Cask and WinGet manifest drafts from release assets; defaults to public-trust gates. |
-| `npm run check:public-trust-readiness -- --tag <tag>` | Aggregates the public-trust signing, published asset, download, Linux metadata, clean-install smoke-plan, package-manager draft, and evidence-log gates; pass `--source-ref` to pin the clean-host runtime smoke helper and `--signing-secret-source github` to verify GitHub Actions secret names before dispatching CI. |
+| `npm run check:public-trust-readiness -- --tag <tag> --source-ref <40-hex-sha>` | Aggregates the public-trust signing, published asset, download, Linux metadata, clean-install smoke-plan, package-manager draft, and evidence-log gates. The immutable source SHA is mandatory; use `--signing-secret-source github --signing-github-environment production` to verify protected-environment secret names. |
 | `npm run -s generate:public-trust-operator-report -- --tag <tag>` | Formats the public-trust readiness state into a Markdown handoff with grouped blockers and exact next commands, including the release-evidence handoff. |
 | `npm run -s generate:release-evidence-handoff` | Formats the operator evidence log into grouped manual rows with copy-ready PASS/DEFER templates; pass `--story-smoke-json <file>` to prefill rows from release story smoke JSON. |
 | `npm run check:release-evidence` | Reads the operator evidence log and fails until required gates are marked `PASS` or documented `DEFER`, with a final announcement decision. |
@@ -232,45 +256,50 @@ human approval of clean-install, upgrade, rollback, and data-continuity proof.
 
 ## Distribution
 
-The `appling/` directory contains the multi-architecture native shell — Bare + CMake builds for macOS / Windows / Linux. GitHub release assets are produced by `.github/workflows/desktop-native-release.yml`, which builds the appling on hosted macOS, Windows, and Linux runners, collects the native artifacts, writes SHA-256 sidecars, and attaches them to the matching release tag. Run the workflow manually with tag `v0.9.1` and `source_ref` set to the release commit to produce or refresh the attached release assets.
+`.github/workflows/desktop-native-release.yml` builds the actual Electron app on
+hosted macOS, Windows, and Linux runners with the pinned electron-builder
+configuration. The workflow is manual and create-only: it accepts a stable
+`vX.Y.Z` tag and an exact lowercase 40-character source SHA, refuses an
+existing tag or release, and never overwrites assets.
 
-Current generated artifacts are `.app.zip` on macOS, `.msix` on Windows, and `.AppImage` on Linux. The workflow uses `npm ci --prefix appling`, so update `appling/package-lock.json` deliberately when the native wrapper toolchain changes.
+The packaged host verifies a build-unique Ed25519-signed SHA-256 inventory of
+the complete physical Pear runtime before loading any unpacked worker or
+dependency. The verification key and release identity live in integrity-sealed
+`app.asar`; hardened Electron fuses also disable RunAsNode, `NODE_OPTIONS`, and
+CLI inspector entry points and enable encrypted cookies.
+
+The two release modes have deliberately different authority:
+
+- `package-proof` produces ad-hoc/unsigned GitHub Actions artifacts for review
+  and clean-host smoke only. It does not create a tag, draft, or release and
+  cannot publish.
+- `public-trust` consumes credentials from the protected `production`
+  environment, builds and verifies the signed artifacts, creates a draft first,
+  re-downloads the current draft immediately before publication, compares every
+  byte and checksum with the independently verified Actions bundle, rechecks
+  source provenance, and publishes only when `publish_release=true` was
+  explicitly approved.
+
+The public-trust Windows route is PFX/Authenticode only for `v0.9.1`. Azure
+Trusted Signing is deferred because electron-builder 26's current integration
+installs a mutable TrustedSigning PowerShell module during the build. It must
+not be treated as a supported credential alternative until that dependency and
+integration are version-pinned and reviewed.
 
 ```sh
-npm run check:appling-release -- --tag v0.9.1
-npm run check:linux-appimage-metadata
-npm run resolve:native-release -- --tag v0.9.1 --repo bigdestiny2/pearbrowser-desktop
-npm run -s generate:native-signing-secret-plan -- --repo bigdestiny2/pearbrowser-desktop --tag v0.9.1 --source-ref <release-commit>
-npm run -s generate:native-install-snippet -- --tag v0.9.1 --repo bigdestiny2/pearbrowser-desktop
-npm run -s generate:native-install-guide -- --tag v0.9.1 --repo bigdestiny2/pearbrowser-desktop
-npm run -s generate:native-install-smoke-plan -- --tag v0.9.1 --repo bigdestiny2/pearbrowser-desktop --source-ref <release-commit>
-npm run generate:package-manager-manifests -- --tag v0.9.1 --repo bigdestiny2/pearbrowser-desktop --trust-mode package-proof
-npm run check:native-signing -- --require-public-trust --secret-source github --repo bigdestiny2/pearbrowser-desktop
-npm run check:public-trust-readiness -- --tag v0.9.1 --repo bigdestiny2/pearbrowser-desktop --source-ref <release-commit> --signing-secret-source github
-npm run -s generate:public-trust-operator-report -- --tag v0.9.1 --repo bigdestiny2/pearbrowser-desktop --source-ref <release-commit> --signing-secret-source github
-npm run -s generate:release-evidence-handoff
-cd appling
 npm ci
-npm run generate
-npm run build
-cd ..
-npm run package:appling -- --tag v0.9.1
+npm test
+npm audit --audit-level=high
+npm run check:linux-appimage-metadata
+npm run -s generate:native-signing-secret-plan -- --repo bigdestiny2/pearbrowser-desktop --tag v0.9.1 --source-ref <40-hex-release-sha> --github-environment production
+npm run check:native-signing -- --require-public-trust --secret-source github --repo bigdestiny2/pearbrowser-desktop --github-environment production
+npm run check:public-trust-readiness -- --tag v0.9.1 --repo bigdestiny2/pearbrowser-desktop --source-ref <40-hex-release-sha> --signing-secret-source github --signing-github-environment production
+npm run -s generate:public-trust-operator-report -- --tag v0.9.1 --repo bigdestiny2/pearbrowser-desktop --source-ref <40-hex-release-sha> --signing-secret-source github --signing-github-environment production
+npm run -s generate:release-evidence-handoff
 ```
 
-Code signing is per-platform:
-- macOS: ad-hoc signed by default; use `PEARBROWSER_MACOS_SIGNING_IDENTITY` /
-  `PEARBROWSER_MACOS_SIGNING_KEYCHAIN` plus notarization for public Developer ID releases
-- Windows: unsigned MSIX packaging by default; set
-  `PEARBROWSER_WINDOWS_SIGNING_SUBJECT` /
-  `PEARBROWSER_WINDOWS_SIGNING_THUMBPRINT` after importing a certificate for
-  public signed releases
-- Linux: no signing required
-
-The native release workflow has two modes. Manual runs default to
-`release_mode=package-proof` for ad-hoc/unsigned packaging validation. Use
-`release_mode=public-trust` for announcement-ready assets; release-published and
-tag-triggered runs default to that mode and fail closed unless macOS Developer
-ID/notary and Windows signing credentials are configured.
+See [Native release packaging](./docs/NATIVE_RELEASE_PACKAGING.md) for the exact
+artifact, credential, draft, failure-recovery, and post-publication contracts.
 
 ## Companion projects
 

@@ -4,61 +4,183 @@ name: Desktop Native Release
   workflow_dispatch:
     inputs:
       tag:
-        description: GitHub release tag to build and attach assets to
+        description: New stable GitHub release tag to create (must not already exist)
         required: true
-        default: v0.5.0
+        type: string
       source_ref:
-        description: Git ref to build the native wrapper from
+        description: Exact 40-character commit SHA to build; must equal the workflow dispatch commit
         required: true
-        default: main
+        type: string
       release_mode:
-        description: package-proof allows ad-hoc/unsigned assets; public-trust requires macOS notarization and Windows signing credentials
+        description: package-proof uploads Actions artifacts only; public-trust enables signing, notarization, and a create-only draft
         required: true
         type: choice
         default: package-proof
         options:
           - package-proof
           - public-trust
-  release:
-    types:
-      - published
-  push:
-    tags:
-      - v*
+      publish_release:
+        description: Publish the verified draft (public-trust mode only)
+        required: true
+        type: boolean
+        default: false
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: desktop-native-release-${{ github.event.release.tag_name || github.event.inputs.tag || github.ref_name }}
+  group: desktop-native-release-${{ inputs.tag }}
   cancel-in-progress: false
 
 env:
-  RELEASE_TAG: ${{ github.event.release.tag_name || github.event.inputs.tag || github.ref_name }}
-  SOURCE_REF: ${{ github.event.inputs.source_ref || github.event.release.tag_name || github.ref_name }}
-  RELEASE_MODE: ${{ github.event.inputs.release_mode || 'public-trust' }}
-  NODE_VERSION: 22
-  PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64 || '' }}
-  PEARBROWSER_MACOS_CERTIFICATE_PASSWORD: ${{ secrets.PEARBROWSER_MACOS_CERTIFICATE_PASSWORD || '' }}
-  PEARBROWSER_MACOS_KEYCHAIN_PASSWORD: ${{ secrets.PEARBROWSER_MACOS_KEYCHAIN_PASSWORD || github.run_id }}
-  PEARBROWSER_MACOS_SIGNING_IDENTITY: ${{ secrets.PEARBROWSER_MACOS_SIGNING_IDENTITY || '-' }}
-  PEARBROWSER_MACOS_SIGNING_KEYCHAIN: ${{ secrets.PEARBROWSER_MACOS_SIGNING_KEYCHAIN || '' }}
-  PEARBROWSER_MACOS_NOTARY_APPLE_ID: ${{ secrets.PEARBROWSER_MACOS_NOTARY_APPLE_ID || '' }}
-  PEARBROWSER_MACOS_NOTARY_PASSWORD: ${{ secrets.PEARBROWSER_MACOS_NOTARY_PASSWORD || '' }}
-  PEARBROWSER_MACOS_NOTARY_TEAM_ID: ${{ secrets.PEARBROWSER_MACOS_NOTARY_TEAM_ID || '' }}
-  PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64: ${{ secrets.PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64 || '' }}
-  PEARBROWSER_WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.PEARBROWSER_WINDOWS_CERTIFICATE_PASSWORD || '' }}
-  PEARBROWSER_WINDOWS_SIGNING_SUBJECT: ${{ secrets.PEARBROWSER_WINDOWS_SIGNING_SUBJECT || 'CN=PearBrowser Desktop' }}
-  PEARBROWSER_WINDOWS_SIGNING_THUMBPRINT: ${{ secrets.PEARBROWSER_WINDOWS_SIGNING_THUMBPRINT || '' }}
-  # Windows EV-equivalent via Azure Trusted Signing (key in Azure's HSM, no
-  # exportable .pfx). Presence of the account name turns the Azure signing step
-  # on; it is an alternative to the PFX/SignTool path above.
-  AZURE_TRUSTED_SIGNING_ACCOUNT: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT || '' }}
+  RELEASE_TAG: ${{ inputs.tag }}
+  SOURCE_REF: ${{ inputs.source_ref }}
+  RELEASE_MODE: ${{ inputs.release_mode }}
+  NODE_VERSION: 22.22.0
 
 jobs:
+  preflight:
+    name: Validate immutable release request
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+
+    steps:
+      - name: Validate exact source, stable tag, and create-only state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          DISPATCH_SHA: ${{ github.sha }}
+          PUBLISH_RELEASE: ${{ inputs.publish_release }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::tag must be a stable vX.Y.Z tag, got $RELEASE_TAG"
+            exit 1
+          fi
+          if [[ ! "$SOURCE_REF" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::source_ref must be an exact lowercase 40-character commit SHA"
+            exit 1
+          fi
+          if [[ "$SOURCE_REF" != "$DISPATCH_SHA" ]]; then
+            echo "::error::source_ref $SOURCE_REF does not equal workflow dispatch commit $DISPATCH_SHA"
+            exit 1
+          fi
+          if [[ "$PUBLISH_RELEASE" == "true" && "$RELEASE_MODE" != "public-trust" ]]; then
+            echo "::error::publish_release=true requires release_mode=public-trust"
+            exit 1
+          fi
+
+          assert_absent() {
+            local label="$1"
+            local endpoint="$2"
+            local response
+            if response="$(gh api "$endpoint" 2>&1)"; then
+              echo "::error::$label already exists; this workflow never overwrites releases or tags"
+              exit 1
+            fi
+            if [[ "$response" != *"HTTP 404"* ]]; then
+              echo "::error::Could not safely prove $label is absent: $response"
+              exit 1
+            fi
+          }
+
+          assert_absent "tag $RELEASE_TAG" "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG"
+          assert_absent "release $RELEASE_TAG" "repos/$GH_REPO/releases/tags/$RELEASE_TAG"
+
+  validate-source:
+    name: Test exact Electron release source
+    needs: preflight
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+        working-directory: pear-ecosystem/01-browser/pearbrowser-desktop
+
+    steps:
+      - name: Checkout exact PearBrowser source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.source_ref }}
+          fetch-depth: 0
+          persist-credentials: false
+          path: pear-ecosystem/01-browser/pearbrowser-desktop
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: pear-ecosystem/01-browser/pearbrowser-desktop/package-lock.json
+
+      - name: Verify checkout and release metadata
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          if [[ "$actual" != "$SOURCE_REF" ]]; then
+            echo "::error::Checked out $actual instead of requested $SOURCE_REF"
+            exit 1
+          fi
+          node - <<'NODE'
+          const pkg = require('./package.json')
+          if (`v${pkg.version}` !== process.env.RELEASE_TAG) {
+            throw new Error(`package.json version ${pkg.version} does not match ${process.env.RELEASE_TAG}`)
+          }
+          if (pkg.devDependencies?.electron !== '43.2.0') throw new Error('release must pin Electron 43.2.0')
+          if (pkg.devDependencies?.['electron-builder'] !== '26.15.3') throw new Error('release must pin electron-builder 26.15.3')
+          NODE
+
+      - name: Verify Electron Builder release contract
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const config = require('./electron-builder.config.cjs')
+          const equal = (actual, expected, label) => {
+            if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+              throw new Error(`${label} must be ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`)
+            }
+          }
+          equal(config.mac?.target, ['dir'], 'mac target')
+          equal(config.win?.target, ['nsis'], 'Windows target')
+          equal(config.linux?.target, ['AppImage'], 'Linux target')
+          if (!config.win?.signtoolOptions) throw new Error('Windows release must use builder-integrated PFX/SignTool signing')
+          if (config.asar !== true) throw new Error('ASAR must be enabled')
+          if (typeof config.beforePack !== 'function' || typeof config.afterPack !== 'function' || typeof config.afterSign !== 'function') {
+            throw new Error('signed physical runtime integrity hooks must be configured')
+          }
+          if (config.electronFuses?.runAsNode !== false) throw new Error('RunAsNode fuse must be disabled')
+          if (config.electronFuses?.enableCookieEncryption !== true) throw new Error('cookie-encryption fuse must be enabled')
+          if (config.electronFuses?.enableNodeOptionsEnvironmentVariable !== false) throw new Error('NODE_OPTIONS fuse must be disabled')
+          if (config.electronFuses?.enableNodeCliInspectArguments !== false) throw new Error('Node CLI inspect fuse must be disabled')
+          if (config.electronFuses?.enableEmbeddedAsarIntegrityValidation !== true) throw new Error('embedded ASAR integrity fuse must be enabled')
+          if (config.electronFuses?.onlyLoadAppFromAsar !== true) throw new Error('only-load-from-ASAR fuse must be enabled')
+          NODE
+
+      - name: Install desktop dependencies
+        run: npm ci
+
+      - name: Verify Pear v3 package and local-worker contract
+        run: npm run check:pear-v3
+
+      - name: Test desktop release source
+        run: npm test
+
+      - name: Verify generated UI bundle
+        run: |
+          npm run build:ui
+          git diff --exit-code -- ui/dist/main.bundle.js
+
   build-native:
-    name: Build ${{ matrix.name }} appling
+    name: Build, inspect, and smoke ${{ matrix.name }}
+    needs: validate-source
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    environment: ${{ inputs.release_mode == 'public-trust' && matrix.platform != 'linux' && 'production' || 'package-proof' }}
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -66,19 +188,27 @@ jobs:
           - name: macOS Apple Silicon
             os: macos-15
             platform: darwin
-            release-platform: macos
+            release_platform: macos
+            arch: arm64
+            package_script: package:electron:macos
           - name: macOS Intel
             os: macos-15-intel
             platform: darwin
-            release-platform: macos
-          - name: Windows
-            os: windows-latest
+            release_platform: macos
+            arch: x64
+            package_script: package:electron:macos
+          - name: Windows x64
+            os: windows-2025
             platform: win32
-            release-platform: windows
-          - name: Linux
-            os: ubuntu-latest
+            release_platform: windows
+            arch: x64
+            package_script: package:electron:windows
+          - name: Linux x64
+            os: ubuntu-24.04
             platform: linux
-            release-platform: linux
+            release_platform: linux
+            arch: x64
+            package_script: package:electron:linux
 
     defaults:
       run:
@@ -86,358 +216,453 @@ jobs:
         working-directory: pear-ecosystem/01-browser/pearbrowser-desktop
 
     steps:
-      - name: Checkout PearBrowser desktop
-        uses: actions/checkout@v4
+      - name: Checkout exact PearBrowser source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ env.SOURCE_REF }}
+          ref: ${{ inputs.source_ref }}
+          fetch-depth: 0
+          persist-credentials: false
           path: pear-ecosystem/01-browser/pearbrowser-desktop
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: pear-ecosystem/01-browser/pearbrowser-desktop/package-lock.json
 
-      - name: Verify Pear v3 package and local-worker contract
-        run: npm run check:pear-v3
-
-      - name: Validate release mode
+      - name: Verify exact checkout and native runner architecture
         run: |
-          case "$RELEASE_MODE" in
-            package-proof|public-trust)
-              echo "release_mode=$RELEASE_MODE"
-              ;;
-            *)
-              echo "::error::Unknown RELEASE_MODE: $RELEASE_MODE"
-              exit 1
-              ;;
-          esac
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          if [[ "$actual" != "$SOURCE_REF" ]]; then
+            echo "::error::Checked out $actual instead of requested $SOURCE_REF"
+            exit 1
+          fi
+          host_arch="$(node -p 'process.arch')"
+          if [[ "$host_arch" != "${{ matrix.arch }}" ]]; then
+            echo "::error::${{ matrix.name }} requires a ${{ matrix.arch }} runner, got $host_arch"
+            exit 1
+          fi
 
-      - name: Setup Python for CMake
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.x"
+      - name: Install desktop dependencies
+        run: npm ci
 
-      - name: Install CMake 4 toolchain
-        run: |
-          python -m pip install --upgrade cmake
-          cmake --version
-
-      - name: Install Linux native dependencies
+      - name: Install Linux smoke-test display
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y pkg-config libgtk-4-dev
+          sudo apt-get install -y xvfb
 
-      - name: Enable Windows dependency checkout paths
-        if: runner.os == 'Windows'
-        run: git config --global core.longpaths true
+      - name: Validate macOS public-trust credentials
+        if: runner.os == 'macOS' && inputs.release_mode == 'public-trust'
+        env:
+          PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64 }}
+          PEARBROWSER_MACOS_CERTIFICATE_PASSWORD: ${{ secrets.PEARBROWSER_MACOS_CERTIFICATE_PASSWORD }}
+          PEARBROWSER_MACOS_KEYCHAIN_PASSWORD: ${{ secrets.PEARBROWSER_MACOS_KEYCHAIN_PASSWORD || github.run_id }}
+          PEARBROWSER_MACOS_SIGNING_IDENTITY: ${{ secrets.PEARBROWSER_MACOS_SIGNING_IDENTITY }}
+          PEARBROWSER_MACOS_NOTARY_APPLE_ID: ${{ secrets.PEARBROWSER_MACOS_NOTARY_APPLE_ID }}
+          PEARBROWSER_MACOS_NOTARY_PASSWORD: ${{ secrets.PEARBROWSER_MACOS_NOTARY_PASSWORD }}
+          PEARBROWSER_MACOS_NOTARY_TEAM_ID: ${{ secrets.PEARBROWSER_MACOS_NOTARY_TEAM_ID }}
+        run: node scripts/check-native-signing-credentials.mjs --platform macos --require-public-trust
 
-      - name: Add Windows SDK packaging tools to PATH
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $sdkRoot = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin'
-          $sdkBin = Get-ChildItem $sdkRoot -Directory |
-            Sort-Object Name -Descending |
-            ForEach-Object { Join-Path $_.FullName 'x64' } |
-            Where-Object { Test-Path (Join-Path $_ 'MakeAppx.exe') } |
-            Select-Object -First 1
-          if (-not $sdkBin) {
-            throw 'MakeAppx.exe not found in Windows SDK'
-          }
-          Add-Content -Path $env:GITHUB_PATH -Value $sdkBin
-          Write-Host "Using Windows SDK tools from $sdkBin"
+      - name: Validate Windows PFX public-trust credentials
+        if: runner.os == 'Windows' && inputs.release_mode == 'public-trust'
+        env:
+          PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64: ${{ secrets.PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64 }}
+          PEARBROWSER_WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.PEARBROWSER_WINDOWS_CERTIFICATE_PASSWORD }}
+        run: node scripts/check-native-signing-credentials.mjs --platform windows --require-public-trust
 
-      - name: Validate release signing configuration
-        run: |
-          set -euo pipefail
-          args=(--platform "$RUNNER_OS")
-          if [[ "$RELEASE_MODE" == "public-trust" ]]; then
-            args+=(--require-public-trust)
-          fi
-          node scripts/check-native-signing-credentials.mjs "${args[@]}"
+      - name: Validate Linux release configuration
+        if: runner.os == 'Linux'
+        run: node scripts/check-native-signing-credentials.mjs --platform linux
 
-      - name: Import macOS signing certificate
-        if: runner.os == 'macOS' && env.PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64 != ''
+      - name: Import macOS Developer ID certificate into an ephemeral keychain
+        if: runner.os == 'macOS' && inputs.release_mode == 'public-trust'
+        env:
+          PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64 }}
+          PEARBROWSER_MACOS_CERTIFICATE_PASSWORD: ${{ secrets.PEARBROWSER_MACOS_CERTIFICATE_PASSWORD }}
+          PEARBROWSER_MACOS_KEYCHAIN_PASSWORD: ${{ secrets.PEARBROWSER_MACOS_KEYCHAIN_PASSWORD || github.run_id }}
         run: |
           set -euo pipefail
           keychain="$RUNNER_TEMP/pearbrowser-signing.keychain-db"
-          cert="$RUNNER_TEMP/pearbrowser-signing.p12"
-
-          python - <<'PY'
-          import base64
-          import os
-          from pathlib import Path
-
-          cert = Path(os.environ["RUNNER_TEMP"]) / "pearbrowser-signing.p12"
-          cert.write_bytes(base64.b64decode(os.environ["PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64"]))
-          PY
-
+          certificate="$RUNNER_TEMP/pearbrowser-signing.p12"
+          rm -f "$keychain" "$certificate"
+          node - <<'NODE'
+          const { writeFileSync } = require('node:fs')
+          const { join } = require('node:path')
+          writeFileSync(join(process.env.RUNNER_TEMP, 'pearbrowser-signing.p12'), Buffer.from(process.env.PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64, 'base64'))
+          NODE
           security create-keychain -p "$PEARBROWSER_MACOS_KEYCHAIN_PASSWORD" "$keychain"
           security set-keychain-settings -lut 21600 "$keychain"
           security unlock-keychain -p "$PEARBROWSER_MACOS_KEYCHAIN_PASSWORD" "$keychain"
-          security import "$cert" -P "$PEARBROWSER_MACOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+          security import "$certificate" -P "$PEARBROWSER_MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -t cert -f pkcs12 -k "$keychain"
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$PEARBROWSER_MACOS_KEYCHAIN_PASSWORD" "$keychain"
           security find-identity -v -p codesigning "$keychain"
-          echo "PEARBROWSER_MACOS_SIGNING_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+          rm -f "$certificate"
+          echo "CSC_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
 
-      - name: Import Windows signing certificate
-        if: runner.os == 'Windows' && env.PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64 != ''
-        shell: pwsh
-        run: |
-          $pfxPath = Join-Path $env:RUNNER_TEMP 'pearbrowser-windows-signing.pfx'
-          [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64))
-          $securePassword = ConvertTo-SecureString -String $env:PEARBROWSER_WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
-          $cert = Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation Cert:\CurrentUser\My -Password $securePassword
-          if (-not $cert) {
-            throw 'Failed to import Windows signing certificate'
-          }
-          if (-not $env:PEARBROWSER_WINDOWS_SIGNING_THUMBPRINT) {
-            Add-Content -Path $env:GITHUB_ENV -Value "PEARBROWSER_WINDOWS_SIGNING_THUMBPRINT=$($cert.Thumbprint)"
-          }
-          Write-Host "Imported Windows signing certificate $($cert.Subject) $($cert.Thumbprint)"
-
-      - name: Install appling build tools
-        run: npm ci --prefix appling
-
-      - name: Verify appling release metadata
-        run: node scripts/check-appling-release.mjs --tag "$RELEASE_TAG"
-
-      - name: Generate native project
-        run: npm run --prefix appling generate
-
-      - name: Build native package
-        run: npm run --prefix appling build
-
-      # Windows EV-equivalent signing via Azure Trusted Signing. Guarded on the
-      # account secret. The build's local SignTool path stays skipped (no
-      # thumbprint), so this signs the unsigned .msix/.exe post-build. NOTE: the
-      # MSIX Publisher (PEARBROWSER_WINDOWS_SIGNING_SUBJECT) must equal the
-      # certificate subject Azure issues, or the signed package will not install.
-      - name: Sign Windows artifacts with Azure Trusted Signing
-        if: runner.os == 'Windows' && env.AZURE_TRUSTED_SIGNING_ACCOUNT != ''
-        uses: azure/trusted-signing-action@v0.5.1
-        with:
-          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
-          endpoint: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
-          trusted-signing-account-name: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT }}
-          certificate-profile-name: ${{ secrets.AZURE_TRUSTED_SIGNING_CERT_PROFILE }}
-          files-folder: ${{ github.workspace }}/pear-ecosystem/01-browser/pearbrowser-desktop/appling/build
-          files-folder-filter: msix,exe
-          files-folder-recurse: true
-          file-digest: SHA256
-          timestamp-rfc3161: http://timestamp.acs.microsoft.com
-          timestamp-digest: SHA256
-
-      # Linux AppImages do not bundle GTK4 by default, so the build-machine-only
-      # libgtk-4 dependency makes them fail to launch on a clean distro. Use
-      # linuxdeploy + the GTK plugin (handles RPATH, AppRun hooks, GTK modules,
-      # gdk-pixbuf loaders, GSettings schemas) to repackage a self-contained image.
-      # NOTE: first run validates this against cmake-pear's AppDir layout.
-      - name: Bundle GTK4 runtime into the Linux AppImage
-        if: runner.os == 'Linux'
-        run: |
-          set -euo pipefail
-          mapfile -t product_images < <(find appling/build -maxdepth 5 -name 'PearBrowser.AppImage' -type f -not -path '*/_deps/*')
-          [ "${#product_images[@]}" -eq 1 ] || { echo "::error::Expected exactly one PearBrowser.AppImage, found ${#product_images[@]}"; printf '%s\n' "${product_images[@]}"; exit 1; }
-          rel="${product_images[0]}"
-          abs="$PWD/$rel"; chmod +x "$abs"
-          work="$RUNNER_TEMP/appimage-gtk"; rm -rf "$work"; mkdir -p "$work"
-          ( cd "$work" && "$abs" --appimage-extract >/dev/null )
-          tools="$RUNNER_TEMP/ld"; mkdir -p "$tools"
-          curl -fsSL -o "$tools/linuxdeploy" https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-          curl -fsSL -o "$tools/linuxdeploy-plugin-gtk.sh" https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gtk/master/linuxdeploy-plugin-gtk.sh
-          chmod +x "$tools/linuxdeploy" "$tools/linuxdeploy-plugin-gtk.sh"
-          export PATH="$tools:$PATH"
-          ( cd "$work" && linuxdeploy --appimage-extract-and-run --appdir squashfs-root --plugin gtk --output appimage )
-          mapfile -t bundled_images < <(find "$work" -maxdepth 1 -name '*.AppImage' -type f)
-          [ "${#bundled_images[@]}" -eq 1 ] || { echo "::error::Expected exactly one bundled AppImage, found ${#bundled_images[@]}"; printf '%s\n' "${bundled_images[@]}"; exit 1; }
-          out="${bundled_images[0]}"
-          mv -f "$out" "$abs"; chmod +x "$abs"
-
-      # Deterministic gate: assert libgtk-4 is now inside the image, in a clean
-      # container with no GTK dev libs. A broken bundle fails here instead of
-      # shipping an AppImage that will not start on users' machines.
-      - name: Verify GTK4 is bundled (clean container)
-        if: runner.os == 'Linux'
-        run: |
-          set -euo pipefail
-          mapfile -t product_images < <(find appling/build -maxdepth 5 -name 'PearBrowser.AppImage' -type f -not -path '*/_deps/*')
-          [ "${#product_images[@]}" -eq 1 ] || { echo "::error::Expected exactly one PearBrowser.AppImage, found ${#product_images[@]}"; printf '%s\n' "${product_images[@]}"; exit 1; }
-          rel="${product_images[0]}"
-          docker run --rm -v "$PWD:/w" -w /w ubuntu:22.04 bash -lc '
-            set -e
-            apt-get update -qq && apt-get install -y -qq libfuse2 >/dev/null
-            chmod +x "'"$rel"'"
-            "'"$rel"'" --appimage-extract >/dev/null
-            if ! find squashfs-root -name "libgtk-4.so*" | grep -q .; then
-              echo "::error::libgtk-4 is not bundled; the AppImage will not run on a clean distro"; exit 1
-            fi
-            echo "GTK4 bundled:"; find squashfs-root -name "libgtk-4.so*"
-          '
-
-      - name: Verify Linux AppImage metadata
-        if: runner.os == 'Linux'
-        run: npm run check:linux-appimage-metadata -- --build-dir appling/build
-
-      - name: Notarize macOS app
+      - name: Build macOS Electron directory
         if: runner.os == 'macOS'
-        run: node scripts/notarize-appling-macos.mjs
+        env:
+          PEARBROWSER_MACOS_SIGNING_IDENTITY: ${{ inputs.release_mode == 'public-trust' && secrets.PEARBROWSER_MACOS_SIGNING_IDENTITY || '-' }}
+        run: npm run "${{ matrix.package_script }}" -- --${{ matrix.arch }}
 
-      - name: Create public-trust macOS DMG
-        if: runner.os == 'macOS' && env.RELEASE_MODE == 'public-trust'
-        run: npm run package:macos-dmg -- --tag "$RELEASE_TAG"
-
-      - name: Sign additional Windows installer artifacts
+      - name: Build Windows Electron directory and NSIS installer
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64: ${{ inputs.release_mode == 'public-trust' && secrets.PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64 || '' }}
+          PEARBROWSER_WINDOWS_CERTIFICATE_PASSWORD: ${{ inputs.release_mode == 'public-trust' && secrets.PEARBROWSER_WINDOWS_CERTIFICATE_PASSWORD || '' }}
         run: |
-          if (-not $env:PEARBROWSER_WINDOWS_SIGNING_THUMBPRINT) {
-            Write-Host 'Skipping additional Windows installer signing; PEARBROWSER_WINDOWS_SIGNING_THUMBPRINT is empty.'
-            exit 0
-          }
-
-          $timestampUrl = 'http://timestamp.digicert.com'
-          $assets = Get-ChildItem -Path appling/build -Recurse -File -Include *.exe
-          foreach ($asset in $assets) {
-            Write-Host "Signing $($asset.FullName)"
-            & signtool sign /sha1 $env:PEARBROWSER_WINDOWS_SIGNING_THUMBPRINT /fd SHA256 /tr $timestampUrl /td SHA256 $asset.FullName
-            if ($LASTEXITCODE -ne 0) {
-              throw "SignTool failed for $($asset.FullName)"
+          $pfxPath = Join-Path $env:RUNNER_TEMP 'pearbrowser-builder-signing.pfx'
+          try {
+            Remove-Item Env:WIN_CSC_LINK -ErrorAction SilentlyContinue
+            Remove-Item Env:WIN_CSC_KEY_PASSWORD -ErrorAction SilentlyContinue
+            if ($env:RELEASE_MODE -eq 'public-trust') {
+              [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64))
+              $env:WIN_CSC_LINK = $pfxPath
+              $env:WIN_CSC_KEY_PASSWORD = $env:PEARBROWSER_WINDOWS_CERTIFICATE_PASSWORD
             }
+            & npm.cmd run '${{ matrix.package_script }}' -- --${{ matrix.arch }}
+            if ($LASTEXITCODE -ne 0) { throw "electron-builder exited with status $LASTEXITCODE" }
+          } finally {
+            Remove-Item Env:WIN_CSC_LINK -ErrorAction SilentlyContinue
+            Remove-Item Env:WIN_CSC_KEY_PASSWORD -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $pfxPath -Force -ErrorAction SilentlyContinue
           }
 
-      - name: Verify Windows signatures when configured
-        if: runner.os == 'Windows'
-        shell: pwsh
+      - name: Build Linux Electron directory and AppImage
+        if: runner.os == 'Linux'
+        run: npm run "${{ matrix.package_script }}" -- --${{ matrix.arch }}
+
+      - name: Resolve the single unpacked Electron package
         run: |
-          if (-not $env:PEARBROWSER_WINDOWS_SIGNING_THUMBPRINT) {
-            Write-Host 'Skipping Windows signature verification; PEARBROWSER_WINDOWS_SIGNING_THUMBPRINT is empty.'
-            exit 0
-          }
-
-          $assets = Get-ChildItem -Path appling/build -Recurse -File -Include *.msix,*.exe
-          if (-not $assets) {
-            throw 'No Windows installer artifacts found for signature verification.'
-          }
-
-          foreach ($asset in $assets) {
-            Write-Host "Verifying $($asset.FullName)"
-            & signtool verify /pa /v $asset.FullName
-            if ($LASTEXITCODE -ne 0) {
-              throw "SignTool verification failed for $($asset.FullName)"
-            }
-          }
-
-      - name: Collect release artifacts
-        run: >
-          node scripts/collect-appling-artifacts.mjs
-          --tag "$RELEASE_TAG"
-          --platform "${{ matrix.platform }}"
-          --arch "${{ runner.arch }}"
-          --out-dir "dist/appling-release/$RELEASE_TAG/${{ matrix.release-platform }}"
-
-      - name: Upload workflow artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: pearbrowser-desktop-${{ env.RELEASE_TAG }}-${{ matrix.release-platform }}-${{ runner.arch }}
-          path: pear-ecosystem/01-browser/pearbrowser-desktop/dist/appling-release/${{ env.RELEASE_TAG }}/${{ matrix.release-platform }}/*
-          if-no-files-found: error
-
-      - name: Delete macOS signing keychain
-        if: always() && runner.os == 'macOS' && env.PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64 != ''
-        run: security delete-keychain "$RUNNER_TEMP/pearbrowser-signing.keychain-db" || true
-
-  attach-release:
-    name: Attach assets to GitHub release
-    needs: build-native
-    runs-on: ubuntu-latest
-
-    defaults:
-      run:
-        shell: bash
-
-    steps:
-      - name: Checkout release verifier
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ env.SOURCE_REF }}
-          path: pear-ecosystem/01-browser/pearbrowser-desktop
-
-      - name: Validate release mode
-        run: |
-          case "$RELEASE_MODE" in
-            package-proof|public-trust)
-              echo "release_mode=$RELEASE_MODE"
+          set -euo pipefail
+          archive_list="$RUNNER_TEMP/pearbrowser-app-asars.txt"
+          find dist/electron -type f -path '*/resources/app.asar' ! -path '*/node_modules/*' | sort > "$archive_list"
+          archive_count="$(wc -l < "$archive_list" | tr -d ' ')"
+          if [[ "$archive_count" != "1" ]]; then
+            echo "::error::Expected exactly one unpacked app.asar, found $archive_count"
+            sed -n '1,20p' "$archive_list"
+            exit 1
+          fi
+          archive="$(sed -n '1p' "$archive_list")"
+          resources="$(dirname "$archive")"
+          case "${{ matrix.platform }}" in
+            darwin)
+              app_bundle="${resources%/Contents/Resources}"
+              executable="$app_bundle/Contents/MacOS/PearBrowser"
+              echo "ELECTRON_APP_BUNDLE=$app_bundle" >> "$GITHUB_ENV"
               ;;
-            *)
-              echo "::error::Unknown RELEASE_MODE: $RELEASE_MODE"
-              exit 1
+            win32)
+              executable="$(dirname "$resources")/PearBrowser.exe"
+              ;;
+            linux)
+              executable="$(dirname "$resources")/pearbrowser"
               ;;
           esac
+          if [[ ! -f "$executable" ]]; then
+            echo "::error::Unpacked Electron executable is missing: $executable"
+            exit 1
+          fi
+          echo "ELECTRON_RESOURCES_DIR=$resources" >> "$GITHUB_ENV"
+          echo "ELECTRON_EXECUTABLE=$executable" >> "$GITHUB_ENV"
 
-      - name: Download native artifacts
-        uses: actions/download-artifact@v4
+      - name: Inspect packaged source, Pear runtime, sidecar, provenance, and fuses
+        run: |
+          node scripts/check-electron-package.mjs \
+            --resources-dir "$ELECTRON_RESOURCES_DIR" \
+            --executable "$ELECTRON_EXECUTABLE" \
+            --tag "$RELEASE_TAG" \
+            --source-ref "$SOURCE_REF" \
+            --release-mode "$RELEASE_MODE" \
+            --platform "${{ matrix.platform }}" \
+            --arch "${{ matrix.arch }}" \
+            --json
+
+      - name: Verify macOS code signature
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          codesign --verify --deep --strict --verbose=2 "$ELECTRON_APP_BUNDLE"
+          if [[ "$RELEASE_MODE" == "public-trust" ]]; then
+            details="$(codesign --display --verbose=4 "$ELECTRON_APP_BUNDLE" 2>&1)"
+            if ! grep -q '^Authority=Developer ID Application:' <<<"$details"; then
+              echo "::error::macOS public-trust app is not signed by a Developer ID Application identity"
+              exit 1
+            fi
+          fi
+
+      - name: Verify Windows builder-integrated signatures
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $installers = @(Get-ChildItem -LiteralPath dist/electron -File -Filter '*.exe')
+          if ($installers.Count -ne 1) {
+            throw "Expected exactly one top-level NSIS installer, found $($installers.Count)"
+          }
+          if ($env:RELEASE_MODE -eq 'public-trust') {
+            foreach ($asset in @($env:ELECTRON_EXECUTABLE, $installers[0].FullName)) {
+              $signature = Get-AuthenticodeSignature -FilePath $asset
+              if ($signature.Status -ne 'Valid') {
+                throw "Authenticode verification failed for ${asset}: $($signature.Status)"
+              }
+              Write-Host "Verified Authenticode signature: $asset"
+            }
+          } else {
+            Write-Host 'Package-proof mode: unsigned Windows artifacts are expected.'
+          }
+
+      - name: Verify Linux executable and AppImage
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          test -x "$ELECTRON_EXECUTABLE"
+          appimage_list="$RUNNER_TEMP/pearbrowser-appimages.txt"
+          find dist/electron -maxdepth 1 -type f -name '*.AppImage' | sort > "$appimage_list"
+          appimage_count="$(wc -l < "$appimage_list" | tr -d ' ')"
+          if [[ "$appimage_count" != "1" ]]; then
+            echo "::error::Expected exactly one AppImage, found $appimage_count"
+            exit 1
+          fi
+          chmod +x "$(sed -n '1p' "$appimage_list")"
+
+      - name: Launch unpacked app and prove the Pear runtime RPC
+        if: runner.os != 'Windows'
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/pearbrowser-${{ matrix.release_platform }}-${{ matrix.arch }}.log"
+          profile="$RUNNER_TEMP/pearbrowser-profile-${{ matrix.arch }}"
+          if [[ "${{ matrix.platform }}" == "linux" ]]; then
+            command=(xvfb-run -a "$ELECTRON_EXECUTABLE")
+          else
+            command=("$ELECTRON_EXECUTABLE")
+          fi
+
+          cleanup() {
+            set +e
+            if [[ -n "${app_pid:-}" ]] && kill -0 "$app_pid" 2>/dev/null; then
+              kill "$app_pid" 2>/dev/null
+              for _ in 1 2 3 4 5; do
+                kill -0 "$app_pid" 2>/dev/null || break
+                sleep 1
+              done
+              kill -9 "$app_pid" 2>/dev/null || true
+              wait "$app_pid" 2>/dev/null || true
+            fi
+            if [[ -f "$log" ]]; then tail -200 "$log"; fi
+          }
+          trap cleanup EXIT
+
+          PEARBROWSER_QVAC_OLLAMA=0 "${command[@]}" --user-data-dir="$profile" >"$log" 2>&1 &
+          app_pid=$!
+          node scripts/runtime-rpc-smoke.mjs \
+            --port-base 9876 \
+            --port-count 5 \
+            --timeout 60000 \
+            --min-hive-relays 1 \
+            --json
+          cleanup
+          trap - EXIT
+
+      - name: Launch unpacked app and prove the Pear runtime RPC on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $stdout = Join-Path $env:RUNNER_TEMP 'pearbrowser-windows.stdout.log'
+          $stderr = Join-Path $env:RUNNER_TEMP 'pearbrowser-windows.stderr.log'
+          $profile = Join-Path $env:RUNNER_TEMP 'pearbrowser-profile-x64'
+          $env:PEARBROWSER_QVAC_OLLAMA = '0'
+          $appProcess = Start-Process -FilePath $env:ELECTRON_EXECUTABLE `
+            -ArgumentList "--user-data-dir=$profile" `
+            -RedirectStandardOutput $stdout `
+            -RedirectStandardError $stderr `
+            -PassThru
+          try {
+            & node scripts/runtime-rpc-smoke.mjs --port-base 9876 --port-count 5 --timeout 60000 --min-hive-relays 1 --json
+            if ($LASTEXITCODE -ne 0) { throw "runtime RPC smoke exited with status $LASTEXITCODE" }
+          } finally {
+            & taskkill.exe /PID $appProcess.Id /T /F 2>$null | Out-Null
+            if (Test-Path $stdout) { Get-Content $stdout -Tail 200 }
+            if (Test-Path $stderr) { Get-Content $stderr -Tail 200 }
+          }
+
+      - name: Notarize and staple macOS app
+        if: runner.os == 'macOS' && inputs.release_mode == 'public-trust'
+        env:
+          PEARBROWSER_MACOS_NOTARY_APPLE_ID: ${{ secrets.PEARBROWSER_MACOS_NOTARY_APPLE_ID }}
+          PEARBROWSER_MACOS_NOTARY_PASSWORD: ${{ secrets.PEARBROWSER_MACOS_NOTARY_PASSWORD }}
+          PEARBROWSER_MACOS_NOTARY_TEAM_ID: ${{ secrets.PEARBROWSER_MACOS_NOTARY_TEAM_ID }}
+        run: node scripts/notarize-appling-macos.mjs --build-dir dist/electron
+
+      - name: Create, notarize, and staple public-trust DMG
+        if: runner.os == 'macOS' && inputs.release_mode == 'public-trust'
+        env:
+          PEARBROWSER_MACOS_NOTARY_APPLE_ID: ${{ secrets.PEARBROWSER_MACOS_NOTARY_APPLE_ID }}
+          PEARBROWSER_MACOS_NOTARY_PASSWORD: ${{ secrets.PEARBROWSER_MACOS_NOTARY_PASSWORD }}
+          PEARBROWSER_MACOS_NOTARY_TEAM_ID: ${{ secrets.PEARBROWSER_MACOS_NOTARY_TEAM_ID }}
+        run: node scripts/create-macos-dmg.mjs --tag "$RELEASE_TAG" --build-dir dist/electron
+
+      - name: Verify macOS public-trust tickets and Gatekeeper assessment
+        if: runner.os == 'macOS' && inputs.release_mode == 'public-trust'
+        run: |
+          set -euo pipefail
+          codesign --verify --deep --strict --verbose=2 "$ELECTRON_APP_BUNDLE"
+          xcrun stapler validate "$ELECTRON_APP_BUNDLE"
+          spctl --assess --type execute --verbose=4 "$ELECTRON_APP_BUNDLE"
+          shopt -s nullglob
+          dmgs=(dist/electron/*.dmg)
+          if (( ${#dmgs[@]} != 1 )); then
+            echo "::error::Expected exactly one public-trust DMG, found ${#dmgs[@]}"
+            exit 1
+          fi
+          dmg="${dmgs[0]}"
+          xcrun stapler validate "$dmg"
+          hdiutil verify "$dmg"
+
+      - name: Collect normalized release artifacts and provenance manifest
+        run: |
+          node scripts/collect-appling-artifacts.mjs \
+            --tag "$RELEASE_TAG" \
+            --source-ref "$SOURCE_REF" \
+            --release-mode "$RELEASE_MODE" \
+            --platform "${{ matrix.platform }}" \
+            --arch "${{ matrix.arch }}" \
+            --build-dir dist/electron \
+            --out-dir "dist/native-release/$RELEASE_TAG/${{ matrix.release_platform }}/${{ matrix.arch }}"
+
+      - name: Upload verified workflow artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pearbrowser-desktop-${{ env.RELEASE_TAG }}-${{ matrix.release_platform }}-${{ matrix.arch }}
+          path: pear-ecosystem/01-browser/pearbrowser-desktop/dist/native-release/${{ env.RELEASE_TAG }}/${{ matrix.release_platform }}/${{ matrix.arch }}/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+      - name: Remove Windows PFX material
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'pearbrowser-builder-signing.pfx') -Force -ErrorAction SilentlyContinue
+
+      - name: Delete ephemeral macOS signing keychain
+        if: always() && runner.os == 'macOS'
+        run: |
+          security delete-keychain "$RUNNER_TEMP/pearbrowser-signing.keychain-db" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/pearbrowser-signing.p12"
+
+  verify-bundle:
+    name: Verify complete Actions artifact bundle
+    needs: build-native
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout exact release verifier
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.source_ref }}
+          persist-credentials: false
+          path: pear-ecosystem/01-browser/pearbrowser-desktop
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Download native workflow artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: release-assets
           pattern: pearbrowser-desktop-${{ env.RELEASE_TAG }}-*
           merge-multiple: true
 
-      - name: Verify release asset bundle
+      - name: Verify exact targets, provenance, byte counts, and checksums
+        run: |
+          node pear-ecosystem/01-browser/pearbrowser-desktop/scripts/check-native-release-bundle.mjs \
+            --dir release-assets \
+            --tag "$RELEASE_TAG" \
+            --source-ref "$SOURCE_REF" \
+            --release-mode "$RELEASE_MODE"
+
+  attach-draft:
+    name: Create and verify public-trust draft
+    if: ${{ inputs.release_mode == 'public-trust' }}
+    needs: verify-bundle
+    runs-on: ubuntu-24.04
+    environment: production
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout exact release verifier
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.source_ref }}
+          persist-credentials: false
+          path: pear-ecosystem/01-browser/pearbrowser-desktop
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Download verified public-trust artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: release-assets
+          pattern: pearbrowser-desktop-${{ env.RELEASE_TAG }}-*
+          merge-multiple: true
+
+      - name: Reverify bundle before GitHub mutation
+        run: |
+          node pear-ecosystem/01-browser/pearbrowser-desktop/scripts/check-native-release-bundle.mjs \
+            --dir release-assets \
+            --tag "$RELEASE_TAG" \
+            --source-ref "$SOURCE_REF" \
+            --release-mode public-trust
+
+      - name: Create draft from the exact source commit
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          ls -la release-assets
-          gh release view "$RELEASE_TAG" --repo "$GH_REPO" >/dev/null
+          assert_absent() {
+            local label="$1"
+            local endpoint="$2"
+            local response
+            if response="$(gh api "$endpoint" 2>&1)"; then
+              echo "::error::$label appeared after preflight; refusing to overwrite it"
+              exit 1
+            fi
+            if [[ "$response" != *"HTTP 404"* ]]; then
+              echo "::error::Could not safely prove $label is absent: $response"
+              exit 1
+            fi
+          }
+          assert_absent "tag $RELEASE_TAG" "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG"
+          assert_absent "release $RELEASE_TAG" "repos/$GH_REPO/releases/tags/$RELEASE_TAG"
 
-          shopt -s nullglob
-          assets=(release-assets/*)
-          if (( ${#assets[@]} == 0 )); then
-            echo "::error::No native release assets were downloaded"
+          gh release create "$RELEASE_TAG" \
+            --repo "$GH_REPO" \
+            --target "$SOURCE_REF" \
+            --title "PearBrowser $RELEASE_TAG" \
+            --generate-notes \
+            --draft
+
+          target="$(gh api "repos/$GH_REPO/releases/tags/$RELEASE_TAG" --jq .target_commitish)"
+          draft="$(gh api "repos/$GH_REPO/releases/tags/$RELEASE_TAG" --jq .draft)"
+          tag_type="$(gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG" --jq .object.type)"
+          tag_sha="$(gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG" --jq .object.sha)"
+          if [[ "$target" != "$SOURCE_REF" || "$draft" != "true" || "$tag_type" != "commit" || "$tag_sha" != "$SOURCE_REF" ]]; then
+            echo "::error::Draft target/state mismatch (target=$target draft=$draft tag_type=$tag_type tag_sha=$tag_sha)"
             exit 1
           fi
 
-          for requirement in \
-            "macos:PearBrowser-*-macos-*.app.zip" \
-            "windows:PearBrowser-*-windows-*.msix" \
-            "linux:PearBrowser-*-linux-*.AppImage"; do
-            platform="${requirement%%:*}"
-            pattern="${requirement#*:}"
-            matches=(release-assets/${pattern})
-            if (( ${#matches[@]} == 0 )); then
-              echo "::error::Expected at least one ${platform} backfill artifact matching ${pattern}"
-              exit 1
-            fi
-          done
-
-          for platform in macos windows linux; do
-            sums=(release-assets/SHA256SUMS-${platform}-*.txt)
-            manifests=(release-assets/manifest-${platform}-*.json)
-            if (( ${#sums[@]} == 0 )); then
-              echo "::error::Expected at least one SHA256SUMS file for ${platform}"
-              exit 1
-            fi
-            if (( ${#manifests[@]} == 0 )); then
-              echo "::error::Expected at least one manifest file for ${platform}"
-              exit 1
-            fi
-          done
-
-          for asset in "${assets[@]}"; do
-            case "$(basename "$asset")" in
-              *.sha256|SHA256SUMS-*|manifest-*) continue ;;
-            esac
-            if [[ ! -f "${asset}.sha256" ]]; then
-              echo "::error::Missing SHA-256 sidecar for ${asset}"
-              exit 1
-            fi
-          done
-
-      - name: Attach assets
+      - name: Attach assets without overwrite
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -445,27 +670,160 @@ jobs:
           set -euo pipefail
           shopt -s nullglob
           assets=(release-assets/*)
-          gh release upload "$RELEASE_TAG" "${assets[@]}" --repo "$GH_REPO" --clobber
+          if (( ${#assets[@]} == 0 )); then
+            echo "::error::No public-trust assets are available to upload"
+            exit 1
+          fi
+          gh release upload "$RELEASE_TAG" "${assets[@]}" --repo "$GH_REPO"
 
-      - name: Verify attached release assets
+      - name: Verify attached draft and exact asset set
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          args=(--tag "$RELEASE_TAG" --repo "$GH_REPO" --require-backfill-formats)
-          if [[ "$RELEASE_MODE" == "public-trust" ]]; then
-            args+=(--require-published --require-public-trust)
-          fi
-          node pear-ecosystem/01-browser/pearbrowser-desktop/scripts/check-native-release-assets.mjs "${args[@]}"
+          find release-assets -maxdepth 1 -type f -printf '%f\n' | sort > "$RUNNER_TEMP/local-assets.txt"
+          gh release view "$RELEASE_TAG" --repo "$GH_REPO" --json assets --jq '.assets[].name' | sort > "$RUNNER_TEMP/remote-assets.txt"
+          diff -u "$RUNNER_TEMP/local-assets.txt" "$RUNNER_TEMP/remote-assets.txt"
 
-      - name: Verify public-trust release downloads
-        if: env.RELEASE_MODE == 'public-trust'
+          node pear-ecosystem/01-browser/pearbrowser-desktop/scripts/check-native-release-assets.mjs \
+            --tag "$RELEASE_TAG" \
+            --repo "$GH_REPO" \
+            --require-public-trust
+
+          draft="$(gh api "repos/$GH_REPO/releases/tags/$RELEASE_TAG" --jq .draft)"
+          tag_sha="$(gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG" --jq .object.sha)"
+          if [[ "$draft" != "true" || "$tag_sha" != "$SOURCE_REF" ]]; then
+            echo "::error::Draft state or tag target changed before verification completed"
+            exit 1
+          fi
+
+  publish-release:
+    name: Publish verified public-trust release
+    if: ${{ inputs.release_mode == 'public-trust' && inputs.publish_release }}
+    needs: attach-draft
+    runs-on: ubuntu-24.04
+    environment: production
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+        working-directory: pear-ecosystem/01-browser/pearbrowser-desktop
+
+    steps:
+      - name: Checkout exact release source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.source_ref }}
+          fetch-depth: 0
+          persist-credentials: false
+          path: pear-ecosystem/01-browser/pearbrowser-desktop
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Download independently verified Actions bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: ${{ runner.temp }}/verified-actions-assets
+          pattern: pearbrowser-desktop-${{ env.RELEASE_TAG }}-*
+          merge-multiple: true
+
+      - name: Re-download draft, compare exact bytes, and publish
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: >
-          node pear-ecosystem/01-browser/pearbrowser-desktop/scripts/verify-native-downloads.mjs
-          --tag "$RELEASE_TAG"
-          --repo "$GH_REPO"
-          --all
+        run: |
+          set -euo pipefail
+
+          verified_dir="$RUNNER_TEMP/verified-actions-assets"
+          draft_dir="$RUNNER_TEMP/current-draft-assets"
+          rm -rf "$draft_dir"
+          mkdir -p "$draft_dir"
+
+          node scripts/check-native-release-bundle.mjs \
+            --dir "$verified_dir" \
+            --tag "$RELEASE_TAG" \
+            --source-ref "$SOURCE_REF" \
+            --release-mode public-trust
+
+          draft="$(gh api "repos/$GH_REPO/releases/tags/$RELEASE_TAG" --jq .draft)"
+          target="$(gh api "repos/$GH_REPO/releases/tags/$RELEASE_TAG" --jq .target_commitish)"
+          tag_sha="$(gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG" --jq .object.sha)"
+          if [[ "$draft" != "true" || "$target" != "$SOURCE_REF" || "$tag_sha" != "$SOURCE_REF" ]]; then
+            echo "::error::Refusing publication: expected draft=true and release/tag target=$SOURCE_REF, got draft=$draft target=$target tag_sha=$tag_sha"
+            exit 1
+          fi
+
+          gh release download "$RELEASE_TAG" \
+            --repo "$GH_REPO" \
+            --dir "$draft_dir"
+
+          find "$verified_dir" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | sort > "$RUNNER_TEMP/verified-action-assets.txt"
+          find "$draft_dir" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | sort > "$RUNNER_TEMP/current-draft-assets.txt"
+          diff -u "$RUNNER_TEMP/verified-action-assets.txt" "$RUNNER_TEMP/current-draft-assets.txt"
+
+          while IFS= read -r name; do
+            if ! cmp -s -- "$verified_dir/$name" "$draft_dir/$name"; then
+              echo "::error::Draft asset bytes differ from the verified Actions artifact: $name"
+              exit 1
+            fi
+          done < "$RUNNER_TEMP/verified-action-assets.txt"
+
+          node scripts/check-native-release-bundle.mjs \
+            --dir "$draft_dir" \
+            --tag "$RELEASE_TAG" \
+            --source-ref "$SOURCE_REF" \
+            --release-mode public-trust
+
+          node scripts/check-native-release-assets.mjs \
+            --tag "$RELEASE_TAG" \
+            --repo "$GH_REPO" \
+            --require-public-trust
+
+          draft="$(gh api "repos/$GH_REPO/releases/tags/$RELEASE_TAG" --jq .draft)"
+          target="$(gh api "repos/$GH_REPO/releases/tags/$RELEASE_TAG" --jq .target_commitish)"
+          tag_sha="$(gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG" --jq .object.sha)"
+          if [[ "$draft" != "true" || "$target" != "$SOURCE_REF" || "$tag_sha" != "$SOURCE_REF" ]]; then
+            echo "::error::Draft state or source target changed during final byte verification"
+            exit 1
+          fi
+
+          gh release edit "$RELEASE_TAG" --repo "$GH_REPO" --draft=false --latest
+
+      - name: Verify published tag and public downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          draft="$(gh api "repos/$GH_REPO/releases/tags/$RELEASE_TAG" --jq .draft)"
+          if [[ "$draft" != "false" ]]; then
+            echo "::error::Release is still a draft after publication"
+            exit 1
+          fi
+
+          git fetch --force origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+          tag_commit="$(git rev-list -n 1 "$RELEASE_TAG")"
+          if [[ "$tag_commit" != "$SOURCE_REF" ]]; then
+            echo "::error::Published tag resolves to $tag_commit instead of $SOURCE_REF"
+            exit 1
+          fi
+
+          node scripts/check-native-release-assets.mjs \
+            --tag "$RELEASE_TAG" \
+            --repo "$GH_REPO" \
+            --require-published \
+            --require-public-trust
+
+          for attempt in 1 2 3; do
+            if node scripts/verify-native-downloads.mjs --tag "$RELEASE_TAG" --repo "$GH_REPO" --all; then
+              exit 0
+            fi
+            if [[ "$attempt" != "3" ]]; then sleep 10; fi
+          done
+          echo "::error::Published native downloads did not pass byte verification after three attempts"
+          exit 1

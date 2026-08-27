@@ -1,334 +1,286 @@
 # Native Release Packaging
 
-PearBrowser Desktop ships through the stable Pear production link, and the
-`appling/` project wraps that link in native macOS, Windows, and Linux launchers.
-The GitHub release should not be assetless: every release tag needs native
-artifacts plus checksums.
+PearBrowser Desktop `v0.9.1` is packaged from the reviewed Electron
+application with the pinned electron-builder toolchain. A legacy Pear identity
+or launcher is not a desktop release artifact. Runtime OTA download/apply
+remains disabled until the Pear v3 production identity, signer roster,
+provisioning record, and multisig ceremony are independently verified.
 
-For the broader install/distribution plan, including package-proof versus
-public-trust release lanes and channel expansion, see
-[Packaging strategy](./PACKAGING_STRATEGY_2026-06-28.md).
+The latest published release is still `v0.9.0`. Treat `v0.9.1` as a release
+candidate until the public-trust workflow and post-publication checks described
+here pass.
 
-## Backfill v0.5.0
+## Release artifact contract
 
-Use the manual GitHub Actions trigger:
+The supported `v0.9.1` artifact set is:
 
-1. Make sure the branch containing `.github/workflows/desktop-native-release.yml`
-   has been merged to the default branch, otherwise GitHub will not expose the
-   manual workflow trigger.
-2. Open **Actions -> Desktop Native Release**.
-3. Run the workflow with tag `v0.5.0`, `source_ref` set to the branch or commit
-   that contains this packaging code, usually `main` after merge, and
-   `release_mode` set for the intended trust level:
-   - `package-proof`: permits ad-hoc macOS signing and unsigned Windows assets.
-   - `public-trust`: requires macOS Developer ID/notary credentials and Windows
-     signing credentials before assets are uploaded for announcement.
-4. Wait for the macOS Apple Silicon, macOS Intel, Windows, and Linux jobs to
-   finish.
-5. Confirm the `v0.5.0` GitHub release has the generated installers, per-file
-   `.sha256` files, `SHA256SUMS-*`, and `manifest-*` files attached.
-6. Verify the attached asset set:
-   `npm run check:native-release-assets -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --require-backfill-formats`.
-7. Confirm the user-facing asset selector resolves the expected package for the
-   current machine:
-   `npm run resolve:native-release -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop`.
+| Platform | Architectures | Required artifacts |
+| --- | --- | --- |
+| macOS | `arm64`, `x64` | Developer ID signed/notarized `.app.zip` and signed, notarized, stapled `.dmg` for each architecture |
+| Windows | `x64` | PFX/Authenticode-signed NSIS `.exe` |
+| Linux | `x64` | `.AppImage` |
 
-The target GitHub release must already exist. The attach job verifies the
-downloaded bundle has macOS `.app.zip`, Windows `.msix`, and Linux `.AppImage`
-assets, a sidecar `.sha256` for every package, and one checksum index plus one
-manifest for each desktop platform. It then uploads the generated assets with
-`gh release upload --clobber`. If the release tag is mistyped or the release is
-missing, the workflow fails without creating a new release.
+Every product artifact must have a matching `.sha256` sidecar. Every
+platform/architecture bundle must also contain its own
+`SHA256SUMS-<platform>-<arch>.txt` and
+`manifest-<platform>-<arch>.json`. The manifest records the stable tag, exact
+40-character source commit SHA, release mode, platform, architecture, and
+artifact digests.
 
-The attach job uses `gh release upload --clobber`, so rerunning the workflow
-refreshes broken or stale assets for the same tag instead of creating duplicate
-release entries.
+The Windows format is NSIS `.exe`. Retired package formats and the legacy
+launcher are relevant only when auditing older releases; they are not accepted
+as `v0.9.1` release outputs.
 
-## Final Workflow Run Checklist
+## Packaging boundary
 
-Use this as the last operator pass before handing off the refreshed `v0.5.0`
-assets:
+electron-builder packages the actual root Electron application and the pinned
+Electron runtime. The reviewed application entry points stay in ASAR, while
+the embedded Pear worker/backend and native modules are deliberately unpacked
+to physical paths required by the worker runtime. Electron fuses require
+embedded ASAR integrity validation, loading the application from ASAR,
+encrypted cookies, and disabled RunAsNode, `NODE_OPTIONS`, and CLI inspector
+entry points.
 
-1. Confirm the packaging branch has landed on the workflow branch GitHub will
-   run, usually `main`, and record the merged commit SHA.
-2. Dispatch the workflow:
-   `gh workflow run desktop-native-release.yml --repo bigdestiny2/pearbrowser-desktop --ref main -f tag=v0.5.0 -f source_ref=<merged-main-commit> -f release_mode=package-proof`.
-3. Wait for `macOS Apple Silicon`, `macOS Intel`, `Windows`, `Linux`, and
-   `Attach assets to GitHub release` to finish green.
-4. Run:
-   `npm run check:native-release-assets -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --require-backfill-formats`.
-5. Run:
-   `npm run verify:native-downloads -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --all`.
-6. Record the Actions run URL, release asset list, checksum/download verifier
-   output, and any expected package-proof OS trust prompts in the release smoke
-   evidence log.
+Unpacked executable code is not trusted on placement alone. Each platform
+build generates an ephemeral Ed25519 key, embeds only its public key and the
+exact release identity in protected `app.asar`, then signs a SHA-256 inventory
+of every file under `app.asar.unpacked` after platform signing is complete.
+The packaged host verifies the signature, release identity, exact path set,
+sizes, and every file digest before it can require `pear-runtime` or spawn the
+worker. The build-time private key is never written into the application.
 
-## Local Build
+`scripts/check-electron-package.mjs` is the pre-release content gate. It checks
+the packaged provenance, compares the reviewed runtime source bytes, verifies
+the expected ASAR/unpacked placement, confirms the platform Pear sidecar is
+present and executable, independently repeats the signed unpacked-tree check,
+checks the exact Electron fuse states, and rejects legacy build content or a
+duplicate Electron runtime.
+
+The release workflow repeats content inspection and launch/RPC smoke on hosted
+runners. A successful local build is useful proof, but it does not replace the
+hosted platform jobs or the public-trust signature checks.
+
+## Workflow authority
+
+`.github/workflows/desktop-native-release.yml` is intentionally:
+
+- manual (`workflow_dispatch`) only;
+- stable-tag only (`vX.Y.Z`);
+- pinned to an exact lowercase 40-character source commit SHA;
+- create-only, refusing any existing tag or GitHub Release;
+- draft-first for public-trust publication; and
+- unable to overwrite existing assets.
+
+The `source_ref` input must equal the commit that supplied the dispatched
+workflow. Branch names, tags, short SHAs, and symbolic refs such as `main` are
+not accepted as package provenance.
+
+### `package-proof`
+
+This mode permits ad-hoc macOS signing and unsigned Windows packaging so the
+artifact structure and clean-host launch can be reviewed before credentials
+are used. Its outputs are GitHub Actions artifacts only.
+
+`package-proof` must not create a Git tag, draft, GitHub Release, or public
+download. `publish_release=true` is invalid in this mode.
+
+### `public-trust`
+
+This mode uses the protected `production` environment and fails closed unless
+the complete macOS and Windows credential sets are present. It builds and
+verifies all platform bundles, creates a draft targeted at the exact source
+commit, then immediately before publication re-downloads every current draft
+asset and requires an exact filename, byte-for-byte, manifest, and checksum
+match with the independently verified Actions bundle. It publishes only when
+the operator explicitly dispatched with `publish_release=true` and approved
+the protected environment.
+
+Creating the draft creates the tag. If a run fails after draft creation, leave
+the draft and tag available for inspection. The workflow never cleans them up
+or retries destructively. After diagnosing the failure, a maintainer may
+deliberately remove both with:
 
 ```sh
-npm run check:appling-release -- --tag v0.5.0
-npm run check:native-signing
-npm run check:linux-appimage-metadata
-cd appling
+gh release delete <tag> --repo bigdestiny2/pearbrowser-desktop --cleanup-tag
+```
+
+Confirm the draft/release and tag are both absent before dispatching the same
+tag again. Existing-release backfills are outside this create-only workflow.
+
+## External signing prerequisites
+
+Signing credentials are external prerequisites. They are not generated,
+stored, or recoverable from this repository. Add them to the protected
+`production` GitHub environment without pasting them into issues, logs, or
+command history.
+
+Generate the name-only handoff and guarded setup commands with an exact release
+SHA:
+
+```sh
+npm run -s generate:native-signing-secret-plan -- \
+  --repo bigdestiny2/pearbrowser-desktop \
+  --tag v0.9.1 \
+  --source-ref <40-hex-release-sha> \
+  --github-environment production
+```
+
+### macOS
+
+Public-trust macOS packaging requires:
+
+- `PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64`
+- `PEARBROWSER_MACOS_CERTIFICATE_PASSWORD`
+- `PEARBROWSER_MACOS_SIGNING_IDENTITY`
+- `PEARBROWSER_MACOS_NOTARY_APPLE_ID`
+- `PEARBROWSER_MACOS_NOTARY_PASSWORD`
+- `PEARBROWSER_MACOS_NOTARY_TEAM_ID`
+
+`PEARBROWSER_MACOS_KEYCHAIN_PASSWORD` and
+`PEARBROWSER_MACOS_SIGNING_KEYCHAIN` are optional runner controls. The
+workflow must verify the Developer ID signature, submit for notarization,
+staple the result, and assess the final app/DMG before collection.
+
+### Windows
+
+The supported `v0.9.1` Windows public-trust route requires both:
+
+- `PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64`
+- `PEARBROWSER_WINDOWS_CERTIFICATE_PASSWORD`
+
+electron-builder consumes that PFX during NSIS packaging so the application
+executable, uninstaller, and final installer are signed in the correct order.
+The workflow must require a valid Authenticode signature on the unpacked
+application and final installer.
+
+Azure Trusted Signing is deferred for this release. electron-builder 26's
+current Azure path installs a mutable TrustedSigning PowerShell module during
+the build. Azure credentials do not satisfy the `v0.9.1` public-trust gate;
+reconsider that route only after the module and integration are version-pinned
+and reviewed.
+
+### Linux
+
+The AppImage lane currently requires no signing secret. The release still
+requires the per-file SHA-256 sidecar, platform checksum index, manifest,
+desktop metadata inspection, and clean-host launch evidence.
+
+Check the protected environment's secret names before dispatch:
+
+```sh
+npm run check:native-signing -- \
+  --require-public-trust \
+  --secret-source github \
+  --repo bigdestiny2/pearbrowser-desktop \
+  --github-environment production
+```
+
+GitHub does not expose secret values after upload. This preflight can confirm
+names only; the workflow must still prove certificate import, signature
+validity, and notarization.
+
+## Local package proof
+
+Install from the committed lockfile, test, audit, then build the host package:
+
+```sh
 npm ci
-npm run generate
-npm run build
-cd ..
-npm run package:appling -- --tag v0.5.0
-npm run check:native-release-assets -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --require-backfill-formats
-npm run resolve:native-release -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
-npm run -s generate:native-install-guide -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
-npm run -s generate:native-signing-secret-plan -- --repo bigdestiny2/pearbrowser-desktop --tag v0.5.0 --source-ref <merged-main-commit>
-npm run check:native-signing -- --require-public-trust --secret-source github --repo bigdestiny2/pearbrowser-desktop
-npm run check:public-trust-readiness -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --source-ref <merged-main-commit> --signing-secret-source github
-npm run -s generate:public-trust-operator-report -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --source-ref <merged-main-commit> --signing-secret-source github
-npm run -s generate:release-evidence-handoff
+npm test
+npm audit --audit-level=high
+npm run build:ui
+git diff --exit-code -- ui/dist/main.bundle.js
+
+# Choose the command for the current host.
+npm run package:electron:macos
+npm run package:electron:windows
+npm run package:electron:linux
 ```
 
-The collector searches `appling/build` for platform-native outputs:
+Local packaging defaults to `RELEASE_MODE=package-proof` and records
+`local-working-tree` provenance. CI must instead supply a stable `RELEASE_TAG`,
+an exact `SOURCE_REF`, and the requested release mode. Inspect the unpacked app
+with `scripts/check-electron-package.mjs`, verify the platform signature/fuses,
+launch the packaged executable, and run `scripts/runtime-rpc-smoke.mjs` before
+treating the output as proof.
 
-- macOS: `.dmg`, `.pkg`, `.zip`, or a zipped `.app` bundle. The current
-  `cmake-pear` path emits a `.app` bundle that the collector zips as
-  `.app.zip`. Public-trust macOS workflow runs also create a notarized `.dmg`
-  before collection, so the same collector attaches both the user-facing DMG and
-  the `.app.zip` fallback.
-- Windows: `.msix`, `.exe`, `.msi`, or `.zip`. The current `cmake-pear` path
-  emits `.msix`.
-- Linux: `.AppImage`, `.deb`, `.rpm`, `.snap`, `.tar.*`, or `.zip`
+Local outputs must not be uploaded to a release. Only the hosted public-trust
+workflow has release authority.
 
-Each copied asset is renamed to `PearBrowser-<version>-<platform>-<arch>.*` and
-gets a SHA-256 sidecar. The workflow uploads exactly those collected files.
+## Public-trust operator sequence
 
-`appling/package-lock.json` is committed on purpose. The native wrapper pulls in
-`cmake-pear` plus platform packaging helpers; release CI must use
-`npm ci --prefix appling` so a rerun for the same tag builds with the same
-toolchain that was tested locally.
+1. Merge the reviewed release delta to the workflow branch and record the
+   exact 40-character commit SHA.
+2. Confirm the stable `v0.9.1` tag and release do not exist.
+3. Confirm all required credentials are present in the protected `production`
+   environment.
+4. Dispatch from the release commit:
 
-## Metadata Contract
+   ```sh
+   gh workflow run desktop-native-release.yml \
+     --repo bigdestiny2/pearbrowser-desktop \
+     --ref main \
+     -f tag=v0.9.1 \
+     -f source_ref=<40-hex-release-sha> \
+     -f release_mode=public-trust \
+     -f publish_release=true
+   ```
 
-`scripts/check-appling-release.mjs` fails the workflow when:
+5. Approve the protected environment only after reviewing the immutable inputs.
+6. Wait for macOS Apple Silicon, macOS Intel, Windows, Linux, bundle
+   verification, draft creation, publication, and public-download verification
+   to finish green.
+7. Verify the published artifacts and downloads independently:
 
-- the requested tag does not match `package.json` version
-- `appling/CMakeLists.txt` does not match the Pear OTA update channel in `package.json`
-- the appling CMake version is stale
-- the appling package no longer exposes `generate`, `build`, and `package`
-- the native wrapper toolchain lockfile, pinned Bare headers, macOS ICNS asset,
-  Linux AppStream metainfo source, ad-hoc macOS signing default, or Windows
-  unsigned-packaging fallback is missing
+   ```sh
+   npm run check:native-release-assets -- \
+     --tag v0.9.1 \
+     --repo bigdestiny2/pearbrowser-desktop \
+     --require-published \
+     --require-public-trust
 
-This keeps the native wrappers pinned to the same release that was staged and
-verified with `scripts/release-prod.sh`.
+   npm run verify:native-downloads -- \
+     --tag v0.9.1 \
+     --repo bigdestiny2/pearbrowser-desktop \
+     --all
+   ```
 
-## Release Asset Contract
+8. Generate the commit-pinned clean-host plan and record evidence for all four
+   targets:
 
-`scripts/check-native-release-assets.mjs` is the post-upload guard for GitHub
-release attachments. It reads `gh release view --json tagName,isDraft,isPrerelease,assets`
-and fails unless the tag has macOS, Windows, and Linux native artifacts, one
-`SHA256SUMS-<platform>-<arch>.txt`, one `manifest-<platform>-<arch>.json`, and a
-per-artifact `.sha256` sidecar for every installer/package file. Use
-`--require-published` before announcement if draft releases should fail the
-gate. Use `--require-public-trust` for public-trust release checks; it requires
-each macOS architecture to include a `.dmg` artifact. Use
-`--require-backfill-formats` for the `v0.5.0` native packaging backfill; it
-requires each detected architecture to include the expected package-proof
-format: macOS `.app.zip`, Windows `.msix`, and Linux `.AppImage`.
+   ```sh
+   npm run -s generate:native-install-smoke-plan -- \
+     --tag v0.9.1 \
+     --repo bigdestiny2/pearbrowser-desktop \
+     --trust-mode public-trust \
+     --source-ref <40-hex-release-sha>
+   ```
 
-The checker accepts multiple architecture bundles for one platform. Each
-platform/architecture pair must have its own checksum index and manifest, so a
-dual macOS release has separate `macos-arm64` and `macos-x64` records instead of
-one ambiguous macOS checksum file.
+9. Run the aggregated readiness gate and operator report. These are expected
+   to remain blocked until the credentials, published assets, clean-host
+   evidence, and final release decision actually exist:
 
-`scripts/resolve-native-release-asset.mjs` is the user-facing selector for those
-same attachments. It detects the current OS/CPU by default, or accepts
-`--platform macos|windows|linux` and `--arch x64|arm64`, then prints the
-recommended package plus its `.sha256` sidecar. Selection prefers public
-installer formats when they exist: macOS `.dmg` before `.pkg` before
-`.app.zip`, Windows `.exe` before `.msix`, and Linux `.AppImage` before distro
-packages. The resolver fails if the package or checksum sidecar is missing, so
-README install links cannot silently drift away from the release asset contract.
+   ```sh
+   npm run check:public-trust-readiness -- \
+     --tag v0.9.1 \
+     --repo bigdestiny2/pearbrowser-desktop \
+     --source-ref <40-hex-release-sha> \
+     --signing-secret-source github \
+     --signing-github-environment production
 
-`scripts/generate-native-install-snippet.mjs` uses the same resolver ordering for
-the four supported desktop targets and emits release-note/install-page Markdown
-with package links, `.sha256` sidecar links, install notes, and the package-proof
-or public-trust warning. Use it after the asset checker and download verifier,
-so user-facing copy is generated from the release assets that actually shipped:
+   npm run -s generate:public-trust-operator-report -- \
+     --tag v0.9.1 \
+     --repo bigdestiny2/pearbrowser-desktop \
+     --source-ref <40-hex-release-sha> \
+     --signing-secret-source github \
+     --signing-github-environment production
+   ```
 
-```sh
-npm run -s generate:native-install-snippet -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
-npm run -s generate:native-install-guide -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop
-```
+10. Regenerate user-facing install copy from the published public-trust assets.
 
-`generate:native-install-guide` is the same resolver in full-guide mode. It
-emits the user-facing `docs/INSTALL_NATIVE_PACKAGES.md` shape with direct
-package/checksum links, checksum verification commands, OS install notes, and
-the stable Pear fallback.
+## Historical migration note
 
-`scripts/generate-native-install-smoke-plan.mjs` turns those same resolver
-choices into clean-host smoke instructions. It emits per-target download,
-checksum, OS trust, install, launch, downloaded runtime diagnostic, and
-evidence-capture steps for macOS, Windows, and Linux. The default
-`package-proof` mode records expected trust prompts; `--trust-mode public-trust`
-refuses macOS assets unless the release has notarized DMGs. Use `--source-ref`
-with the merged commit SHA when producing announcement evidence so clean hosts
-fetch the exact `scripts/runtime-rpc-smoke.mjs` helper without needing a source
-checkout:
-
-```sh
-npm run -s generate:native-install-smoke-plan -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --source-ref <merged-main-commit>
-```
-
-`scripts/generate-package-manager-manifests.mjs` prepares the later channel
-expansion drafts from the attached release assets. It reads the macOS and
-Windows `.sha256` sidecars, writes a Homebrew Cask draft and a WinGet singleton
-manifest draft under `dist/package-manager-manifests/<tag>/`, and defaults to
-`--trust-mode public-trust`. In that default mode it refuses package-proof macOS
-`.app.zip` assets because Homebrew should not be submitted until the public
-release has notarized `.dmg` assets. The WinGet `License` value defaults to the
-root `package.json` SPDX expression (`Apache-2.0 AND MIT`) unless `--license`
-is supplied. Use `--trust-mode package-proof` only for rehearsing the output
-shape against the current package-proof release:
-
-```sh
-npm run generate:package-manager-manifests -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --trust-mode package-proof
-```
-
-`scripts/verify-native-downloads.mjs` is the stronger download-integrity check.
-It resolves the recommended package for the current platform/architecture, or
-all supported desktop targets with `--all`, downloads each package plus its
-`.sha256` sidecar, streams the package through SHA-256, and fails on digest,
-sidecar-name, or byte-count mismatch. Use it after a release asset backfill and
-before publishing package-manager manifests. The public-trust native release
-workflow runs this check automatically after uploading and verifying attached
-release assets:
-
-```sh
-npm run verify:native-downloads -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --all
-```
-
-`scripts/check-linux-appimage-metadata.mjs` verifies the Linux desktop
-integration metadata required before treating the AppImage as the long-term
-public Linux package. Without arguments it validates the committed Linux icon
-and AppStream metainfo source. The native release workflow runs it on Linux with
-`--build-dir appling/build` after `npm run --prefix appling build`, so the
-generated AppDir must contain `AppRun`, `PearBrowser.desktop`, `icon.png`, and
-`usr/share/metainfo/io.github.bigdestiny2.pearbrowser.metainfo.xml` before
-artifact collection:
-
-```sh
-npm run check:linux-appimage-metadata
-npm run check:linux-appimage-metadata -- --build-dir appling/build
-```
-
-`scripts/check-public-trust-readiness.mjs` is the operator-facing summary gate
-for announcement readiness. It runs the public-trust signing preflight, the
-published release asset checker with both public-trust and backfill-format
-requirements, byte-level download verification, the Linux AppImage metadata
-checker, the public-trust clean-install smoke-plan generator, the package-manager
-draft generator in dry-run mode, and the operator evidence-log checker, then
-reports all blockers in one JSON or human-readable result. Use `--source-ref`
-with the merged commit SHA so the nested clean-install smoke plan downloads the
-exact runtime RPC smoke helper:
-
-```sh
-npm run check:public-trust-readiness -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --source-ref <merged-main-commit> --signing-secret-source github
-```
-
-`scripts/generate-public-trust-operator-report.mjs` formats that same readiness
-state for handoff: gate summary, grouped blockers, warning/deferral notes, and
-the exact next commands for credential setup, public-trust workflow dispatch,
-install-smoke generation, package-manager drafts, release evidence handoff, and
-evidence verification.
-Use `--readiness-file` to format a saved readiness JSON artifact without
-rerunning network-backed checks:
-
-```sh
-npm run -s generate:public-trust-operator-report -- --tag v0.5.0 --repo bigdestiny2/pearbrowser-desktop --source-ref <merged-main-commit> --signing-secret-source github
-```
-
-This command should remain blocked for the current package-proof `v0.5.0`
-assets until Developer ID/notary credentials, Windows signing credentials,
-notarized macOS DMGs, clean-machine install evidence, and the final announcement
-decision are all present.
-
-## Signing
-
-The current macOS workflow produces ad-hoc signed `.app.zip` artifacts so local
-and CI builds verify without a private Apple certificate. The current Windows
-workflow can package unsigned `.msix` artifacts without a private certificate.
-Public trust signing is still a release-credential gate:
-
-- macOS: add `PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64`,
-  `PEARBROWSER_MACOS_CERTIFICATE_PASSWORD`,
-  `PEARBROWSER_MACOS_SIGNING_IDENTITY`,
-  `PEARBROWSER_MACOS_NOTARY_APPLE_ID`,
-  `PEARBROWSER_MACOS_NOTARY_PASSWORD`, and
-  `PEARBROWSER_MACOS_NOTARY_TEAM_ID` as GitHub Actions secrets. The workflow
-  imports the Developer ID certificate into a temporary keychain, passes that
-  keychain to CMake signing, submits the built `.app` to notarytool, staples the
-  notarization ticket, re-verifies codesign, creates a drag-to-Applications
-  `.dmg`, submits and staples the DMG when notary credentials are present, and
-  only then collects the public `.dmg` plus `.app.zip` fallback assets.
-  `PEARBROWSER_MACOS_KEYCHAIN_PASSWORD` is optional; the run id is used when it
-  is absent.
-- Windows — two routes (either satisfies `public-trust`):
-  - **Option A · Azure Trusted Signing (EV-equivalent, recommended).** The key
-    lives in Azure's HSM (no exportable `.pfx`). Add `AZURE_TENANT_ID`,
-    `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_TRUSTED_SIGNING_ENDPOINT`
-    (e.g. `https://eus.codesigning.azure.net/`), `AZURE_TRUSTED_SIGNING_ACCOUNT`
-    (presence turns the step on), and `AZURE_TRUSTED_SIGNING_CERT_PROFILE`. The
-    workflow signs the `.msix`/`.exe` post-build via `azure/trusted-signing-action`.
-    Set `PEARBROWSER_WINDOWS_SIGNING_SUBJECT` to the CN Azure issues so it matches
-    the MSIX `Publisher`.
-  - **Option B · OV/software `.pfx`.** Add `PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64`
-    and `PEARBROWSER_WINDOWS_CERTIFICATE_PASSWORD`, plus optional
-    `PEARBROWSER_WINDOWS_SIGNING_THUMBPRINT` and `PEARBROWSER_WINDOWS_SIGNING_SUBJECT`.
-    If the thumbprint is empty the workflow uses the imported certificate
-    thumbprint via SignTool.
-  - With neither configured the build skips signing and uploads unsigned Windows
-    packages for packaging proof only. When signing is configured, the workflow
-    signs additional `.exe` installer artifacts and verifies Windows installer
-    signatures before collection.
-- Linux: attach package checksums; no signing is required for the current
-  AppImage path.
-
-Before spending a native release run on public distribution, validate the
-credential payload set. Generate the operator handoff first so the GitHub
-secret names, file/env-value command templates, and follow-up checks stay in
-sync with the workflow:
-
-```sh
-npm run -s generate:native-signing-secret-plan -- --repo bigdestiny2/pearbrowser-desktop --tag v0.5.0 --source-ref <merged-main-commit>
-npm run check:native-signing -- --require-public-trust
-npm run check:native-signing -- --require-public-trust --secret-source github --repo bigdestiny2/pearbrowser-desktop
-```
-
-The generated plan uses `openssl base64 -A` for certificate payload files and
-`gh secret set` command templates for the required macOS and Windows GitHub
-Actions secrets. The emitted commands check certificate files with `test -s`
-and env-sourced values with `test -n` before uploading, so an empty local input
-fails before `gh secret set`. It deliberately prints names and commands only,
-not secret values.
-
-Without `--require-public-trust`, the command accepts the packaging-proof path:
-macOS can remain ad-hoc signed, Windows can remain unsigned, and Linux relies on
-checksums. With `--require-public-trust`, macOS must have the Developer ID
-certificate pair, a real signing identity, and the notary credential trio;
-Windows must have the PFX certificate pair; Linux remains checksum-only.
-The default `env` secret source validates local payload values and catches
-malformed base64 or thumbprints. `--secret-source github` uses `gh secret list`
-to confirm the required GitHub Actions secret names exist for the target repo;
-GitHub does not expose secret values, so this mode passes with a warning that
-the workflow must still validate certificate import, signing, and notarization.
-
-The GitHub workflow mirrors this split. Manual `workflow_dispatch` runs default
-to `release_mode=package-proof` so maintainers can refresh packaging assets
-without private credentials. Release-published and tag-triggered runs default to
-`release_mode=public-trust`, and manual runs can select `public-trust`
-explicitly. In public-trust mode, the workflow adds
-`--require-public-trust` to `scripts/check-native-signing-credentials.mjs` and
-adds `--require-published --require-public-trust` to the post-upload release
-asset check.
-
-Do not attach hand-built local installers to a public release unless the
-corresponding workflow job cannot run and the manual build command plus checksum
-output is recorded in the release evidence log.
+Older PearBrowser releases used a separate native-launcher experiment and
+different Windows package formats. Those files may remain in history or as
+icon/metadata sources during migration. They are not the `v0.9.1` build target,
+do not prove that the reviewed Electron source was packaged, and must not be
+collected by the current release workflow.
