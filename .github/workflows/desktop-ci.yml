@@ -10,16 +10,16 @@ name: Desktop CI
 jobs:
   desktop:
     name: Desktop tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout PearBrowser desktop
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           path: pear-ecosystem/01-browser/pearbrowser-desktop
 
       - name: Checkout PearBrowser mobile source contracts
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: bigdestiny2/PearBrowser
           ref: 5c1c920b8b42ffe895f78c49c43d176d5ca93086
@@ -31,16 +31,16 @@ jobs:
       # line*, not the dependency spec: package.json may express that line as
       # the `latest` dist-tag or as an explicit semver range.
       - name: Checkout HiveRelay release contract
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: bigdestiny2/P2P-Hiverelay
-          ref: v0.20.2
+          ref: b702d8e34f4bf6c933763285e1131e468ae9807b # v0.20.2
           path: pear-ecosystem/00-core/hiverelay
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 22
+          node-version: 22.22.0
           cache: npm
           cache-dependency-path: pear-ecosystem/01-browser/pearbrowser-desktop/package-lock.json
 
@@ -95,6 +95,12 @@ jobs:
       - name: Test
         working-directory: pear-ecosystem/01-browser/pearbrowser-desktop
         run: npm test
+
+      - name: Verify generated UI bundle
+        working-directory: pear-ecosystem/01-browser/pearbrowser-desktop
+        run: |
+          npm run build:ui
+          git diff --exit-code -- ui/dist/main.bundle.js
 
       - name: Audit high severity dependencies
         working-directory: pear-ecosystem/01-browser/pearbrowser-desktop

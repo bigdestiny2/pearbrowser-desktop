@@ -4,7 +4,6 @@ import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { execFileSync, spawnSync } from 'node:child_process'
 import {
-  copyFileSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -23,12 +22,8 @@ const packageLock = JSON.parse(readFileSync(new URL('../package-lock.json', impo
 const catalogSource = JSON.parse(readFileSync(new URL('../catalog-source/pearbrowser-network.catalog.json', import.meta.url), 'utf8'))
 const { SEED_APPS } = require('../backend/catalogue-seed.js')
 const rootLicense = readFileSync(new URL('../LICENSE', import.meta.url), 'utf8')
-const applingPkg = JSON.parse(readFileSync(new URL('../appling/package.json', import.meta.url), 'utf8'))
-const applingLock = JSON.parse(readFileSync(new URL('../appling/package-lock.json', import.meta.url), 'utf8'))
-const applingCmake = readFileSync(new URL('../appling/CMakeLists.txt', import.meta.url), 'utf8')
 const nativeReleaseWorkflow = readFileSync(new URL('../.github/workflows/desktop-native-release.yml', import.meta.url), 'utf8')
 const desktopCiWorkflow = readFileSync(new URL('../.github/workflows/desktop-ci.yml', import.meta.url), 'utf8')
-const applingReleaseCheck = readFileSync(new URL('../scripts/check-appling-release.mjs', import.meta.url), 'utf8')
 const applingArtifactCollector = readFileSync(new URL('../scripts/collect-appling-artifacts.mjs', import.meta.url), 'utf8')
 const applingArtifactCollectorPath = fileURLToPath(new URL('../scripts/collect-appling-artifacts.mjs', import.meta.url))
 const nativeSigningCheck = readFileSync(new URL('../scripts/check-native-signing-credentials.mjs', import.meta.url), 'utf8')
@@ -77,8 +72,7 @@ const pinAppOnHiveRelay = readFileSync(new URL('../scripts/pin-app-on-hiverelay.
 const npmHiveRelayPackages = ['p2p-hiverelay', 'p2p-hiverelay-client', 'p2p-hiverelay-verifier']
 const releaseVersion = pkg.version
 const releaseTag = `v${releaseVersion}`
-const releaseVersionPattern = releaseVersion.replaceAll('.', '\\.')
-const releaseTagPattern = releaseTag.replaceAll('.', '\\.')
+const immutableSourceRef = '0123456789abcdef0123456789abcdef01234567'
 
 function writePackageManagerReleaseFixture (fixture, names) {
   const shaByName = new Map()
@@ -120,6 +114,65 @@ function writePackageManagerReleaseFixture (fixture, names) {
   }
 }
 
+function writePublicTrustReleaseFixture (fixture, { sourceRef = immutableSourceRef } = {}) {
+  const version = '0.5.0'
+  const targets = [
+    { platform: 'macos', arch: 'arm64', extensions: ['app.zip', 'dmg'] },
+    { platform: 'macos', arch: 'x64', extensions: ['app.zip', 'dmg'] },
+    { platform: 'windows', arch: 'x64', extensions: ['exe'] },
+    { platform: 'linux', arch: 'x64', extensions: ['AppImage'] }
+  ]
+  const assets = []
+  const addAsset = (name, content) => {
+    const path = join(fixture, name)
+    writeFileSync(path, content)
+    assets.push({
+      name,
+      size: readFileSync(path).length,
+      url: pathToFileURL(path).toString()
+    })
+  }
+
+  for (const target of targets) {
+    const artifactItems = []
+    const checksumLines = []
+    for (const extension of target.extensions) {
+      const name = `PearBrowser-${version}-${target.platform}-${target.arch}.${extension}`
+      const content = `fixture bytes for ${name}`
+      const sha256 = createHash('sha256').update(content).digest('hex')
+      const checksumLine = `${sha256}  ${name}`
+      addAsset(name, content)
+      addAsset(`${name}.sha256`, `${checksumLine}\n`)
+      checksumLines.push(checksumLine)
+      artifactItems.push({
+        name,
+        source: `dist/electron/${name}`,
+        bytes: Buffer.byteLength(content),
+        sha256
+      })
+    }
+    addAsset(`SHA256SUMS-${target.platform}-${target.arch}.txt`, `${checksumLines.join('\n')}\n`)
+    addAsset(`manifest-${target.platform}-${target.arch}.json`, `${JSON.stringify({
+      tag: `v${version}`,
+      version,
+      sourceRef,
+      releaseMode: 'public-trust',
+      platform: target.platform,
+      arch: target.arch,
+      artifacts: artifactItems
+    }, null, 2)}\n`)
+  }
+
+  const releasePath = join(fixture, 'release.json')
+  writeFileSync(releasePath, JSON.stringify({
+    tagName: `v${version}`,
+    isDraft: false,
+    isPrerelease: false,
+    assets
+  }, null, 2))
+  return { releasePath }
+}
+
 function writeCompleteReleaseEvidenceFixture (path) {
   writeFileSync(path, `
 # Release Smoke Evidence Log
@@ -156,7 +209,7 @@ function writeBlockedPublicTrustReadinessFixture (path) {
     ok: false,
     repo: 'example/pearbrowser',
     tag: 'v9.9.9',
-    sourceRef: 'abc123',
+    sourceRef: immutableSourceRef,
     mode: 'public-trust',
     checks: [
       {
@@ -300,7 +353,9 @@ test('release script purges ignored files from previous Pear stages', () => {
 
 test('v3 release preflight leaves availability verification to the approved release workflow', () => {
   assert.doesNotMatch(releaseScript, /verify-pin\.js/)
-  assert.match(releaseScript, /independent HiveRelay availability evidence/)
+  assert.match(releaseScript, /Developer ID signing\/notarization/)
+  assert.match(releaseScript, /PFX\/Authenticode/)
+  assert.match(releaseScript, /exact immutable 40-character source commit SHA/)
   assert.match(verifyPin, /HiveRelayClient/)
   assert.match(verifyPin, /proveSeeded/)
   assert.match(verifyPin, /verifySeededFallback/)
@@ -501,9 +556,14 @@ test('HiveRelay local workspace guard still fails for missing file dependencies'
 })
 
 test('desktop CI checks out and guards the HiveRelay 0.20.2 release contract', () => {
+  assert.match(desktopCiWorkflow, /runs-on: ubuntu-24\.04/)
+  assert.match(desktopCiWorkflow, /actions\/checkout@[0-9a-f]{40} # v4/)
+  assert.match(desktopCiWorkflow, /actions\/setup-node@[0-9a-f]{40} # v4/)
+  assert.match(desktopCiWorkflow, /node-version: 22\.22\.0/)
+  assert.doesNotMatch(desktopCiWorkflow, /uses: [^\n]+@v[0-9]/)
   assert.match(desktopCiWorkflow, /repository: bigdestiny2\/PearBrowser\s+ref: 5c1c920b8b42ffe895f78c49c43d176d5ca93086/)
   assert.match(desktopCiWorkflow, /Checkout HiveRelay release contract/)
-  assert.match(desktopCiWorkflow, /ref: v0\.20\.2/)
+  assert.match(desktopCiWorkflow, /ref: b702d8e34f4bf6c933763285e1131e468ae9807b # v0\.20\.2/)
   assert.match(desktopCiWorkflow, /Guard HiveRelay 0\.20\.2 workspace layout/)
   assert.match(desktopCiWorkflow, /pear-ecosystem\/00-core\/hiverelay\/packages\/core\/package\.json/)
   assert.match(desktopCiWorkflow, /published to npm/)
@@ -516,7 +576,9 @@ test('RelayClient uses scheme-aware transport for public HTTPS gateways', () => 
   assert.match(relayClient, /const https = require\('bare-https'\)/)
   assert.match(relayClient, /function relayTransportForUrl/)
   assert.match(relayClient, /parsed\.protocol === 'https:' \? 443 : 80/)
-  assert.match(relayClient, /transport\.get\(relayRequestOptions\(parsed\)/)
+  // bare-https has no get() shorthand — GETs must go through request()+end().
+  assert.match(relayClient, /transport\.request\(relayRequestOptions\(parsed\)/)
+  assert.doesNotMatch(relayClient, /transport\.get\(/)
   assert.match(relayClient, /transport\.request\(\{/)
   assert.match(relayClient, /DEFAULT_MAX_RESPONSE_BYTES = 16 \* 1024 \* 1024/)
   assert.match(relayClient, /DEFAULT_MAX_CONTROL_RESPONSE_BYTES = 1024 \* 1024/)
@@ -530,6 +592,7 @@ test('native signing credential checker is exposed as an operator script', () =>
   assert.equal(pkg.scripts?.['check:native-signing'], 'node scripts/check-native-signing-credentials.mjs')
   assert.match(nativeSigningCheck, /--require-public-trust/)
   assert.match(nativeSigningCheck, /--secret-source/)
+  assert.match(nativeSigningCheck, /--github-environment/)
   assert.match(nativeSigningCheck, /gh', \[\s*'secret',\s*'list'/)
   assert.match(nativeSigningCheck, /--github-secrets-file/)
   assert.match(nativeSigningCheck, /PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64/)
@@ -555,19 +618,22 @@ test('native signing secret plan generator is exposed for credential handoff', (
     '--tag',
     'v9.9.9',
     '--source-ref',
-    'abc123'
+    immutableSourceRef,
+    '--github-environment',
+    'release-signing'
   ], {
     encoding: 'utf8'
   })
   assert.equal(markdown.status, 0, markdown.stderr || markdown.stdout)
   assert.match(markdown.stdout, /# Native Signing Secret Setup/)
   assert.match(markdown.stdout, /Repository: `example\/pearbrowser`/)
+  assert.match(markdown.stdout, /GitHub environment: `release-signing`/)
   assert.match(markdown.stdout, /test -s DeveloperIDApplication\.p12/)
   assert.match(markdown.stdout, /openssl base64 -A -in DeveloperIDApplication\.p12/)
   assert.match(markdown.stdout, /test -n "\$\{PEARBROWSER_MACOS_CERTIFICATE_PASSWORD:-\}"/)
-  assert.match(markdown.stdout, /gh secret set PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64 --repo example\/pearbrowser/)
-  assert.match(markdown.stdout, /npm run check:native-signing -- --require-public-trust --secret-source github --repo example\/pearbrowser/)
-  assert.match(markdown.stdout, /--source-ref abc123/)
+  assert.match(markdown.stdout, /gh secret set PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64 --repo example\/pearbrowser --env release-signing/)
+  assert.match(markdown.stdout, /npm run check:native-signing -- --require-public-trust --secret-source github --repo example\/pearbrowser --github-environment release-signing/)
+  assert.ok(markdown.stdout.includes(`--source-ref ${immutableSourceRef}`))
 
   const json = spawnSync(process.execPath, [
     nativeSigningSecretPlanPath,
@@ -575,6 +641,8 @@ test('native signing secret plan generator is exposed for credential handoff', (
     'example/pearbrowser',
     '--platform',
     'macos',
+    '--source-ref',
+    immutableSourceRef,
     '--json'
   ], {
     encoding: 'utf8'
@@ -582,14 +650,17 @@ test('native signing secret plan generator is exposed for credential handoff', (
   assert.equal(json.status, 0, json.stderr || json.stdout)
   const report = JSON.parse(json.stdout)
   assert.equal(report.repo, 'example/pearbrowser')
+  assert.equal(report.githubEnvironment, 'production')
   assert.equal(report.platform, 'macos')
+  assert.equal(report.sourceRef, immutableSourceRef)
   assert.ok(report.requiredSecrets.includes('PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64'))
   assert.ok(report.requiredSecrets.includes('PEARBROWSER_MACOS_NOTARY_TEAM_ID'))
   assert.ok(report.optionalSecrets.includes('PEARBROWSER_MACOS_KEYCHAIN_PASSWORD'))
   assert.ok(!report.requiredSecrets.includes('PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64'))
   assert.ok(report.secrets.some((secret) => secret.name === 'PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64' && secret.command.includes('test -s DeveloperIDApplication.p12')))
-  assert.ok(report.secrets.some((secret) => secret.name === 'PEARBROWSER_MACOS_CERTIFICATE_PASSWORD' && secret.command.includes('test -n "${PEARBROWSER_MACOS_CERTIFICATE_PASSWORD:-}"')))
+  assert.ok(report.secrets.some((secret) => secret.name === 'PEARBROWSER_MACOS_CERTIFICATE_PASSWORD' && secret.command.includes('test -n "$' + '{PEARBROWSER_MACOS_CERTIFICATE_PASSWORD:-}"')))
   assert.ok(report.verificationCommands.some((command) => command.includes('check:native-signing')))
+  assert.ok(report.verificationCommands.every((command) => command.includes('production')))
 })
 
 test('native release asset checker is exposed as an operator script', () => {
@@ -601,7 +672,10 @@ test('native release asset checker is exposed as an operator script', () => {
   assert.match(nativeReleaseAssetCheck, /--require-published/)
   assert.match(nativeReleaseAssetCheck, /--require-public-trust/)
   assert.match(nativeReleaseAssetCheck, /--require-backfill-formats/)
-  assert.match(nativeReleaseAssetCheck, /missing public-trust macOS DMG/)
+  assert.match(nativeReleaseAssetCheck, /expected exactly one macOS \.app\.zip/)
+  assert.match(nativeReleaseAssetCheck, /expected exactly one public-trust macOS DMG/)
+  assert.match(nativeReleaseAssetCheck, /expected exactly one Windows NSIS \.exe/)
+  assert.match(nativeReleaseAssetCheck, /expected exactly one Linux \.AppImage/)
   assert.match(nativeReleaseAssetCheck, /missing required v0\.5\.0 backfill/)
 })
 
@@ -644,10 +718,16 @@ test('native install snippet generator is exposed for release notes', () => {
   assert.match(nativeInstallSnippet, /--format/)
   assert.match(nativeInstallSnippet, /Install Native Packages/)
   assert.match(nativeInstallSnippet, /Trust Note/)
-  assert.match(nativeInstallGuide, new RegExp(`releases/download/${releaseTagPattern}/PearBrowser-${releaseVersionPattern}-macos-arm64\\.app\\.zip`))
-  assert.match(nativeInstallGuide, /Apple could not verify that\s+PearBrowser is free of malware/)
-  assert.match(nativeInstallGuide, /Open Anyway/)
-  assert.match(nativeInstallGuide, /generate:native-install-guide/)
+  const published = nativeInstallGuide.match(/Latest published release: `v(\d+\.\d+\.\d+)`\./)
+  assert.ok(published, 'native install guide must declare its published release')
+  assert.ok(nativeInstallGuide.includes(`Current release candidate: \`v${releaseVersion}\`.`))
+  assert.ok(nativeInstallGuide.includes(`Do not treat \`v${releaseVersion}\` as downloadable or`))
+  assert.doesNotMatch(nativeInstallGuide, new RegExp(`releases/download/v${releaseVersion.replaceAll('.', '\\.')}/`))
+  assert.match(nativeInstallGuide, /Authenticode-signed NSIS installer/)
+  assert.match(nativeInstallGuide, /Developer ID signed and notarized/)
+  assert.match(nativeInstallGuide, /Linux x64.*executable AppImage/)
+  assert.match(nativeInstallGuide, /resolve:native-release/)
+  assert.match(nativeInstallGuide, /verify:native-downloads/)
 })
 
 test('native install smoke plan generator is exposed for clean-machine evidence', () => {
@@ -759,9 +839,10 @@ test('public-trust readiness checker is exposed as the announcement gate', () =>
   assert.match(publicTrustReadiness, /check-release-evidence\.mjs/)
   assert.match(publicTrustReadiness, /--require-public-trust/)
   assert.match(publicTrustReadiness, /--require-published/)
-  assert.match(publicTrustReadiness, /--require-backfill-formats/)
+  assert.doesNotMatch(publicTrustReadiness, /--require-backfill-formats/)
   assert.match(publicTrustReadiness, /--source-ref/)
   assert.match(publicTrustReadiness, /--signing-secret-source/)
+  assert.match(publicTrustReadiness, /--signing-github-environment/)
   assert.match(publicTrustReadiness, /--dry-run/)
 })
 
@@ -785,6 +866,8 @@ test('public-trust operator report formats readiness blockers into next actions'
       publicTrustOperatorReportPath,
       '--readiness-file',
       readinessPath,
+      '--source-ref',
+      immutableSourceRef,
       '--evidence-file',
       'docs/custom-evidence.md'
     ], {
@@ -797,8 +880,9 @@ test('public-trust operator report formats readiness blockers into next actions'
     assert.match(markdown.stdout, /\[ \] macos-certificate: macOS Developer ID certificate is missing/)
     assert.match(markdown.stdout, /### Operator Evidence/)
     assert.match(markdown.stdout, /Final decision is missing/i)
-    assert.match(markdown.stdout, /npm run -s generate:native-signing-secret-plan -- --repo example\/pearbrowser --tag v9\.9\.9 --source-ref abc123/)
-    assert.match(markdown.stdout, /gh workflow run desktop-native-release\.yml --repo example\/pearbrowser --ref main -f tag=v9\.9\.9 -f source_ref=abc123 -f release_mode=public-trust/)
+    assert.ok(markdown.stdout.includes(`npm run -s generate:native-signing-secret-plan -- --repo example/pearbrowser --tag v9.9.9 --source-ref ${immutableSourceRef} --github-environment production`))
+    assert.match(markdown.stdout, /check:native-signing.*--github-environment production/)
+    assert.ok(markdown.stdout.includes(`gh workflow run desktop-native-release.yml --repo example/pearbrowser --ref main -f tag=v9.9.9 -f source_ref=${immutableSourceRef} -f release_mode=public-trust -f publish_release=true`))
     assert.match(markdown.stdout, /npm run -s generate:release-evidence-handoff -- --file docs\/custom-evidence\.md/)
     assert.match(markdown.stdout, /npm run check:release-evidence -- --file docs\/custom-evidence\.md/)
 
@@ -806,6 +890,8 @@ test('public-trust operator report formats readiness blockers into next actions'
       publicTrustOperatorReportPath,
       '--readiness-file',
       readinessPath,
+      '--source-ref',
+      immutableSourceRef,
       '--evidence-file',
       'docs/custom-evidence.md',
       '--json'
@@ -817,7 +903,7 @@ test('public-trust operator report formats readiness blockers into next actions'
     assert.equal(report.ok, false)
     assert.equal(report.repo, 'example/pearbrowser')
     assert.equal(report.tag, 'v9.9.9')
-    assert.equal(report.sourceRef, 'abc123')
+    assert.equal(report.sourceRef, immutableSourceRef)
     assert.equal(report.evidenceFile, 'docs/custom-evidence.md')
     assert.ok(report.blockerGroups.some((group) => group.id === 'native-signing' && group.blockers.length === 2))
     assert.ok(report.nextCommands.some((command) => command.id === 'dispatch-public-trust-workflow'))
@@ -836,130 +922,147 @@ test('macOS DMG packager is exposed for public-trust native releases', () => {
   assert.match(macosDmgPackager, /Applications/)
 })
 
-test('appling release metadata stays in sync with the production Pear channel', () => {
-  const productionId = pkg.upgrade.replace(/^pear:\/\//, '')
-  assert.match(applingCmake, new RegExp(`ID "${productionId}"`))
-  assert.match(applingCmake, new RegExp(`VERSION ${pkg.version.replace(/\./g, '\\.')}`))
-  assert.equal(applingPkg.name, 'pearbrowser-desktop-appling')
-  assert.equal(applingPkg.devDependencies?.['bare-headers'], '1.28.7')
-  assert.equal(applingPkg.devDependencies?.['bare-make'], '1.8.0')
-  assert.equal(applingLock.packages?.['node_modules/bare-headers']?.version, '1.28.7')
-  assert.equal(applingLock.packages?.['node_modules/bare-make']?.version, '1.8.0')
-  assert.equal(applingPkg.scripts.generate, 'bare-make generate')
-  assert.equal(applingPkg.scripts.build, 'bare-make build')
-  assert.equal(pkg.scripts?.['check:appling-release'], 'node scripts/check-appling-release.mjs')
-  assert.equal(pkg.scripts?.['package:appling'], 'node scripts/collect-appling-artifacts.mjs')
+test('Electron release metadata uses the reviewed package configuration', () => {
+  assert.equal(pkg.devDependencies?.electron, '43.2.0')
+  assert.equal(pkg.devDependencies?.['electron-builder'], '26.15.3')
+  assert.equal(pkg.scripts?.['check:electron-package'], 'node scripts/check-electron-package.mjs')
+  assert.equal(pkg.scripts?.['package:electron:macos'], 'electron-builder --config electron-builder.config.cjs --mac dir --publish never')
+  assert.equal(pkg.scripts?.['package:electron:windows'], 'electron-builder --config electron-builder.config.cjs --win nsis --publish never')
+  assert.equal(pkg.scripts?.['package:electron:linux'], 'electron-builder --config electron-builder.config.cjs --linux AppImage --publish never')
+  assert.equal(pkg.scripts?.['package:native'], 'node scripts/collect-appling-artifacts.mjs')
   assert.equal(pkg.scripts?.['package:macos-dmg'], 'node scripts/create-macos-dmg.mjs')
-  assert.match(applingReleaseCheck, /appling CMake ID/)
-  assert.match(applingReleaseCheck, /release tag must look like vX\.Y\.Z/)
-  assert.match(applingReleaseCheck, /\['macOS icon', '\.\.\/appling\/assets\/darwin\/icon\.png'\]/)
-  assert.match(applingReleaseCheck, /\['macOS icns icon', '\.\.\/appling\/assets\/darwin\/icon\.icns'\]/)
-  assert.match(applingReleaseCheck, /Linux AppStream metainfo/)
-  assert.match(applingCmake, /PEARBROWSER_BARE_HEADERS_VERSION "1\.28\.7"/)
-  assert.match(applingCmake, /PEARBROWSER_LINUX_METAINFO/)
-  assert.match(applingCmake, /function\(configure_pear_appling_linux target\)/)
-  assert.match(applingCmake, /usr\/share\/metainfo\/io\.github\.bigdestiny2\.pearbrowser\.metainfo\.xml/)
-  assert.match(applingCmake, /PEARBROWSER_MACOS_SIGNING_IDENTITY\s+"-"\s+CACHE/)
-  assert.match(applingCmake, /PEARBROWSER_WINDOWS_SIGNING_SUBJECT\s+"CN=PearBrowser Desktop"\s+CACHE/)
-  assert.match(applingCmake, /WINDOWS_SIGNING_SUBJECT "\$\{PEARBROWSER_WINDOWS_SIGNING_SUBJECT\}"/)
-  assert.match(applingCmake, /WINDOWS_SIGNING_THUMBPRINT "\$\{PEARBROWSER_WINDOWS_SIGNING_THUMBPRINT\}"/)
-  assert.match(applingCmake, /function\(download_bare_headers result\)/)
-  assert.match(applingCmake, /function\(code_sign_macos target\)/)
-  assert.match(applingCmake, /function\(code_sign_windows target\)/)
-  assert.match(applingReleaseCheck, /bare-make generate/)
+  assert.equal(pkg.scripts?.['package:appling'], undefined)
+  assert.equal(pkg.dependencies?.electron, undefined)
 })
 
-test('native release workflow builds and attaches appling artifacts for every desktop OS', () => {
+test('native release workflow validates immutable source and builds reviewed Electron artifacts for every desktop OS', () => {
   assert.match(nativeReleaseWorkflow, /name: Desktop Native Release/)
   assert.match(nativeReleaseWorkflow, /workflow_dispatch:/)
   assert.match(nativeReleaseWorkflow, /source_ref:/)
+  assert.match(nativeReleaseWorkflow, /publish_release:/)
   assert.match(nativeReleaseWorkflow, /release_mode:/)
-  assert.match(nativeReleaseWorkflow, /package-proof/)
-  assert.match(nativeReleaseWorkflow, /public-trust/)
-  assert.match(nativeReleaseWorkflow, /SOURCE_REF:/)
-  assert.match(nativeReleaseWorkflow, /RELEASE_MODE:/)
-  assert.match(nativeReleaseWorkflow, /ref: \$\{\{ env\.SOURCE_REF \}\}/)
-  assert.match(nativeReleaseWorkflow, /release:/)
-  assert.match(nativeReleaseWorkflow, /push:\n\s+tags:/)
+  assert.match(nativeReleaseWorkflow, /default: package-proof/)
+  assert.match(nativeReleaseWorkflow, /NODE_VERSION: 22\.22\.0/)
+  assert.match(nativeReleaseWorkflow, /tag must be a stable vX\.Y\.Z tag/)
+  assert.match(nativeReleaseWorkflow, /source_ref must be an exact lowercase 40-character commit SHA/)
+  assert.match(nativeReleaseWorkflow, /"\$SOURCE_REF" != "\$DISPATCH_SHA"/)
+  assert.match(nativeReleaseWorkflow, /package\.json version .* does not match/)
+  assert.match(nativeReleaseWorkflow, /ref: \$\{\{ inputs\.source_ref \}\}/)
+  assert.match(nativeReleaseWorkflow, /persist-credentials: false/)
+  assert.doesNotMatch(nativeReleaseWorkflow, /\n {2}release:\n/)
+  assert.doesNotMatch(nativeReleaseWorkflow, /\n {2}push:\n/)
+
+  assert.equal((nativeReleaseWorkflow.match(/^\s{8}include:$/gm) || []).length, 1)
   assert.match(nativeReleaseWorkflow, /macOS Apple Silicon/)
   assert.match(nativeReleaseWorkflow, /macos-15/)
   assert.match(nativeReleaseWorkflow, /macOS Intel/)
   assert.match(nativeReleaseWorkflow, /macos-15-intel/)
-  assert.match(nativeReleaseWorkflow, /windows-latest/)
-  assert.match(nativeReleaseWorkflow, /ubuntu-latest/)
-  assert.match(nativeReleaseWorkflow, /libgtk-4-dev/)
-  assert.match(nativeReleaseWorkflow, /core\.longpaths true/)
-  assert.match(nativeReleaseWorkflow, /MakeAppx\.exe/)
-  assert.match(nativeReleaseWorkflow, /npm ci --prefix appling/)
-  assert.doesNotMatch(nativeReleaseWorkflow, /npm install -g bare-make/)
-  assert.match(nativeReleaseWorkflow, /PEARBROWSER_MACOS_SIGNING_IDENTITY/)
-  assert.match(nativeReleaseWorkflow, /args=\(--platform "\$RUNNER_OS"\)/)
-  assert.match(nativeReleaseWorkflow, /--require-public-trust/)
-  assert.match(nativeReleaseWorkflow, /node scripts\/check-native-signing-credentials\.mjs "\$\{args\[@\]\}"/)
+  assert.match(nativeReleaseWorkflow, /Windows x64/)
+  assert.match(nativeReleaseWorkflow, /windows-2025/)
+  assert.match(nativeReleaseWorkflow, /Linux x64/)
+  assert.match(nativeReleaseWorkflow, /ubuntu-24\.04/)
+  assert.match(nativeReleaseWorkflow, /package:electron:macos/)
+  assert.match(nativeReleaseWorkflow, /package:electron:windows/)
+  assert.match(nativeReleaseWorkflow, /package:electron:linux/)
+  assert.match(nativeReleaseWorkflow, /npm ci/)
+  assert.match(nativeReleaseWorkflow, /npm test/)
+  assert.match(nativeReleaseWorkflow, /git diff --exit-code -- ui\/dist\/main\.bundle\.js/)
+  assert.doesNotMatch(nativeReleaseWorkflow, /CMAKE|MakeAppx|npm ci --prefix appling|azure\/trusted-signing|libgtk-4-dev|linuxdeploy/)
+
+  assert.match(nativeReleaseWorkflow, /check-electron-package\.mjs/)
+  assert.match(nativeReleaseWorkflow, /--source-ref "\$SOURCE_REF"/)
+  assert.match(nativeReleaseWorkflow, /--release-mode "\$RELEASE_MODE"/)
+  assert.match(nativeReleaseWorkflow, /--platform "\$\{\{ matrix\.platform \}\}"/)
+  assert.match(nativeReleaseWorkflow, /--arch "\$\{\{ matrix\.arch \}\}"/)
+  assert.match(nativeReleaseWorkflow, /embedded ASAR integrity fuse/)
+  assert.match(nativeReleaseWorkflow, /only-load-from-ASAR fuse/)
+  assert.match(nativeReleaseWorkflow, /runtime-rpc-smoke\.mjs/)
+  assert.match(nativeReleaseWorkflow, /xvfb-run -a/)
+  assert.match(nativeReleaseWorkflow, /Start-Process -FilePath \$env:ELECTRON_EXECUTABLE/)
+
   assert.match(nativeReleaseWorkflow, /PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64/)
-  assert.match(nativeReleaseWorkflow, /PEARBROWSER_MACOS_NOTARY_APPLE_ID/)
-  assert.match(nativeReleaseWorkflow, /Import macOS signing certificate/)
-  assert.match(nativeReleaseWorkflow, /node scripts\/notarize-appling-macos\.mjs/)
-  assert.match(nativeReleaseWorkflow, /Create public-trust macOS DMG/)
-  assert.match(nativeReleaseWorkflow, /npm run package:macos-dmg -- --tag "\$RELEASE_TAG"/)
+  assert.match(nativeReleaseWorkflow, /Import macOS Developer ID certificate into an ephemeral keychain/)
+  assert.match(nativeReleaseWorkflow, /security import .* -T \/usr\/bin\/codesign/)
+  assert.doesNotMatch(nativeReleaseWorkflow, /security import .* -A/)
   assert.match(nativeReleaseWorkflow, /security set-key-partition-list/)
   assert.match(nativeReleaseWorkflow, /security delete-keychain/)
-  assert.match(nativeReleaseWorkflow, /PEARBROWSER_WINDOWS_SIGNING_THUMBPRINT/)
+  assert.match(nativeReleaseWorkflow, /notarize-appling-macos\.mjs --build-dir dist\/electron/)
+  assert.match(nativeReleaseWorkflow, /create-macos-dmg\.mjs --tag "\$RELEASE_TAG" --build-dir dist\/electron/)
   assert.match(nativeReleaseWorkflow, /PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64/)
-  assert.match(nativeReleaseWorkflow, /Import-PfxCertificate/)
-  assert.match(nativeReleaseWorkflow, /Sign additional Windows installer artifacts/)
-  assert.match(nativeReleaseWorkflow, /signtool verify/)
-  assert.match(nativeReleaseWorkflow, /npm run --prefix appling generate/)
-  assert.match(nativeReleaseWorkflow, /npm run --prefix appling build/)
-  assert.match(nativeReleaseWorkflow, /Verify Linux AppImage metadata/)
-  assert.match(nativeReleaseWorkflow, /check:linux-appimage-metadata -- --build-dir appling\/build/)
-  assert.match(nativeReleaseWorkflow, /-name 'PearBrowser\.AppImage'/)
-  assert.match(nativeReleaseWorkflow, /Expected exactly one PearBrowser\.AppImage/)
-  assert.doesNotMatch(nativeReleaseWorkflow, /AppImage' -type f \| head -n1/)
-  assert.match(nativeReleaseWorkflow, /actions\/upload-artifact@v4/)
-  assert.match(nativeReleaseWorkflow, /actions\/download-artifact@v4/)
-  assert.match(nativeReleaseWorkflow, /release-platform: macos/)
-  assert.match(nativeReleaseWorkflow, /gh release view "\$RELEASE_TAG"/)
-  assert.match(nativeReleaseWorkflow, /SHA256SUMS-\$\{platform\}-\*\.txt/)
-  assert.match(nativeReleaseWorkflow, /Expected at least one SHA256SUMS file/)
-  assert.match(nativeReleaseWorkflow, /Expected at least one \$\{platform\} backfill artifact matching \$\{pattern\}/)
-  assert.match(nativeReleaseWorkflow, /Missing SHA-256 sidecar/)
-  assert.match(nativeReleaseWorkflow, /gh release upload "\$RELEASE_TAG" "\$\{assets\[@\]\}"/)
-  assert.match(nativeReleaseWorkflow, /Checkout release verifier/)
-  assert.match(nativeReleaseWorkflow, /check-native-release-assets\.mjs/)
-  assert.match(nativeReleaseWorkflow, /--require-backfill-formats/)
-  assert.match(nativeReleaseWorkflow, /Verify public-trust release downloads/)
-  assert.match(nativeReleaseWorkflow, /verify-native-downloads\.mjs/)
-  assert.match(nativeReleaseWorkflow, /--require-published/)
-  assert.match(nativeReleaseWorkflow, /--require-public-trust/)
-  assert.doesNotMatch(nativeReleaseWorkflow, /gh release create/)
-  assert.match(nativeReleaseWorkflow, /contents: write/)
+  assert.match(nativeReleaseWorkflow, /WIN_CSC_LINK/)
+  assert.match(nativeReleaseWorkflow, /WIN_CSC_KEY_PASSWORD/)
+  assert.match(nativeReleaseWorkflow, /Remove-Item -LiteralPath \$pfxPath -Force -ErrorAction SilentlyContinue/)
+  assert.doesNotMatch(nativeReleaseWorkflow, /Import-PfxCertificate|PEARBROWSER_WINDOWS_SIGNING_THUMBPRINT/)
+
+  assert.match(nativeReleaseWorkflow, /collect-appling-artifacts\.mjs/)
+  assert.match(nativeReleaseWorkflow, /--build-dir dist\/electron/)
+  assert.match(nativeReleaseWorkflow, /check-native-release-bundle\.mjs/)
+  assert.match(nativeReleaseWorkflow, /actions\/checkout@[0-9a-f]{40} # v4/)
+  assert.match(nativeReleaseWorkflow, /actions\/setup-node@[0-9a-f]{40} # v4/)
+  assert.match(nativeReleaseWorkflow, /actions\/upload-artifact@[0-9a-f]{40} # v4/)
+  assert.match(nativeReleaseWorkflow, /actions\/download-artifact@[0-9a-f]{40} # v4/)
+  assert.doesNotMatch(nativeReleaseWorkflow, /uses: [^\n]+@v[0-9]/)
+
+  const globalConfiguration = nativeReleaseWorkflow.slice(0, nativeReleaseWorkflow.indexOf('\njobs:'))
+  assert.doesNotMatch(globalConfiguration, /secrets\./)
+  assert.doesNotMatch(nativeReleaseWorkflow, /if: [^\n]*secrets\./)
 })
 
-test('native release workflow defaults manual runs to package proof and public release events to public trust', () => {
-  assert.match(nativeReleaseWorkflow, /default: package-proof/)
-  assert.match(nativeReleaseWorkflow, /RELEASE_MODE: \$\{\{ github\.event\.inputs\.release_mode \|\| 'public-trust' \}\}/)
-  assert.match(nativeReleaseWorkflow, /case "\$RELEASE_MODE" in/)
-  assert.match(nativeReleaseWorkflow, /if \[\[ "\$RELEASE_MODE" == "public-trust" \]\]; then/)
+test('native release workflow keeps package proof private and public trust draft-first', () => {
+  assert.match(nativeReleaseWorkflow, /publish_release=true requires release_mode=public-trust/)
+  assert.match(nativeReleaseWorkflow, /environment: \$\{\{ inputs\.release_mode == 'public-trust' && matrix\.platform != 'linux' && 'production' \|\| 'package-proof' \}\}/)
+  assert.match(nativeReleaseWorkflow, /attach-draft:\n[\s\S]*?if: \$\{\{ inputs\.release_mode == 'public-trust' \}\}/)
+  assert.match(nativeReleaseWorkflow, /publish-release:\n[\s\S]*?if: \$\{\{ inputs\.release_mode == 'public-trust' && inputs\.publish_release \}\}/)
+  assert.match(nativeReleaseWorkflow, /gh release create "\$RELEASE_TAG"/)
+  assert.match(nativeReleaseWorkflow, /--target "\$SOURCE_REF"/)
+  assert.match(nativeReleaseWorkflow, /--draft/)
+  assert.match(nativeReleaseWorkflow, /gh release upload "\$RELEASE_TAG" "\$\{assets\[@\]\}"/)
+  assert.doesNotMatch(nativeReleaseWorkflow, /--clobber/)
+  assert.match(nativeReleaseWorkflow, /gh release edit "\$RELEASE_TAG" --repo "\$GH_REPO" --draft=false --latest/)
+  assert.match(nativeReleaseWorkflow, /Download independently verified Actions bundle/)
+  assert.match(nativeReleaseWorkflow, /Re-download draft, compare exact bytes, and publish/)
+  assert.match(nativeReleaseWorkflow, /gh release download "\$RELEASE_TAG"/)
+  assert.match(nativeReleaseWorkflow, /cmp -s -- "\$verified_dir\/\$name" "\$draft_dir\/\$name"/)
+  assert.match(nativeReleaseWorkflow, /Draft asset bytes differ from the verified Actions artifact/)
+  assert.match(nativeReleaseWorkflow, /--require-published/)
+  assert.match(nativeReleaseWorkflow, /--require-public-trust/)
+  assert.doesNotMatch(nativeReleaseWorkflow, /--require-backfill-formats/)
+
   assert.ok(
-    nativeReleaseWorkflow.indexOf('args+=(--require-public-trust)') <
-      nativeReleaseWorkflow.indexOf('node scripts/check-native-signing-credentials.mjs "${args[@]}"'),
-    'public-trust mode must add the native signing hard gate before running the checker'
+    nativeReleaseWorkflow.indexOf('Create draft from the exact source commit') <
+      nativeReleaseWorkflow.indexOf('Attach assets without overwrite'),
+    'the workflow must create a draft before attaching assets'
   )
   assert.ok(
-    nativeReleaseWorkflow.indexOf('args+=(--require-published)') <
-      nativeReleaseWorkflow.indexOf('check-native-release-assets.mjs "${args[@]}"'),
-    'public-trust mode must require a published release in the post-upload asset check'
+    nativeReleaseWorkflow.indexOf('Download independently verified Actions bundle') <
+      nativeReleaseWorkflow.indexOf('Re-download draft, compare exact bytes, and publish'),
+    'the workflow must recover the independently verified Actions bundle before final draft verification'
+  )
+  const finalPublicationStep = nativeReleaseWorkflow.slice(
+    nativeReleaseWorkflow.indexOf('- name: Re-download draft, compare exact bytes, and publish'),
+    nativeReleaseWorkflow.indexOf('- name: Verify published tag and public downloads')
   )
   assert.ok(
-    nativeReleaseWorkflow.indexOf('Create public-trust macOS DMG') <
-      nativeReleaseWorkflow.indexOf('node scripts/collect-appling-artifacts.mjs'),
-    'public-trust macOS DMG must be created before release artifact collection'
+    finalPublicationStep.indexOf('gh release download "$RELEASE_TAG"') <
+      finalPublicationStep.indexOf('cmp -s -- "$verified_dir/$name" "$draft_dir/$name"') &&
+      finalPublicationStep.indexOf('cmp -s -- "$verified_dir/$name" "$draft_dir/$name"') <
+      finalPublicationStep.indexOf('gh release edit "$RELEASE_TAG"'),
+    'the same final step must download and byte-compare the current draft before publication'
+  )
+  assert.equal(
+    (finalPublicationStep.match(/check-native-release-bundle\.mjs/g) || []).length,
+    2,
+    'the final step must checksum-verify both the Actions bundle and downloaded draft'
   )
   assert.ok(
-    nativeReleaseWorkflow.indexOf("if: env.RELEASE_MODE == 'public-trust'") <
-      nativeReleaseWorkflow.indexOf('verify-native-downloads.mjs'),
-    'public-trust mode must run byte-level native download verification after upload'
+    nativeReleaseWorkflow.indexOf('Create, notarize, and staple public-trust DMG') <
+      nativeReleaseWorkflow.indexOf('Collect normalized release artifacts and provenance manifest'),
+    'public-trust DMGs must be created before artifact collection'
+  )
+  assert.ok(
+    nativeReleaseWorkflow.indexOf('Re-download draft, compare exact bytes, and publish') <
+      nativeReleaseWorkflow.lastIndexOf('verify-native-downloads.mjs'),
+    'public download verification must happen after publication'
   )
 })
 
@@ -1011,7 +1114,7 @@ test('native signing credential checker separates package proof from public trus
   assert.equal(windowsComplete.status, 0)
   assert.equal(windowsComplete.report.counts.fail, 0)
 
-  // Azure Trusted Signing is an accepted EV-equivalent alternative to the PFX path.
+  // Azure Trusted Signing is intentionally deferred until it has a reviewed integration.
   const windowsAzureComplete = run({
     AZURE_TENANT_ID: 'tenant',
     AZURE_CLIENT_ID: 'client',
@@ -1020,9 +1123,8 @@ test('native signing credential checker separates package proof from public trus
     AZURE_TRUSTED_SIGNING_ACCOUNT: 'pearbrowser-signing',
     AZURE_TRUSTED_SIGNING_CERT_PROFILE: 'pearbrowser'
   }, ['--platform', 'windows', '--require-public-trust'])
-  assert.equal(windowsAzureComplete.status, 0)
-  assert.equal(windowsAzureComplete.report.counts.fail, 0)
-  assert.ok(windowsAzureComplete.report.checks.some((check) => check.id === 'windows-certificate' && check.status === 'pass'))
+  assert.notEqual(windowsAzureComplete.status, 0)
+  assert.ok(windowsAzureComplete.report.checks.some((check) => check.id === 'windows-certificate' && check.status === 'fail'))
 
   const partialAzure = run({
     AZURE_TRUSTED_SIGNING_ACCOUNT: 'pearbrowser-signing'
@@ -1052,6 +1154,7 @@ test('native signing credential checker separates package proof from public trus
     assert.equal(githubComplete.status, 0, githubComplete.stderr || githubComplete.stdout)
     assert.equal(githubComplete.report.secretSource, 'github')
     assert.equal(githubComplete.report.repo, 'bigdestiny2/pearbrowser-desktop')
+    assert.equal(githubComplete.report.githubEnvironment, 'production')
     assert.equal(githubComplete.report.counts.fail, 0)
     assert.ok(githubComplete.report.checks.some((check) => check.id === 'secret-values-unreadable' && check.status === 'warn'))
 
@@ -1064,6 +1167,7 @@ test('native signing credential checker separates package proof from public trus
       secretsPath
     ])
     assert.notEqual(githubIncomplete.status, 0)
+    assert.equal(githubIncomplete.report.githubEnvironment, 'production')
     assert.ok(githubIncomplete.report.checks.some((check) => check.id === 'macos-notary' && check.status === 'fail'))
   } finally {
     rmSync(fixture, { recursive: true, force: true })
@@ -1080,40 +1184,46 @@ test('macOS notarization helper submits, staples, and verifies app bundles', () 
   assert.match(macosNotarizeScript, /\*\*\*\*\*\*\*\*/)
 })
 
-test('appling artifact collector emits checksummed release assets', () => {
+test('Electron artifact collector emits checksummed release assets with provenance', () => {
   assert.match(applingArtifactCollector, /createHash\('sha256'\)/)
   assert.match(applingArtifactCollector, /\.app\.zip/)
-  assert.match(applingArtifactCollector, /\.msix/)
+  assert.match(applingArtifactCollector, /\.exe/)
+  assert.match(applingArtifactCollector, /\.AppImage/)
   assert.match(applingArtifactCollector, /SHA256SUMS-\$\{releasePlatform\}-\$\{arch\}\.txt/)
   assert.match(applingArtifactCollector, /\$\{appName\}-\$\{version\}-\$\{releasePlatform\}-\$\{arch\}/)
-  assert.match(applingArtifactCollector, /no \$\{releasePlatform\} appling artifacts found/)
+  assert.match(applingArtifactCollector, /sourceRef/)
+  assert.match(applingArtifactCollector, /releaseMode/)
+  assert.match(applingArtifactCollector, /expected exactly one top-level Electron Builder/)
   assert.match(applingArtifactCollector, /release version \$\{version\} does not match package\.json version/)
   assert.match(applingArtifactCollector, /refusing to clear unsafe output directory/)
 })
 
-test('appling artifact collector emits normalized assets and checksum manifests', () => {
-  const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'pear-appling-release-')))
+test('Electron artifact collector emits normalized NSIS assets and checksum manifests', () => {
+  const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'pear-electron-release-')))
   try {
-    const buildDir = join(fixture, 'appling', 'build', 'nested')
-    mkdirSync(buildDir, { recursive: true })
+    const buildDir = join(fixture, 'dist', 'electron')
+    mkdirSync(join(buildDir, 'win-unpacked'), { recursive: true })
     writeFileSync(join(buildDir, 'PearBrowser Setup.exe'), 'windows installer bytes')
-    writeFileSync(join(buildDir, 'PearBrowser.exe'), 'raw bare-pear launcher — must be excluded')
-    writeFileSync(join(buildDir, 'PearBrowser.dmg'), 'wrong platform bytes')
+    writeFileSync(join(buildDir, 'win-unpacked', 'PearBrowser.exe'), 'unpacked app executable')
     writeFileSync(join(buildDir, 'notes.txt'), 'not a release artifact')
 
     execFileSync(process.execPath, [
       applingArtifactCollectorPath,
       '--tag',
       releaseTag,
+      '--source-ref',
+      immutableSourceRef,
+      '--release-mode',
+      'package-proof',
       '--platform',
       'windows',
       '--arch',
       'X64',
       '--build-dir',
-      join(fixture, 'appling', 'build')
+      buildDir
     ], { cwd: fixture, encoding: 'utf8' })
 
-    const outDir = join(fixture, 'dist', 'appling-release', releaseTag, 'windows')
+    const outDir = join(fixture, 'dist', 'native-release', releaseTag, 'windows', 'x64')
     assert.deepEqual(readdirSync(outDir).sort(), [
       `PearBrowser-${releaseVersion}-windows-x64.exe`,
       `PearBrowser-${releaseVersion}-windows-x64.exe.sha256`,
@@ -1123,49 +1233,55 @@ test('appling artifact collector emits normalized assets and checksum manifests'
 
     const sidecar = readFileSync(join(outDir, `PearBrowser-${releaseVersion}-windows-x64.exe.sha256`), 'utf8')
     assert.match(sidecar, new RegExp(`^[a-f0-9]{64}  PearBrowser-${releaseVersion.replaceAll('.', '\\.')}-windows-x64\\.exe\\n$`))
-
-    const sums = readFileSync(join(outDir, 'SHA256SUMS-windows-x64.txt'), 'utf8')
-    assert.equal(sums, sidecar)
+    assert.equal(readFileSync(join(outDir, 'SHA256SUMS-windows-x64.txt'), 'utf8'), sidecar)
 
     const manifest = JSON.parse(readFileSync(join(outDir, 'manifest-windows-x64.json'), 'utf8'))
     assert.equal(manifest.tag, releaseTag)
     assert.equal(manifest.version, releaseVersion)
+    assert.equal(manifest.sourceRef, immutableSourceRef)
+    assert.equal(manifest.releaseMode, 'package-proof')
     assert.equal(manifest.platform, 'windows')
     assert.equal(manifest.arch, 'x64')
     assert.equal(manifest.artifacts.length, 1)
     assert.equal(manifest.artifacts[0].name, `PearBrowser-${releaseVersion}-windows-x64.exe`)
-    assert.equal(manifest.artifacts[0].source, 'appling/build/nested/PearBrowser Setup.exe')
+    assert.equal(manifest.artifacts[0].source, 'dist/electron/PearBrowser Setup.exe')
   } finally {
     rmSync(fixture, { recursive: true, force: true })
   }
 })
 
-test('appling artifact collector excludes AppImageTool and packages PearBrowser', () => {
-  const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'pear-linux-appling-release-')))
+test('Electron artifact collector packages only the top-level product AppImage', () => {
+  const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'pear-linux-electron-release-')))
   try {
-    const buildDir = join(fixture, 'appling', 'build', 'nested')
-    mkdirSync(buildDir, { recursive: true })
-    writeFileSync(join(buildDir, 'appimagetool-x86_64.AppImage'), 'packaging tool bytes')
+    const buildDir = join(fixture, 'dist', 'electron')
+    mkdirSync(join(buildDir, 'linux-unpacked'), { recursive: true })
     writeFileSync(join(buildDir, 'PearBrowser.AppImage'), 'pearbrowser product bytes')
+    writeFileSync(join(buildDir, 'linux-unpacked', 'nested.AppImage'), 'must be ignored')
 
     execFileSync(process.execPath, [
       applingArtifactCollectorPath,
       '--tag',
       releaseTag,
+      '--source-ref',
+      immutableSourceRef,
+      '--release-mode',
+      'package-proof',
       '--platform',
       'linux',
       '--arch',
       'x64',
       '--build-dir',
-      join(fixture, 'appling', 'build')
+      buildDir
     ], { cwd: fixture, encoding: 'utf8' })
 
-    const outDir = join(fixture, 'dist', 'appling-release', releaseTag, 'linux')
+    const outDir = join(fixture, 'dist', 'native-release', releaseTag, 'linux', 'x64')
     const assetName = `PearBrowser-${releaseVersion}-linux-x64.AppImage`
     assert.equal(readFileSync(join(outDir, assetName), 'utf8'), 'pearbrowser product bytes')
     const manifest = JSON.parse(readFileSync(join(outDir, 'manifest-linux-x64.json'), 'utf8'))
+    assert.equal(manifest.sourceRef, immutableSourceRef)
+    assert.equal(manifest.releaseMode, 'package-proof')
     assert.equal(manifest.artifacts.length, 1)
-    assert.equal(manifest.artifacts[0].source, 'appling/build/nested/PearBrowser.AppImage')
+    assert.equal(manifest.artifacts[0].source, 'dist/electron/PearBrowser.AppImage')
   } finally {
     rmSync(fixture, { recursive: true, force: true })
   }
@@ -1186,6 +1302,10 @@ test('appling artifact collector refuses unsafe output directories before cleari
       applingArtifactCollectorPath,
       '--tag',
       releaseTag,
+      '--source-ref',
+      immutableSourceRef,
+      '--release-mode',
+      'package-proof',
       '--platform',
       'windows',
       '--arch',
@@ -1337,7 +1457,7 @@ test('native release asset checker requires macOS DMGs for public-trust assets',
 
     assert.notEqual(missing.status, 0)
     const missingReport = JSON.parse(missing.stdout)
-    assert.ok(missingReport.errors.some((error) => error.includes('missing public-trust macOS DMG for macos/x64')))
+    assert.ok(missingReport.errors.some((error) => error.includes('expected exactly one public-trust macOS DMG for macos/x64, found 0')))
   } finally {
     rmSync(fixture, { recursive: true, force: true })
   }
@@ -1562,7 +1682,10 @@ test('native install snippet generator emits release-note packages for every des
     assert.match(markdown.stdout, /## Native Installers/)
     assert.match(markdown.stdout, /PearBrowser-0\.5\.0-macos-arm64\.dmg/)
     assert.match(markdown.stdout, /PearBrowser-0\.5\.0-windows-x64\.exe/)
-    assert.match(markdown.stdout, /These assets are expected to be signed\/notarized/)
+    assert.match(markdown.stdout, /does not independently attest Developer ID signing/)
+    assert.match(markdown.stdout, /validate those properties against the complete published release evidence/)
+    assert.doesNotMatch(markdown.stdout, /The macOS DMG is Developer ID signed/)
+    assert.doesNotMatch(markdown.stdout, /Windows NSIS \.exe is Authenticode-signed/)
 
     const guide = spawnSync(process.execPath, [
       nativeInstallSnippetPath,
@@ -1584,6 +1707,8 @@ test('native install snippet generator emits release-note packages for every des
     assert.match(guide.stdout, /\[PearBrowser-0\.5\.0-macos-arm64\.dmg\]\(https:\/\/example\.invalid\/PearBrowser-0\.5\.0-macos-arm64\.dmg\)/)
     assert.match(guide.stdout, /npm run -s generate:native-install-guide/)
     assert.match(guide.stdout, /PowerShell/)
+    assert.match(guide.stdout, /Signing and notarization status must come from release evidence, not these filenames/)
+    assert.doesNotMatch(guide.stdout, /supported user-facing formats are a notarized macOS/)
     assert.doesNotMatch(guide.stdout, /legacy migration record/i)
 
     const packageProofDir = join(fixture, 'package-proof')
@@ -1593,8 +1718,8 @@ test('native install snippet generator emits release-note packages for every des
       'PearBrowser-0.5.0-macos-arm64.app.zip.sha256',
       'PearBrowser-0.5.0-macos-x64.app.zip',
       'PearBrowser-0.5.0-macos-x64.app.zip.sha256',
-      'PearBrowser-0.5.0-windows-x64.msix',
-      'PearBrowser-0.5.0-windows-x64.msix.sha256',
+      'PearBrowser-0.5.0-windows-x64.exe',
+      'PearBrowser-0.5.0-windows-x64.exe.sha256',
       'PearBrowser-0.5.0-linux-x64.AppImage',
       'PearBrowser-0.5.0-linux-x64.AppImage.sha256'
     ])
@@ -1604,6 +1729,8 @@ test('native install snippet generator emits release-note packages for every des
       packageProofRelease,
       '--tag',
       'v0.5.0',
+      '--trust-mode',
+      'package-proof',
       '--format',
       'guide'
     ], {
@@ -1612,7 +1739,8 @@ test('native install snippet generator emits release-note packages for every des
     })
 
     assert.equal(packageProofGuide.status, 0, packageProofGuide.stderr || packageProofGuide.stdout)
-    assert.match(packageProofGuide.stdout, /Apple could not verify that PearBrowser is free of malware/)
+    assert.match(packageProofGuide.stdout, /package-proof GitHub Actions artifacts only/)
+    assert.match(packageProofGuide.stdout, /macOS is ad-hoc signed but not notarized/)
     assert.match(packageProofGuide.stdout, /Control-click `PearBrowser\.app` -> Open -> Open/)
     assert.match(packageProofGuide.stdout, /Open Anyway/)
   } finally {
@@ -1641,7 +1769,7 @@ test('native install smoke plan generator emits clean-machine commands for every
       '--tag',
       'v0.5.0',
       '--source-ref',
-      'release-smoke-source',
+      immutableSourceRef,
       '--json'
     ], {
       cwd: fileURLToPath(new URL('..', import.meta.url)),
@@ -1652,8 +1780,8 @@ test('native install smoke plan generator emits clean-machine commands for every
     const report = JSON.parse(json.stdout)
     assert.equal(report.ok, true)
     assert.equal(report.trustMode, 'package-proof')
-    assert.equal(report.sourceRef, 'release-smoke-source')
-    assert.equal(report.runtimeSmokeScript, 'https://raw.githubusercontent.com/bigdestiny2/pearbrowser-desktop/release-smoke-source/scripts/runtime-rpc-smoke.mjs')
+    assert.equal(report.sourceRef, immutableSourceRef)
+    assert.equal(report.runtimeSmokeScript, `https://raw.githubusercontent.com/bigdestiny2/pearbrowser-desktop/${immutableSourceRef}/scripts/runtime-rpc-smoke.mjs`)
     assert.equal(report.targets.length, 4)
     assert.ok(report.warnings.some((warning) => warning.includes('package-proof clean-install smoke')))
     assert.ok(report.targets.find((target) => target.label === 'macOS Apple Silicon').commands.some((command) => command.includes('ditto -x -k')))
@@ -1661,7 +1789,7 @@ test('native install smoke plan generator emits clean-machine commands for every
     assert.ok(report.targets.find((target) => target.label === 'macOS Apple Silicon').commands.some((command) => command.includes('runtime-rpc-smoke.mjs --timeout 20000 --max-storage-percent 100 --json')))
     assert.ok(report.targets.find((target) => target.label === 'Windows x64').commands.some((command) => command.includes('Get-AuthenticodeSignature')))
     assert.ok(report.targets.find((target) => target.label === 'Windows x64').commands.some((command) => command.includes('Start menu')))
-    assert.ok(report.targets.find((target) => target.label === 'Windows x64').commands.some((command) => command.includes('Invoke-WebRequest -Uri') && command.includes('release-smoke-source/scripts/runtime-rpc-smoke.mjs')))
+    assert.ok(report.targets.find((target) => target.label === 'Windows x64').commands.some((command) => command.includes('Invoke-WebRequest -Uri') && command.includes(`${immutableSourceRef}/scripts/runtime-rpc-smoke.mjs`)))
     assert.ok(report.targets.find((target) => target.label === 'Windows x64').commands.some((command) => command.includes('node .\\pearbrowser-runtime-rpc-smoke.mjs')))
     assert.ok(report.targets.find((target) => target.label === 'Linux x64').commands.some((command) => command.includes('chmod +x')))
     assert.ok(report.targets.find((target) => target.label === 'Linux x64').commands.some((command) => command.includes('curl -L -o pearbrowser-runtime-rpc-smoke.mjs')))
@@ -1675,7 +1803,7 @@ test('native install smoke plan generator emits clean-machine commands for every
       '--tag',
       'v0.5.0',
       '--source-ref',
-      'release-smoke-source'
+      immutableSourceRef
     ], {
       cwd: fileURLToPath(new URL('..', import.meta.url)),
       encoding: 'utf8'
@@ -1683,7 +1811,7 @@ test('native install smoke plan generator emits clean-machine commands for every
 
     assert.equal(markdown.status, 0, markdown.stderr || markdown.stdout)
     assert.match(markdown.stdout, /## Native Clean-Install Smoke Plan/)
-    assert.match(markdown.stdout, /Smoke helper source: \[release-smoke-source\]/)
+    assert.ok(markdown.stdout.includes(`Smoke helper source: [${immutableSourceRef}]`))
     assert.match(markdown.stdout, /### macOS Apple Silicon/)
     assert.match(markdown.stdout, /```powershell/)
     assert.match(markdown.stdout, /Evidence to record:/)
@@ -1694,6 +1822,8 @@ test('native install smoke plan generator emits clean-machine commands for every
       releasePath,
       '--tag',
       'v0.5.0',
+      '--source-ref',
+      immutableSourceRef,
       '--trust-mode',
       'public-trust',
       '--json'
@@ -1704,7 +1834,7 @@ test('native install smoke plan generator emits clean-machine commands for every
 
     assert.notEqual(blocked.status, 0)
     const blockedReport = JSON.parse(blocked.stdout)
-    assert.ok(blockedReport.errors.some((error) => error.includes('public-trust clean-install smoke requires notarized macOS DMG')))
+    assert.ok(blockedReport.errors.some((error) => error.includes('public-trust clean-install smoke requires notarized macOS DMG assets')))
 
     const publicTrustDir = join(fixture, 'public-trust')
     mkdirSync(publicTrustDir)
@@ -1724,6 +1854,8 @@ test('native install smoke plan generator emits clean-machine commands for every
       publicTrustRelease,
       '--tag',
       'v0.5.0',
+      '--source-ref',
+      immutableSourceRef,
       '--trust-mode',
       'public-trust',
       '--json'
@@ -1971,30 +2103,7 @@ test('package-manager manifest generator gates package-proof assets by default',
 test('public-trust readiness checker passes when all release gates are represented', () => {
   const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'pear-public-trust-readiness-')))
   try {
-    const { releasePath } = writePackageManagerReleaseFixture(fixture, [
-      'PearBrowser-0.5.0-macos-arm64.dmg',
-      'PearBrowser-0.5.0-macos-arm64.dmg.sha256',
-      'PearBrowser-0.5.0-macos-arm64.app.zip',
-      'PearBrowser-0.5.0-macos-arm64.app.zip.sha256',
-      'SHA256SUMS-macos-arm64.txt',
-      'manifest-macos-arm64.json',
-      'PearBrowser-0.5.0-macos-x64.dmg',
-      'PearBrowser-0.5.0-macos-x64.dmg.sha256',
-      'PearBrowser-0.5.0-macos-x64.app.zip',
-      'PearBrowser-0.5.0-macos-x64.app.zip.sha256',
-      'SHA256SUMS-macos-x64.txt',
-      'manifest-macos-x64.json',
-      'PearBrowser-0.5.0-windows-x64.exe',
-      'PearBrowser-0.5.0-windows-x64.exe.sha256',
-      'PearBrowser-0.5.0-windows-x64.msix',
-      'PearBrowser-0.5.0-windows-x64.msix.sha256',
-      'SHA256SUMS-windows-x64.txt',
-      'manifest-windows-x64.json',
-      'PearBrowser-0.5.0-linux-x64.AppImage',
-      'PearBrowser-0.5.0-linux-x64.AppImage.sha256',
-      'SHA256SUMS-linux-x64.txt',
-      'manifest-linux-x64.json'
-    ])
+    const { releasePath } = writePublicTrustReleaseFixture(fixture)
     const evidencePath = join(fixture, 'evidence.md')
     writeCompleteReleaseEvidenceFixture(evidencePath)
 
@@ -2005,7 +2114,7 @@ test('public-trust readiness checker passes when all release gates are represent
       '--tag',
       'v0.5.0',
       '--source-ref',
-      'release-smoke-source',
+      immutableSourceRef,
       '--evidence-file',
       evidencePath,
       '--json'
@@ -2019,14 +2128,52 @@ test('public-trust readiness checker passes when all release gates are represent
     const report = JSON.parse(result.stdout)
     assert.equal(report.ok, true)
     assert.equal(report.mode, 'public-trust')
-    assert.equal(report.sourceRef, 'release-smoke-source')
-    assert.equal(report.checks.length, 7)
+    assert.equal(report.sourceRef, immutableSourceRef)
+    assert.equal(report.checks.length, 8)
     assert.deepEqual(report.blockers, [])
     assert.ok(report.checks.every((check) => check.ok))
-    assert.match(report.checks.find((check) => check.id === 'native-install-smoke-plan').command, /--source-ref release-smoke-source/)
+    assert.ok(report.checks.find((check) => check.id === 'native-install-smoke-plan').command.includes(`--source-ref ${immutableSourceRef}`))
     assert.equal(report.checks.find((check) => check.id === 'linux-appimage-metadata').status, 'pass')
+    assert.match(report.checks.find((check) => check.id === 'published-provenance').summary, new RegExp(`sourceRef=${immutableSourceRef}`))
     assert.ok(report.checks.some((check) => check.id === 'native-downloads' && check.summary.includes('verified=4')))
     assert.deepEqual(report.warnings, [])
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
+})
+
+test('public-trust readiness checker rejects published manifests from a different source commit', () => {
+  const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'pear-public-trust-source-mismatch-')))
+  try {
+    const { releasePath } = writePublicTrustReleaseFixture(fixture, {
+      sourceRef: 'fedcba9876543210fedcba9876543210fedcba98'
+    })
+    const evidencePath = join(fixture, 'evidence.md')
+    writeCompleteReleaseEvidenceFixture(evidencePath)
+
+    const result = spawnSync(process.execPath, [
+      publicTrustReadinessPath,
+      '--fixture',
+      releasePath,
+      '--tag',
+      'v0.5.0',
+      '--source-ref',
+      immutableSourceRef,
+      '--evidence-file',
+      evidencePath,
+      '--json'
+    ], {
+      cwd: fileURLToPath(new URL('..', import.meta.url)),
+      encoding: 'utf8',
+      env: publicTrustSigningEnv()
+    })
+
+    assert.notEqual(result.status, 0)
+    const report = JSON.parse(result.stdout)
+    const provenance = report.checks.find((check) => check.id === 'published-provenance')
+    assert.equal(provenance.status, 'block')
+    assert.ok(provenance.blockers.some((message) => message.includes('manifest-macos-arm64.json: sourceRef')))
+    assert.ok(provenance.blockers.some((message) => message.includes(immutableSourceRef)))
   } finally {
     rmSync(fixture, { recursive: true, force: true })
   }
@@ -2035,30 +2182,7 @@ test('public-trust readiness checker passes when all release gates are represent
 test('public-trust readiness checker can read signing gate from GitHub Actions secret names', () => {
   const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'pear-public-trust-github-secrets-')))
   try {
-    const { releasePath } = writePackageManagerReleaseFixture(fixture, [
-      'PearBrowser-0.5.0-macos-arm64.dmg',
-      'PearBrowser-0.5.0-macos-arm64.dmg.sha256',
-      'PearBrowser-0.5.0-macos-arm64.app.zip',
-      'PearBrowser-0.5.0-macos-arm64.app.zip.sha256',
-      'SHA256SUMS-macos-arm64.txt',
-      'manifest-macos-arm64.json',
-      'PearBrowser-0.5.0-macos-x64.dmg',
-      'PearBrowser-0.5.0-macos-x64.dmg.sha256',
-      'PearBrowser-0.5.0-macos-x64.app.zip',
-      'PearBrowser-0.5.0-macos-x64.app.zip.sha256',
-      'SHA256SUMS-macos-x64.txt',
-      'manifest-macos-x64.json',
-      'PearBrowser-0.5.0-windows-x64.exe',
-      'PearBrowser-0.5.0-windows-x64.exe.sha256',
-      'PearBrowser-0.5.0-windows-x64.msix',
-      'PearBrowser-0.5.0-windows-x64.msix.sha256',
-      'SHA256SUMS-windows-x64.txt',
-      'manifest-windows-x64.json',
-      'PearBrowser-0.5.0-linux-x64.AppImage',
-      'PearBrowser-0.5.0-linux-x64.AppImage.sha256',
-      'SHA256SUMS-linux-x64.txt',
-      'manifest-linux-x64.json'
-    ])
+    const { releasePath } = writePublicTrustReleaseFixture(fixture)
     const evidencePath = join(fixture, 'evidence.md')
     const secretsPath = join(fixture, 'github-secrets.json')
     writeCompleteReleaseEvidenceFixture(evidencePath)
@@ -2071,7 +2195,7 @@ test('public-trust readiness checker can read signing gate from GitHub Actions s
       '--tag',
       'v0.5.0',
       '--source-ref',
-      'release-smoke-source',
+      immutableSourceRef,
       '--evidence-file',
       evidencePath,
       '--signing-secret-source',
@@ -2091,6 +2215,7 @@ test('public-trust readiness checker can read signing gate from GitHub Actions s
     const nativeSigning = report.checks.find((check) => check.id === 'native-signing')
     assert.equal(nativeSigning.status, 'warn')
     assert.match(nativeSigning.command, /--secret-source github/)
+    assert.match(nativeSigning.command, /--github-environment production/)
     assert.match(nativeSigning.command, /--github-secrets-file/)
     assert.ok(report.warnings.some((warning) => warning.message.includes('secret-values-unreadable')))
   } finally {
@@ -2129,7 +2254,7 @@ test('public-trust readiness checker aggregates package-proof blockers', () => {
       '--tag',
       'v0.5.0',
       '--source-ref',
-      'release-smoke-source',
+      immutableSourceRef,
       '--evidence-file',
       evidencePath,
       '--json'
@@ -2147,10 +2272,10 @@ test('public-trust readiness checker aggregates package-proof blockers', () => {
     assert.equal(report.checks.find((check) => check.id === 'linux-appimage-metadata').status, 'pass')
     assert.equal(report.checks.find((check) => check.id === 'native-release-assets').status, 'block')
     assert.equal(report.checks.find((check) => check.id === 'native-install-smoke-plan').status, 'block')
-    assert.match(report.checks.find((check) => check.id === 'native-install-smoke-plan').command, /--source-ref release-smoke-source/)
+    assert.ok(report.checks.find((check) => check.id === 'native-install-smoke-plan').command.includes(`--source-ref ${immutableSourceRef}`))
     assert.equal(report.checks.find((check) => check.id === 'package-manager-manifests').status, 'block')
-    assert.ok(report.blockers.some((blocker) => blocker.message.includes('missing public-trust macOS DMG for macos/arm64')))
-    assert.ok(report.blockers.some((blocker) => blocker.message.includes('public-trust clean-install smoke requires notarized macOS DMG')))
+    assert.ok(report.blockers.some((blocker) => blocker.message.includes('expected exactly one public-trust macOS DMG for macos/arm64, found 0')))
+    assert.ok(report.blockers.some((blocker) => blocker.message.includes('public-trust clean-install smoke requires notarized macOS DMG assets')))
     assert.ok(report.blockers.some((blocker) => blocker.message.includes('public-trust Homebrew Cask requires notarized macOS DMG assets')))
   } finally {
     rmSync(fixture, { recursive: true, force: true })
@@ -2248,7 +2373,7 @@ test('native release asset checker fails when an installer sidecar is missing', 
         'PearBrowser-0.5.0-macos-arm64.app.zip.sha256',
         'SHA256SUMS-macos-arm64.txt',
         'manifest-macos-arm64.json',
-        'PearBrowser-0.5.0-windows-x64.msix',
+        'PearBrowser-0.5.0-windows-x64.exe',
         'SHA256SUMS-windows-x64.txt',
         'manifest-windows-x64.json',
         'PearBrowser-0.5.0-linux-x64.AppImage',
@@ -2273,7 +2398,7 @@ test('native release asset checker fails when an installer sidecar is missing', 
     assert.notEqual(result.status, 0)
     const report = JSON.parse(result.stdout)
     assert.equal(report.ok, false)
-    assert.ok(report.errors.some((error) => error.includes('missing SHA-256 sidecar for PearBrowser-0.5.0-windows-x64.msix')))
+    assert.ok(report.errors.some((error) => error.includes('missing SHA-256 sidecar for PearBrowser-0.5.0-windows-x64.exe')))
   } finally {
     rmSync(fixture, { recursive: true, force: true })
   }

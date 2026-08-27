@@ -4,6 +4,68 @@
 > only to explain past releases; they are not current installation, launch, or
 > recovery instructions. Current native delivery requires a verified package.
 
+## Unreleased
+
+### Changed
+
+- Aligned the embedded Pear v3 cohort with the stable Pear 3.3.0 release:
+  `pear-runtime@1.3.1`, `pear-install@1.2.2`,
+  `pear-runtime-updater@3.4.0`, Autobase 7.28.1, Hypercore 11.35.2,
+  Corestore 7.12.2, and Hyperdrive 13.3.3. Native release preflight now accepts
+  only the reviewed stable Pear CLI 3.3.0 and rejects v2, prerelease, and future
+  unreviewed releases.
+- Kept OTA download/apply disabled while the retained upgrade key is a
+  migration placeholder rather than the approved production multisig channel.
+- Replaced the legacy native-launcher release target with packaging of the
+  reviewed Electron application through pinned electron-builder. The current
+  public-trust contract is signed/notarized macOS `.app.zip` plus `.dmg`, a
+  PFX/Authenticode-signed Windows NSIS `.exe`, and a Linux AppImage. Package
+  proof stays in GitHub Actions only; public trust is manual, exact-SHA,
+  create-only, and draft-first.
+- Added a build-unique Ed25519 signature over an exact SHA-256 inventory of the
+  unpacked Pear runtime. The protected ASAR public key now gates every physical
+  worker, backend, dependency, and native sidecar byte before runtime loading;
+  Electron production fuses also disable Node injection surfaces and enable
+  cookie encryption.
+- Deferred Azure Trusted Signing because electron-builder 26's current route
+  installs a mutable TrustedSigning PowerShell module during the build. The
+  Windows `v0.9.1` public-trust lane requires the complete external PFX
+  certificate/password pair.
+
+### Fixed
+
+- Pear OTA now resolves the platform-qualified deployment artifact
+  (`PearBrowser.app`, `PearBrowser.AppImage`, or `PearBrowser.exe`) and has a
+  tested apply/relaunch path ready for the production channel. Previously the
+  extensionless name could not resolve a Pear-built artifact, and the
+  `updated` handler only logged before the staged update was deleted on the
+  next launch. Updater errors are now handled at their source, and a failed OS
+  swap stays latched until a fresh updater instance is created on restart.
+
+## v0.9.1 — release candidate
+
+Corrective release candidate for two user-facing defects found by post-release visual QA
+of v0.9.0 — both invisible to the nonvisual release gates.
+
+### Fixed
+
+- **Blank window under the embedded Electron host.** The shell's bare module
+  specifiers (`react-dom/client`, `htm/react`) can never resolve when
+  index.html loads over `file://`; the window rendered blank from the Pear v3
+  migration onward. The UI is now an esbuild bundle
+  (`npm run build:ui` → committed `ui/dist/main.bundle.js`) that loads
+  identically under `file://` and pear-served hosts, and a guard test pins
+  index.html to the bundle.
+- The renderer's backend port scan (9876–9880) ran once and raced the Bare
+  worker binding its WS server, showing "Boot failed / reinstall" on healthy
+  installs; the scan now retries under a 25-second deadline.
+- Every https relay capability check in Settings failed with
+  `transport.get is not a function`: `bare-https@2` exports `request()` only
+  (the `get()` shorthand exists on `bare-http1` alone). Relay GETs now go
+  through `request()+end()`, verified live against the US gateway's signed
+  capability document; the transport mocks mirror the real modules and a
+  regression test pins the shape.
+
 ## v0.9.0 — 2026-08-17
 
 WDK wallet preview release (experimental, desktop-only, testnet-only, off by

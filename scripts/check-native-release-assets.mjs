@@ -84,8 +84,8 @@ function usage (code, message = '') {
 
 function normalizeTag (tag) {
   const normalized = String(tag || '').replace(/^refs\/tags\//, '')
-  if (!/^v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$/.test(normalized)) {
-    usage(2, `release tag must look like vX.Y.Z, got ${tag}`)
+  if (!/^v[0-9]+\.[0-9]+\.[0-9]+$/.test(normalized)) {
+    usage(2, `release tag must be a stable vX.Y.Z tag, got ${tag}`)
   }
   return normalized
 }
@@ -140,9 +140,7 @@ function verifyRelease (release, options) {
   if (options.requirePublished && release?.isDraft) {
     errors.push('release is still a draft; publish it before public announcement')
   }
-  if (release?.isPrerelease) {
-    warnings.push('release is marked prerelease')
-  }
+  if (release?.isPrerelease) errors.push('stable release must not be marked prerelease')
 
   const platforms = {}
   for (const platform of ['macos', 'windows', 'linux']) {
@@ -160,7 +158,8 @@ function verifyRelease (release, options) {
     .map((asset) => asset.name)
     .filter((name) => !classified.has(name))
     .sort()
-  if (extras.length) warnings.push(`unclassified attached asset(s): ${extras.join(', ')}`)
+  if (extras.length && options.requirePublicTrust) errors.push(`unexpected public-trust asset(s): ${extras.join(', ')}`)
+  else if (extras.length) warnings.push(`unclassified attached asset(s): ${extras.join(', ')}`)
 
   return {
     ok: errors.length === 0,
@@ -202,7 +201,7 @@ function verifyPlatform (platform, assets, names, version, errors, options = {})
   const artifacts = assets
     .filter((asset) => asset.name.startsWith(primaryPrefix))
     .filter((asset) => !asset.name.endsWith('.sha256'))
-    .filter((asset) => isPrimaryArtifact(platform, asset.name, version))
+    .filter((asset) => isPrimaryArtifact(platform, asset.name, version, options))
   const artifactsByArch = assetsGroupedByArch(
     artifacts,
     new RegExp(`^PearBrowser-${escapeRegex(version)}-${escapeRegex(platform)}-([A-Za-z0-9._-]+?)(?:[-.].*)?$`),
@@ -233,10 +232,17 @@ function verifyPlatform (platform, assets, names, version, errors, options = {})
     if (!artifactsByArch.has(arch)) {
       errors.push(`expected at least one primary ${platform}/${arch} native artifact named ${primaryPrefix}${arch}...`)
     }
+    const archArtifacts = artifactsByArch.get(arch) || []
+    if (platform === 'macos') {
+      const appZips = archArtifacts.filter((asset) => /\.app\.zip$/i.test(asset.name))
+      if (appZips.length !== 1) {
+        errors.push(`expected exactly one macOS .app.zip for ${platform}/${arch}, found ${appZips.length}`)
+      }
+    }
     if (platform === 'macos' && options.requirePublicTrust) {
-      const archArtifacts = artifactsByArch.get(arch) || []
-      if (!archArtifacts.some((asset) => /\.dmg$/i.test(asset.name))) {
-        errors.push(`missing public-trust macOS DMG for ${platform}/${arch}`)
+      const dmgs = archArtifacts.filter((asset) => /\.dmg$/i.test(asset.name))
+      if (dmgs.length !== 1) {
+        errors.push(`expected exactly one public-trust macOS DMG for ${platform}/${arch}, found ${dmgs.length}`)
       }
     }
     if (options.requireBackfillFormats) {
@@ -247,9 +253,15 @@ function verifyPlatform (platform, assets, names, version, errors, options = {})
       }
     }
     if (platform === 'linux') {
-      const appImages = (artifactsByArch.get(arch) || []).filter((asset) => /\.AppImage$/i.test(asset.name))
+      const appImages = archArtifacts.filter((asset) => /\.AppImage$/i.test(asset.name))
       if (appImages.length !== 1) {
         errors.push(`expected exactly one Linux .AppImage for ${platform}/${arch}, found ${appImages.length}: ${appImages.map((asset) => asset.name).join(', ') || '(none)'}`)
+      }
+    }
+    if (platform === 'windows' && !options.requireBackfillFormats) {
+      const installers = archArtifacts.filter((asset) => /\.exe$/i.test(asset.name))
+      if (installers.length !== 1) {
+        errors.push(`expected exactly one Windows NSIS .exe for ${platform}/${arch}, found ${installers.length}`)
       }
     }
   }
@@ -310,11 +322,11 @@ function assetsGroupedByArch (assets, pattern, label, errors) {
   return byArch
 }
 
-function isPrimaryArtifact (platform, name, version) {
+function isPrimaryArtifact (platform, name, version, options = {}) {
   if (!name.startsWith(`PearBrowser-${version}-${platform}-`)) return false
-  if (platform === 'macos') return /\.(?:app\.zip|dmg|pkg|zip)$/i.test(name)
-  if (platform === 'windows') return /\.(?:msix|exe|msi|zip)$/i.test(name)
-  if (platform === 'linux') return /\.(?:AppImage|deb|rpm|snap|tar\.gz|tgz|tar\.xz|zip)$/i.test(name)
+  if (platform === 'macos') return /\.(?:app\.zip|dmg)$/i.test(name)
+  if (platform === 'windows') return /\.exe$/i.test(name) || (options.requireBackfillFormats && /\.msix$/i.test(name))
+  if (platform === 'linux') return /\.AppImage$/i.test(name)
   return false
 }
 

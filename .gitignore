@@ -22,3 +22,7 @@ examples/headless-tab/*.png
 # agent session scratch
 outputs/
 .landing-seed.mjs
+
+# The committed UI bundle (npm run build:ui) — index.html loads it over file://
+!ui/dist/
+!ui/dist/main.bundle.js

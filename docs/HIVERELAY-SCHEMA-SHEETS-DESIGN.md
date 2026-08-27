@@ -10,6 +10,12 @@
 > Desktop. This document remains the design rationale and relay-side expansion
 > plan. See [`ARCHITECTURE_AND_CAPABILITIES.md`](./ARCHITECTURE_AND_CAPABILITIES.md)
 > for the current browser-facing catalogue pipeline.
+>
+> **Pear v3 delivery correction (2026-08):** a `driveKey` identifies browsable
+> static content. PearBrowser may open it or save a local offline copy, but it
+> does not install or launch it as a native application. Native Install/Open is
+> available only from a separately verified `nativeDelivery` Pear v3
+> AppRelease. Top-level `pear://` / `file://` links are migration metadata.
 
 ---
 
@@ -30,7 +36,7 @@ A schema-sheets room is an Autobase, so its `base.discoveryKey` **pins on HiveRe
 
 This doc specifies two complementary applications of that one primitive:
 
-- **Design A — The Catalogue on schema-sheets:** one validated, queryable, multiwriter catalogue *room* replaces the drive/bee/autobee trio as the canonical app catalogue, with real server-side search, signed app provenance, curated/open membership, and run-in-tab gating driven by a validated `type` field.
+- **Design A — The Catalogue on schema-sheets:** one validated, queryable, multiwriter catalogue *room* replaces the drive/bee/autobee trio as the canonical app catalogue, with real server-side search, signed app provenance, curated/open membership, delivery-safe static-content actions, and separately verified native delivery.
 - **Design B — The Backbone on schema-sheets:** one schema-sheets *index room per relay*, written through from the relay's existing registries, exposes a **pin registry**, a **relay directory** (killing the hardcoded relay list), an **app manifest**, and **verifier/reputation** rows — additively, with the existing seeding engine and verifier kept as the source of truth.
 
 The two designs **share one infrastructure** (the same `schema-sheets` dependency, the same `keet-identity-key` membership/attestation, the same `z32` room-link convention, the same `hiveRelay.seed()` pin path). The reconciliation in §6 makes the relay's index room and the catalogue room cooperate rather than collide: the relay *serves and pins* the catalogue room, and the catalogue's `app-manifest` rows and the backbone's `app-manifest` schema are unified into a single shape.
@@ -55,7 +61,7 @@ Cross-cutting limits shared by all three:
 - **No real search** — the UI does a client-side `Array.filter` substring match (`ui/shell.js` `filteredApps`); the backend `searchApps` is unused.
 - **Weak trust** — apps are keyed by `id` with "highest version wins," so any actor can shadow an app id with a higher version; there is no publisher provenance.
 - **Hardcoded data** — `FEATURED_APPS` is a 6-entry array in `ui/shell.js:33-94`, not data.
-- **Field drift** — some apps carry only a `driveKey` (installable), others only a `link` (launch-only, e.g. Keet/PearPass); nothing enforces "carry at least one."
+- **Field drift** — static content uses `driveKey`; older records may carry only a legacy executable `link`; signed native packages use the separate `nativeDelivery*` projection. The schema must preserve migration records without treating them as launch authority.
 
 ### 2.2 The HiveRelay backbone
 
@@ -124,9 +130,15 @@ All references below are to `/tmp/ss-study/package` (the studied copy of the dep
     name:{type:'string',maxLength:200},
     iconRef:{type:'string',maxLength:300},        // drive path OR small (<=8KB) data: URI
     description:{type:'string',maxLength:1000},
-    driveKey:{type:'string',pattern:'^[0-9a-f]{64}$'},  // installable apps
-    link:{type:'string',maxLength:300},           // pear://… launch-only apps (Keet/PearPass)
-    type:{enum:['standalone','hypersite']},       // window vs run-in-tab gating
+    driveKey:{type:'string',pattern:'^[0-9a-f]{64}$'},  // browsable/static content
+    link:{type:'string',maxLength:300},           // legacy migration/display metadata
+    legacyMigrationId:{type:'string',pattern:'^[13-9a-km-uw-z]{52}$'},
+    nativeDeliveryStatus:{enum:['migration-required','available']},
+    nativeDeliveryKind:{enum:['pear-v3']},
+    nativeInstallLink:{type:'string',pattern:'^pear://[13-9a-km-uw-z]{52}/?$'},
+    nativeProductName:{type:'string',maxLength:120},
+    nativeTargets:{type:'array',items:{type:'string',maxLength:40},maxItems:12},
+    type:{enum:['standalone','hypersite']},       // compatibility/display metadata
     author:{type:'string',maxLength:200},
     categories:{type:'array',items:{type:'string',maxLength:60},maxItems:12},
     version:{type:'string',maxLength:40},
@@ -135,7 +147,12 @@ All references below are to `/tmp/ss-study/package` (the studied copy of the dep
     verification:{enum:['unverified','relay-listed','author-signed']}
   },
   required:['name','type'],
-  anyOf:[{required:['driveKey']},{required:['link']}],   // MUST carry one
+  anyOf:[
+    {required:['driveKey']},
+    {required:['link']},
+    {required:['legacyMigrationId']},
+    {properties:{nativeDeliveryStatus:{const:'available'}},required:['nativeDeliveryStatus','nativeDeliveryKind','nativeInstallLink']}
+  ],
   additionalProperties:false }
 ```
 
@@ -152,7 +169,7 @@ The two built-in indexes do all the work:
 - **Recent:** `sheets.list('apps', {gte:0, lte:Date.now()})` returns rows ordered by `[schemaId,time]`; pass `reverse`+`limit` through `_opts` for "newest 50." (Phase 0 test confirms `find()` forwards `reverse`/`limit` to the HyperDB iterator; if not, add pagination in the wrapper.)
 - **By category / text:** `list('apps', {query:"[?type=='standalone']"})`, `"[?contains(categories,'games')]"`, substring `"[?contains(name,'keet') || contains(description,'chat')]"`. **A query language at the data layer instead of brute prefix scans.**
 - **Saved facets:** `addQuery('apps','Trending Games', …, true)`; the Apps UI renders them as chips.
-- **Trending (OPTIONAL / v2):** there is no event log, so it requires a second `app-events` schema (`{appId, kind:['install','launch','view']}`) that clients write to, then group-count by `appId`. **Telemetry is privacy-sensitive in a privacy-first browser — keep this out of v1; ship only recent + by-category** (open question §8).
+- **Trending (OPTIONAL / v2):** there is no event log, so it would require a second privacy-sensitive content-events schema (`{appId, kind:['open','save-offline','view']}`). **Keep this out of v1; ship only recent + by-category** (open question §8).
 
 ### 4.3 Contribution (app submission)
 
@@ -179,14 +196,14 @@ The in-memory DTO is the seam — **keep it**. Add a 4th `source` value `'sheets
 - **Phase 2 (cutover):** flip the default to the sheets `z32` link; auto-seed on first Apps-tab visit (reuse `defaultCatalogSeeded`). Legacy loaders stay for user-pinned catalogs.
 - **Phase 3 (deprecate):** mark `CMD_LOAD_CATALOG_BEE` + the `CMD_AUTOBEE_*` trio + `autobee-catalog-*.cjs` as legacy; remove only after telemetry shows zero legacy loads.
 
-**One-time migration script** `scripts/migrate-catalog-to-sheets.js`: read the current Hyperdrive `/catalog.json` (and any bee/autobee), normalize each entry to the `apps` schema (infer `type`: `hypersite` if link-only htmx else `standalone`; set `driveKey` OR `link`; default `verification:'relay-listed'`, `publishedAt:now`, `manifestHash` from hashing the app drive's `manifest.json`), then `addRow` each. Run from the operator box (`~/Desktop/pearbrowser-publishers`) so the canonical room is operator-owned.
+**One-time migration script** `scripts/migrate-catalog-to-sheets.js`: read the current Hyperdrive `/catalog.json` (and any bee/autobee), normalize static entries to `driveKey`, preserve legacy executable links only as migration records, project verified native releases into `nativeDelivery*`, and set `verification`, `publishedAt`, and `manifestHash` honestly before `addRow`. Run from the operator box (`~/Desktop/pearbrowser-publishers`) so the canonical room is operator-owned.
 
 **Backward compat:** `parseCatalogRef` keeps returning `{key,bee,autobee,kind}` for old scheme strings; add `kind:'sheets'`. Persisted `recentCatalogs` still route. My-Catalog (writable Hyperdrive) stays as-is for now.
 
-### 4.6 UI + run-in-tab integration
+### 4.6 UI + delivery-safe action integration
 
 - **Search box:** replace the client-side `filteredApps` substring `useMemo` (`shell.js`) with a **debounced `CMD_SHEETS_LIST`** passing a JMESPath built from `{query, category, source}`. Keep the `useMemo` as a thin offline fallback. This is the "real search box that calls `sheets.list` with JMESPath."
-- **Native-delivery gating:** a catalogue row may open browsable `hyper://` content, or carry `legacyMigrationId` plus `nativeDelivery.status:'migration-required'`. The latter displays publisher migration guidance and never starts a worker or window. Since delivery state is a **validated field on every row**, the hardcoded featured list becomes **data**: seed those rows into the canonical room and render Featured from `list('apps', {query:"[?author=='pearbrowser']"})` or a featured flag.
+- **Content/native-delivery gating:** a catalogue row may expose browsable `driveKey` content through **Open** and optional offline-copy actions, or carry separately verified Pear v3 native delivery through **Install app / Open app**. `legacyMigrationId` plus `nativeDelivery.status:'migration-required'` displays guidance and never starts a worker or window. Since delivery state is a validated field, the hardcoded featured list becomes data: seed those rows into the canonical room and render Featured from `list('apps', {query:"[?author=='pearbrowser']"})` or a featured flag.
 - **Routing:** `catalogLoadPlan` (`shell.js:123`) + `parseCatalogRef` (`keys.js:138`) gain a `sheets://` scheme (or bare z32) → `CMD_SHEETS_LOAD`. A 52-char z32 decoding to 64 bytes (key+enc) routes to sheets; a 32-byte z32 / 64-hex stays drive.
 - **Icons:** do NOT base64-inline at load. `iconRef` is either a drive path the UI lazily fetches (via `CMD_GET_DRIVE_INFO`/proxy) or a small `data:` URI inline in the row. Letter-fallback otherwise (already in `shell.js`). **Pick path-fetch as the default to avoid Autobase bloat** (open question §8).
 
@@ -212,9 +229,9 @@ One row per `appKey`. Fields include `appKey` (64hex, required), `type` (`app|dr
 
 One row per relay advertising itself — a **thin signed projection of `buildCapabilityDoc`**. Fields mirror the capability doc: `pubkey` (required), `name`, `description`, `software`, `version`, `region`, `runtime`, `supported_transports`, `features`, **`gatewayUrl`** (required — the HTTP fast-path base), `limitation{}`, `health{anchoredCount,totalCount,anchorRatio,lastSeen}`, `capacity{usedBytes,maxStorageBytes}`, `reputation{score,relaysServed}` (from `node.reputation.getRecord`). Time index = `lastSeen` (heartbeat). **`json.capabilitySig` copies the capability doc's own signature so clients re-verify via `verifyCapabilityDoc` WITHOUT trusting the room writer.**
 
-### (c) `app-manifest` — the install/launch contract (resolves the field drift)
+### (c) `app-manifest` — the content/native-delivery boundary
 
-Fields: `appId` (required), `appKey` (64hex|null), `driveKey` (64hex|null), `link` (`pear://`|`hyper://`|null), `name` (required), `description`, `author`, `version`, `icon`, `categories`, `launchType` (`standalone|hypersite`), `entrypoint`, `publisherPubkey` (keet-identity), `publishedAt`, `sizeBytes`. Required: `[appId, name]`, with `anyOf:[{required:[driveKey]},{required:[link]}]` so a manifest is **both installable and launchable**. **This schema is unified with Design A's `apps` schema — see §6.**
+Fields: `appId` (required), `appKey` (64hex|null), `driveKey` (64hex|null, browsable content), legacy `link` (migration/display only), `legacyMigrationId`, the verified `nativeDelivery*` projection, `name` (required), `description`, `author`, `version`, `icon`, `categories`, compatibility `launchType`, `entrypoint`, `publisherPubkey`, `publishedAt`, and `sizeBytes`. A drive is openable/savable content; native installation and launch require the separate signed Pear v3 delivery record. **This schema is unified with Design A's `apps` schema — see §6.**
 
 ### (d) `verification` — reputation/verifier output tied to `p2p-hiverelay-verifier`
 
@@ -257,7 +274,7 @@ Room key derived deterministically from the relay identity (`sodium hash(relay p
 
 The catalogue (Design A) and the backbone (Design B) describe the *same* schema-sheets primitive applied to overlapping data. To avoid two parallel app schemas and two membership systems, reconcile as follows:
 
-1. **One `app-manifest`/`apps` schema, shared.** Design A's `apps` schema and Design B's `app-manifest` schema are **merged into one canonical schema** that carries both `driveKey` and `link` (`anyOf`), `type`/`launchType` (one field — use `type` ∈ `{standalone,hypersite}`), `manifestHash`, `verification`, `publisherPubkey`/`memberkey`. The catalogue room uses it as `apps`; the relay index room references the identical shape. Migration scripts and the row→DTO mapper are written once.
+1. **One `app-manifest`/`apps` schema, shared.** Design A's `apps` schema and Design B's `app-manifest` schema are **merged into one canonical schema** carrying static `driveKey`, legacy migration metadata, verified `nativeDelivery*`, compatibility `type`/`launchType`, `manifestHash`, `verification`, and `publisherPubkey`/`memberkey`. The catalogue room uses it as `apps`; the relay index room references the identical shape. Migration scripts and the row→DTO mapper are written once.
 2. **One membership/identity layer.** Both designs use `keet-identity-key` for attestations and the same open-vs-curated writer model. The canonical catalogue room and the relay's index room both default to **curated** (operator/relay is sole writer; community → `app-suggestions` / invited verifier peers).
 3. **The relay serves AND pins the catalogue room.** This is the key reconciliation: the canonical catalogue room (Design A) is itself **a schema-sheets room the relay pins** via `pinSheetsBestEffort(roomKeyHex, sheets.base.discoveryKey)` → the same `hiveRelay.seed(keyHex, {replicas:3, discoveryKey})` used by `pinDriveBestEffort` (`index.js:1500`). The relay operator runs a headless schema-sheets joined as **indexer** (Drache93 uses `BlindPeering.addAutobaseBackground`; the relay does the same) so the catalogue is durable with no writer online — **fixing the autobee "vanishes when writers offline" limit.** The relay gateway can additionally expose `GET /v1/catalogue/<z32>` (or reuse `/index/manifests`) returning `list('apps')` JSON for the bare-http1 fast path. So Design B's `/index/manifests` route and Design A's catalogue room are the **same data over the same gateway** — not two stores.
 4. **One z32 room-link convention** (`z32(key32 ++ encryptionKey32)`), one `hiveindex://`/`sheets://` routing family in `parseCatalogRef`. The public index room and a public catalogue room differ only in whether the encryption key is shared.
@@ -267,9 +284,9 @@ The catalogue (Design A) and the backbone (Design B) describe the *same* schema-
 **Catalogue:**
 - The in-memory DTO `{version,name,source,sourceKey,writable,apps[]}` + `{catalogKey,catalogName}` tagging — the seam that lets sheets coexist with legacy.
 - `CMD_GET_CATALOG_APPS` / `listCatalogs` / `unloadCatalog` contracts and the cache-key namespacing in the `catalogs` Map.
-- The app-card render, Install/Launch/Update buttons, the `type` field gating.
+- The app-card render, with **Open / Save offline / Refresh saved copy / Remove saved copy** for static content and separately gated **Install app / Open app** for verified native delivery.
 - `pinDriveBestEffort` / `hiveRelay.seed` (`index.js:1500`) — reused verbatim for room discovery keys.
-- `app-manager.install` (driveKey → Hyperdrive → swarm.join → wait `/index.html`) — unchanged; sheets supplies validated driveKeys.
+- The legacy-named `app-manager.install` RPC implementation (driveKey → Hyperdrive → swarm.join → wait `/index.html`) as the saved-copy engine; UI and docs expose it only as **Save offline**, never native installation.
 - `_safeJSONParse` prototype-pollution defense (redundant for sheets rows, kept for legacy loaders).
 
 **Backbone:**
@@ -301,11 +318,11 @@ Each phase is independently shippable and testable. Effort is rough engineer-day
 
 ### Phase 1 — Catalogue schema + read path (coexist) (3–4 d)
 **Deliverable:** `backend/sheets-catalog.js`; `CMD_SHEETS_LOAD`/`CMD_SHEETS_LIST`/`CMD_SHEETS_LIST_SCHEMAS`; the canonical `apps` schema; the row→DTO mapper; a 4th `source:'sheets'` in `getAggregatedApps`/`listCatalogs`/`unloadCatalog`; `sheets://` routing in `parseCatalogRef`/`catalogLoadPlan`. The desktop loads a sheets room **in addition to** the Hyperdrive default. Relay pins it via `pinSheetsBestEffort`.
-**Test:** ajv rejects a row missing both driveKey+link (501) and bad `version`; valid standalone accepted. JMESPath category/substring/recent queries return expected subsets. DTO output byte-identical to the legacy Hyperdrive path. Coexistence: both sources merge; `unloadCatalog('sheets:<z32>')` drops only the sheets entry.
+**Test:** ajv rejects a row missing every content/migration/native-delivery identity and bad `version`; valid static and verified-native records are accepted. JMESPath category/substring/recent queries return expected subsets. DTO output byte-identical to the legacy Hyperdrive path. Coexistence: both sources merge; `unloadCatalog('sheets:<z32>')` drops only the sheets entry.
 
-### Phase 2 — Search UI + run-in-tab + Featured-as-data (2–3 d)
-**Deliverable:** debounced `CMD_SHEETS_LIST` wired to the Apps search box (JMESPath built from a constrained whitelist template); `useMemo` demoted to offline fallback; `type` gating (`standalone`→window, `hypersite`→run-in-tab); `FEATURED_APPS` seeded as rows and rendered from a query.
-**Test:** typing issues `CMD_SHEETS_LIST` with the built JMESPath and renders results; `hypersite` shows Run-in-tab, `standalone` shows Open-in-window; JMESPath injection probes (`` `]|@| `` etc.) are escaped/rejected.
+### Phase 2 — Search UI + delivery-safe actions + Featured-as-data (2–3 d)
+**Deliverable:** debounced `CMD_SHEETS_LIST` wired to the Apps search box (JMESPath built from a constrained whitelist template); `useMemo` demoted to offline fallback; static content exposes Open/offline-copy actions; verified `nativeDelivery` alone exposes native Install/Open; `FEATURED_APPS` seeded as rows and rendered from a query.
+**Test:** typing issues `CMD_SHEETS_LIST` with the built JMESPath and renders results; drive rows show content actions, signed native rows show host-gated native actions, and legacy executable links show migration status. JMESPath injection probes (`` `]|@| `` etc.) are escaped/rejected.
 
 ### Phase 3 — Contribution + membership + attestation (3–4 d)
 **Deliverable:** `CMD_SHEETS_ADD_ROW`/`CMD_SHEETS_UPDATE_ROW`/`CMD_SHEETS_DELETE_ROW`; `app-suggestions` schema + curated-mode gating; `CMD_SHEETS_ATTEST`/`CMD_SHEETS_LIST_ATTEST` (reusing `CMD_IDENTITY_SIGN`); `CMD_SHEETS_JOIN`/`CMD_SHEETS_ADD_WRITER`; `verification` shown as derived. The "+ Catalog"/My-Catalog add-form submit to sheets rows. **This is the phase that decides curated-vs-open for the canonical room** (open question — must settle before Phase 5 cutover).
@@ -321,7 +338,7 @@ Each phase is independently shippable and testable. Effort is rough engineer-day
 
 ### Phase 6 — Cutover + migration + deprecation (2–3 d)
 **Deliverable:** flip the default catalog to the sheets `z32` (Phase A2); `scripts/migrate-catalog-to-sheets.js` + `scripts/migrate-bee-to-room.js`; auto-seed on first Apps-tab visit; mark `CMD_LOAD_CATALOG_BEE` + autobee trio as legacy (remove only after telemetry shows zero legacy loads); move `pending-seeds.json` read path to `/index/pins`.
-**Test:** every legacy `/catalog.json` entry becomes a valid `apps`/`app-manifest` row (type inferred, driveKey-or-link present, manifestHash computed, zero ajv failures); old Hyperbee/Autobee catalogs still load (no regression).
+**Test:** every legacy `/catalog.json` entry becomes a valid `apps`/`app-manifest` row (static drive, explicit migration record, or verified native delivery; `manifestHash` computed where applicable; zero ajv failures); old Hyperbee/Autobee catalogs still load without restoring executable-link launch behavior.
 
 **Critical path:** Phase 0 → 1 → 2 (catalogue user value ships after Phase 2). Phases 4–5 (backbone) depend only on Phase 0 and can run in parallel with 1–3 if a second engineer is available. Phase 6 depends on 1–5. Total: ~18–25 engineer-days serial; ~12–15 with two engineers parallelizing catalogue vs backbone.
 
@@ -338,7 +355,7 @@ Each phase is independently shippable and testable. Effort is rough engineer-day
 5. **Trust: a malicious room writer can inject fake rows (MEDIUM).** Membership gates *who* writes, not truthfulness. *Mitigation:* clients re-verify — `relay-directory` rows via `capabilitySig`/`verifyCapabilityDoc`, manifest rows via keet attestations, anchored claims via `auditAnchors`/`/api/anchors/<key>/proof`. **The room is an index, not an authority.**
 6. **Eventual consistency (MEDIUM).** A just-submitted app may not appear instantly; no 15s blind-wait. *Mitigation:* optimistic UI insert + `base.update()` refresh + a "syncing" indicator.
 7. **Room-key exposure / redaction (MEDIUM, backbone).** The deterministic room key is computable by anyone (intended for the public read-only room) — operators must NOT put private entries in it; respect `_shouldRedactEntry`/`redactPrivate` exactly as `/catalog.json`.
-8. **`manifestHash` is advisory (MEDIUM).** A malicious publisher can claim any hash; real authenticity needs verifying it against the actual app drive at install time (`app-manager`). The field alone is advisory until that check lands.
+8. **`manifestHash` is advisory (MEDIUM).** A malicious publisher can claim any hash; real authenticity needs verifying it against the actual content drive during open/offline-save. The field alone is advisory until that check lands.
 9. **JMESPath full-scan at scale (MEDIUM).** `list()` pulls all rows into memory then filters. *Mitigation:* push pagination into the HTTP `/index/*` and `CMD_SHEETS_LIST` routes (reuse `/catalog.json`'s page/pageSize pattern).
 10. **Forward-compat (`additionalProperties`) (MEDIUM).** No "retain unknown" semantics. *Decision (reconciled):* `apps`/`relay-directory`/`verification` strict (`false`); `pin-registry`/`app-manifest` permissive (`true`) for cross-relay forward-compat.
 11. **z32 link is public-by-design (LOW).** Embeds the encryption key; cannot be unlisted once shared — document explicitly.
@@ -350,7 +367,7 @@ Each phase is independently shippable and testable. Effort is rough engineer-day
 1. **Curated vs open for the CANONICAL room.** *Recommend: curated* (relay operator is sole writer; community → `app-suggestions`). Must settle before Phase 6 cutover.
 2. **"My Catalog" future.** Stay a writable Hyperdrive, become the user joining the canonical room as a writer, or their own sheets room? *Recommend: leave Hyperdrive as-is in v1; revisit after Phase 3.* Decides whether `CMD_MYCATALOG_*` is retired or re-pointed.
 3. **Trending in v1 or v2?** *Recommend: v2 (none in v1)* — telemetry is privacy-sensitive; ship only recent + by-category. If v1, require an opt-in/aggregate-only event model.
-4. **Icon strategy.** Inline `data:` URI (simple, bloats Autobase) vs lazy drive-path fetch (no bloat, needs the drive online). *Recommend: drive-path fetch as default,* `data:` URI capped at 8KB only for tiny launch-only apps.
+4. **Icon strategy.** Inline `data:` URI (simple, bloats Autobase) vs lazy drive-path fetch (no bloat, needs the drive online). *Recommend: drive-path fetch as default,* `data:` URI capped at 8KB only for records without a content drive.
 5. **Does the gateway expose HTTP `/v1/catalogue/<z32>` / `/index/manifests` JSON, or do desktops always read over the swarm?** *Recommend: expose HTTP* for cold-start latency; P2P is the fallback when the gateway is down. (Reconciled in §6 — they are the same data.)
 6. **`verification` enum: writable or derived?** *Recommend: derived* — `relay-listed` settable only by the relay writer, `author-signed` only via a valid attestation, `unverified` default.
 7. **One room per relay vs one shared global room.** *Recommend: per-relay rooms (each relay sole writer) + client-side merge,* avoiding shared-room membership/conflict policy. Confirm scale expectations.

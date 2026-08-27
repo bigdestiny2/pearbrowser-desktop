@@ -16,8 +16,12 @@ const args = parseArgs(process.argv.slice(2))
 const tag = normalizeTag(args.tag || `v${pkg.version}`)
 const version = versionFromTag(tag)
 const repo = args.repo || process.env.GH_REPO || 'bigdestiny2/pearbrowser-desktop'
-const trustMode = normalizeTrustMode(args.trustMode || 'package-proof')
+const trustMode = normalizeTrustMode(args.trustMode || 'public-trust')
 const format = normalizeFormat(args.format || 'snippet')
+
+if (trustMode === 'package-proof' && !args.fixture) {
+  fail('package-proof artifacts live in GitHub Actions only; pass --fixture with downloaded artifact metadata instead of reading or creating a GitHub Release')
+}
 
 let release
 try {
@@ -65,8 +69,8 @@ function requireValue (argv, index, flag) {
 
 function usage (code, message = '') {
   if (message) console.error(`error: ${message}`)
-  console.error('usage: node scripts/generate-native-install-snippet.mjs [--tag v0.5.0] [--repo owner/repo] [--trust-mode package-proof|public-trust] [--format snippet|guide] [--json]')
-  console.error('       node scripts/generate-native-install-snippet.mjs --fixture release.json [--tag v0.5.0] [--trust-mode package-proof|public-trust] [--format snippet|guide] [--json]')
+  console.error('usage: node scripts/generate-native-install-snippet.mjs [--tag v0.9.1] [--repo owner/repo] [--trust-mode public-trust] [--format snippet|guide] [--json]')
+  console.error('       node scripts/generate-native-install-snippet.mjs --fixture actions-artifacts.json [--tag v0.9.1] --trust-mode package-proof [--format snippet|guide] [--json]')
   process.exit(code)
 }
 
@@ -90,8 +94,8 @@ function fail (message) {
 
 function normalizeTag (tag) {
   const normalized = String(tag || '').replace(/^refs\/tags\//, '')
-  if (!/^v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$/.test(normalized)) {
-    usage(2, `release tag must look like vX.Y.Z, got ${tag}`)
+  if (!/^v[0-9]+\.[0-9]+\.[0-9]+$/.test(normalized)) {
+    usage(2, `release tag must be stable vX.Y.Z, got ${tag}`)
   }
   return normalized
 }
@@ -142,6 +146,10 @@ function buildInstallReport (release, options) {
   if (tagName && tagName !== options.tag) {
     errors.push(`release tagName ${tagName} does not match expected ${options.tag}`)
   }
+  if (options.trustMode === 'public-trust') {
+    if (release?.isDraft) errors.push('public-trust install guidance requires a published release')
+    if (release?.isPrerelease) errors.push('public-trust install guidance requires a stable non-prerelease release')
+  }
 
   for (const target of SUPPORTED_TARGETS) {
     try {
@@ -185,9 +193,9 @@ function resolveReleaseAsset (release, options) {
   const candidates = assets
     .filter((asset) => asset.name.startsWith(prefix))
     .filter((asset) => !asset.name.endsWith('.sha256'))
-    .filter((asset) => isPrimaryArtifact(options.platform, asset.name))
+    .filter((asset) => isPrimaryArtifact(options.platform, asset.name, options.trustMode))
     .sort((a, b) => {
-      return artifactRank(options.platform, a.name) - artifactRank(options.platform, b.name) ||
+      return artifactRank(options.platform, a.name, options.trustMode) - artifactRank(options.platform, b.name, options.trustMode) ||
         a.name.length - b.name.length ||
         a.name.localeCompare(b.name)
     })
@@ -229,18 +237,18 @@ function normalizeAssets (assets) {
     .filter((asset) => asset.name)
 }
 
-function isPrimaryArtifact (platform, name) {
-  if (platform === 'macos') return /\.(?:dmg|pkg|app\.zip|zip)$/i.test(name)
-  if (platform === 'windows') return /\.(?:exe|msix|msi|zip)$/i.test(name)
-  if (platform === 'linux') return /\.(?:AppImage|deb|rpm|snap|tar\.gz|tgz|tar\.xz|zip)$/i.test(name)
+function isPrimaryArtifact (platform, name, trustMode) {
+  if (platform === 'macos') return trustMode === 'public-trust' ? /\.dmg$/i.test(name) : /\.app\.zip$/i.test(name)
+  if (platform === 'windows') return /\.exe$/i.test(name)
+  if (platform === 'linux') return /\.AppImage$/i.test(name)
   return false
 }
 
-function artifactRank (platform, name) {
+function artifactRank (platform, name, trustMode) {
   const order = {
-    macos: [/\.dmg$/i, /\.pkg$/i, /\.app\.zip$/i, /\.zip$/i],
-    windows: [/\.exe$/i, /\.msix$/i, /\.msi$/i, /\.zip$/i],
-    linux: [/\.AppImage$/i, /\.deb$/i, /\.rpm$/i, /\.snap$/i, /\.tar\.gz$/i, /\.tgz$/i, /\.tar\.xz$/i, /\.zip$/i]
+    macos: trustMode === 'public-trust' ? [/\.dmg$/i] : [/\.app\.zip$/i],
+    windows: [/\.exe$/i],
+    linux: [/\.AppImage$/i]
   }[platform] || []
   const index = order.findIndex((pattern) => pattern.test(name))
   return index === -1 ? order.length : index
@@ -253,11 +261,8 @@ function installNoteFor (platform, name) {
   if (platform === 'macos') {
     return 'Unzip the archive, move PearBrowser.app to /Applications, then open it from Finder. Package-proof builds may require the macOS Privacy & Security "Open Anyway" flow after checksum verification.'
   }
-  if (platform === 'windows' && /\.msix$/i.test(name)) {
-    return 'Open the MSIX package and follow the Windows installer prompts.'
-  }
   if (platform === 'windows') {
-    return 'Run the installer and follow the Windows prompts.'
+    return 'Run the NSIS .exe installer and follow the Windows prompts.'
   }
   if (platform === 'linux' && /\.(?:AppImage)$/i.test(name)) {
     return `Run chmod +x ${name}, then launch ./${name}.`
@@ -309,9 +314,9 @@ function printMarkdown (report) {
   console.log()
   console.log('### Trust Note')
   if (report.trustMode === 'public-trust') {
-    console.log('These assets are expected to be signed/notarized where the OS supports it. Keep the checksum sidecars in the release notes for independent byte verification.')
+    console.log('Release metadata identifies these packages as public-trust lane outputs, but this generator checks only publication state, filenames, sizes, and SHA-256 sidecar presence. It does not independently attest Developer ID signing, notarization or stapling, or Authenticode signing. Release operators must validate those properties against the complete published release evidence before making OS-trust claims. Keep every SHA-256 sidecar in the release notes for independent byte verification.')
   } else {
-    console.log('These are package-proof assets. macOS or Windows may show OS trust prompts until the public-trust signing and notarization lane is complete.')
+    console.log('These are package-proof GitHub Actions artifacts, not release assets. macOS or Windows may show OS trust prompts; do not redistribute or publish them as a GitHub Release.')
   }
 }
 
@@ -332,9 +337,9 @@ function printInstallGuide (report) {
   console.log(`Current release: \`${report.tag}\`.`)
   console.log()
   if (report.trustMode === 'public-trust') {
-    console.log('These are public-trust desktop builds. macOS and Windows packages are expected to be signed where the OS supports it, and every package keeps a matching SHA-256 sidecar for independent byte verification.')
+    console.log('Release metadata identifies these packages as public-trust lane outputs, and every package has a matching SHA-256 sidecar for independent byte verification. This guide does not independently attest Developer ID signing, notarization or stapling, or Authenticode signing; release operators must validate those properties against the complete published release evidence before making OS-trust claims.')
   } else {
-    console.log('These are package-proof desktop builds. Linux uses checksums only. macOS is ad-hoc signed but not notarized, and Windows packages are unsigned until the public-trust signing credentials are configured. Treat macOS/Windows OS trust prompts as expected for this release lane, not as the final public-trust experience. On macOS, Gatekeeper may say Apple could not verify that PearBrowser is free of malware until a signed and notarized DMG is published.')
+    console.log('These are package-proof GitHub Actions artifacts only. Linux uses checksums, macOS is ad-hoc signed but not notarized, and the Windows NSIS installer is unsigned. They are never attached to or published as a GitHub Release; use them only for packaging and clean-host verification.')
   }
   console.log()
   console.log('## Choose A Package')
@@ -347,10 +352,10 @@ function printInstallGuide (report) {
     console.log(`| ${target.label} | ${markdownLink(target.asset.name, target.asset.url)} | ${markdownLink(target.checksum.name, target.checksum.url)} |`)
   }
   console.log()
-  console.log('The Windows `.msix` and extra Linux AppImage artifact may remain attached for package validation, but the resolver selects the `.exe` and normalized `.AppImage` as the user-facing defaults.')
+  console.log('The supported user-facing formats are a macOS `.dmg`, a Windows NSIS `.exe`, and a Linux `.AppImage`. Public-trust releases also retain the macOS `.app.zip` plus its checksum as a directly inspectable companion artifact. Signing and notarization status must come from release evidence, not these filenames.')
   if (report.trustMode !== 'public-trust') {
     console.log()
-    console.log('For the future public-trust macOS lane, the resolver will prefer notarized `.dmg` assets over `.app.zip` once those assets are attached by the signed native release workflow.')
+    console.log('The public-trust macOS lane selects the notarized `.dmg`; the `.app.zip` remains a release companion only after Developer ID signing and notarization pass.')
   }
   console.log()
   console.log('From a source checkout, ask the resolver for the current machine:')

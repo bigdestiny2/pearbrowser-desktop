@@ -16,7 +16,7 @@ if (secretStore.error) {
 if (platform === 'all' || platform === 'macos') validateMacOS()
 if (platform === 'all' || platform === 'windows') validateWindows()
 if (platform === 'all' || platform === 'linux') {
-  add('pass', 'linux-release-assets', 'Linux release artifacts use checksum verification', 'No release signing secrets are required for the current AppImage path.')
+  add('pass', 'linux-release-assets', 'Electron AppImage release artifacts use checksum verification', 'No release signing secrets are required for the current Linux AppImage lane.')
 }
 
 const counts = {
@@ -30,6 +30,7 @@ const report = {
   platform,
   secretSource: secretStore.source,
   repo: secretStore.repo,
+  githubEnvironment: secretStore.githubEnvironment,
   counts,
   checks
 }
@@ -38,7 +39,9 @@ if (args.json) {
   console.log(JSON.stringify(report, null, 2))
 } else {
   console.log(`PearBrowser native signing credential check (${report.ok ? 'PASS' : 'BLOCKED'})`)
-  const source = report.repo ? `${report.secretSource}:${report.repo}` : report.secretSource
+  const source = report.repo
+    ? `${report.secretSource}:${report.repo}${report.githubEnvironment ? `/${report.githubEnvironment}` : ''}`
+    : report.secretSource
   console.log(`mode=${report.mode} platform=${platform} secretSource=${source} pass=${counts.pass} warn=${counts.warn} fail=${counts.fail}`)
   for (const check of checks) {
     const prefix = check.status.toUpperCase().padEnd(4)
@@ -65,7 +68,7 @@ function validateMacOS () {
     if (args.requirePublicTrust) {
       add('fail', 'macos-certificate', 'macOS Developer ID certificate is missing', 'PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64 and PEARBROWSER_MACOS_CERTIFICATE_PASSWORD are required for public macOS distribution.', 'Export the Developer ID Application certificate as a .p12, base64-encode it, and add both GitHub Actions secrets.')
     } else {
-      add('warn', 'macos-certificate', 'macOS Developer ID certificate is not configured', 'The workflow will produce an ad-hoc signed .app.zip for packaging proof only.', 'Add PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64, PEARBROWSER_MACOS_CERTIFICATE_PASSWORD, and PEARBROWSER_MACOS_SIGNING_IDENTITY before public distribution.')
+      add('warn', 'macos-certificate', 'macOS Developer ID certificate is not configured', 'The package-proof workflow may produce an ad-hoc signed Electron .app.zip Actions artifact; it cannot create or publish a GitHub Release.', 'Add PEARBROWSER_MACOS_CERTIFICATE_P12_BASE64, PEARBROWSER_MACOS_CERTIFICATE_PASSWORD, and PEARBROWSER_MACOS_SIGNING_IDENTITY to the protected production environment before public distribution.')
     }
   } else if (!p12 || !p12Password) {
     add('fail', 'macos-certificate', 'macOS certificate secret pair is incomplete', missingDetail({
@@ -98,7 +101,7 @@ function validateMacOS () {
     if (args.requirePublicTrust) {
       add('fail', 'macos-notary', 'macOS notarization credentials are missing', 'PEARBROWSER_MACOS_NOTARY_APPLE_ID, PEARBROWSER_MACOS_NOTARY_PASSWORD, and PEARBROWSER_MACOS_NOTARY_TEAM_ID are required for public macOS distribution.', 'Add all three notarization secrets before rerunning the native release workflow.')
     } else {
-      add('warn', 'macos-notary', 'macOS notarization credentials are not configured', 'The workflow will skip notarytool/stapler and the macOS asset will not be public-trust-cleared.', 'Add PEARBROWSER_MACOS_NOTARY_APPLE_ID, PEARBROWSER_MACOS_NOTARY_PASSWORD, and PEARBROWSER_MACOS_NOTARY_TEAM_ID before public distribution.')
+      add('warn', 'macos-notary', 'macOS notarization credentials are not configured', 'Package-proof skips notarytool/stapler; its .app.zip is not public-trust-cleared and is not attached to a release.', 'Add PEARBROWSER_MACOS_NOTARY_APPLE_ID, PEARBROWSER_MACOS_NOTARY_PASSWORD, and PEARBROWSER_MACOS_NOTARY_TEAM_ID to the protected production environment before public distribution.')
     }
   } else if (notaryCount < 3) {
     add('fail', 'macos-notary', 'macOS notarization secret set is incomplete', missingDetail({
@@ -120,13 +123,7 @@ function validateMacOS () {
 function validateWindows () {
   const pfx = secret('PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64')
   const pfxPassword = secret('PEARBROWSER_WINDOWS_CERTIFICATE_PASSWORD')
-  const thumbprint = secret('PEARBROWSER_WINDOWS_SIGNING_THUMBPRINT')
-  const subject = secret('PEARBROWSER_WINDOWS_SIGNING_SUBJECT') || 'CN=PearBrowser Desktop'
-
-  // Azure Trusted Signing is the EV-equivalent path (key in Azure's HSM, no
-  // exportable .pfx). It satisfies the Windows signing requirement as an
-  // alternative to the PFX/SignTool path below.
-  const azure = {
+  const deferredAzure = {
     AZURE_TENANT_ID: secret('AZURE_TENANT_ID'),
     AZURE_CLIENT_ID: secret('AZURE_CLIENT_ID'),
     AZURE_CLIENT_SECRET: secret('AZURE_CLIENT_SECRET'),
@@ -134,21 +131,18 @@ function validateWindows () {
     AZURE_TRUSTED_SIGNING_ACCOUNT: secret('AZURE_TRUSTED_SIGNING_ACCOUNT'),
     AZURE_TRUSTED_SIGNING_CERT_PROFILE: secret('AZURE_TRUSTED_SIGNING_CERT_PROFILE')
   }
-  const azureConfigured = Object.values(azure).some(Boolean)
+  const azureConfigured = Object.values(deferredAzure).some(Boolean)
   const certConfigured = Boolean(pfx || pfxPassword)
 
   if (azureConfigured) {
-    const missing = Object.entries(azure).filter(([, v]) => !v).map(([k]) => k)
-    if (missing.length) {
-      add('fail', 'windows-certificate', 'Azure Trusted Signing secret set is incomplete', `missing ${missing.join(', ')}`, 'Provide the full Azure Trusted Signing service-principal + account + certificate-profile secret set.')
-    } else {
-      add('pass', 'windows-certificate', 'Windows Azure Trusted Signing payload is complete', 'CI will sign the .msix via azure/trusted-signing-action.')
-    }
-  } else if (!certConfigured) {
+    add('warn', 'windows-azure-deferred', 'Azure Trusted Signing is not an accepted v0.9.1 release credential', 'The electron-builder 26 Azure route installs a mutable TrustedSigning PowerShell module at build time, so this lane remains deferred.', 'Use the reviewed PFX certificate/password route for v0.9.1. Re-enable Azure only after its module and integration are version-pinned and reviewed.')
+  }
+
+  if (!certConfigured) {
     if (args.requirePublicTrust) {
-      add('fail', 'windows-certificate', 'Windows signing certificate is missing', 'PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64 and PEARBROWSER_WINDOWS_CERTIFICATE_PASSWORD (or the AZURE_TRUSTED_SIGNING_* set) are required for public Windows distribution on GitHub-hosted runners.', 'Export the code-signing certificate as a .pfx and base64-encode it, or configure Azure Trusted Signing.')
+      add('fail', 'windows-certificate', 'Windows PFX signing certificate is missing', 'PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64 and PEARBROWSER_WINDOWS_CERTIFICATE_PASSWORD are both required for the public-trust NSIS installer.', 'Export the Authenticode code-signing certificate and private key as a password-protected .pfx, base64-encode it, and add both secrets to the protected production environment.')
     } else {
-      add('warn', 'windows-certificate', 'Windows signing certificate is not configured', 'The workflow will upload unsigned Windows packages for packaging proof only.', 'Add PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64 and PEARBROWSER_WINDOWS_CERTIFICATE_PASSWORD, or the AZURE_TRUSTED_SIGNING_* secret set, before public distribution.')
+      add('warn', 'windows-certificate', 'Windows PFX signing certificate is not configured', 'Package-proof may upload an unsigned NSIS .exe as an Actions artifact; it cannot create or publish a GitHub Release.', 'Add PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64 and PEARBROWSER_WINDOWS_CERTIFICATE_PASSWORD to the protected production environment before public distribution.')
     }
   } else if (!pfx || !pfxPassword) {
     add('fail', 'windows-certificate', 'Windows certificate secret pair is incomplete', missingDetail({
@@ -157,25 +151,7 @@ function validateWindows () {
     }), 'Configure the PFX payload and password together.')
   } else {
     validateBase64('PEARBROWSER_WINDOWS_CERTIFICATE_PFX_BASE64', pfx)
-    add('pass', 'windows-certificate', 'Windows signing certificate payload is complete', 'CI will import the PFX and use the imported certificate thumbprint when PEARBROWSER_WINDOWS_SIGNING_THUMBPRINT is absent.')
-  }
-
-  if (!/^CN=.+/i.test(subject)) {
-    add('warn', 'windows-signing-subject', 'Windows signing subject does not start with CN=', `subject=${subject}`, 'Confirm the MSIX publisher subject matches the certificate subject before publishing.')
-  } else {
-    add('pass', 'windows-signing-subject', 'Windows signing subject is configured', subject)
-  }
-
-  if (thumbprint) {
-    const normalized = thumbprint.replace(/\s+/g, '')
-    if (!secretStore.readValues) {
-      add('pass', 'windows-signing-thumbprint', 'Windows signing thumbprint secret name is present', 'Secret value is not readable by this preflight; CI will validate the thumbprint shape when it runs.')
-      noteUnreadableSecretValues()
-    } else if (!/^[a-f0-9]{40}$/i.test(normalized)) {
-      add('fail', 'windows-signing-thumbprint', 'Windows signing thumbprint has an unexpected shape', `thumbprint=${redactMiddle(thumbprint)}`, 'Use the 40-hex-character SHA-1 certificate thumbprint, or leave it empty so CI uses the imported PFX certificate.')
-    } else {
-      add('pass', 'windows-signing-thumbprint', 'Windows signing thumbprint is configured', redactMiddle(normalized))
-    }
+    add('pass', 'windows-certificate', 'Windows PFX signing certificate payload is complete', 'electron-builder will use this PFX to Authenticode-sign the application executable, uninstaller, and final NSIS .exe before release verification.')
   }
 }
 
@@ -212,18 +188,13 @@ function missingDetail (vars) {
   return `missing ${missing.join(', ')}`
 }
 
-function redactMiddle (value) {
-  const normalized = String(value || '')
-  if (normalized.length <= 12) return normalized ? '********' : ''
-  return `${normalized.slice(0, 6)}...${normalized.slice(-6)}`
-}
-
 function loadSecretStore (args) {
   const source = normalizeSecretSource(args.secretSource || (args.githubSecretsFile ? 'github' : 'env'))
   if (source === 'env') {
     return {
       source,
       repo: '',
+      githubEnvironment: '',
       readValues: true,
       error: '',
       value: (name) => (process.env[name] || '').trim()
@@ -231,13 +202,26 @@ function loadSecretStore (args) {
   }
 
   const repo = args.repo || process.env.GH_REPO || 'bigdestiny2/pearbrowser-desktop'
+  // Public-trust credentials belong to the protected environment. Never
+  // silently inspect repository-wide secrets when the operator selects the
+  // GitHub source; an explicit environment can override this for test/staging.
+  const githubEnvironment = args.githubEnvironment || 'production'
   try {
     const names = args.githubSecretsFile
       ? namesFromGithubSecretsJson(readFileSync(args.githubSecretsFile, 'utf8'))
-      : namesFromGithubSecretsJson(execFileSync('gh', ['secret', 'list', '--repo', repo, '--json', 'name'], { encoding: 'utf8' }))
+      : namesFromGithubSecretsJson(execFileSync('gh', [
+        'secret',
+        'list',
+        '--repo',
+        repo,
+        ...(githubEnvironment ? ['--env', githubEnvironment] : []),
+        '--json',
+        'name'
+      ], { encoding: 'utf8' }))
     return {
       source,
       repo,
+      githubEnvironment,
       readValues: false,
       error: '',
       value: (name) => names.has(name) ? name : ''
@@ -247,6 +231,7 @@ function loadSecretStore (args) {
     return {
       source,
       repo,
+      githubEnvironment,
       readValues: false,
       error: stderr || (err && err.message ? err.message : String(err)),
       value: () => ''
@@ -284,6 +269,7 @@ function parseArgs (argv) {
     requirePublicTrust: false,
     secretSource: '',
     repo: '',
+    githubEnvironment: '',
     githubSecretsFile: ''
   }
   for (let i = 0; i < argv.length; i++) {
@@ -297,6 +283,9 @@ function parseArgs (argv) {
     } else if (arg === '--repo') {
       parsed.repo = argv[++i] || ''
       if (!parsed.repo || parsed.repo.startsWith('--')) failUsage('--repo requires a value')
+    } else if (arg === '--github-environment') {
+      parsed.githubEnvironment = argv[++i] || ''
+      if (!parsed.githubEnvironment || parsed.githubEnvironment.startsWith('--')) failUsage('--github-environment requires a value')
     } else if (arg === '--github-secrets-file') {
       parsed.githubSecretsFile = argv[++i] || ''
       if (!parsed.githubSecretsFile || parsed.githubSecretsFile.startsWith('--')) failUsage('--github-secrets-file requires a value')
@@ -324,6 +313,6 @@ function normalizePlatform (value) {
 
 function failUsage (message) {
   console.error(message)
-  console.error('usage: node scripts/check-native-signing-credentials.mjs [--platform all|macos|windows|linux] [--require-public-trust] [--secret-source env|github] [--repo owner/repo] [--github-secrets-file secrets.json] [--json]')
+  console.error('usage: node scripts/check-native-signing-credentials.mjs [--platform all|macos|windows|linux] [--require-public-trust] [--secret-source env|github] [--repo owner/repo] [--github-environment name] [--github-secrets-file secrets.json] [--json]')
   process.exit(2)
 }

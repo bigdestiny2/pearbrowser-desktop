@@ -12,10 +12,17 @@ const DEFAULT_REPO = 'bigdestiny2/pearbrowser-desktop'
 const args = parseArgs(process.argv.slice(2))
 const tag = normalizeTag(args.tag || `v${pkg.version}`)
 const repo = args.repo || process.env.GH_REPO || DEFAULT_REPO
-const sourceRef = normalizeSourceRef(args.sourceRef || 'main')
+const sourceRef = normalizeSourceSha(args.sourceRef || process.env.GITHUB_SHA || '')
 const format = normalizeFormat(args.format || 'markdown')
+const signingGithubEnvironment = args.signingGithubEnvironment || (args.signingSecretSource === 'github' ? 'production' : '')
 const readiness = loadReadiness(args, { tag, repo, sourceRef })
-const report = buildReport(readiness, { tag, repo, sourceRef, evidenceFile: args.evidenceFile })
+const report = buildReport(readiness, {
+  tag,
+  repo,
+  sourceRef,
+  evidenceFile: args.evidenceFile,
+  signingGithubEnvironment: signingGithubEnvironment || 'production'
+})
 
 if (format === 'json') printJson(report)
 else printMarkdown(report)
@@ -39,6 +46,7 @@ function loadReadiness (args, defaults) {
     ...(args.evidenceFile ? ['--evidence-file', args.evidenceFile] : []),
     ...(args.signingSecretSource ? ['--signing-secret-source', args.signingSecretSource] : []),
     ...(args.signingRepo ? ['--signing-repo', args.signingRepo] : []),
+    ...(signingGithubEnvironment ? ['--signing-github-environment', signingGithubEnvironment] : []),
     ...(args.signingGithubSecretsFile ? ['--signing-github-secrets-file', args.signingGithubSecretsFile] : [])
   ]
   const result = spawnSync(process.execPath, [
@@ -82,17 +90,29 @@ function buildReport (readiness, defaults) {
   const normalized = readiness && typeof readiness === 'object' ? readiness : {}
   const repo = normalized.repo || defaults.repo
   const tag = normalized.tag || defaults.tag
-  const sourceRef = normalized.sourceRef || defaults.sourceRef
+  const sourceRef = normalizeSourceSha(normalized.sourceRef || defaults.sourceRef)
   const evidenceFile = normalized.evidenceFile || defaults.evidenceFile || ''
   const checks = Array.isArray(normalized.checks) ? normalized.checks.map(normalizeCheck) : []
-  const blockers = Array.isArray(normalized.blockers)
+  const blockers = (Array.isArray(normalized.blockers)
     ? normalized.blockers.map(normalizeBlocker)
-    : checks.flatMap((check) => check.blockers.map((message) => ({ check: check.id, message })))
+    : checks.flatMap((check) => check.blockers.map((message) => ({ check: check.id, message }))))
+  if (sourceRef !== defaults.sourceRef) {
+    blockers.unshift({
+      check: 'readiness',
+      message: `readiness source SHA ${sourceRef} does not match requested source SHA ${defaults.sourceRef}`
+    })
+  }
   const warnings = Array.isArray(normalized.warnings)
     ? normalized.warnings.map(normalizeBlocker)
     : checks.flatMap((check) => check.warnings.map((message) => ({ check: check.id, message })))
   const blockerGroups = groupBlockers(blockers)
-  const nextCommands = nextCommandsFor({ repo, tag, sourceRef, evidenceFile })
+  const nextCommands = nextCommandsFor({
+    repo,
+    tag,
+    sourceRef,
+    evidenceFile,
+    signingGithubEnvironment: defaults.signingGithubEnvironment
+  })
 
   return {
     ok: blockers.length === 0 && normalized.ok !== false,
@@ -147,28 +167,28 @@ function groupBlockers (blockers) {
   return [...groups.values()]
 }
 
-function nextCommandsFor ({ repo, tag, sourceRef, evidenceFile }) {
+function nextCommandsFor ({ repo, tag, sourceRef, evidenceFile, signingGithubEnvironment }) {
   const evidenceArgs = evidenceFile ? ` -- --file ${shellQuote(evidenceFile)}` : ''
   return [
     {
       id: 'credential-handoff',
       label: 'Generate signing secret handoff',
-      command: `npm run -s generate:native-signing-secret-plan -- --repo ${shellQuote(repo)} --tag ${shellQuote(tag)} --source-ref ${shellQuote(sourceRef)}`
+      command: `npm run -s generate:native-signing-secret-plan -- --repo ${shellQuote(repo)} --tag ${shellQuote(tag)} --source-ref ${shellQuote(sourceRef)} --github-environment ${shellQuote(signingGithubEnvironment)}`
     },
     {
       id: 'verify-secret-names',
       label: 'Verify GitHub Actions secret names',
-      command: `npm run check:native-signing -- --require-public-trust --secret-source github --repo ${shellQuote(repo)}`
+      command: `npm run check:native-signing -- --require-public-trust --secret-source github --repo ${shellQuote(repo)} --github-environment ${shellQuote(signingGithubEnvironment)}`
     },
     {
       id: 'dispatch-public-trust-workflow',
       label: 'Run Desktop Native Release in public-trust mode',
-      command: `gh workflow run desktop-native-release.yml --repo ${shellQuote(repo)} --ref main -f tag=${shellQuote(tag)} -f source_ref=${shellQuote(sourceRef)} -f release_mode=public-trust`
+      command: `gh workflow run desktop-native-release.yml --repo ${shellQuote(repo)} --ref main -f tag=${shellQuote(tag)} -f source_ref=${shellQuote(sourceRef)} -f release_mode=public-trust -f publish_release=true`
     },
     {
       id: 'rerun-readiness',
       label: 'Rerun the public-trust readiness gate',
-      command: `npm run check:public-trust-readiness -- --tag ${shellQuote(tag)} --repo ${shellQuote(repo)} --source-ref ${shellQuote(sourceRef)} --signing-secret-source github`
+      command: `npm run check:public-trust-readiness -- --tag ${shellQuote(tag)} --repo ${shellQuote(repo)} --source-ref ${shellQuote(sourceRef)} --signing-secret-source github --signing-github-environment ${shellQuote(signingGithubEnvironment)}`
     },
     {
       id: 'regenerate-install-guide',
@@ -209,6 +229,8 @@ function printMarkdown (report) {
   console.log(`Release tag: \`${report.tag}\``)
   console.log(`Source ref: \`${report.sourceRef}\``)
   console.log(`Status: \`${report.ok ? 'READY' : 'BLOCKED'}\``)
+  console.log('')
+  console.log('Signing/notarization credentials are external prerequisites in the protected environment; this report can verify their names and downstream evidence but does not provision or expose them.')
   console.log('')
 
   console.log('## Gate Summary')
@@ -289,19 +311,18 @@ function shellQuote (value) {
 
 function normalizeTag (tag) {
   const normalized = String(tag || '').replace(/^refs\/tags\//, '')
-  if (!/^v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$/.test(normalized)) {
-    usage(2, `release tag must look like vX.Y.Z, got ${tag}`)
+  if (!/^v[0-9]+\.[0-9]+\.[0-9]+$/.test(normalized)) {
+    usage(2, `public-trust release tag must be stable vX.Y.Z, got ${tag}`)
   }
   return normalized
 }
 
-function normalizeSourceRef (value) {
+function normalizeSourceSha (value) {
   const ref = String(value || '').trim()
-  if (!ref) usage(2, '--source-ref cannot be empty')
-  if (!/^[A-Za-z0-9._/@+-]+$/.test(ref)) {
-    usage(2, `--source-ref contains unsupported characters: ${value}`)
+  if (!/^[a-f0-9]{40}$/i.test(ref)) {
+    usage(2, '--source-ref must be the exact immutable 40-character release commit SHA')
   }
-  return ref
+  return ref.toLowerCase()
 }
 
 function normalizeFormat (value) {
@@ -321,6 +342,7 @@ function parseArgs (argv) {
     evidenceFile: '',
     signingSecretSource: '',
     signingRepo: '',
+    signingGithubEnvironment: '',
     signingGithubSecretsFile: '',
     format: ''
   }
@@ -334,6 +356,7 @@ function parseArgs (argv) {
     else if (arg === '--evidence-file') parsed.evidenceFile = requireValue(argv, ++i, arg)
     else if (arg === '--signing-secret-source') parsed.signingSecretSource = requireValue(argv, ++i, arg)
     else if (arg === '--signing-repo') parsed.signingRepo = requireValue(argv, ++i, arg)
+    else if (arg === '--signing-github-environment') parsed.signingGithubEnvironment = requireValue(argv, ++i, arg)
     else if (arg === '--signing-github-secrets-file') parsed.signingGithubSecretsFile = requireValue(argv, ++i, arg)
     else if (arg === '--format') parsed.format = requireValue(argv, ++i, arg)
     else if (arg === '--json') parsed.format = 'json'
@@ -351,6 +374,6 @@ function requireValue (argv, index, flag) {
 
 function usage (code, message = '') {
   if (message) console.error(`error: ${message}`)
-  console.error('usage: node scripts/generate-public-trust-operator-report.mjs [--tag v0.5.0] [--repo owner/repo] [--source-ref main] [--readiness-file readiness.json] [--fixture release.json] [--evidence-file docs/RELEASE_SMOKE_EVIDENCE_LOG_2026-06-23.md] [--signing-secret-source env|github] [--signing-repo owner/repo] [--signing-github-secrets-file secrets.json] [--format markdown|json] [--json]')
+  console.error('usage: node scripts/generate-public-trust-operator-report.mjs [--tag v0.9.1] [--repo owner/repo] --source-ref <40-hex-commit-sha> [--readiness-file readiness.json] [--fixture release.json] [--evidence-file docs/RELEASE_SMOKE_EVIDENCE_LOG_2026-06-23.md] [--signing-secret-source env|github] [--signing-repo owner/repo] [--signing-github-environment name] [--signing-github-secrets-file secrets.json] [--format markdown|json] [--json]')
   process.exit(code)
 }

@@ -417,17 +417,28 @@ function tryConnect (url, timeoutMs) {
 export async function startBackend () {
   let pipe = null
   let connectedPort = null
-  const errors = []
-  for (let p = RPC_PORT_BASE; p < RPC_PORT_BASE + RPC_PORT_COUNT; p++) {
-    try {
-      pipe = await tryConnect(rendererUrlFor(p), 1500)
-      connectedPort = p
-      console.log('[rpc] connected on :' + p)
-      break
-    } catch (err) {
-      errors.push(`:${p} ${err.message}`)
+  let errors = []
+  // The window can finish loading before the Bare main process binds its WS
+  // server (the embedded host spawns the worker in parallel with window
+  // creation). A single scan pass therefore races boot and reports a dead
+  // backend that is merely still starting. Keep rescanning until the
+  // deadline; each pass costs at most portCount × 1.5s.
+  const deadline = Date.now() + 25_000
+  do {
+    errors = []
+    for (let p = RPC_PORT_BASE; p < RPC_PORT_BASE + RPC_PORT_COUNT; p++) {
+      try {
+        pipe = await tryConnect(rendererUrlFor(p), 1500)
+        connectedPort = p
+        console.log('[rpc] connected on :' + p)
+        break
+      } catch (err) {
+        errors.push(`:${p} ${err.message}`)
+      }
     }
-  }
+    if (pipe) break
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+  } while (Date.now() < deadline)
   if (!pipe) {
     // None of the ports accepted. The Bare main process is either not
     // running or crashed before binding the WS server. Since v0.4.4
@@ -436,13 +447,16 @@ export async function startBackend () {
     // pure port-scan failure means the native host itself did not start, not
     // that the backend reported a structured boot failure.
     //
-    // Most common cause: an interrupted local installation. Do not revive a
-    // remote app reference; reinstall the verified signed native package.
+    // ...or the process is alive but no longer serving: a Bare worker whose
+    // stdout pipe has filled blocks in fflush with the WS port still bound, so
+    // connects are accepted by the kernel and then never answered. Both look
+    // identical from here, so name both rather than sending every user to a
+    // reinstall. Do not revive a remote app reference.
     throw new Error(
       `Could not reach backend on any port ${RPC_PORT_BASE}-${RPC_PORT_BASE + RPC_PORT_COUNT - 1} ` +
-      `(${errors.join('; ')}). The Bare main process appears not to be running. ` +
-      `Most likely cause: an interrupted installation. Reinstall the verified ` +
-      `signed native package and relaunch it.`
+      `(${errors.join('; ')}). The Bare main process is not running, or is running ` +
+      `but unresponsive. Relaunch the app first; if that does not help, reinstall ` +
+      `the verified signed native package.`
     )
   }
   const rpc = new RpcClient(pipe)
