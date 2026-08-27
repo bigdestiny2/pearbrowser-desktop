@@ -24,6 +24,7 @@ fi
 echo "PearBrowser v3 native-release preflight"
 echo "This command has no publication authority."
 
+npm run check:pear-v3
 npm run check:release-evidence
 npm run check:native-signing
 npm run check:linux-appimage-metadata

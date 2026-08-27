@@ -11,6 +11,7 @@
     "preinstall": "node scripts/check-hiverelay-layout.mjs",
     "start": "electron electron/main.cjs",
     "run": "electron electron/main.cjs",
+    "check:pear-v3": "node scripts/check-pear-v3-contract.mjs",
     "check:release-evidence": "node scripts/check-release-evidence.mjs",
     "check:origin-isolation-smoke-evidence": "node scripts/check-origin-isolation-smoke-evidence.mjs",
     "generate:release-evidence-handoff": "node scripts/generate-release-evidence-handoff.mjs",
@@ -46,6 +47,7 @@
     "smoke:wdk:evm": "node node_modules/bare/bin/bare scripts/wdk-evm-worklet-smoke.mjs",
     "smoke:wdk:e2e": "node node_modules/bare/bin/bare scripts/wdk-e2e-testnet.mjs",
     "smoke:release-stories": "node scripts/release-rpc-story-smoke.mjs",
+    "pretest": "npm run -s check:pear-v3",
     "test": "node --test 'test/*.test.js'",
     "build:ui": "esbuild ui/main.js --bundle --format=esm --outfile=ui/dist/main.bundle.js --define:process.env.NODE_ENV='\"production\"' --minify",
     "prestart": "npm run -s build:ui"

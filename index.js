@@ -26,7 +26,7 @@ const RPC_PORT_COUNT = 5
 const RENDERER_RECONNECT_GRACE_MS = 8000
 // Pear v3 executes this file as a worker owned by `pear-runtime`. The Electron
 // host supplies the two values below before loading us; unlike the retired
-// `pear run` host, no ambient global `Pear` API is involved.
+// shared-CLI host, no ambient global `Pear` API is involved.
 const runtimeContext = globalThis.PearBrowserRuntime || {}
 const rpcSessionToken = String(runtimeContext.sessionToken || '')
 const diagnosticToken = String(env.PEARBROWSER_RPC_DIAGNOSTIC_TOKEN || '')

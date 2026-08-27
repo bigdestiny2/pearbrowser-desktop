@@ -97,6 +97,9 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
+      - name: Verify Pear v3 package and local-worker contract
+        run: npm run check:pear-v3
+
       - name: Validate release mode
         run: |
           case "$RELEASE_MODE" in

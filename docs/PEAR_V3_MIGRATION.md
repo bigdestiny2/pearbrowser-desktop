@@ -62,6 +62,13 @@ browser-launch affordance. It must move to the project’s production multisig
 link before a public v3 release. The existing value is retained only to keep
 the source buildable while the signing quorum establishes that channel.
 
+Run `npm run check:pear-v3` before tests or packaging. The gate checks every
+manifest and lockfile for legacy launcher packages or scripts, pins
+`pear-runtime@1.3.1`, `pear-install@1.2.2`, and the transitive
+`pear-runtime-updater@3.4.0`, and permits exactly one embedded-runtime start:
+the local `workers/main.js` entrypoint with host-owned arguments. It is also a
+mandatory pretest and native-release workflow step.
+
 ## Data continuity
 
 Do not delete an old installation as part of migration. Preserve its user data

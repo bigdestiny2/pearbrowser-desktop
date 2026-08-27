@@ -1,5 +1,5 @@
 // Native v3 host. Electron owns application lifecycle and Pear OTA owns only
-// the embedded Bare backend/update worker; there is no `pear run` launch path.
+// the embedded Bare backend/update worker; there is no shared-CLI launch path.
 const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron')
 const crypto = require('node:crypto')
 const os = require('node:os')

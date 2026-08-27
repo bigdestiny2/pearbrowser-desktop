@@ -193,7 +193,7 @@ Shipping a full-GUI app as static/tab-able; non-`/index.html` entry; `pushState`
 
 ### Requirements
 
-- **PB-WORKERCONTRACT-1 (MUST, both — *eligibility, not enforcement*).** Release as a Pear terminal/worker app: `package.json` declares `pear.type:"terminal"`, no window, no own HTTP server. **Correction:** PearBrowser does **not** read/enforce your `pear.type` to route GUI-vs-tab. `CMD_RUN_APP_IN_TAB` only regex-validates the link scheme; tab-vs-window is a consequence of the **curated catalogue `type:'hypersite'` flag** + pear-run + whether the spawned worker actually speaks pear-request. A non-terminal app pasted into the same path is still spawned via pear-run, not auto-redirected to a window. So: ship a terminal worker because that's what makes `Pear.worker.pipe()` work — not because the runtime detects and reroutes the wrong type.
+- **PB-WORKERCONTRACT-1 (MUST, both — *eligibility, not enforcement*).** The v3 browser does not execute a catalogue link through a shared worker launcher. The current `TabRuntime` accepts only its bundled in-process demo and is a UI proof surface, not an application-delivery path. A third-party worker app must ship as a verified native package and start its own embedded runtime; a curated `type:'hypersite'` flag must never imply executable delivery.
 
 - **PB-WORKERCONTRACT-2 (MUST).** Obtain the host transport via `const pipe = Pear.worker.pipe()` and treat that single duplex as your only I/O. No sockets, fetch, or HTTP listener.
 
@@ -583,9 +583,9 @@ Run before release. Grouped by tier; **Tier A items are the universal floor**.
 
 ## 13. V3 release, availability, and catalogue runbook (NORMATIVE)
 
-Pear v2 staging, `pear run`, `pear release`, and a persistent executable-key
-seeder are retired workflows. They are not compatibility paths for a v3
-application.
+Shared-CLI staging, remote-link launching, v2 release mutation, and persistent
+executable-key seeding are retired workflows. They are not compatibility paths
+for a v3 application.
 
 ### 13.1 Build and package
 
