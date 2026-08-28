@@ -16,7 +16,7 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { normalizeAsarEntry } from '../scripts/lib/electron-package-paths.mjs'
+import { normalizeAsarEntry, toAsarExtractionPath } from '../scripts/lib/electron-package-paths.mjs'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 const require = createRequire(import.meta.url)
@@ -51,6 +51,8 @@ test('Electron package gate normalizes Windows-style ASAR entry paths', () => {
   const archiveEntries = new Set(entries.map(normalizeAsarEntry))
   assert.ok(archiveEntries.has(normalizeAsarEntry('electron\\main.cjs')))
   assert.ok(archiveEntries.has(normalizeAsarEntry('ui\\dist\\main.bundle.js')))
+  assert.equal(toAsarExtractionPath('ui/dist/main.bundle.js', '\\'), 'ui\\dist\\main.bundle.js')
+  assert.equal(toAsarExtractionPath('ui\\dist\\main.bundle.js', '/'), 'ui/dist/main.bundle.js')
 })
 
 test('Electron package gate verifies reviewed ASAR and physical Pear runtime bytes', async () => {

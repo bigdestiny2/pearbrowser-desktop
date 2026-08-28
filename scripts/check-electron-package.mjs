@@ -7,7 +7,7 @@ import { createRequire } from 'node:module'
 import { existsSync, lstatSync, readFileSync, readdirSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { normalizeAsarEntry } from './lib/electron-package-paths.mjs'
+import { normalizeAsarEntry, toAsarExtractionPath } from './lib/electron-package-paths.mjs'
 
 const sourceRoot = fileURLToPath(new URL('..', import.meta.url))
 const require = createRequire(import.meta.url)
@@ -299,7 +299,7 @@ function readPackagedFile (path) {
     return null
   }
   try {
-    return extractFile(archivePath, path)
+    return extractFile(archivePath, toAsarExtractionPath(path))
   } catch (error) {
     errors.push(`could not extract packaged source ${path}: ${error.message}`)
     return null
@@ -309,7 +309,7 @@ function readPackagedFile (path) {
 function readArchiveJson (path) {
   if (!archiveEntries.has(path)) fail(`packaged ASAR JSON is missing: ${path}`)
   try {
-    return JSON.parse(extractFile(archivePath, path).toString('utf8'))
+    return JSON.parse(extractFile(archivePath, toAsarExtractionPath(path)).toString('utf8'))
   } catch (error) {
     fail(`could not parse packaged ASAR JSON ${path}: ${error.message}`)
   }
