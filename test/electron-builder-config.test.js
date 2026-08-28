@@ -20,6 +20,10 @@ test('Electron builder uses the pinned runtime, hybrid ASAR, fuses, and current 
   assert.equal(pkg.devDependencies?.electron, '43.2.0')
   assert.equal(pkg.devDependencies?.['electron-builder'], '26.15.3')
   assert.equal(pkg.dependencies?.electron, undefined)
+  assert.equal(pkg.scripts?.['install:electron-runtime'], 'node node_modules/electron/install.js')
+  for (const platform of ['macos', 'windows', 'linux']) {
+    assert.match(pkg.scripts?.[`package:electron:${platform}`] || '', /^npm run -s install:electron-runtime && electron-builder /)
+  }
   assert.equal(config.electronVersion, '43.2.0')
   assert.equal(config.electronDist, 'node_modules/electron/dist')
   assert.equal(config.asar, true)
