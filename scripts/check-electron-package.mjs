@@ -7,6 +7,7 @@ import { createRequire } from 'node:module'
 import { existsSync, lstatSync, readFileSync, readdirSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { normalizeAsarEntry } from './lib/electron-package-paths.mjs'
 
 const sourceRoot = fileURLToPath(new URL('..', import.meta.url))
 const require = createRequire(import.meta.url)
@@ -31,7 +32,7 @@ if (!existsSync(resourcesDir)) fail(`packaged resources directory does not exist
 if (!existsSync(archivePath)) fail(`integrity-protected app.asar is missing: ${archivePath}`)
 if (!existsSync(unpackedRoot)) fail(`physical Pear runtime directory is missing: ${unpackedRoot}`)
 
-const archiveEntries = new Set(listPackage(archivePath).map((path) => path.replace(/^\//, '')))
+const archiveEntries = new Set(listPackage(archivePath).map(normalizeAsarEntry))
 const packagedPackage = readArchiveJson('package.json')
 
 check(packagedPackage.name === sourcePackage.name, `packaged name must be ${sourcePackage.name}, got ${packagedPackage.name || '(missing)'}`)
