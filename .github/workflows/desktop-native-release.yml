@@ -340,7 +340,7 @@ jobs:
         run: |
           set -euo pipefail
           archive_list="$RUNNER_TEMP/pearbrowser-app-asars.txt"
-          find dist/electron -type f -path '*/resources/app.asar' ! -path '*/node_modules/*' | sort > "$archive_list"
+          find dist/electron -type f -name 'app.asar' ! -path '*/node_modules/*' | sort > "$archive_list"
           archive_count="$(wc -l < "$archive_list" | tr -d ' ')"
           if [[ "$archive_count" != "1" ]]; then
             echo "::error::Expected exactly one unpacked app.asar, found $archive_count"
@@ -427,6 +427,28 @@ jobs:
             exit 1
           fi
           chmod +x "$(sed -n '1p' "$appimage_list")"
+
+      - name: Secure Linux Chromium sandbox for hosted smoke
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          chrome_sandbox="$(dirname "$ELECTRON_EXECUTABLE")/chrome-sandbox"
+          if [[ ! -f "$chrome_sandbox" || -L "$chrome_sandbox" ]]; then
+            echo "::error::Packaged Chromium sandbox is missing or is not a regular file: $chrome_sandbox"
+            exit 1
+          fi
+          sudo chown root:root "$chrome_sandbox"
+          sudo chmod 4755 "$chrome_sandbox"
+          owner="$(stat -c '%U:%G' "$chrome_sandbox")"
+          mode="$(stat -c '%a' "$chrome_sandbox")"
+          if [[ "$owner" != "root:root" ]]; then
+            echo "::error::Chromium sandbox owner must be root:root, got $owner"
+            exit 1
+          fi
+          if [[ "$mode" != "4755" ]]; then
+            echo "::error::Chromium sandbox mode must be 4755, got $mode"
+            exit 1
+          fi
 
       - name: Launch unpacked app and prove the Pear runtime RPC
         if: runner.os != 'Windows'

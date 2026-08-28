@@ -16,6 +16,7 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { normalizeAsarEntry } from '../scripts/lib/electron-package-paths.mjs'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 const require = createRequire(import.meta.url)
@@ -31,6 +32,22 @@ const sourceRef = '0123456789abcdef0123456789abcdef01234567'
 const fuseSentinel = 'dL7pKGdnNz796PbbjQWNKmHXBZaB9tsX'
 const fuseEnabled = 49
 const fuseDisabled = 48
+
+test('Electron package gate normalizes Windows-style ASAR entry paths', () => {
+  const entries = [
+    '\\package.json',
+    '\\electron\\main.cjs',
+    'electron\\preload.cjs',
+    '/ui/dist/main.bundle.js'
+  ]
+
+  assert.deepEqual(entries.map(normalizeAsarEntry), [
+    'package.json',
+    'electron/main.cjs',
+    'electron/preload.cjs',
+    'ui/dist/main.bundle.js'
+  ])
+})
 
 test('Electron package gate verifies reviewed ASAR and physical Pear runtime bytes', async () => {
   const fixture = mkdtempSync(join(tmpdir(), 'pear-electron-package-gate-'))
