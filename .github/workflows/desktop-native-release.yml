@@ -340,7 +340,7 @@ jobs:
         run: |
           set -euo pipefail
           archive_list="$RUNNER_TEMP/pearbrowser-app-asars.txt"
-          find dist/electron -type f -path '*/resources/app.asar' ! -path '*/node_modules/*' | sort > "$archive_list"
+          find dist/electron -type f -name 'app.asar' ! -path '*/node_modules/*' | sort > "$archive_list"
           archive_count="$(wc -l < "$archive_list" | tr -d ' ')"
           if [[ "$archive_count" != "1" ]]; then
             echo "::error::Expected exactly one unpacked app.asar, found $archive_count"

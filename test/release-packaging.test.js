@@ -971,6 +971,8 @@ test('native release workflow validates immutable source and builds reviewed Ele
   assert.doesNotMatch(nativeReleaseWorkflow, /CMAKE|MakeAppx|npm ci --prefix appling|azure\/trusted-signing|libgtk-4-dev|linuxdeploy/)
 
   assert.match(nativeReleaseWorkflow, /check-electron-package\.mjs/)
+  assert.match(nativeReleaseWorkflow, /find dist\/electron -type f -name 'app\.asar' ! -path '\*\/node_modules\/\*'/)
+  assert.doesNotMatch(nativeReleaseWorkflow, /-path '\*\/resources\/app\.asar'/)
   assert.match(nativeReleaseWorkflow, /--source-ref "\$SOURCE_REF"/)
   assert.match(nativeReleaseWorkflow, /--release-mode "\$RELEASE_MODE"/)
   assert.match(nativeReleaseWorkflow, /--platform "\$\{\{ matrix\.platform \}\}"/)
