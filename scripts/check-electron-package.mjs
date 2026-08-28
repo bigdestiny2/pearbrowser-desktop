@@ -89,7 +89,7 @@ const sourceFiles = [
 ]
 
 for (const sourceFile of sourceFiles) {
-  const path = relative(sourceRoot, sourceFile)
+  const path = normalizeAsarEntry(relative(sourceRoot, sourceFile))
   const packaged = readPackagedFile(path)
   if (!packaged) continue
   const sourceHash = hashBytes(readFileSync(sourceFile))

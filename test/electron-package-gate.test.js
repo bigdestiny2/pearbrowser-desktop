@@ -47,6 +47,10 @@ test('Electron package gate normalizes Windows-style ASAR entry paths', () => {
     'electron/preload.cjs',
     'ui/dist/main.bundle.js'
   ])
+
+  const archiveEntries = new Set(entries.map(normalizeAsarEntry))
+  assert.ok(archiveEntries.has(normalizeAsarEntry('electron\\main.cjs')))
+  assert.ok(archiveEntries.has(normalizeAsarEntry('ui\\dist\\main.bundle.js')))
 })
 
 test('Electron package gate verifies reviewed ASAR and physical Pear runtime bytes', async () => {
