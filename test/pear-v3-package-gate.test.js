@@ -31,7 +31,7 @@ function fixture (t) {
       corestore: '^7.12.2',
       hypercore: '^11.35.2',
       hyperdrive: '^13.3.3',
-      'pear-install': '1.2.2',
+      'pear-install': '1.3.0',
       'pear-runtime': '1.3.1'
     }
   }
@@ -65,8 +65,8 @@ function fixture (t) {
         integrity
       },
       'node_modules/pear-install': {
-        version: '1.2.2',
-        resolved: 'https://registry.npmjs.org/pear-install/-/pear-install-1.2.2.tgz',
+        version: '1.3.0',
+        resolved: 'https://registry.npmjs.org/pear-install/-/pear-install-1.3.0.tgz',
         integrity
       },
       'node_modules/pear-runtime': {
@@ -113,9 +113,9 @@ function fixture (t) {
 test('Pear v3 package/source gate accepts the repository contract', () => {
   const report = checkPearV3Contract({ root: repositoryRoot })
   assert.equal(report.ok, true)
-  assert.equal(report.reviewedUpstream.cli, '3.3.0')
+  assert.equal(report.reviewedUpstream.cli, '3.4.0')
   assert.equal(report.reviewedUpstream.build, '1.2.0')
-  assert.deepEqual(report.direct, { 'pear-install': '1.2.2', 'pear-runtime': '1.3.1' })
+  assert.deepEqual(report.direct, { 'pear-install': '1.3.0', 'pear-runtime': '1.3.1' })
   assert.equal(report.updater, '3.4.0')
   assert.equal(report.worker, 'workers/main.js')
 })
@@ -155,7 +155,7 @@ test('Pear v3 package/source gate rejects an unapproved OTA channel or stale rel
   const stale = fixture(t)
   stale.pkg.dependencies.autobase = '^7.27.3'
   writeJson(join(stale.root, 'package.json'), stale.pkg)
-  assert.throws(() => checkPearV3Contract({ root: stale.root }), /autobase must declare the reviewed Pear 3\.3 cohort/)
+  assert.throws(() => checkPearV3Contract({ root: stale.root }), /autobase must declare the reviewed compatibility cohort range/)
 })
 
 test('Pear v3 package/source gate rejects remote or variable worker entrypoints', (t) => {

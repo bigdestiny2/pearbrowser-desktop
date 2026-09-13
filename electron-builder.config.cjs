@@ -83,7 +83,7 @@ module.exports = {
       tag: releaseTag,
       sourceRef,
       mode: releaseMode,
-      pear: '3.3.0'
+      pear: '3.4.0'
     }
   },
   mac: {

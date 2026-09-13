@@ -46,7 +46,7 @@ const provenance = packagedPackage.pearRelease || {}
 check(provenance.tag === expectedTag, `packaged provenance tag must be ${expectedTag}, got ${provenance.tag || '(missing)'}`)
 check(provenance.sourceRef === expectedSourceRef, `packaged provenance sourceRef must be ${expectedSourceRef}, got ${provenance.sourceRef || '(missing)'}`)
 check(provenance.mode === expectedMode, `packaged provenance mode must be ${expectedMode}, got ${provenance.mode || '(missing)'}`)
-check(provenance.pear === '3.3.0', `packaged provenance Pear version must be 3.3.0, got ${provenance.pear || '(missing)'}`)
+check(provenance.pear === '3.4.0', `packaged provenance Pear version must be 3.4.0, got ${provenance.pear || '(missing)'}`)
 
 let runtimeIntegrityReport = null
 const runtimeIntegrity = packagedPackage.pearRuntimeIntegrity || {}
@@ -60,7 +60,7 @@ try {
       tag: expectedTag,
       sourceRef: expectedSourceRef,
       releaseMode: expectedMode,
-      pear: '3.3.0',
+      pear: '3.4.0',
       platform: expectedPlatform,
       arch: expectedArch
     }
@@ -109,7 +109,7 @@ for (const archiveEntry of ['electron/main.cjs', 'electron/preload.cjs', 'index.
 }
 
 const expectedDependencies = {
-  'pear-install': '1.2.2',
+  'pear-install': '1.3.0',
   'pear-runtime': '1.3.1',
   'pear-runtime-updater': '3.4.0'
 }

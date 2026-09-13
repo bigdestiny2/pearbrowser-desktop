@@ -18,7 +18,7 @@ The candidate makes the embedded-Electron window render (the shell is now an
 esbuild bundle — bare specifiers never resolved over `file://`), stops the
 renderer racing backend boot, repairs the Settings relay capability checks
 (`bare-https` has no `get()` shorthand), and aligns the reviewed runtime cohort
-with Pear 3.3.0. It is not a published release until its public-trust native
+with Pear 3.4.0. It is not a published release until its public-trust native
 assets and release gates pass. See
 [docs/RELEASE_NOTES_v0.9.1.md](./docs/RELEASE_NOTES_v0.9.1.md).
 

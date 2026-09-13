@@ -18,7 +18,7 @@ const provenance = {
   tag: 'v0.9.1',
   sourceRef: '0123456789abcdef0123456789abcdef01234567',
   mode: 'package-proof',
-  pear: '3.3.0'
+  pear: '3.4.0'
 }
 const expected = {
   tag: provenance.tag,

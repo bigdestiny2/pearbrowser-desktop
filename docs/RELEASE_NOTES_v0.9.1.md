@@ -10,8 +10,9 @@ workflow and post-publication download checks pass.
 
 ## Pear v3 and packaging
 
-- Aligns the reviewed embedded cohort with stable Pear 3.3.0:
-  `pear-runtime@1.3.1`, `pear-install@1.2.2`, and
+- Aligns the reviewed platform gate with stable Pear 3.4.0 while retaining the
+  separately versioned embedded runtime cohort:
+  `pear-runtime@1.3.1`, `pear-install@1.3.0`, and
   `pear-runtime-updater@3.4.0`, with the compatible Autobase,
   Hypercore/Corestore, and Hyperdrive pins in the lockfile.
 - Packages the actual reviewed Electron application with the pinned

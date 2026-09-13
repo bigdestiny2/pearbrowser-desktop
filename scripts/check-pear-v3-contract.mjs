@@ -31,9 +31,9 @@ const ignoredDirectories = new Set([
 ])
 const sourceExtensions = new Set(['.cjs', '.js', '.mjs', '.sh'])
 const reviewedUpstreamCohort = Object.freeze({
-  cli: '3.3.0',
+  cli: '3.4.0',
   build: '1.2.0',
-  install: '1.2.2',
+  install: '1.3.0',
   runtime: '1.3.1',
   updater: '3.4.0'
 })
@@ -191,10 +191,10 @@ export function checkPearV3Contract ({ root = defaultRoot } = {}) {
   }
   for (const [name, version] of Object.entries(releaseDependencyRanges)) {
     if (pkg.dependencies?.[name] !== version) {
-      errors.push(`${name} must declare the reviewed Pear 3.3 cohort range ${version}`)
+      errors.push(`${name} must declare the reviewed compatibility cohort range ${version}`)
     }
     if (lock.packages?.['']?.dependencies?.[name] !== version) {
-      errors.push(`${name} lockfile root must match the reviewed Pear 3.3 cohort range ${version}`)
+      errors.push(`${name} lockfile root must match the reviewed compatibility cohort range ${version}`)
     }
   }
   for (const [name, version] of Object.entries(releaseResolvedVersions)) {

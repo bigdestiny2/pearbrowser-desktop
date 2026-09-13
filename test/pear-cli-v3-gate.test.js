@@ -36,21 +36,21 @@ function versionsOutput ({
 
 test('Pear CLI gate reads the platform version from current CLI output', () => {
   const output = [
-    'pear://0.3243.pzcjqmpoo6szkoc4bpkw65ib9ctnrq7b6mneeinbhbheihaq6p6o / v3.3.0',
+    'pear://0.3243.pzcjqmpoo6szkoc4bpkw65ib9ctnrq7b6mneeinbhbheihaq6p6o / v3.4.0',
     'Key=pzcjqmpoo6szkoc4bpkw65ib9ctnrq7b6mneeinbhbheihaq6p6o',
-    'SemVer=3.3.0',
+    'SemVer=3.4.0',
     'Fork=0',
     'Length=3243'
   ].join('\n')
-  assert.equal(extractPearCliVersion(output), '3.3.0')
+  assert.equal(extractPearCliVersion(output), '3.4.0')
 })
 
 test('Pear CLI gate accepts only the reviewed stable platform release', () => {
-  assert.equal(assertSupportedPearCliVersion('3.3.0'), '3.3.0')
+  assert.equal(assertSupportedPearCliVersion('3.4.0'), '3.4.0')
   assert.throws(() => assertSupportedPearCliVersion('2.6.5'), /too old/)
   assert.throws(() => assertSupportedPearCliVersion('3.4.0-rc.0'), /prerelease/)
-  assert.throws(() => assertSupportedPearCliVersion('3.3.1'), /has not been reviewed/)
-  assert.throws(() => assertSupportedPearCliVersion('3.4.0'), /has not been reviewed/)
+  assert.throws(() => assertSupportedPearCliVersion('3.3.0'), /has not been reviewed/)
+  assert.throws(() => assertSupportedPearCliVersion('3.4.1'), /has not been reviewed/)
   assert.throws(() => assertSupportedPearCliVersion('4.0.0'), /outside the reviewed v3/)
   assert.throws(() => extractPearCliVersion('not a version'), /semantic version/)
 })
@@ -66,14 +66,14 @@ test('Pear CLI gate validates tagged platform state without conflating internal 
   assert.equal(state.bareVersion, '1.24.3 (sidecar) / 1.29.4')
 })
 
-test('Pear CLI gate checks the v3.3.0 platform identity and versions state', () => {
+test('Pear CLI gate checks the v3.4.0 platform identity and versions state', () => {
   const calls = []
   const result = checkPearCli({
     command: 'pear-test',
     spawn: (command, args) => {
       calls.push([command, ...args])
       if (args[0] === '-v') {
-        return { status: 0, stdout: 'pear://0.3243.aaaa / v3.3.0\n', stderr: '' }
+        return { status: 0, stdout: 'pear://0.3243.aaaa / v3.4.0\n', stderr: '' }
       }
       return { status: 0, stdout: versionsOutput(), stderr: '' }
     }
@@ -83,7 +83,15 @@ test('Pear CLI gate checks the v3.3.0 platform identity and versions state', () 
     ['pear-test', '-v'],
     ['pear-test', 'versions', '--json']
   ])
-  assert.equal(result.version, '3.3.0')
+  assert.equal(result.version, '3.4.0')
+  assert.deepEqual(result.capabilities, {
+    blindPeer: true,
+    blindRelay: true,
+    relayFallback: true,
+    seedBlindPeer: true,
+    stageWithoutPackageJson: true,
+    enhancedCoreStats: true
+  })
   assert.equal(result.versions.reportedPearRuntimeVersion, '2.6.5')
   assert.equal(result.versions.checkout.length, 3243)
 })

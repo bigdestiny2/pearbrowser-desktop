@@ -63,7 +63,7 @@ test('Electron package gate verifies reviewed ASAR and physical Pear runtime byt
     assert.equal(pass.status, 0, pass.stderr || pass.stdout)
     const report = JSON.parse(pass.stdout)
     assert.equal(report.ok, true)
-    assert.equal(report.pear, '3.3.0')
+    assert.equal(report.pear, '3.4.0')
     assert.ok(report.runtimeIntegrity.files > 3)
     assert.ok(report.verifiedSourceFiles > 100)
     assert.equal(report.fuses.runAsNode, fuseDisabled)
@@ -108,7 +108,7 @@ async function createPackageFixture (fixture) {
       tag: releaseTag,
       sourceRef,
       mode: 'package-proof',
-      pear: '3.3.0'
+      pear: '3.4.0'
     },
     pearRuntimeIntegrity: {
       schema: 1,
@@ -145,7 +145,7 @@ async function createPackageFixture (fixture) {
       tag: releaseTag,
       sourceRef,
       mode: 'package-proof',
-      pear: '3.3.0'
+      pear: '3.4.0'
     },
     platform: process.platform,
     arch: process.arch
