@@ -36,6 +36,12 @@ digest match: a pair of self-authored JSON files cannot prove the runtime
 source. A trusted Electron capture and review flow must be implemented before
 any checker result can be called verified.
 
+Per-drive listener allocation now fails closed, and the unbound main proxy
+listener rejects direct `/hyper/` and `/app/` drive pages while per-drive mode
+is enabled. This prevents a failed listener or a typed loopback URL from
+serving a drive on the shared origin. It does not solve Chromium cookie sharing
+between different ports on the same host.
+
 Per-drive listener and bridge-token isolation remain valuable, but full
 per-app browser-storage isolation is open. Untrusted P2P apps need a reviewed
 host/scheme/session-partition design and real Electron tests before any

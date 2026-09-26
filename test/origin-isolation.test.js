@@ -185,11 +185,18 @@ test('HyperProxy per-drive listeners serve only their bound drive key', async (t
   assert.equal(wrongDrive.statusCode, 403)
   assert.equal(wrongDrive.body, 'Forbidden for this origin')
 
+  const sharedOrigin = `http://127.0.0.1:${proxy.port}`
+  for (const route of [`/hyper/${driveA}/index.html`, `/app/${driveA}/index.html`]) {
+    const response = await httpGet(sharedOrigin + route)
+    assert.equal(response.statusCode, 403)
+    assert.equal(response.body, 'Drive origin required')
+  }
+
   await proxy.stop()
   assert.equal(proxy._driveOrigins.size, 0)
 })
 
-test('HyperProxy falls back to the main loopback origin when drive listener allocation fails', async (t) => {
+test('HyperProxy refuses navigation when drive listener allocation fails', async (t) => {
   const proxy = new HyperProxy(async () => null, () => {}, null, {
     perDriveOrigins: true
   })
@@ -205,9 +212,7 @@ test('HyperProxy falls back to the main loopback origin when drive listener allo
     throw new Error('bind refused')
   }
 
-  const localUrl = await proxy.localUrlForDrive(driveA, 'hyper', '/index.html')
-  assert.equal(new URL(localUrl).origin, `http://127.0.0.1:${proxy.port}`)
-  assert.match(localUrl, new RegExp(`/hyper/${driveA}/index\\.html$`))
+  await assert.rejects(proxy.localUrlForDrive(driveA, 'hyper', '/index.html'), /bind refused/)
   assert.equal(warnings.length, 1)
   assert.match(warnings[0], /per-drive origin failed/)
   assert.match(warnings[0], /bind refused/)

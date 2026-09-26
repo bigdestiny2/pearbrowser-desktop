@@ -720,7 +720,9 @@ class HyperProxy {
       return originForPort(entry.port)
     } catch (err) {
       console.warn('[origin-isolation] per-drive origin failed for', keyHex.slice(0, 12) + '…', '-', err && err.message)
-      return originForPort(this._port)
+      // A shared-origin fallback would expose one drive's browser storage and
+      // injected page tokens to another. Refuse navigation instead.
+      throw err
     }
   }
 
@@ -834,6 +836,14 @@ class HyperProxy {
 
     const url = new URL(req.url, documentOrigin)
     const path = url.pathname
+
+    // The main listener has no drive binding. In per-drive mode it must not
+    // serve drive documents, including direct loopback URLs entered by a user.
+    if (this._perDriveOrigins && !context.boundDriveKeyHex &&
+        (path.startsWith('/hyper/') || path.startsWith('/app/'))) {
+      res.statusCode = 403
+      return res.end('Drive origin required')
+    }
 
     // HTTP Bridge — direct API for WebView apps (bypasses RN relay)
     if (this._httpBridge && path.startsWith('/api/')) {
