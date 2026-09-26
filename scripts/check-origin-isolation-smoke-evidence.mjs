@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 
+import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 
 export const FEATURE_FLAG = 'PEARBROWSER_PER_DRIVE_ORIGINS=1'
 export const PROOF_KEY = 'pear-origin-isolation-proof'
 
-export function analyzeOriginIsolationSmokeEvidence (evidence) {
+export function analyzeOriginIsolationSmokeEvidence (evidence, { browserCapture = null, browserCaptureHash = '' } = {}) {
   const failures = []
   const warnings = []
   const checks = []
@@ -23,25 +24,39 @@ export function analyzeOriginIsolationSmokeEvidence (evidence) {
   add('apps-count', apps.length === 2, 'evidence must include exactly two apps')
 
   const [appA = {}, appB = {}] = apps
-  const driveA = normalizeDriveKey(appA.driveKey || driveKeyFromHyperUrl(appA.url))
-  const driveB = normalizeDriveKey(appB.driveKey || driveKeyFromHyperUrl(appB.url))
-  add('drive-a', !!driveA, 'app A must include a 64-hex drive key or hyper:// URL')
-  add('drive-b', !!driveB, 'app B must include a 64-hex drive key or hyper:// URL')
-  add('distinct-drives', !!driveA && !!driveB && driveA !== driveB, 'app A and app B must use different drive keys')
+  const driveA = driveKeyFromHyperUrl(appA.url)
+  const driveB = driveKeyFromHyperUrl(appB.url)
+  add('drive-a', !!driveA, 'app A URL must be hyper://<64-hex-drive-key>/...')
+  add('drive-b', !!driveB, 'app B URL must be hyper://<64-hex-drive-key>/...')
+  add('drive-a-key-match', !appA.driveKey || normalizeDriveKey(appA.driveKey) === driveA, 'app A declared driveKey must match its hyper:// URL')
+  add('drive-b-key-match', !appB.driveKey || normalizeDriveKey(appB.driveKey) === driveB, 'app B declared driveKey must match its hyper:// URL')
+  add('distinct-drives', !!driveA && !!driveB && driveA !== driveB, 'app A and app B URLs must contain different drive keys')
 
   const originA = normalizeLoopbackOrigin(appA.origin || evidence?.originSplit?.appAOrigin)
   const originB = normalizeLoopbackOrigin(appB.origin || evidence?.originSplit?.appBOrigin)
   add('origin-a', !!originA, 'app A origin must be a loopback http origin')
   add('origin-b', !!originB, 'app B origin must be a loopback http origin')
   add('origin-split', !!originA && !!originB && originA !== originB, 'app A and app B must report different loopback origins')
+  // In the current single Electron session, ports do not partition cookies.
+  // A future partitioned-session design needs a separately reviewed gate.
+  add('cookie-host-split', !!originA && !!originB && new URL(originA).hostname !== new URL(originB).hostname, 'different ports on one loopback host share cookies; distinct cookie hosts are required')
+  add('browser-runtime-source', evidence?.automatedVerifier?.mode !== 'local-hyperproxy-httpbridge-fixture', 'local HyperProxy/HttpBridge fixtures cannot certify Chromium storage')
 
   const storage = evidence?.storage || {}
   const capture = storage.capture || {}
-  add('browser-storage-capture', capture.kind === 'electron-webcontents' && String(capture.artifact || '').trim().length > 0, 'storage isolation requires a real Electron WebContents capture artifact; fixture simulations are not browser proof')
+  add('browser-storage-capture', capture.kind === 'electron-webcontents' && String(capture.artifact || '').trim().length > 0 && browserCapture?.kind === 'pearbrowser-electron-webcontents-storage-capture', 'storage isolation requires a readable Electron WebContents capture JSON; fixture simulations and a path alone are not browser proof')
+  add('browser-storage-capture-hash', /^[0-9a-f]{64}$/.test(String(capture.sha256 || '')) && capture.sha256 === browserCaptureHash, 'storage.capture.sha256 must match the capture file bytes')
+  add('browser-storage-capture-runtime', browserCapture?.runtime?.name === 'Electron' && /^\d+\./.test(String(browserCapture?.runtime?.version || '')) && !!browserCapture?.capturedAt, 'capture must record the Electron runtime version and capture time')
+  // The JSON and digest are operator supplied. Neither proves that Electron produced them.
+  // Keep release acceptance blocked until a trusted runtime capture/review flow exists.
+  add('trusted-electron-capture', false, 'capture provenance cannot be verified by this checker; a trusted Electron runtime capture and review flow is required')
   const proofKey = String(storage.proofKey || evidence?.proofKey || '').trim()
   const writtenValue = String(storage.writtenValue || '').trim()
   const storageA = storage.appA || appA.storage || {}
   const storageB = storage.appB || appB.storage || {}
+  const capturedApps = Array.isArray(browserCapture?.apps) ? browserCapture.apps : []
+  add('browser-storage-capture-app-a', captureMatchesApp(capturedApps[0], appA, originA, storageA), 'capture app A URL, origin, and measured storage must match the evidence')
+  add('browser-storage-capture-app-b', captureMatchesApp(capturedApps[1], appB, originB, storageB), 'capture app B URL, origin, and measured storage must match the evidence')
 
   add('proof-key', proofKey === PROOF_KEY, `storage.proofKey must be ${PROOF_KEY}`)
   add('written-value', writtenValue.length > 0, 'storage.writtenValue must be present')
@@ -132,6 +147,14 @@ function cookieContains (cookie, key, value) {
   return haystack.split(/;\s*/).some((part) => part === `${key}=${value}`)
 }
 
+function captureMatchesApp (captured, app, origin, storage) {
+  if (!captured || !app || !origin || !storage) return false
+  if (!Number.isInteger(captured.webContentsId) || captured.webContentsId < 1) return false
+  if (captured.url !== app.url || normalizeLoopbackOrigin(captured.origin) !== origin) return false
+  if (!captured.storage || !Object.hasOwn(captured.storage, 'localStorage') || !Object.hasOwn(captured.storage, 'indexedDB') || !Object.hasOwn(captured.storage, 'cookie')) return false
+  return ['localStorage', 'indexedDB', 'cookie'].every((key) => captured.storage[key] === storage[key])
+}
+
 function parseArgs (argv) {
   const args = { file: '', json: false }
   for (let i = 0; i < argv.length; i++) {
@@ -178,10 +201,27 @@ function loadJsonFile (file) {
   return JSON.parse(readFileSync(url, 'utf8'))
 }
 
+function loadBrowserCapture (evidence, evidenceFile) {
+  const artifact = evidence?.storage?.capture?.artifact
+  if (typeof artifact !== 'string' || !artifact.trim()) return {}
+  try {
+    const evidenceUrl = new URL(evidenceFile, pathToFileURL(process.cwd() + '/'))
+    const artifactUrl = new URL(artifact, evidenceUrl)
+    if (artifactUrl.protocol !== 'file:') return {}
+    const bytes = readFileSync(artifactUrl)
+    return {
+      browserCapture: JSON.parse(bytes.toString('utf8')),
+      browserCaptureHash: createHash('sha256').update(bytes).digest('hex')
+    }
+  } catch {
+    return {}
+  }
+}
+
 async function main () {
   const args = parseArgs(process.argv.slice(2))
   const evidence = loadJsonFile(args.file)
-  const result = analyzeOriginIsolationSmokeEvidence(evidence)
+  const result = analyzeOriginIsolationSmokeEvidence(evidence, loadBrowserCapture(evidence, args.file))
   if (args.json) console.log(JSON.stringify(result, null, 2))
   else printReport(result, args.file)
   if (!result.ok) process.exit(1)

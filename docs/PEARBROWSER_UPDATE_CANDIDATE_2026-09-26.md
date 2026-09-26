@@ -23,9 +23,18 @@ separate localStorage but a `Path=/` cookie shared between those ports.
 listeners and an ephemeral Electron session. The old automated smoke used
 in-memory `BrowserStorageBuckets` and reported cookie separation by origin;
 that simulation did not reflect Chromium. The generator now models host-scoped
-cookies and produces blocked evidence. The checker requires an explicit real
-Electron WebContents capture before accepting browser-storage evidence, and
-the historical July artifact is blocked by the new gate.
+cookies and produces blocked evidence. The historical July artifact is
+blocked by the new gate. The checker also requires drive keys to match their `hyper://` URLs and distinct cookie hosts;
+two ports on `127.0.0.1` cannot pass. Its capture check opens a separate JSON
+file, verifies its SHA-256 digest, and compares both app URLs, origins, and
+measured localStorage/IndexedDB/cookie values to the release evidence. A
+declared file name alone cannot pass. The required capture JSON records
+`kind: pearbrowser-electron-webcontents-storage-capture`, the Electron version
+and capture time, and each app's `webContentsId`, URL, origin, and observed
+storage. The checker keeps a hard provenance blocker even when the file and
+digest match: a pair of self-authored JSON files cannot prove the runtime
+source. A trusted Electron capture and review flow must be implemented before
+any checker result can be called verified.
 
 Per-drive listener and bridge-token isolation remain valuable, but full
 per-app browser-storage isolation is open. Untrusted P2P apps need a reviewed
@@ -35,11 +44,12 @@ the current gap, not a passing isolation proof.
 
 ## Validation and remaining gates
 
-- The complete desktop suite passed 959 tests, with 6 skipped, after the
+- The complete desktop suite passed 961 tests, with 6 skipped, after the
   candidate changes. The Pear v3 host contract and installed Pear CLI 3.4.0
   checks passed. The Autobee spike and existing collaborative-catalog focused
-  tests passed 11/11. The origin-evidence focused tests passed 7/7; the
-  historical July simulated artifact is now blocked.
+  tests passed 11/11. The origin-evidence focused tests passed 9/9 after
+  capture binding, URL-key agreement, and the hard provenance block. The historical July
+  simulated artifact is now blocked.
 - The production Autobase/Corestore/Hypercore/Hyperdrive/HyperDHT cohort stays
   at its reviewed Pear 3.4 lockfile versions. Newer patch/minor releases exist,
   but changing persistent P2P formats requires cold-reopen, fresh-peer,

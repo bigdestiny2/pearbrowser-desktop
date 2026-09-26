@@ -50,7 +50,7 @@ DHT bootstrap configuration. A remote catalogue link remains discovery
 metadata, never a `PearRuntime.run()` input.
 
 The native-app installer boundary pins `pear-install@1.3.0`. It accepts one GUI
-artifact for the current OS (`.app`, `.AppImage`, or `.exe`), rejects packages exposing
+artifact for the current OS (`.app`, `.AppImage`, or `.msix`), rejects packages exposing
 command-line binary targets, requires the package's `upgrade` identity to match
 the requested link and optional catalogue product name, and rejects unexpected
 install destinations or an incompatible declared platform target. Pear 3.4's

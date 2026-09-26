@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -31,7 +32,7 @@ function validEvidence () {
       {
         label: 'Poked',
         url: `hyper://${'b'.repeat(64)}/`,
-        origin: 'http://127.0.0.1:61002'
+        origin: 'http://localhost:61002'
       }
     ],
     storage: {
@@ -74,13 +75,54 @@ function validEvidence () {
   }
 }
 
-test('origin isolation smoke evidence accepts a complete operator artifact', () => {
-  const result = analyzeOriginIsolationSmokeEvidence(validEvidence())
-  assert.equal(result.ok, true)
-  assert.equal(result.status, 'verified')
-  assert.equal(result.failures.length, 0)
-  assert.ok(result.checks.some((check) => check.id === 'origin-split' && check.ok))
+function captureFor (evidence) {
+  return {
+    kind: 'pearbrowser-electron-webcontents-storage-capture',
+    runtime: { name: 'Electron', version: '43.2.0' },
+    capturedAt: '2026-09-26T00:00:00Z',
+    apps: evidence.apps.map((app, index) => ({
+      webContentsId: index + 1,
+      url: app.url,
+      origin: app.origin,
+      storage: { ...evidence.storage[index === 0 ? 'appA' : 'appB'] }
+    }))
+  }
+}
+
+function analyzeWithCapture (evidence) {
+  const browserCapture = captureFor(evidence)
+  const browserCaptureHash = createHash('sha256').update(JSON.stringify(browserCapture)).digest('hex')
+  evidence.storage.capture.sha256 = browserCaptureHash
+  return analyzeOriginIsolationSmokeEvidence(evidence, { browserCapture, browserCaptureHash })
+}
+
+test('operator artifact format remains blocked without trusted Electron provenance', () => {
+  const result = analyzeWithCapture(validEvidence())
+  assert.equal(result.ok, false)
+  assert.equal(result.status, 'blocked')
+  assert.ok(result.failures.some((failure) => failure.id === 'trusted-electron-capture'))
+  assert.ok(result.checks.some((check) => check.id === 'browser-storage-capture-hash' && check.ok))
   assert.ok(result.checks.some((check) => check.id === 'app-b-indexeddb-isolated' && check.ok))
+})
+
+test('historical fixture cannot be relabeled into passing Electron proof', () => {
+  const artifact = JSON.parse(readFileSync(new URL('../docs/origin-isolation-smoke-evidence-peerit-pearfeed-2026-07-04.json', import.meta.url), 'utf8'))
+  artifact.storage.capture = { kind: 'electron-webcontents', artifact: '/nonexistent/proof.json' }
+  const result = analyzeOriginIsolationSmokeEvidence(artifact)
+  assert.equal(result.ok, false)
+  assert.ok(result.failures.some((failure) => failure.id === 'cookie-host-split'))
+  assert.ok(result.failures.some((failure) => failure.id === 'browser-runtime-source'))
+})
+
+test('declared drive keys cannot override identical app URLs', () => {
+  const evidence = validEvidence()
+  evidence.apps[0].driveKey = 'a'.repeat(64)
+  evidence.apps[1].url = evidence.apps[0].url
+  evidence.apps[1].driveKey = 'b'.repeat(64)
+  const result = analyzeWithCapture(evidence)
+  assert.equal(result.ok, false)
+  assert.ok(result.failures.some((failure) => failure.id === 'drive-b-key-match'))
+  assert.ok(result.failures.some((failure) => failure.id === 'distinct-drives'))
 })
 
 test('fixture simulation cannot certify browser storage isolation', () => {
@@ -113,13 +155,13 @@ test('origin isolation smoke evidence validates automated verifier checks when p
       { id: 'tab-lifecycle-release', ok: false }
     ]
   }
-  const result = analyzeOriginIsolationSmokeEvidence(evidence)
+  const result = analyzeWithCapture(evidence)
 
   assert.equal(result.ok, false)
   assert.ok(result.failures.some((failure) => failure.id === 'automated-verifier-checks'))
 })
 
-test('origin isolation smoke evidence accepts passing automated verifier checks', () => {
+test('passing automated verifier checks still require trusted browser provenance', () => {
   const evidence = validEvidence()
   evidence.automatedVerifier = {
     kind: 'pearbrowser-origin-isolation-automated-verifier',
@@ -128,9 +170,10 @@ test('origin isolation smoke evidence accepts passing automated verifier checks'
       { id: 'tab-lifecycle-release', ok: true }
     ]
   }
-  const result = analyzeOriginIsolationSmokeEvidence(evidence)
+  const result = analyzeWithCapture(evidence)
 
-  assert.equal(result.ok, true)
+  assert.equal(result.ok, false)
+  assert.ok(result.failures.some((failure) => failure.id === 'trusted-electron-capture'))
   assert.ok(result.checks.some((check) => check.id === 'automated-verifier-kind' && check.ok))
   assert.ok(result.checks.some((check) => check.id === 'automated-verifier-checks' && check.ok))
 })
@@ -142,16 +185,37 @@ test('origin isolation smoke evidence CLI exits non-zero until the proof is comp
   try {
     const goodPath = join(fixture, 'good.json')
     const badPath = join(fixture, 'bad.json')
-    writeFileSync(goodPath, JSON.stringify(validEvidence(), null, 2))
-    const bad = validEvidence()
+    const goodEvidence = validEvidence()
+    const captureJson = JSON.stringify(captureFor(goodEvidence), null, 2)
+    writeFileSync(join(fixture, 'electron-cookie-storage-trace.json'), captureJson)
+    goodEvidence.storage.capture.sha256 = createHash('sha256').update(captureJson).digest('hex')
+    writeFileSync(goodPath, JSON.stringify(goodEvidence, null, 2))
+    const bad = structuredClone(goodEvidence)
     bad.strictCsp.evidence = ''
     writeFileSync(badPath, JSON.stringify(bad, null, 2))
 
     const good = spawnSync(process.execPath, [checkerPath, '--file', goodPath, '--json'], {
       encoding: 'utf8'
     })
-    assert.equal(good.status, 0, good.stderr || good.stdout)
-    assert.equal(JSON.parse(good.stdout).status, 'verified')
+    assert.equal(good.status, 1, good.stderr || good.stdout)
+    const goodReport = JSON.parse(good.stdout)
+    assert.equal(goodReport.status, 'blocked')
+    assert.ok(goodReport.failures.some((failure) => failure.id === 'trusted-electron-capture'))
+    assert.ok(goodReport.checks.some((check) => check.id === 'browser-storage-capture-app-b' && check.ok))
+
+    const missingCapture = structuredClone(goodEvidence)
+    missingCapture.storage.capture.artifact = 'missing-trace.json'
+    writeFileSync(join(fixture, 'missing.json'), JSON.stringify(missingCapture))
+    const missing = spawnSync(process.execPath, [checkerPath, '--file', join(fixture, 'missing.json'), '--json'], { encoding: 'utf8' })
+    assert.equal(missing.status, 1)
+    assert.ok(JSON.parse(missing.stdout).failures.some((failure) => failure.id === 'browser-storage-capture'))
+
+    const mismatchedCapture = structuredClone(goodEvidence)
+    mismatchedCapture.storage.appB.cookie = `${PROOF_KEY}=peerit-proof-value`
+    writeFileSync(join(fixture, 'mismatched.json'), JSON.stringify(mismatchedCapture))
+    const mismatched = spawnSync(process.execPath, [checkerPath, '--file', join(fixture, 'mismatched.json'), '--json'], { encoding: 'utf8' })
+    assert.equal(mismatched.status, 1)
+    assert.ok(JSON.parse(mismatched.stdout).failures.some((failure) => failure.id === 'browser-storage-capture-app-b'))
 
     const blocked = spawnSync(process.execPath, [checkerPath, '--file', badPath, '--json'], {
       encoding: 'utf8'
