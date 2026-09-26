@@ -214,3 +214,11 @@ test('release evidence handoff collapses duplicate final-decision blockers', () 
 test('release evidence handoff is exposed as an npm script', () => {
   assert.equal(pkg.scripts['generate:release-evidence-handoff'], 'node scripts/generate-release-evidence-handoff.mjs')
 })
+
+
+test('current release log blocks the known cross-app cookie leak', () => {
+  const markdown = readFileSync(new URL('../docs/RELEASE_SMOKE_EVIDENCE_LOG_2026-06-23.md', import.meta.url), 'utf8')
+  const result = analyzeReleaseEvidence(markdown)
+  assert.equal(result.ok, false)
+  assert.ok(result.failures.some((item) => item.item === 'Current P2P app cookie isolation'))
+})

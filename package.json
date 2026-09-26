@@ -146,6 +146,7 @@
     "@electron/asar": "3.4.1",
     "@electron/fuses": "1.8.0",
     "@tetherto/wdk-worklet-bundler": "1.0.0-beta.9",
+    "autobee": "2.12.1",
     "bare": "1.30.3",
     "electron": "43.2.0",
     "electron-builder": "26.15.3",

@@ -2,6 +2,8 @@
 
 A local-first peer-to-peer browser, app store, search engine, naming layer, Nostr bridge, and site publisher for macOS, Windows, and Linux, built on the Pear Runtime.
 
+**2026-09-26 local desktop candidate:** The Pear 3.4 host contract is under test with an isolated upstream Autobee 2 compatibility spike. A real Electron check found that current per-drive localhost ports share cookies, so complete P2P app storage isolation remains an open release gate. See [candidate status and evidence](./docs/PEARBROWSER_UPDATE_CANDIDATE_2026-09-26.md).
+
 **No accounts. No DNS. Local-first data.** Sites are addressed by stable Hyperdrive keys and can be pinned on the [HiveRelay](https://github.com/bigdestiny2/P2P-Hiverelay) backbone. Native applications are installed from verified packages; a catalogue never turns a remote executable link into a runtime command.
 
 **HiveRelay compatibility baseline:** the relay fleet/source stable line is
@@ -79,7 +81,7 @@ package for your platform, and use the migration guidance in
 - Install an explicitly configured Pear v3 build through a host-confirmed native action. Catalogue rows use `nativeDelivery: { status: "available", kind: "pear-v3", installLink: "pear://…" }`; the installed app owns its own runtime, storage, windows, and OTA lifecycle.
 - A top-level `pear://` or `file://` row remains a **legacy migration record**. PearBrowser never sends catalogue values to `PearRuntime.run()`.
 - Native Pear apps and installed Hyperdrive sites are tracked separately: sites launch through the tab proxy, while native apps launch through the operating system.
-- Load decentralized catalogues from Hyperdrive JSON, signed Hyperbee, Autobee, schema-sheets rooms, HiveRelay index rooms, default curated seeds, community submissions, and your own writable catalogues
+- Load decentralized catalogues from Hyperdrive JSON, signed Hyperbee, experimental Autobase-backed collaborative catalogues (historically labelled Autobee), schema-sheets rooms, HiveRelay index rooms, default curated seeds, community submissions, and your own writable catalogues
 - Keep multiple catalogs loaded at once with search, category, and source filters across the aggregated app store
 - **My Catalog:** create a writable personal catalog, add apps from loaded catalogs or installed apps, rename it, edit saved metadata (name, description, version, author, categories), and share the catalog key; copies opened without the writer key stay read-only
 - Safe catalogue normalization accepts `apps[]`, `items[]`, or `entries[]`, classifies `hyper://` as browsable content, classifies compatible signed package releases for install, retains `pear://`/`file://` only for migration, rejects malformed targets, and strips prototype-pollution keys before rendering

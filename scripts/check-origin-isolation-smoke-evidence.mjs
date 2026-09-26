@@ -36,6 +36,8 @@ export function analyzeOriginIsolationSmokeEvidence (evidence) {
   add('origin-split', !!originA && !!originB && originA !== originB, 'app A and app B must report different loopback origins')
 
   const storage = evidence?.storage || {}
+  const capture = storage.capture || {}
+  add('browser-storage-capture', capture.kind === 'electron-webcontents' && String(capture.artifact || '').trim().length > 0, 'storage isolation requires a real Electron WebContents capture artifact; fixture simulations are not browser proof')
   const proofKey = String(storage.proofKey || evidence?.proofKey || '').trim()
   const writtenValue = String(storage.writtenValue || '').trim()
   const storageA = storage.appA || appA.storage || {}

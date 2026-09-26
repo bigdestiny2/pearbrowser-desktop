@@ -35,6 +35,7 @@ function validEvidence () {
       }
     ],
     storage: {
+      capture: { kind: 'electron-webcontents', artifact: 'electron-cookie-storage-trace.json' },
       proofKey: PROOF_KEY,
       writtenValue: 'peerit-proof-value',
       appA: {
@@ -80,6 +81,14 @@ test('origin isolation smoke evidence accepts a complete operator artifact', () 
   assert.equal(result.failures.length, 0)
   assert.ok(result.checks.some((check) => check.id === 'origin-split' && check.ok))
   assert.ok(result.checks.some((check) => check.id === 'app-b-indexeddb-isolated' && check.ok))
+})
+
+test('fixture simulation cannot certify browser storage isolation', () => {
+  const evidence = validEvidence()
+  evidence.storage.capture = { kind: 'fixture-simulation', artifact: '' }
+  const result = analyzeOriginIsolationSmokeEvidence(evidence)
+  assert.equal(result.ok, false)
+  assert.ok(result.failures.some((failure) => failure.id === 'browser-storage-capture'))
 })
 
 test('origin isolation smoke evidence fails same-origin and storage-leak artifacts', () => {
@@ -191,7 +200,7 @@ test('origin isolation automated verifier emits checker-compatible evidence from
     ], {
       encoding: 'utf8'
     })
-    assert.equal(generated.status, 0, generated.stderr || generated.stdout)
+    assert.equal(generated.status, 1, generated.stderr || generated.stdout)
     const evidence = JSON.parse(readFileSync(outPath, 'utf8'))
     const stdoutEvidence = JSON.parse(generated.stdout)
     assert.equal(evidence.kind, 'pearbrowser-origin-isolation-smoke-evidence')
@@ -199,18 +208,21 @@ test('origin isolation automated verifier emits checker-compatible evidence from
     assert.notEqual(evidence.apps[0].origin, evidence.apps[1].origin)
     assert.equal(evidence.storage.appA.localStorage, 'automated-origin-proof')
     assert.equal(evidence.storage.appB.localStorage, null)
+    assert.match(evidence.storage.appB.cookie, /pear-origin-isolation-proof=automated-origin-proof/)
+    assert.equal(evidence.storage.capture.kind, 'fixture-simulation')
     assert.equal(evidence.realAppBridge.routes.swarmEvents, true)
     assert.equal(evidence.automatedVerifier.mode, 'local-hyperproxy-httpbridge-fixture')
     assert.ok(evidence.automatedVerifier.checks.some((check) => check.id === 'tab-lifecycle-release' && check.ok))
 
     const analyzed = analyzeOriginIsolationSmokeEvidence(evidence)
-    assert.equal(analyzed.ok, true)
+    assert.equal(analyzed.ok, false)
+    assert.ok(analyzed.failures.some((failure) => failure.id === 'browser-storage-capture'))
 
     const checked = spawnSync(process.execPath, [checkerPath, '--file', outPath, '--json'], {
       encoding: 'utf8'
     })
-    assert.equal(checked.status, 0, checked.stderr || checked.stdout)
-    assert.equal(JSON.parse(checked.stdout).status, 'verified')
+    assert.equal(checked.status, 1, checked.stderr || checked.stdout)
+    assert.equal(JSON.parse(checked.stdout).status, 'blocked')
   } finally {
     rmSync(fixture, { recursive: true, force: true })
   }

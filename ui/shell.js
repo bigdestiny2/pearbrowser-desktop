@@ -2601,7 +2601,7 @@ function CollaborativeCatalog ({ rpc, C }) {
   return html`
     <div className="collab-catalog">
       <h2>Collaborative catalog <span className="settings-subtle">(experimental)</span></h2>
-      <p className="subtitle">An app catalog several people can co-edit, synced peer-to-peer. Not pinned on relays yet — reachable only while a writer is online.</p>
+      <p className="subtitle">An app catalog several people can co-edit, synced peer-to-peer. This existing catalog format uses Autobase and Hyperbee; new Autobee 2 catalogs are not compatible. Not pinned on relays yet — reachable only while a writer is online.</p>
       <div className="settings-card">
         ${err && html`<div className="apps-error">${err}</div>`}
         ${notice && html`<div className="apps-ok">${notice}</div>`}
@@ -6072,8 +6072,8 @@ function ExperimentalSection ({ rpc, C, onAutobeeChange, onDeviceSyncChange }) {
       </div>
       <div className="settings-row">
         <div>
-          <div className="settings-label">Collaborative catalogs (Autobee)</div>
-          <div className="settings-subtle">Create app catalogs several people can co-edit, synced peer-to-peer with no server. Experimental — load or create them with <code>autobee://</code> keys in the Apps tab. Not yet pinned on relays, so a catalog is reachable only while a writer is online.</div>
+          <div className="settings-label">Collaborative catalogs (experimental)</div>
+          <div className="settings-subtle">Co-edit app catalogs using the existing Autobase format. Its <code>autobee://</code> keys are not compatible with new Autobee 2 catalogs. Reachable only while a writer is online until relay pinning is supported.</div>
         </div>
         <label className="login-scope${autobee ? ' on' : ''}">
           <input type="checkbox" checked=${autobee} disabled=${busy === 'experimentalAutobeeCatalogs'}

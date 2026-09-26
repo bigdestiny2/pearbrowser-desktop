@@ -55,8 +55,9 @@ The browser-origin boundary is now enforced in addition to backend tokens:
 - `backend/http-bridge.js` requires `X-Pear-Token`, scopes sync app IDs by
   drive key, and now requires one-time SSE tickets for `/api/swarm/events`.
 - `ui/shell.js` renders app pages in sandboxed iframes with
-  `allow-same-origin`, but distinct per-drive ports isolate cookies,
-  localStorage, IndexedDB, DOM access, and injected tokens.
+  `allow-same-origin`. Distinct per-drive ports isolate origin-scoped
+  localStorage, IndexedDB, DOM access, and injected tokens. Cookies remain
+  shared by host across those ports; see the 2026-09-26 correction below.
 
 ## Rejected Alternatives
 
@@ -173,16 +174,16 @@ npm run -s check:origin-isolation-smoke-evidence -- --file origin-isolation-smok
 ```
 
 The generated plan covers launch with `PEARBROWSER_PER_DRIVE_ORIGINS=1`, runtime
-readiness, automated HyperProxy/HttpBridge origin splitting, localStorage/cookie/
-IndexedDB separation, strict-CSP shim hashing, tab-origin release behavior, and
-bridge route proof.
+readiness, automated HyperProxy/HttpBridge origin splitting, a real-browser
+storage check, strict-CSP shim hashing, tab-origin release behavior, and bridge
+route proof. The local fixture generator cannot certify browser storage.
 
 ## Test Matrix
 
 | Gate | Proof |
 |---|---|
 | Origin split | two drive keys produce different `localUrl` ports and different `base href` origins |
-| Storage split | browser smoke proves `localStorage`/IndexedDB/cookies do not cross between app origins |
+| Storage split | Electron WebContents smoke must prove localStorage/IndexedDB separation and cookie isolation separately; the current per-port design fails the cookie requirement |
 | Token origin binding | token minted for drive A origin fails from drive B origin |
 | Bridge compatibility | `/api/sync/*`, `/api/identity`, `/api/swarm/ticket`, and `/api/swarm/events?ticket=` still pass |
 | CSP compatibility | strict `<meta http-equiv="Content-Security-Policy">` apps still load injected shims by hash |
@@ -283,3 +284,23 @@ PB-AUDIT-002 is closed locally: storage, strict-CSP, listener lifecycle,
 default-on policy, and real-app bridge gates are represented by the verified
 evidence artifact. A release handoff may still request a manual window
 screenshot as presentation evidence.
+
+## 2026-09-26 correction: cookie isolation remains open
+
+The 2026-07-04 automated smoke artifact used an in-memory `BrowserStorageBuckets`
+simulation keyed entirely by origin. It was not a Chromium storage capture. The
+checker now rejects fixture storage as release proof, and the generator models
+cookies by host and returns a blocked result. Historical PASS rows for that
+artifact establish proxy and bridge behavior only; they do not establish
+browser storage isolation.
+
+A real Electron 43.2.0 probe is recorded in
+[`electron-cookie-port-probe-2026-09-26.json`](electron-cookie-port-probe-2026-09-26.json).
+Two `127.0.0.1` listeners with different ports shared the same `Path=/` cookie,
+while localStorage stayed separate. The diagnostic source is
+[`scripts/probe-electron-cookie-ports.cjs`](../scripts/probe-electron-cookie-ports.cjs).
+This reproduces the missing boundary in the browser engine. Per-drive ports
+remain useful for same-origin scripts and localStorage/IndexedDB, but full
+per-app browser-storage isolation is **not qualified**. A separate host, scheme,
+or session-partition design requires implementation and real browser testing
+before making that claim or distributing untrusted P2P pages as isolated apps.
