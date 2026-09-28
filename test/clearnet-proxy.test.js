@@ -312,7 +312,7 @@ test('HyperProxy routes /clearnet/* to clearnet handler', async () => {
   const req = new EventEmitter()
   req.method = 'GET'
   req.url = `/clearnet/${encodeClearnetTarget('https://example.com/')}`
-  req.headers = {}
+  req.headers = { host: '127.0.0.1:9876' }
   req.socket = { remoteAddress: '127.0.0.1' }
   const res = {
     statusCode: 200,
@@ -341,6 +341,7 @@ test('HyperProxy routes dynamic root paths using a clearnet referer', async () =
   req.method = 'GET'
   req.url = '/media/sites/js/app.js'
   req.headers = {
+    host: '127.0.0.1:51177',
     referer: `http://127.0.0.1:51177/clearnet/${encodeClearnetTarget('https://www.cnn.com/story')}`
   }
   req.socket = { remoteAddress: '127.0.0.1' }

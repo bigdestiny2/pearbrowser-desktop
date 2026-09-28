@@ -15,7 +15,7 @@ test('PearBrowser v3 uses an embedded Pear OTA worker behind a native Electron h
   assert.equal(pkg.main, 'electron/main.cjs')
   assert.equal(pkg.scripts.start, 'electron electron/main.cjs')
   assert.equal(pkg.dependencies?.['pear-runtime'], '1.3.1')
-  assert.equal(pkg.dependencies?.['pear-install'], '1.2.2')
+  assert.equal(pkg.dependencies?.['pear-install'], '1.3.0')
   assert.equal(pkg.updates, false)
   assert.equal(pkg.dependencies?.corestore, '^7.12.2')
   assert.equal(pkg.dependencies?.hypercore, '^11.35.2')

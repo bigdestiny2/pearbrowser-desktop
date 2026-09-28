@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { normalizeUrl, isClearnetUrl } from '../ui/lib/keys.js'
+import driveOrigin from '../backend/drive-origin.cjs'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const shell = readFileSync(join(root, 'ui/shell.js'), 'utf8')
@@ -11,6 +12,7 @@ const boot = readFileSync(join(root, 'ui/boot.js'), 'utf8')
 const index = readFileSync(join(root, 'backend/index.js'), 'utf8')
 const constants = readFileSync(join(root, 'backend/constants.js'), 'utf8')
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
+const { driveHostnameForKey } = driveOrigin
 
 test('normalizeUrl accepts clearnet hosts and https URLs', () => {
   assert.equal(normalizeUrl('example.com'), 'https://example.com')
@@ -18,6 +20,10 @@ test('normalizeUrl accepts clearnet hosts and https URLs', () => {
   assert.equal(isClearnetUrl('https://example.com'), true)
   assert.equal(isClearnetUrl('http://127.0.0.1:9/x'), false)
   assert.equal(isClearnetUrl('hyper://' + 'a'.repeat(64)), false)
+  const driveHost = driveHostnameForKey('a'.repeat(64))
+  assert.equal(isClearnetUrl(`http://${driveHost}:10001/hyper/x`), false)
+  assert.equal(normalizeUrl(`${driveHost}:10001/hyper/x`), `http://${driveHost}:10001/hyper/x`)
+  assert.equal(isClearnetUrl('https://example.localhost/x'), true)
 })
 
 test('pear.links allowlists clearnet schemes', () => {

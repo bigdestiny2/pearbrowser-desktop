@@ -2,10 +2,10 @@
   "ok": true,
   "schemaVersion": 1,
   "kind": "pearbrowser-origin-isolation-smoke-plan",
-  "generatedAt": "2026-07-04T13:57:11.924Z",
+  "generatedAt": "2026-09-26T18:52:42.222Z",
   "package": {
     "name": "pearbrowser-desktop",
-    "version": "0.5.2"
+    "version": "0.9.1"
   },
   "featureFlag": "PEARBROWSER_PER_DRIVE_ORIGINS=1",
   "proofKey": "pear-origin-isolation-proof",
@@ -21,6 +21,16 @@
       "label": "Pearfeed"
     }
   ],
+  "releaseGate": {
+    "status": "BLOCKED",
+    "reason": "The draft maps each drive to a distinct keyed .localhost cookie host. Fixture evidence and hand-authored capture JSON cannot establish packaged real-app browser provenance, so the release checker remains blocked.",
+    "requires": [
+      "Review the draft keyed .localhost host mapping and exact Host checks in the packaged build, including restart and listener lifecycle behavior.",
+      "A real Electron WebContents capture JSON showing both app URLs, WebContents IDs, origins, localStorage, cookies, and IndexedDB in one browser profile, with its matching SHA-256 digest.",
+      "A trusted Electron runtime capture/review integration must bind measured WebContents output to the tested build and profile; a human reviewer must confirm its provenance.",
+      "After that integration is implemented and independently reviewed, a passing origin-isolation evidence check must include cookie-host, storage, strict-CSP, lifecycle, and bridge proof."
+    ]
+  },
   "commands": [
     {
       "id": "launch-feature-flagged-desktop",
@@ -40,7 +50,7 @@
     {
       "id": "automated-origin-isolation-evidence",
       "command": "node scripts/generate-origin-isolation-smoke-evidence.mjs --plan 'docs/origin-isolation-smoke-plan-peerit-pearfeed-2026-07-02.json' --out origin-isolation-smoke-evidence.json --json",
-      "evidence": "Automated verifier emits a pearbrowser-origin-isolation-smoke-evidence artifact that passes check:origin-isolation-smoke-evidence."
+      "evidence": "Diagnostic-only HyperProxy/HttpBridge fixture. Its evidence artifact must remain blocked by the release checker; it does not observe Chromium cookies or storage."
     }
   ],
   "automatedVerifier": {
@@ -48,7 +58,8 @@
     "validatesWith": "npm run check:origin-isolation-smoke-evidence -- --file origin-isolation-smoke-evidence.json --json",
     "notes": [
       "Runs a local HyperProxy/HttpBridge harness with per-drive origins enabled.",
-      "Uses the plan apps as the two drive identities and exercises origin split, strict-CSP injection, storage isolation, listener release, and bridge routes."
+      "Uses the plan apps as fixture drive identities and exercises proxy, CSP injection, listener release, and bridge routes.",
+      "Fixture storage buckets are simulated. The release checker must block this output until trusted packaged-app Electron capture and independent review exist."
     ]
   },
   "manualSteps": [
@@ -60,7 +71,12 @@
     {
       "id": "origin-split",
       "action": "In each tab, record `location.origin` from DevTools.",
-      "evidence": "The two origins are different loopback origins, normally different `127.0.0.1:<port>` values."
+      "evidence": "Record both exact origins and keyed .localhost hostnames. Confirm they differ for the two real apps in one Electron profile."
+    },
+    {
+      "id": "cookie-host-design",
+      "action": "Review the draft per-drive keyed .localhost host design and verify App A and App B use distinct cookie hostnames in one Electron profile.",
+      "evidence": "Design review and Electron navigation capture show a scalable mapping from each drive key to its own cookie host, including restart and listener lifecycle behavior."
     },
     {
       "id": "storage-write-a",
@@ -70,7 +86,12 @@
     {
       "id": "storage-read-b",
       "action": "Run the read snippet in Pearfeed.",
-      "evidence": "Pearfeed reports a different origin and reads no pear-origin-isolation-proof value from localStorage, cookie, or IndexedDB."
+      "evidence": "Pearfeed reports a different cookie host and reads no pear-origin-isolation-proof value from localStorage, cookie, or IndexedDB in the same real Electron profile."
+    },
+    {
+      "id": "electron-storage-capture",
+      "action": "Capture both page results from actual Electron WebContents, along with the browser build/source commit, OS, one-profile identifier, and artifact path. Attach the unmodified capture to the release evidence.",
+      "evidence": "Record storage.capture.kind, artifact path, and matching SHA-256, then have a human reviewer inspect WebContents IDs, runtime version, timestamp, build, and one-profile provenance. The current checker still blocks this hand-authored record until trusted runtime capture/review integration exists."
     },
     {
       "id": "strict-csp-real-app",
@@ -89,7 +110,7 @@
     }
   ],
   "snippets": {
-    "writeStorageInAppA": "(async () => {\n  const key = \"pear-origin-isolation-proof\"\n  const value = \"peerit-1783173431924\"\n  localStorage.setItem(key, value)\n  document.cookie = key + '=' + value + '; SameSite=Lax'\n  await new Promise((resolve, reject) => {\n    const request = indexedDB.open(key, 1)\n    request.onupgradeneeded = () => request.result.createObjectStore('proof')\n    request.onerror = () => reject(request.error)\n    request.onsuccess = () => {\n      const db = request.result\n      const tx = db.transaction('proof', 'readwrite')\n      tx.objectStore('proof').put(value, 'value')\n      tx.oncomplete = () => { db.close(); resolve() }\n      tx.onerror = () => reject(tx.error)\n    }\n  })\n  return { origin: location.origin, value, localStorage: localStorage.getItem(key), cookie: document.cookie }\n})()",
+    "writeStorageInAppA": "(async () => {\n  const key = \"pear-origin-isolation-proof\"\n  const value = \"peerit-1790448762222\"\n  localStorage.setItem(key, value)\n  document.cookie = key + '=' + value + '; SameSite=Lax'\n  await new Promise((resolve, reject) => {\n    const request = indexedDB.open(key, 1)\n    request.onupgradeneeded = () => request.result.createObjectStore('proof')\n    request.onerror = () => reject(request.error)\n    request.onsuccess = () => {\n      const db = request.result\n      const tx = db.transaction('proof', 'readwrite')\n      tx.objectStore('proof').put(value, 'value')\n      tx.oncomplete = () => { db.close(); resolve() }\n      tx.onerror = () => reject(tx.error)\n    }\n  })\n  return { origin: location.origin, value, localStorage: localStorage.getItem(key), cookie: document.cookie }\n})()",
     "readStorageInAppB": "(async () => {\n  const key = \"pear-origin-isolation-proof\"\n  const indexedValue = await new Promise((resolve) => {\n    const request = indexedDB.open(key)\n    request.onerror = () => resolve(null)\n    request.onupgradeneeded = () => { request.transaction.abort(); resolve(null) }\n    request.onsuccess = () => {\n      const db = request.result\n      if (!db.objectStoreNames.contains('proof')) { db.close(); resolve(null); return }\n      const tx = db.transaction('proof', 'readonly')\n      const get = tx.objectStore('proof').get('value')\n      get.onsuccess = () => { db.close(); resolve(get.result || null) }\n      get.onerror = () => { db.close(); resolve(null) }\n    }\n  })\n  return { origin: location.origin, localStorage: localStorage.getItem(key), cookie: document.cookie, indexedDB: indexedValue }\n})()"
   },
   "evidenceTemplate": {
@@ -113,6 +134,11 @@
     ],
     "storage": {
       "proofKey": "pear-origin-isolation-proof",
+      "capture": {
+        "kind": "electron-webcontents",
+        "artifact": "",
+        "sha256": ""
+      },
       "writtenValue": "<value returned by the app A write snippet>",
       "appA": {
         "localStorage": "<app A localStorage value>",
@@ -148,19 +174,73 @@
     ],
     "automatedVerifier": {
       "command": "npm run -s generate:origin-isolation-smoke-evidence -- --plan 'docs/origin-isolation-smoke-plan-peerit-pearfeed-2026-07-02.json' --out origin-isolation-smoke-evidence.json --json",
-      "validatesWith": "npm run check:origin-isolation-smoke-evidence -- --file origin-isolation-smoke-evidence.json --json"
+      "validatesWith": "npm run check:origin-isolation-smoke-evidence -- --file origin-isolation-smoke-evidence.json --json",
+      "note": "Diagnostic fixture scaffold only. It must not be relabeled as browser evidence; a future trusted Electron capture/review integration is required."
     }
+  },
+  "browserCaptureRequiredShape": {
+    "kind": "pearbrowser-electron-webcontents-storage-capture",
+    "runtime": {
+      "name": "Electron",
+      "version": "<version from the tested Electron process>"
+    },
+    "capturedAt": "<ISO timestamp from the capture>",
+    "apps": [
+      {
+        "webContentsId": "<positive integer for app A native view>",
+        "url": "hyper://ec6e2d6d9d22b9d6b40e11a9ca3042be3197e4bdca9e9a7f079be6ee830761b4/",
+        "origin": "<actual location.origin>",
+        "storage": {
+          "localStorage": "<measured value or null>",
+          "indexedDB": "<measured value or null>",
+          "cookie": "<measured document.cookie>"
+        },
+        "viewKind": "top-level-native",
+        "rootFrameId": "<root frame id of this native WebContents>",
+        "pageUrl": "<exact bound http://d-<key>.localhost:<port>/hyper/<key>/ URL>",
+        "cookies": {
+          "defaultHostOnly": "<true after a cookie with omitted SameSite is present on only this keyed host>",
+          "sameSiteLax": "<true only after measured Lax cookie is present>",
+          "httpOnlyLax": "<true only after measured HttpOnly Lax cookie is present>",
+          "hostOnly": "<true only when cookies are scoped to this exact keyed hostname>",
+          "appAProofVisible": "<true for app A, false for app B>",
+          "appADefaultProofVisible": "<true for app A, false for app B>"
+        }
+      },
+      {
+        "webContentsId": "<different positive integer for app B native view>",
+        "url": "hyper://5c2807c5ba1383e55d69a2fe5085fdeb563e2e18f175f363f3f18437219c1aec/",
+        "origin": "<actual location.origin>",
+        "storage": {
+          "localStorage": "<measured value or null>",
+          "indexedDB": "<measured value or null>",
+          "cookie": "<measured document.cookie>"
+        },
+        "viewKind": "top-level-native",
+        "rootFrameId": "<root frame id of this native WebContents>",
+        "pageUrl": "<exact bound http://d-<key>.localhost:<port>/hyper/<key>/ URL>",
+        "cookies": {
+          "defaultHostOnly": "<true after a cookie with omitted SameSite is present on only this keyed host>",
+          "sameSiteLax": "<true only after measured Lax cookie is present>",
+          "httpOnlyLax": "<true only after measured HttpOnly Lax cookie is present>",
+          "hostOnly": "<true only when cookies are scoped to this exact keyed hostname>",
+          "appAProofVisible": "<true for app A, false for app B>",
+          "appADefaultProofVisible": "<true for app A, false for app B>"
+        }
+      }
+    ]
   },
   "acceptance": [
     "Feature flag is enabled for the launched desktop process.",
-    "Two app tabs report different `location.origin` values.",
-    "Data written in App A localStorage, cookie, and IndexedDB is not visible in App B.",
+    "Two app tabs report different `location.origin` values and different cookie hostnames.",
+    "The two apps are distinct top-level native WebContentsViews with different root frame and WebContents IDs; default, Lax, and HttpOnly cookies stay on their keyed hosts.",
+    "A trusted Electron runtime capture/review flow proves, from one browser profile, that App A localStorage, cookie, and IndexedDB values are not visible in App B.",
     "Strict-CSP real app compatibility is recorded.",
     "Tab close/navigation-away does not leave the browser in a broken listener state.",
     "At least one real app bridge flow still passes under the feature flag."
   ],
   "remainingIfPassed": [
-    "Decide LRU/default-on listener policy.",
-    "Record the smoke evidence in the release evidence log before flipping the feature flag default-on."
+    "Review the cookie-isolating host design and listener lifecycle on supported desktop platforms.",
+    "Only after the trusted capture/review gate is implemented should the operator record a passing checker report and make a release claim."
   ]
 }

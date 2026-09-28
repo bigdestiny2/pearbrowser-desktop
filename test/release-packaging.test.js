@@ -24,6 +24,7 @@ const { SEED_APPS } = require('../backend/catalogue-seed.js')
 const rootLicense = readFileSync(new URL('../LICENSE', import.meta.url), 'utf8')
 const nativeReleaseWorkflow = readFileSync(new URL('../.github/workflows/desktop-native-release.yml', import.meta.url), 'utf8')
 const desktopCiWorkflow = readFileSync(new URL('../.github/workflows/desktop-ci.yml', import.meta.url), 'utf8')
+const prPackageProofWorkflow = readFileSync(new URL('../.github/workflows/desktop-pr-package-proof.yml', import.meta.url), 'utf8')
 const applingArtifactCollector = readFileSync(new URL('../scripts/collect-appling-artifacts.mjs', import.meta.url), 'utf8')
 const applingArtifactCollectorPath = fileURLToPath(new URL('../scripts/collect-appling-artifacts.mjs', import.meta.url))
 const nativeSigningCheck = readFileSync(new URL('../scripts/check-native-signing-credentials.mjs', import.meta.url), 'utf8')
@@ -189,6 +190,7 @@ function writeCompleteReleaseEvidenceFixture (path) {
 | Gate | Expected | Result | Evidence |
 | --- | --- | --- | --- |
 | Public-trust readiness | all machine gates represented | PASS | fixture command output |
+| Current P2P app cookie isolation | real packaged Electron app proof | PASS | synthetic fixture claim; trusted capture is intentionally absent |
 
 ## Announcement Decision
 
@@ -570,6 +572,26 @@ test('desktop CI checks out and guards the HiveRelay 0.20.2 release contract', (
   assert.match(desktopCiWorkflow, /npm ci/)
   assert.doesNotMatch(desktopCiWorkflow, /Checkout HiveRelay workspace packages/)
   assert.doesNotMatch(desktopCiWorkflow, /vendor\/hiverelay/)
+})
+
+test('native Hyper tab Electron smoke gates desktop CI and every native package matrix', () => {
+  assert.equal(pkg.scripts?.['check:electron-native-tabs'], 'node scripts/check-electron-native-tabs-runner.cjs')
+  assert.match(desktopCiWorkflow, /sudo chmod 4755 "\$sandbox"/)
+  assert.match(desktopCiWorkflow, /run: xvfb-run -a npm run -s check:electron-native-tabs/)
+
+  for (const [name, workflow, buildStep] of [
+    ['PR package proof', prPackageProofWorkflow, 'Build ad-hoc macOS or unsigned Linux package'],
+    ['native release', nativeReleaseWorkflow, 'Build macOS Electron directory']
+  ]) {
+    for (const runner of ['macOS Apple Silicon', 'macOS Intel', 'Windows x64', 'Linux x64']) {
+      assert.ok(workflow.includes(runner), name + ' is missing ' + runner)
+    }
+    assert.match(workflow, /if: runner\.os != 'Linux'\n\s+run: npm run -s check:electron-native-tabs/)
+    assert.match(workflow, /if: runner\.os == 'Linux'\n\s+run: xvfb-run -a npm run -s check:electron-native-tabs/)
+    assert.match(workflow, /sudo chmod 4755 "\$sandbox"/)
+    assert.ok(workflow.indexOf('Probe first-party Hyper tabs in Electron') < workflow.indexOf(buildStep), name + ' must run native-tab integration before packaging')
+    assert.doesNotMatch(workflow, /--no-sandbox/)
+  }
 })
 
 test('RelayClient uses scheme-aware transport for public HTTPS gateways', () => {
@@ -2112,7 +2134,7 @@ test('package-manager manifest generator gates package-proof assets by default',
   }
 })
 
-test('public-trust readiness checker passes when all release gates are represented', () => {
+test('public-trust readiness blocks only unverified cookie capture when other gates pass', () => {
   const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'pear-public-trust-readiness-')))
   try {
     const { releasePath } = writePublicTrustReleaseFixture(fixture)
@@ -2136,14 +2158,15 @@ test('public-trust readiness checker passes when all release gates are represent
       env: publicTrustSigningEnv()
     })
 
-    assert.equal(result.status, 0, result.stderr || result.stdout)
+    assert.equal(result.status, 1, result.stderr || result.stdout)
     const report = JSON.parse(result.stdout)
-    assert.equal(report.ok, true)
+    assert.equal(report.ok, false)
     assert.equal(report.mode, 'public-trust')
     assert.equal(report.sourceRef, immutableSourceRef)
     assert.equal(report.checks.length, 8)
-    assert.deepEqual(report.blockers, [])
-    assert.ok(report.checks.every((check) => check.ok))
+    assert.deepEqual(report.blockers.map((blocker) => blocker.check), ['release-evidence'])
+    assert.match(report.blockers[0].message, /trusted origin-isolation evidence did not pass/)
+    assert.ok(report.checks.filter((check) => check.id !== 'release-evidence').every((check) => check.ok))
     assert.ok(report.checks.find((check) => check.id === 'native-install-smoke-plan').command.includes(`--source-ref ${immutableSourceRef}`))
     assert.equal(report.checks.find((check) => check.id === 'linux-appimage-metadata').status, 'pass')
     assert.match(report.checks.find((check) => check.id === 'published-provenance').summary, new RegExp(`sourceRef=${immutableSourceRef}`))
@@ -2221,9 +2244,12 @@ test('public-trust readiness checker can read signing gate from GitHub Actions s
       env: {}
     })
 
-    assert.equal(result.status, 0, result.stderr || result.stdout)
+    assert.equal(result.status, 1, result.stderr || result.stdout)
     const report = JSON.parse(result.stdout)
-    assert.equal(report.ok, true)
+    assert.equal(report.ok, false)
+    assert.deepEqual(report.blockers.map((blocker) => blocker.check), ['release-evidence'])
+    assert.match(report.blockers[0].message, /trusted origin-isolation evidence did not pass/)
+    assert.ok(report.checks.filter((check) => check.id !== 'release-evidence').every((check) => check.ok))
     const nativeSigning = report.checks.find((check) => check.id === 'native-signing')
     assert.equal(nativeSigning.status, 'warn')
     assert.match(nativeSigning.command, /--secret-source github/)

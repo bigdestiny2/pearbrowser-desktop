@@ -97,6 +97,16 @@ function buildPlan ({ appA, appB, runtimeCommand, sourcePlan = '' }) {
     featureFlag: FEATURE_FLAG,
     proofKey: PROOF_KEY,
     apps: [appA, appB],
+    releaseGate: {
+      status: 'BLOCKED',
+      reason: 'The draft maps each drive to a distinct keyed .localhost cookie host. Fixture evidence and hand-authored capture JSON cannot establish packaged real-app browser provenance, so the release checker remains blocked.',
+      requires: [
+        'Review the draft keyed .localhost host mapping and exact Host checks in the packaged build, including restart and listener lifecycle behavior.',
+        'A real Electron WebContents capture JSON showing both app URLs, WebContents IDs, origins, localStorage, cookies, and IndexedDB in one browser profile, with its matching SHA-256 digest.',
+        'A trusted Electron runtime capture/review integration must bind measured WebContents output to the tested build and profile; a human reviewer must confirm its provenance.',
+        'After that integration is implemented and independently reviewed, a passing origin-isolation evidence check must include cookie-host, storage, strict-CSP, lifecycle, and bridge proof.'
+      ]
+    },
     commands: [
       {
         id: 'launch-feature-flagged-desktop',
@@ -116,7 +126,7 @@ function buildPlan ({ appA, appB, runtimeCommand, sourcePlan = '' }) {
       {
         id: 'automated-origin-isolation-evidence',
         command: nodeVerifierCommand,
-        evidence: 'Automated verifier emits a pearbrowser-origin-isolation-smoke-evidence artifact that passes check:origin-isolation-smoke-evidence.'
+        evidence: 'Diagnostic-only HyperProxy/HttpBridge fixture. Its evidence artifact must remain blocked by the release checker; it does not observe Chromium cookies or storage.'
       }
     ],
     automatedVerifier: {
@@ -124,7 +134,8 @@ function buildPlan ({ appA, appB, runtimeCommand, sourcePlan = '' }) {
       validatesWith: 'npm run check:origin-isolation-smoke-evidence -- --file origin-isolation-smoke-evidence.json --json',
       notes: [
         'Runs a local HyperProxy/HttpBridge harness with per-drive origins enabled.',
-        'Uses the plan apps as the two drive identities and exercises origin split, strict-CSP injection, storage isolation, listener release, and bridge routes.'
+        'Uses the plan apps as fixture drive identities and exercises proxy, CSP injection, listener release, and bridge routes.',
+        'Fixture storage buckets are simulated. The release checker must block this output until trusted packaged-app Electron capture and independent review exist.'
       ]
     },
     manualSteps: [
@@ -136,7 +147,12 @@ function buildPlan ({ appA, appB, runtimeCommand, sourcePlan = '' }) {
       {
         id: 'origin-split',
         action: 'In each tab, record `location.origin` from DevTools.',
-        evidence: 'The two origins are different loopback origins, normally different `127.0.0.1:<port>` values.'
+        evidence: 'Record both exact origins and keyed .localhost hostnames. Confirm they differ for the two real apps in one Electron profile.'
+      },
+      {
+        id: 'cookie-host-design',
+        action: 'Review the draft per-drive keyed .localhost host design and verify App A and App B use distinct cookie hostnames in one Electron profile.',
+        evidence: 'Design review and Electron navigation capture show a scalable mapping from each drive key to its own cookie host, including restart and listener lifecycle behavior.'
       },
       {
         id: 'storage-write-a',
@@ -146,7 +162,12 @@ function buildPlan ({ appA, appB, runtimeCommand, sourcePlan = '' }) {
       {
         id: 'storage-read-b',
         action: `Run the read snippet in ${appB.label}.`,
-        evidence: `${appB.label} reports a different origin and reads no ${PROOF_KEY} value from localStorage, cookie, or IndexedDB.`
+        evidence: `${appB.label} reports a different cookie host and reads no ${PROOF_KEY} value from localStorage, cookie, or IndexedDB in the same real Electron profile.`
+      },
+      {
+        id: 'electron-storage-capture',
+        action: 'Capture both page results from actual Electron WebContents, along with the browser build/source commit, OS, one-profile identifier, and artifact path. Attach the unmodified capture to the release evidence.',
+        evidence: 'Record storage.capture.kind, artifact path, and matching SHA-256, then have a human reviewer inspect WebContents IDs, runtime version, timestamp, build, and one-profile provenance. The current checker still blocks this hand-authored record until trusted runtime capture/review integration exists.'
       },
       {
         id: 'strict-csp-real-app',
@@ -169,17 +190,28 @@ function buildPlan ({ appA, appB, runtimeCommand, sourcePlan = '' }) {
       readStorageInAppB: readSnippet
     },
     evidenceTemplate: buildEvidenceTemplate({ appA, appB, automatedVerifierCommand: npmVerifierCommand }),
+    browserCaptureRequiredShape: {
+      kind: 'pearbrowser-electron-webcontents-storage-capture',
+      runtime: { name: 'Electron', version: '<version from the tested Electron process>' },
+      capturedAt: '<ISO timestamp from the capture>',
+      apps: [appA, appB].map((app) => ({
+        webContentsId: '<positive integer from the actual WebContents>',
+        url: app.url,
+        origin: '<actual location.origin>',
+        storage: { localStorage: '<measured value or null>', indexedDB: '<measured value or null>', cookie: '<measured document.cookie>' }
+      }))
+    },
     acceptance: [
       'Feature flag is enabled for the launched desktop process.',
-      'Two app tabs report different `location.origin` values.',
-      'Data written in App A localStorage, cookie, and IndexedDB is not visible in App B.',
+      'Two app tabs report different `location.origin` values and different cookie hostnames.',
+      'A trusted Electron runtime capture/review flow proves, from one browser profile, that App A localStorage, cookie, and IndexedDB values are not visible in App B.',
       'Strict-CSP real app compatibility is recorded.',
       'Tab close/navigation-away does not leave the browser in a broken listener state.',
       'At least one real app bridge flow still passes under the feature flag.'
     ],
     remainingIfPassed: [
-      'Decide LRU/default-on listener policy.',
-      'Record the smoke evidence in the release evidence log before flipping the feature flag default-on.'
+      'Review the cookie-isolating host design and listener lifecycle on supported desktop platforms.',
+      'Only after the trusted capture/review gate is implemented should the operator record a passing checker report and make a release claim.'
     ]
   }
 }
@@ -206,6 +238,11 @@ function buildEvidenceTemplate ({ appA, appB, automatedVerifierCommand }) {
     ],
     storage: {
       proofKey: PROOF_KEY,
+      capture: {
+        kind: 'electron-webcontents',
+        artifact: '', // Set only after attaching a real Electron capture; empty keeps this template blocked.
+        sha256: '' // SHA-256 of those exact capture file bytes; empty keeps this template blocked.
+      },
       writtenValue: '<value returned by the app A write snippet>',
       appA: {
         localStorage: '<app A localStorage value>',
@@ -241,7 +278,8 @@ function buildEvidenceTemplate ({ appA, appB, automatedVerifierCommand }) {
     ],
     automatedVerifier: {
       command: automatedVerifierCommand,
-      validatesWith: 'npm run check:origin-isolation-smoke-evidence -- --file origin-isolation-smoke-evidence.json --json'
+      validatesWith: 'npm run check:origin-isolation-smoke-evidence -- --file origin-isolation-smoke-evidence.json --json',
+      note: 'Diagnostic fixture scaffold only. It must not be relabeled as browser evidence; a future trusted Electron capture/review integration is required.'
     }
   }
 }
@@ -305,6 +343,7 @@ function printMarkdown (report) {
   console.log('# PearBrowser Origin Isolation Smoke Plan\n')
   console.log(`Package: \`${report.package.name}@${report.package.version}\``)
   console.log(`Feature flag: \`${report.featureFlag}\`\n`)
+  console.log(`Release gate: ${report.releaseGate.status} — ${report.releaseGate.reason}\n`)
 
   console.log('## Apps\n')
   for (const app of report.apps) {
@@ -340,6 +379,12 @@ function printMarkdown (report) {
   console.log(JSON.stringify(report.evidenceTemplate, null, 2))
   console.log('```')
 
-  console.log('\n## Acceptance\n')
+  console.log('\n## Required Electron Capture Shape\n')
+  console.log('```json')
+  console.log(JSON.stringify(report.browserCaptureRequiredShape, null, 2))
+  console.log('```')
+  console.log('This is a required shape, not release proof. A trusted Electron runtime capture/review integration and human provenance review must exist before the checker can verify it; do not hand-fill it or relabel fixture output.\n')
+
+  console.log('## Acceptance\n')
   for (const item of report.acceptance) console.log(`- ${item}`)
 }

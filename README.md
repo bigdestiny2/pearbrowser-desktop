@@ -2,6 +2,8 @@
 
 A local-first peer-to-peer browser, app store, search engine, naming layer, Nostr bridge, and site publisher for macOS, Windows, and Linux, built on the Pear Runtime.
 
+**2026-09-28 desktop draft:** The Pear 3.4 host contract and an isolated upstream Autobee 2 compatibility test are in PR #84. The candidate assigns each drive a distinct `.localhost` host; a local Electron 43.2 probe passed cookie and storage separation. Integrated packaged-app capture, other desktop platforms, and public signing remain release gates. See [candidate status and evidence](./docs/PEARBROWSER_UPDATE_CANDIDATE_2026-09-26.md).
+
 **No accounts. No DNS. Local-first data.** Sites are addressed by stable Hyperdrive keys and can be pinned on the [HiveRelay](https://github.com/bigdestiny2/P2P-Hiverelay) backbone. Native applications are installed from verified packages; a catalogue never turns a remote executable link into a runtime command.
 
 **HiveRelay compatibility baseline:** the relay fleet/source stable line is
@@ -18,7 +20,7 @@ The candidate makes the embedded-Electron window render (the shell is now an
 esbuild bundle — bare specifiers never resolved over `file://`), stops the
 renderer racing backend boot, repairs the Settings relay capability checks
 (`bare-https` has no `get()` shorthand), and aligns the reviewed runtime cohort
-with Pear 3.3.0. It is not a published release until its public-trust native
+with Pear 3.4.0. It is not a published release until its public-trust native
 assets and release gates pass. See
 [docs/RELEASE_NOTES_v0.9.1.md](./docs/RELEASE_NOTES_v0.9.1.md).
 
@@ -79,7 +81,7 @@ package for your platform, and use the migration guidance in
 - Install an explicitly configured Pear v3 build through a host-confirmed native action. Catalogue rows use `nativeDelivery: { status: "available", kind: "pear-v3", installLink: "pear://…" }`; the installed app owns its own runtime, storage, windows, and OTA lifecycle.
 - A top-level `pear://` or `file://` row remains a **legacy migration record**. PearBrowser never sends catalogue values to `PearRuntime.run()`.
 - Native Pear apps and installed Hyperdrive sites are tracked separately: sites launch through the tab proxy, while native apps launch through the operating system.
-- Load decentralized catalogues from Hyperdrive JSON, signed Hyperbee, Autobee, schema-sheets rooms, HiveRelay index rooms, default curated seeds, community submissions, and your own writable catalogues
+- Load decentralized catalogues from Hyperdrive JSON, signed Hyperbee, experimental Autobase-backed collaborative catalogues (historically labelled Autobee), schema-sheets rooms, HiveRelay index rooms, default curated seeds, community submissions, and your own writable catalogues
 - Keep multiple catalogs loaded at once with search, category, and source filters across the aggregated app store
 - **My Catalog:** create a writable personal catalog, add apps from loaded catalogs or installed apps, rename it, edit saved metadata (name, description, version, author, categories), and share the catalog key; copies opened without the writer key stay read-only
 - Safe catalogue normalization accepts `apps[]`, `items[]`, or `entries[]`, classifies `hyper://` as browsable content, classifies compatible signed package releases for install, retains `pear://`/`file://` only for migration, rejects malformed targets, and strips prototype-pollution keys before rendering
@@ -244,7 +246,8 @@ evidence. Signing credentials remain external operator prerequisites.
 | `npm run -s generate:native-install-snippet -- --tag <tag>` | Emits release-note/install-page Markdown for the recommended desktop packages and checksum sidecars. |
 | `npm run -s generate:native-install-guide -- --tag <tag>` | Emits the full user-facing native install guide with direct package and checksum links. |
 | `npm run -s generate:native-install-smoke-plan -- --tag <tag> --source-ref <40-hex-sha>` | Emits clean-host install smoke commands, a commit-pinned runtime diagnostic, and evidence bullets for macOS, Windows, and Linux. Package-proof mode requires downloaded Actions artifact metadata via `--fixture`. |
-| `npm run -s generate:origin-isolation-smoke-evidence -- --plan docs/origin-isolation-smoke-plan-peerit-pearfeed-2026-07-02.json --out docs/origin-isolation-smoke-evidence-peerit-pearfeed-2026-07-04.json --json` | Runs the automated Peerit/Pearfeed per-drive-origin verifier and writes the evidence artifact consumed by `check:origin-isolation-smoke-evidence`. |
+| `npm run -s generate:origin-isolation-smoke-evidence -- --plan docs/origin-isolation-smoke-plan-peerit-pearfeed-2026-07-02.json --out origin-isolation-fixture.json --json` | Runs a diagnostic HyperProxy/HttpBridge fixture. It cannot certify Chromium storage or cookie isolation; the distinct-host candidate has a separate real Electron probe, while the release checker still requires trusted integrated runtime capture and review. |
+| `npm run check:electron-hyper-proxy-integration` | Uses two synthetic drives through the actual HyperProxy in disposable Electron BrowserWindows to check origin storage, API tokens, and route denial. Diagnostic only; packaged real-app evidence is still required. |
 | `npm run generate:package-manager-manifests -- --tag <tag>` | Emits Homebrew Cask and WinGet manifest drafts from release assets; defaults to public-trust gates. |
 | `npm run check:public-trust-readiness -- --tag <tag> --source-ref <40-hex-sha>` | Aggregates the public-trust signing, published asset, download, Linux metadata, clean-install smoke-plan, package-manager draft, and evidence-log gates. The immutable source SHA is mandatory; use `--signing-secret-source github --signing-github-environment production` to verify protected-environment secret names. |
 | `npm run -s generate:public-trust-operator-report -- --tag <tag>` | Formats the public-trust readiness state into a Markdown handoff with grouped blockers and exact next commands, including the release-evidence handoff. |
@@ -266,7 +269,9 @@ The packaged host verifies a build-unique Ed25519-signed SHA-256 inventory of
 the complete physical Pear runtime before loading any unpacked worker or
 dependency. The verification key and release identity live in integrity-sealed
 `app.asar`; hardened Electron fuses also disable RunAsNode, `NODE_OPTIONS`, and
-CLI inspector entry points and enable encrypted cookies.
+CLI inspector entry points. Cookie encryption remains enabled for public-trust
+and Windows/Linux package-proof builds; ad-hoc macOS package-proof builds leave
+that fuse disabled so fresh-profile first launch can complete.
 
 The two release modes have deliberately different authority:
 

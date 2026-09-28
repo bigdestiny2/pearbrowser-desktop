@@ -1,5 +1,50 @@
 # Release Smoke Evidence Log - 2026-06-23
 
+**2026-09-28 first-party tab candidate update:** Desktop source now places
+Hyperdrive pages in top-level native WebContentsViews with exact keyed hosts.
+At source `88d10d75e5e44a50f0a6aaa2195e96b8fc142d36`, the full
+suite passed 985 tests with six skips. The ad-hoc Apple Silicon package
+passed source, runtime inventory, and fuse checks. A fresh-profile Browse
+diagnostic with real Peerit and Pearfeed passed 11/11 native-target,
+HTTP-200, default/Lax plus CDP-set HttpOnly cookie, storage, bridge-presence,
+Peerit strict-CSP/bridge, and tab-close checks. The synthetic Electron server
+separately passed a real HTTP `Set-Cookie` roundtrip for default/Lax/HttpOnly.
+The private diagnostic artifact is
+`/tmp/pear-native-tabs-peerit-pearfeed-lifecycle.json`. The checker still
+forces `trusted-electron-capture` to fail until an exact signed public-trust
+package and independent real-app review exist. Published v0.9.0 page
+storage under shared `127.0.0.1` origins is not automatically carried into
+the dedicated native-view session. The old bytes remain, but users may need
+app sign-in or client-state recovery. The current [PR checks](https://github.com/bigdestiny2/pearbrowser-desktop/pull/84/checks)
+show hosted native-tab results for the latest pushed head; this local package
+rehearsal is separate. No signed real-app capture is claimed. Desktop v0.9.1
+remains **HOLD**.
+
+**2026-09-28 earlier desktop status:** The release checker runs the trusted
+origin-isolation verifier for the P2P cookie row. A textual PASS, DEFER, or
+removed row cannot clear the gate. The current native-view candidate requires
+top-level target captures from two real apps in the exact signed package and
+independent review. The result is
+**53 PASS / 18 DEFER / 1 FAIL**. At exact source head
+`2503724299a1596ef812fd851b18e9f2e76ee902`,
+[Desktop CI](https://github.com/bigdestiny2/pearbrowser-desktop/actions/runs/36437255547)
+and the [four-platform PR package proof](https://github.com/bigdestiny2/pearbrowser-desktop/actions/runs/36437255572)
+passed, including Intel first-window/reload and the complete review-bundle
+verifier. Packaged macOS QVAC 0.54.0 addons passed a native link check without
+the older Intel Homebrew OpenSSL dependency. Local native model and Chromium
+loopback `window.pear.ai` streaming diagnostics passed, but no published P2P
+app journey was tested. These ad-hoc/unsigned packages do not establish public
+trust. macOS Developer ID/notarization and Windows PFX credentials,
+clean-install evidence, and trusted real-app cookie capture remain open.
+Desktop `v0.9.1` remains **HOLD**; mobile remains held separately. See the
+[current candidate follow-up](PEARBROWSER_UPDATE_CANDIDATE_2026-09-26.md#2026-09-28-current-follow-up-origin-gate-and-intel-first-window).
+
+**2026-09-28 earlier follow-up:** The desktop draft PR added a disposable real-HyperProxy Electron smoke using synthetic drives; the local macOS run passed. Its PR-only package matrix added review-only checksummed artifacts and a complete-bundle verifier; [run 36400696929](https://github.com/bigdestiny2/pearbrowser-desktop/actions/runs/36400696929) passed for prior source head `7d68aac`. Check [PR #84's current head](https://github.com/bigdestiny2/pearbrowser-desktop/pull/84/checks) before relying on CI. The separate protected `package-proof` workflow rejected this branch before native build jobs, and its protection was not changed. At that point, release evidence was 54 PASS / 17 DEFER / 1 FAIL for trusted packaged real-app cookie isolation. See [the candidate follow-up](PEARBROWSER_UPDATE_CANDIDATE_2026-09-26.md#2026-09-28-follow-up-named-host-integration-and-pr-artifacts).
+
+**2026-09-26 correction:** The July origin-isolation storage PASS was based on an in-memory simulation. A real Electron 43.2.0 probe found cookies shared across loopback ports; the current evidence checker now blocks that artifact. See [the origin-isolation correction](ORIGIN_ISOLATION_MIGRATION_2026-07-02.md#2026-09-26-correction-cookie-isolation-remains-open).
+
+**2026-09-28 earlier candidate audit:** Draft desktop PR [#84](https://github.com/bigdestiny2/pearbrowser-desktop/pull/84) passed its Ubuntu test CI and a local arm64 macOS package/integrity/runtime smoke from PR head `4b2f43c`. The packaged app connected to DHT and two HiveRelays with a disposable profile. At that point `check:release-evidence` reported 54 PASS / 17 DEFER / 1 FAIL because the then-published P2P app cookies were shared across same-host loopback ports. Public-trust signing secret names and `v0.9.1` release assets are absent; Windows/Linux package, clean-install, and human journey proof were pending at that point. [Website PR #7](https://github.com/bigdestiny2/pearbrowser-com/pull/7) made HTTPS and its downloads metadata live at the already published `v0.9.0`, while the Hyperdrive website remains an older edition. The historical rows and announcement decision below document their original scope; they are not a `v0.9.1` GO decision. See the [earlier candidate audit](PEARBROWSER_UPDATE_CANDIDATE_2026-09-26.md#2026-09-28-earlier-release-audit).
+
 Purpose: operator-filled proof log for the final PearBrowser community release
 smoke. This file pairs with `docs/MANUAL_RELEASE_SMOKE_2026-06-23.md`.
 
@@ -70,7 +115,8 @@ manual gate.
 | Production browser launch | stable `pear://tco5k7...` opens and backend connects | PASS | 2026-07-15 released stable production length `63158` (from `45758`), then launched that exact `pear://` address. The new v0.6.0 stack initialized QVAC approved models, the per-drive tab runtime, renderer, proxy, DHT, and HiveRelay connections; a fresh-peer metadata/content scan verified `8515` release entries and all forbidden release paths absent. Five relays accepted the 365-day pin and the durable seeder observed five live remote replication peers. |
 | Runtime RPC smoke | `/status-smoke` reports DHT/proxy/relay readiness | PASS | 2026-07-15 runtime smoke against the released stable address returned `ok:true`, RPC `9876`, `dhtConnected:true`, `peerCount:10`, a live proxy port, and `hiveRelays:10`. The existing local production profile reported storage `123%` (`1.32 GB` against a `1 GB` target); this is a local-profile cleanup risk, not a launch/connectivity failure, and would fail the separate strict clean-profile `--max-storage-percent 100` demo gate. |
 | Release RPC story smoke | nonvisual homepage/catalogue/local-story/site-publish preflight, no third-party app launch | PASS | 2026-07-15 candidate run with `--site-story` passed at storage `13%`, including a temporary site with `3` relay acceptances and `2` replication peers before cleanup. After release, the same smoke against stable production length `63158` returned `ok:true`, DHT connected, `9` peers, `9` HiveRelays, homepage HTTP `200` with `59063` bytes, `2` catalogues and `14` apps, local search/naming/library/session stories, all first-party desktop GUI stories, and safe `peerit` HTTP `200`; Peercord stayed a standalone contract with no automated trust approval. |
-| Feature-flagged origin isolation smoke | `check:origin-isolation-smoke-evidence` verifies Peerit/Pearfeed drive identities, split loopback origins, storage split, strict-CSP compatibility, tab lifecycle, and bridge routes | PASS | 2026-07-04 automated verifier generated `docs/origin-isolation-smoke-evidence-peerit-pearfeed-2026-07-04.json` from `docs/origin-isolation-smoke-plan-peerit-pearfeed-2026-07-02.json`; `npm run check:origin-isolation-smoke-evidence -- --file docs/origin-isolation-smoke-evidence-peerit-pearfeed-2026-07-04.json --json` returned `ok:true`, `status:"verified"`, `26/26` checks, and no warnings. |
+| Feature-flagged origin isolation smoke | `check:origin-isolation-smoke-evidence` verifies Peerit/Pearfeed drive identities, keyed loopback origins, storage split, strict-CSP compatibility, tab lifecycle, and bridge routes | DEFER | The 2026-07-04 automated verifier used fixture drives and simulated storage; its former `26/26` result is historical diagnostic evidence, not a current release pass. The corrected checker now requires exact drive-keyed hosts and a trusted packaged real-app Electron capture. That capture and strict-CSP/lifecycle/bridge review remain pending; package proof must be checked against the exact source head. |
+| Current P2P app cookie isolation | Real Electron browser proof must show one app cannot read another app cookie | FAIL | 2026-09-26 Electron 43.2.0 probe at `docs/electron-cookie-port-probe-2026-09-26.json` showed a Path=/ cookie shared across two 127.0.0.1 ports. The July fixture used simulated storage; the corrected evidence checker now blocks it. The v0.9.1 draft assigns distinct drive-keyed .localhost hosts and a local Electron 43.2 macOS cookie probe passed, but a trusted capture of real P2P apps in the exact packaged candidate and cross-platform review are still missing. |
 | Browse story | homepage `hyper://03f006...` renders, reloads, site info correct | PASS | 2026-07-15 v0.6.0 release RPC desktop-GUI smoke fetched the homepage and reload at HTTP `200` with `59063` bytes and verified site-info key `03f0060a...3ebb4f`, version `49`, `8` active peers, and durable relay state |
 | Fresh-launch landing story | PearBrowser landing front tab, P2P Builders and `peerit` startup tabs present | PASS | 2026-07-15 source/runtime contract verified the PearBrowser homepage as the front tab, P2P Builders and `peerit` as startup defaults, `restoreStartupTabs` preserving defaults, and Sites discovery pinning `peerit` first |
 | Catalogue story | Apps auto-loads, featured cards visible, search works | PASS | 2026-07-15 v0.6.0 release RPC desktop-GUI smoke loaded `2` catalogues and `14` apps, verified Keet, PearPass, anonGPT, Paste, and Peercord, and returned launchable rows for `peercord`, `peerit`, `keet`, and `paste` searches |

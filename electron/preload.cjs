@@ -11,5 +11,20 @@ contextBridge.exposeInMainWorld('pearbrowserRuntime', {
     const listener = (_event, data) => callback(data)
     ipcRenderer.on('pearbrowser:pear-apps:progress', listener)
     return () => ipcRenderer.removeListener('pearbrowser:pear-apps:progress', listener)
+  },
+  tabs: {
+    load: (request) => ipcRenderer.invoke('pearbrowser:tabs:load', request),
+    select: (request) => ipcRenderer.invoke('pearbrowser:tabs:select', request),
+    hide: () => ipcRenderer.invoke('pearbrowser:tabs:hide'),
+    close: (request) => ipcRenderer.invoke('pearbrowser:tabs:close', request),
+    reload: (request) => ipcRenderer.invoke('pearbrowser:tabs:reload', request),
+    openDevTools: (request) => ipcRenderer.invoke('pearbrowser:tabs:open-devtools', request),
+    captureContext: (request) => ipcRenderer.invoke('pearbrowser:tabs:capture-context', request),
+    onTabEvent: (callback) => {
+      if (typeof callback !== 'function') return () => {}
+      const listener = (_event, data) => callback(data)
+      ipcRenderer.on('pearbrowser:tabs:event', listener)
+      return () => ipcRenderer.removeListener('pearbrowser:tabs:event', listener)
+    }
   }
 })

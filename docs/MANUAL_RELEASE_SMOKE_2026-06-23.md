@@ -2,6 +2,8 @@
 
 > Historical v2 smoke checklist. Do not execute its legacy app references;
 > current release proof uses verified native packages and the v3 release gates.
+> For the v0.9.1 draft, see the named-host gate below and
+> [PR #84 checks](https://github.com/bigdestiny2/pearbrowser-desktop/pull/84/checks).
 
 Purpose: final human-run smoke checklist for the PearBrowser community release.
 Automated tests and fresh-peer verifiers prove most protocol and catalogue
@@ -115,23 +117,50 @@ announcement.
     HiveRelay-unseeds a temporary test site. This does not launch Peercord,
     approve a third-party trust prompt, or replace any row whose evidence owner
     still requires a human screenshot/window check.
-  - For the feature-flagged per-app origin proof, generate the operator plan
-    with two real app drives before producing evidence:
+  - **Origin isolation release gate is BLOCKED for the v0.9.1 draft.** The
+    historical `127.0.0.1:<port>` design split Web Storage origins but shared
+    cookies by host. [PR #84](https://github.com/bigdestiny2/pearbrowser-desktop/pull/84)
+    now generates exact `d-<z32-key>.localhost:<drive-port>` app hosts. Local
+    macOS Electron cookie and synthetic-drive HyperProxy integration probes
+    passed. A trusted packaged real-app WebContents capture and independent
+    review for one browser profile still block release; the current checker
+    blocks even structurally complete hand-authored capture JSON.
+  - Generate the operator plan with two real app drives:
     `npm run -s generate:origin-isolation-smoke-plan -- --app-a hyper://<app-a-drive>/ --app-b hyper://<app-b-drive>/ --json --out origin-isolation-smoke-plan.json`.
-    Expected: the plan names the `PEARBROWSER_PER_DRIVE_ORIGINS=1` launch,
-    runtime readiness command, automated evidence command, two-tab
-    `location.origin` comparison, localStorage/cookie/IndexedDB separation
-    snippets, strict-CSP check, tab close/navigation check, and bridge proof.
-  - Produce the automated evidence artifact from the plan:
+    `ok: true` means the plan was generated; its `releaseGate.status` remains
+    `BLOCKED` until trusted packaged real-app capture and review are complete.
+  - Run the local proxy/bridge fixture only as a diagnostic:
     `npm run -s generate:origin-isolation-smoke-evidence -- --plan origin-isolation-smoke-plan.json --out origin-isolation-smoke-evidence.json --json`.
-    Expected: the verifier runs the feature-flagged HyperProxy/HttpBridge
-    harness, records distinct loopback origins, storage split, strict-CSP shim
-    hashes, tab-origin release, and bridge route results.
-  - Verify the generated artifact:
-    `npm run -s check:origin-isolation-smoke-evidence -- --file origin-isolation-smoke-evidence.json --json`.
-    Expected before recording release evidence: `status` is `verified`; same
-    origin, leaked storage, missing strict-CSP evidence, missing tab lifecycle
-    evidence, or missing bridge route proof blocks the checker.
+    It uses simulated storage buckets and does not read Chromium cookies,
+    localStorage, or IndexedDB. This diagnostic command and its artifact are
+    expected to fail the release checker. Do not relabel or copy its output into
+    a browser-capture record.
+  - In an actual Electron build, open both real app drives in separate tabs in
+    **the same browser profile**. Record the build/source commit, OS, profile,
+    exact `location.origin` and hostname for both pages, and the raw output of
+    the plan's App A write and App B read snippets. Capture both WebContents
+    results as an attached JSON artifact with the plan's required shape:
+    `kind: pearbrowser-electron-webcontents-storage-capture`, Electron runtime
+    name/version, capture timestamp, and for each app a positive `webContentsId`,
+    URL, origin, and measured storage values. Set `storage.capture.kind` to
+    `electron-webcontents`, `storage.capture.artifact` to that JSON path, and
+    `storage.capture.sha256` to the SHA-256 of its exact bytes. A human reviewer
+    must confirm the WebContents IDs and capture provenance from the tested
+    build. These fields, a path, and a matching digest still cannot certify
+    provenance without the trusted runtime capture/review flow. The hostnames must differ,
+    and App B must read no App A proof value from localStorage, cookies, or
+    IndexedDB. Separate ports on `127.0.0.1` do not satisfy this gate.
+  - In the same build, prove strict-CSP app loading, tab close/navigation
+    lifecycle, and the real app identity/sync/swarm bridge routes. Record their
+    logs or screenshots in the evidence artifact.
+  - Check the candidate artifact:
+    `npm run -s check:origin-isolation-smoke-evidence -- --file <electron-evidence.json> --json`.
+    **Expected now: `status: blocked`, including for structurally complete
+    hand-authored JSON.** Do not promote a claimed capture by editing its
+    fields. Implement and independently review the trusted Electron runtime
+    capture/review integration first; only a later checker that binds the
+    capture to the tested build, plus distinct cookie hosts and the other
+    browser gates, can return `verified` for release evidence.
 - [ ] Browse user story:
   - Open `hyper://03f0060a35451cfb6b68ad1dda1b8474ebb43fd9100071ccf7d67679a83ebb4f/`.
   - Expected: page renders, About-this-site shows the drive key, reload works.

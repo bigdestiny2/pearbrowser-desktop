@@ -38,8 +38,15 @@ Electron runtime. The reviewed application entry points stay in ASAR, while
 the embedded Pear worker/backend and native modules are deliberately unpacked
 to physical paths required by the worker runtime. Electron fuses require
 embedded ASAR integrity validation, loading the application from ASAR,
-encrypted cookies, and disabled RunAsNode, `NODE_OPTIONS`, and CLI inspector
-entry points.
+and disabled RunAsNode, `NODE_OPTIONS`, and CLI inspector entry points. The
+cookie-encryption fuse stays enabled for every public-trust build and for
+Windows/Linux package-proof builds. Ad-hoc-signed macOS package-proof builds
+leave that fuse disabled: a fresh-profile Electron 43.2.0 test with it enabled
+stalled during the Keychain lookup and the first window showed a boot failure;
+with only that fuse disabled, Home opened. The package verifier checks this
+exact mode/platform split, and the ad-hoc output remains review-only. A
+public-trust macOS release must retain cookie encryption and pass the
+first-window smoke on the exact Developer ID signed and notarized candidate.
 
 Unpacked executable code is not trusted on placement alone. Each platform
 build generates an ephemeral Ed25519 key, embeds only its public key and the
@@ -56,9 +63,26 @@ present and executable, independently repeats the signed unpacked-tree check,
 checks the exact Electron fuse states, and rejects legacy build content or a
 duplicate Electron runtime.
 
-The release workflow repeats content inspection and launch/RPC smoke on hosted
-runners. A successful local build is useful proof, but it does not replace the
-hosted platform jobs or the public-trust signature checks.
+The release workflow also runs `check:electron-native-tabs` on macOS
+arm64/x64, Windows, and Linux before packaging. It checks synthetic drive
+pages in top-level WebContentsViews, including default/Lax and server-set
+HttpOnly cookie isolation. This diagnostic does not establish real-app
+compatibility or public trust.
+
+For a local macOS package-proof rehearsal with Peerit and Pearfeed, run
+`node scripts/capture-origin-isolation-package-proof.mjs --app
+/path/to/PearBrowser.app/Contents/MacOS/PearBrowser` against an exact-source
+ad-hoc package. The runner uses a disposable profile and Browse UI, observes
+distinct top-level native CDP targets, and writes a private result with its
+release gate fixed to BLOCKED. Its CDP-set HttpOnly probe measures cookie jar
+isolation; the synthetic Electron server smoke proves the HTTP `Set-Cookie`
+roundtrip separately. A signed public-trust real-app capture and independent
+review remain required.
+
+The release workflow repeats content inspection, launch/RPC smoke, and
+first-window renderer mount/reload smoke on hosted platform runners. A
+successful local build is useful proof, but it does not replace the hosted
+platform jobs or the public-trust signature checks.
 
 ## Workflow authority
 

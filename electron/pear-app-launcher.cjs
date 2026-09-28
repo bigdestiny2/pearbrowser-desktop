@@ -73,7 +73,7 @@ function validateResolvedTargets (targets, opts = {}) {
   if (!SAFE_APP_NAME_RE.test(app) || target.isBin === true || ext !== extension) {
     throw new Error('Pear package contains a non-GUI executable target; browser installs support one native application only')
   }
-  if (platform === 'darwin' && dest !== path.join('/Applications', app + extension)) {
+  if (platform === 'darwin' && dest !== path.join(homeDir, 'Applications', app + extension)) {
     throw new Error('Pear package requested an unexpected macOS install destination')
   }
   if (platform === 'linux' && (!dest || path.basename(dest) !== app + extension || !allowedLinuxRoots(homeDir).includes(path.dirname(dest)))) {
@@ -118,8 +118,11 @@ function validateInstallEvent (data, opts = {}) {
 
   let dest = data.dest == null ? null : path.resolve(String(data.dest))
   if (platform === 'darwin') {
-    const expected = path.join('/Applications', app + extension)
-    if (dest !== expected) throw new Error('Pear package requested an unexpected macOS install destination')
+    const expected = path.join(homeDir, 'Applications', app + extension)
+    const legacySystemDestination = path.join('/Applications', app + extension)
+    if (dest !== expected && !(opts.allowLegacySystemDestination === true && dest === legacySystemDestination)) {
+      throw new Error('Pear package requested an unexpected macOS install destination')
+    }
   } else if (platform === 'linux') {
     if (!dest || path.basename(dest) !== app + extension || !allowedLinuxRoots(homeDir).includes(path.dirname(dest))) {
       throw new Error('Pear package requested an unexpected Linux install destination')
@@ -189,7 +192,10 @@ class PearAppLauncher {
             platform: record.platform,
             arch: record.arch,
             homeDir: this.homeDir,
-            expectedLink: link
+            expectedLink: link,
+            // Keep previously installed 1.2.2 records launchable. New 1.3.0
+            // installs are still constrained to the user-owned destination.
+            allowLegacySystemDestination: true
           })
           this.records.set(link, { ...record, ...installed, artifactKey: installed.key, link })
         } catch {}
@@ -242,7 +248,7 @@ class PearAppLauncher {
 
     const Install = this._installClass()
     const installer = new Install({ link })
-    // pear-install 1.2.2 resolves the complete target set before this method is
+    // pear-install 1.3.0 resolves the complete target set before this method is
     // called. Guard that boundary so a package containing an already-present
     // CLI target cannot bypass the per-artifact `app` event validation below.
     if (typeof installer._partitionTargets === 'function') {

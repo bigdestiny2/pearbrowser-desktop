@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
+import driveOrigin from '../backend/drive-origin.cjs'
 
 const require = createRequire(import.meta.url)
 const {
@@ -14,6 +15,7 @@ const DRIVE_B = 'b'.repeat(64)
 const ORIGIN_A = 'http://127.0.0.1:9876'
 const ORIGIN_B = 'http://127.0.0.1:9999'
 const SESSION = 'session-test-1'
+const { driveHostnameForKey } = driveOrigin
 
 function tupleFor (driveKeyHex, origin = ORIGIN_A) {
   return {
@@ -34,6 +36,16 @@ test('mint produces a 128-bit hex token that verifies against its tuple', async 
   assert.match(token, /^[0-9a-f]{32}$/)
   assert.ok(expiresAt > Date.now())
   assert.equal(await docs.verify({ tuple: tupleFor(DRIVE_A), token, method: 'connect' }), true)
+})
+
+test('named-drive wallet document tokens reject the shared listener origin', async () => {
+  const docs = new WalletDocuments()
+  const namedOrigin = 'http://' + driveHostnameForKey(DRIVE_A) + ':9876'
+  const siblingOrigin = 'http://' + driveHostnameForKey(DRIVE_B) + ':9876'
+  const { token } = issue(docs, DRIVE_A, namedOrigin)
+  assert.equal(await docs.verify({ tuple: tupleFor(DRIVE_A, namedOrigin), token }), true)
+  assert.equal(await docs.verify({ tuple: tupleFor(DRIVE_A, ORIGIN_A), token }), false)
+  assert.equal(await docs.verify({ tuple: tupleFor(DRIVE_A, siblingOrigin), token }), false)
 })
 
 test('unknown and malformed tokens fail closed', async () => {

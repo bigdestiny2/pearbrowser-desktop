@@ -87,6 +87,38 @@ test('resolved installer targets reject mixed GUI and command-line packages befo
   ], { platform: 'linux', homeDir: '/home/test' }), /multiple installable targets/)
 })
 
+test('Pear 3.4 macOS installs are user-owned while legacy system records remain readable', () => {
+  const app = {
+    filename: 'Demo App',
+    ext: '.app',
+    dest: '/Users/test/Applications/Demo App.app',
+    isBin: false
+  }
+  assert.deepEqual(validateResolvedTargets([app], { platform: 'darwin', homeDir: '/Users/test' }), {
+    app: 'Demo App',
+    ext: '.app',
+    dest: '/Users/test/Applications/Demo App.app'
+  })
+  assert.throws(() => validateResolvedTargets([{ ...app, dest: '/Applications/Demo App.app' }], {
+    platform: 'darwin', homeDir: '/Users/test'
+  }), /unexpected macOS install destination/)
+
+  const event = installEvent({
+    key: '/by-arch/darwin-arm64/app/Demo App.app',
+    dest: '/Applications/Demo App.app'
+  })
+  assert.equal(validateInstallEvent(event, {
+    platform: 'darwin',
+    arch: 'arm64',
+    homeDir: '/Users/test',
+    expectedLink: LINK,
+    allowLegacySystemDestination: true
+  }).dest, '/Applications/Demo App.app')
+  assert.throws(() => validateInstallEvent(event, {
+    platform: 'darwin', arch: 'arm64', homeDir: '/Users/test', expectedLink: LINK
+  }), /unexpected macOS install destination/)
+})
+
 test('native installer records authoritative package metadata and closes its resources', async () => {
   let instance = null
   class FakeInstall extends EventEmitter {

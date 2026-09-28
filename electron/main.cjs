@@ -1,6 +1,6 @@
 // Native v3 host. Electron owns application lifecycle and Pear OTA owns only
 // the embedded Bare backend/update worker; there is no shared-CLI launch path.
-const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron')
+const { app, BrowserWindow, dialog, ipcMain, session, shell } = require('electron')
 const crypto = require('node:crypto')
 const { createRequire } = require('node:module')
 const os = require('node:os')
@@ -35,6 +35,7 @@ const runtimeRequire = app.isPackaged
 const PearRuntime = runtimeRequire('pear-runtime')
 const { PearAppLauncher, normalizePearInstallLink } = require('./pear-app-launcher.cjs')
 const { applyPearUpdateAndRestart, pearOtaArtifactName } = require('./pear-ota-lifecycle.cjs')
+const { NativeTabHost } = require('./native-tab-host.cjs')
 
 const sessionToken = crypto.randomBytes(32).toString('hex')
 const appName = pkg.productName || pkg.name
@@ -44,13 +45,18 @@ let pearRuntime = null
 let pearAppLauncher = null
 let quitting = false
 let updateRestartPending = false
+const shellHosts = new Map()
 
 function requireTrustedRenderer (event) {
   const senderUrl = String(event?.senderFrame?.url || event?.sender?.getURL?.() || '')
   const shellUrl = pathToFileURL(path.join(__dirname, '..', 'index.html')).href
-  if (senderUrl !== shellUrl) {
+  const contents = event?.sender
+  const host = shellHosts.get(contents?.id)
+  if (senderUrl !== shellUrl || !host || contents !== host.window.webContents ||
+      event.senderFrame !== contents.mainFrame) {
     throw new Error('Pear app operation rejected from an untrusted renderer')
   }
+  return host
 }
 
 function requirePearAppLauncher () {
@@ -59,12 +65,28 @@ function requirePearAppLauncher () {
 }
 
 ipcMain.on('pearbrowser:runtime-session', (event) => {
-  event.returnValue = sessionToken
+  // The backend credential belongs only to the packaged file:// shell. A
+  // child/guest page must never acquire it, even if it sends this IPC channel.
+  try {
+    requireTrustedRenderer(event)
+    event.returnValue = sessionToken
+  } catch {
+    event.returnValue = null
+  }
 })
 
 ipcMain.handle('pearbrowser:open-devtools', (event) => {
+  requireTrustedRenderer(event)
   event.sender.openDevTools({ mode: 'detach' })
 })
+
+ipcMain.handle('pearbrowser:tabs:load', (event, request) => requireTrustedRenderer(event).load(request))
+ipcMain.handle('pearbrowser:tabs:select', (event, request) => requireTrustedRenderer(event).select(request))
+ipcMain.handle('pearbrowser:tabs:hide', (event) => requireTrustedRenderer(event).hide())
+ipcMain.handle('pearbrowser:tabs:close', (event, request) => requireTrustedRenderer(event).close(request))
+ipcMain.handle('pearbrowser:tabs:reload', (event, request) => requireTrustedRenderer(event).reload(request))
+ipcMain.handle('pearbrowser:tabs:open-devtools', (event, request) => requireTrustedRenderer(event).openDevTools(request))
+ipcMain.handle('pearbrowser:tabs:capture-context', (event, request) => requireTrustedRenderer(event).captureContext(request))
 
 ipcMain.handle('pearbrowser:pear-apps:list', (event) => {
   requireTrustedRenderer(event)
@@ -203,7 +225,20 @@ async function createWindow () {
       contextIsolation: true
     }
   })
-
+  const tabSession = session.fromPartition('persist:pearbrowser-hyper-tabs')
+  const tabHost = new NativeTabHost({
+    window,
+    session: tabSession,
+    emit: (event) => {
+      if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
+        window.webContents.send('pearbrowser:tabs:event', event)
+      }
+    }
+  })
+  const shellWebContentsId = window.webContents.id
+  shellHosts.set(shellWebContentsId, tabHost)
+  window.on('close', () => tabHost.closeAll())
+  window.on('closed', () => shellHosts.delete(shellWebContentsId))
   await window.loadFile(path.join(__dirname, '..', 'index.html'))
 }
 

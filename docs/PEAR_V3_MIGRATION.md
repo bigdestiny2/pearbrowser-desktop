@@ -49,11 +49,14 @@ confirmation, and accepts no caller-controlled destination, binary filter, or
 DHT bootstrap configuration. A remote catalogue link remains discovery
 metadata, never a `PearRuntime.run()` input.
 
-The native-app installer boundary pins `pear-install@1.2.2`. It accepts one GUI
-artifact for the current OS (`.app`, `.AppImage`, or `.exe`), rejects packages exposing
+The native-app installer boundary pins `pear-install@1.3.0`. It accepts one GUI
+artifact for the current OS (`.app`, `.AppImage`, or `.msix`), rejects packages exposing
 command-line binary targets, requires the package's `upgrade` identity to match
 the requested link and optional catalogue product name, and rejects unexpected
-install destinations or an incompatible declared platform target. The installed
+install destinations or an incompatible declared platform target. Pear 3.4's
+installer moves new macOS apps from system-wide `/Applications` to the user's
+`~/Applications`; PearBrowser enforces that for new installs while retaining
+validated legacy records so existing 1.2.2 installations still launch. The installed
 application then starts and configures its own embedded `pear-runtime`; the
 browser does not provide an ambient `Pear` global or runtime configuration.
 
@@ -73,26 +76,34 @@ download or apply an update today.
 
 Run `npm run check:pear-v3` before tests or packaging. The gate checks every
 manifest and lockfile for legacy launcher packages or scripts, pins
-`pear-runtime@1.3.1`, `pear-install@1.2.2`, and the transitive
-`pear-runtime-updater@3.4.0`. It also pins Autobase 7.28.1 with the Pear 3.3
-Hypercore/Corestore cohort so its schema encodings remain compatible, and
+`pear-runtime@1.3.1`, `pear-install@1.3.0`, and the transitive
+`pear-runtime-updater@3.4.0`. It also pins Autobase 7.28.1 with the reviewed
+Hypercore/Corestore compatibility cohort so its schema encodings remain compatible, and
 permits exactly one embedded-runtime start:
 the local `workers/main.js` entrypoint with host-owned arguments. It is also a
 mandatory pretest and native-release workflow step.
 
-The reviewed operator baseline is stable Pear CLI `3.3.0` with
+The reviewed operator baseline is stable Pear CLI `3.4.0` with
 `pear-build@1.2.0`; `pear@3.0.0` on npm is only the bootstrap package and must
 not be added as an application dependency. Run `npm run check:pear-cli` before
-native release preflight. It rejects the current v2 line and the 3.4.0 release
-candidate, as well as any future stable release until its contract is reviewed.
-On the official 3.3.0 platform, `pear versions --json` can still report
+native release preflight. It rejects older v3 builds, prereleases, and future
+stable releases until their contracts are reviewed. On the official 3.4.0
+platform, `pear versions --json` can still report
 `runtimes.pear` as `2.6.5`; that diagnostic field is not the v3 platform
 release identity. The gate uses the `pear -v` platform SemVer, validates the
 tagged checkout state, and leaves the application runtime contract to the
 separate `pear-runtime@1.3.1` package gate described above.
-Pear 3.3.0 also makes `pear gc cores` interactive when a writable
+Pear 3.3.0 also made `pear gc cores` interactive when a writable
 core is selected: non-interactive cleanup of explicitly owned cores must use
 `--force`, although PearBrowser has no such cleanup automation today.
+
+Pear 3.4.0 adds native `blind-peer` availability, native `blind-relay` UDX
+fallbacks, the global `--relay <key>` application option,
+`pear seed --blind-peer <key>`, and `pear stage --skip-package-json`.
+PearBrowser records those as reviewed platform capabilities; it does not start
+an unaccounted storage peer or silently force a relay. Relay selection remains
+an explicit application/operator action, while HiveRelay capability documents
+remain the browser's source for managed availability services.
 
 ## Data continuity
 

@@ -108,10 +108,10 @@ function normalizeApp (source, fallbackLabel) {
 async function runAutomatedVerifier ({ appA, appB, sourcePlan, proofValue }) {
   const checks = []
   const startedAt = Date.now()
-  const logCheck = (id, ok, detail, extra = {}) => {
+  const logCheck = (id, ok, detail, extra = {}, fatal = true) => {
     const check = { id, ok: !!ok, detail, elapsedMs: Date.now() - startedAt, ...extra }
     checks.push(check)
-    if (!check.ok) throw new Error(`${id}: ${detail}`)
+    if (!check.ok && fatal) throw new Error(`${id}: ${detail}`)
     return check
   }
 
@@ -166,7 +166,7 @@ async function runAutomatedVerifier ({ appA, appB, sourcePlan, proofValue }) {
     const storage = new BrowserStorageBuckets(PROOF_KEY)
     const appAStorage = storage.write(originA, proofValue)
     const appBStorage = storage.read(originB)
-    logCheck('storage-split', appAStorage.localStorage === proofValue && appBStorage.localStorage === null && appBStorage.indexedDB === null && !appBStorage.cookie.includes(proofValue), 'browser storage buckets are split by the distinct loopback origins')
+    logCheck('storage-split', appAStorage.localStorage === proofValue && appBStorage.localStorage === null && appBStorage.indexedDB === null && !appBStorage.cookie.includes(proofValue), 'simulated storage buckets are distinct by drive host; real Electron storage proof is still required', {}, false)
 
     const identity = await requestJson('GET', `${originA}/api/identity`, {
       headers: originHeaders(originA, tokenA)
@@ -229,6 +229,7 @@ async function runAutomatedVerifier ({ appA, appB, sourcePlan, proofValue }) {
         }
       ],
       storage: {
+        capture: { kind: 'fixture-simulation', artifact: '' },
         proofKey: PROOF_KEY,
         writtenValue: proofValue,
         appA: appAStorage,
@@ -401,12 +402,13 @@ class BrowserStorageBuckets {
   constructor (proofKey) {
     this.proofKey = proofKey
     this.buckets = new Map()
+    this.cookiesByHost = new Map()
   }
 
   write (origin, value) {
     const bucket = this.bucket(origin)
     bucket.localStorage.set(this.proofKey, value)
-    bucket.cookies.set(this.proofKey, value)
+    this.cookies(origin).set(this.proofKey, value)
     bucket.indexedDB.set(this.proofKey, value)
     return this.snapshot(origin)
   }
@@ -419,16 +421,21 @@ class BrowserStorageBuckets {
     if (!this.buckets.has(origin)) {
       this.buckets.set(origin, {
         localStorage: new Map(),
-        cookies: new Map(),
         indexedDB: new Map()
       })
     }
     return this.buckets.get(origin)
   }
 
+  cookies (origin) {
+    const host = new URL(origin).hostname
+    if (!this.cookiesByHost.has(host)) this.cookiesByHost.set(host, new Map())
+    return this.cookiesByHost.get(host)
+  }
+
   snapshot (origin) {
     const bucket = this.bucket(origin)
-    const cookie = [...bucket.cookies.entries()].map(([key, value]) => `${key}=${value}`).join('; ')
+    const cookie = [...this.cookies(origin).entries()].map(([key, value]) => `${key}=${value}`).join('; ')
     return {
       localStorage: bucket.localStorage.has(this.proofKey) ? bucket.localStorage.get(this.proofKey) : null,
       cookie,
@@ -441,14 +448,14 @@ function httpRequest (method, url, opts = {}) {
   return new Promise((resolve, reject) => {
     const parsed = new URL(url)
     const body = opts.body === undefined ? null : JSON.stringify(opts.body)
-    const headers = { connection: 'close', ...(opts.headers || {}) }
+    const headers = { connection: 'close', host: parsed.host, ...(opts.headers || {}) }
     if (body !== null) {
       headers['content-type'] = 'application/json'
       headers['content-length'] = Buffer.byteLength(body)
     }
     const req = nodeHttp.request({
       method,
-      hostname: parsed.hostname,
+      hostname: '127.0.0.1',
       port: parsed.port,
       path: `${parsed.pathname}${parsed.search}`,
       headers,

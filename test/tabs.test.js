@@ -4,12 +4,13 @@
 // snapshot normalization/round-tripping.
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import driveOrigin from '../backend/drive-origin.cjs'
 import {
   MAX_TAB_HISTORY,
   normalizeTabHistory, clampHistoryIndex, pushTabHistory,
   normalizeTabSnapshot, serializeTab, restoreSavedTab, sortTabsPinnedFirst,
   normalizeDefaultTab, restoreStartupTabs, makeTab,
-  driveKeyFromTabAddress, tabDriveKey, tabListUsesDriveKey
+  driveKeyFromTabAddress, tabDriveKey, tabListUsesDriveKey, nativeHyperDriveKey
 } from '../ui/lib/tabs.js'
 
 const A = 'hyper://aaa/'
@@ -18,6 +19,7 @@ const C = 'hyper://ccc/'
 const DEALROOM = 'hyper://0724aabf2ad6394983f91c6b24ebd417cb3d25addcf29c98eb246c512dc77f90/'
 const DRIVE_A = 'a'.repeat(64)
 const DRIVE_B = 'b'.repeat(64)
+const { driveHostnameForKey } = driveOrigin
 
 test('normalizeTabHistory drops empties and collapses consecutive repeats', () => {
   assert.deepEqual(normalizeTabHistory([A, A, B, B, B, C]), [A, B, C])
@@ -135,11 +137,38 @@ test('restoreStartupTabs dedupes default tabs from saved sessions', () => {
 
 test('tab origin helpers extract drive keys from hyper and local proxy addresses', () => {
   assert.equal(driveKeyFromTabAddress(`hyper://${DRIVE_A}/posts/1`), DRIVE_A)
-  assert.equal(driveKeyFromTabAddress(`http://127.0.0.1:12345/hyper/${DRIVE_A}/index.html`), DRIVE_A)
-  assert.equal(driveKeyFromTabAddress(`http://localhost:12345/app/${DRIVE_B}/index.html`), DRIVE_B)
+  assert.equal(driveKeyFromTabAddress(`http://127.0.0.1:12345/hyper/${DRIVE_A}/index.html`), '')
+  assert.equal(driveKeyFromTabAddress(`http://localhost:12345/app/${DRIVE_B}/index.html`), '')
+  const namedA = `http://${driveHostnameForKey(DRIVE_A)}:12345/hyper/${DRIVE_A}/index.html`
+  assert.equal(driveKeyFromTabAddress(namedA), DRIVE_A)
+  assert.equal(driveKeyFromTabAddress(`http://${driveHostnameForKey(DRIVE_B)}:12345/hyper/${DRIVE_A}/index.html`), '')
+  assert.equal(makeTab(namedA).kind, 'hyper')
+  assert.equal(restoreSavedTab({ url: namedA }).kind, 'hyper')
   assert.equal(driveKeyFromTabAddress(`http://example.com/hyper/${DRIVE_A}/`), '')
 
-  assert.equal(tabDriveKey({ url: '', displayUrl: '', src: `http://127.0.0.1:1/app/${DRIVE_A}/index.html` }), DRIVE_A)
+  assert.equal(tabDriveKey({ url: '', displayUrl: '', src: `http://127.0.0.1:1/app/${DRIVE_A}/index.html` }), '')
+  assert.equal(tabDriveKey({ url: '', displayUrl: '', src: namedA }), DRIVE_A)
   assert.equal(tabListUsesDriveKey([{ url: `hyper://${DRIVE_A}/` }], DRIVE_A), true)
   assert.equal(tabListUsesDriveKey([{ url: `hyper://${DRIVE_A}/` }], DRIVE_B), false)
+})
+
+
+test('native Hyper tab routing requires an explicit public key and exact keyed origin', () => {
+  const localA = `http://${driveHostnameForKey(DRIVE_A)}:12345/hyper/${DRIVE_A}/index.html`
+  const appA = `http://${driveHostnameForKey(DRIVE_A)}:12345/app/${DRIVE_A}/index.html`
+  const localB = `http://${driveHostnameForKey(DRIVE_B)}:12345/hyper/${DRIVE_B}/index.html`
+  const publicA = `hyper://${DRIVE_A}/index.html`
+  const valid = { kind: 'hyper', url: publicA, displayUrl: publicA, src: localA }
+  assert.equal(nativeHyperDriveKey(valid), DRIVE_A)
+  assert.equal(nativeHyperDriveKey({ ...valid, src: appA }), DRIVE_A)
+  assert.equal(nativeHyperDriveKey({ ...valid, src: localB }), '')
+  assert.equal(nativeHyperDriveKey({ ...valid, src: `http://127.0.0.1:12345/hyper/${DRIVE_A}/index.html` }), '')
+  assert.equal(nativeHyperDriveKey({ ...valid, src: `http://${driveHostnameForKey(DRIVE_B)}:12345/hyper/${DRIVE_A}/index.html` }), '')
+  assert.equal(nativeHyperDriveKey({ ...valid, kind: 'loopback' }), '')
+  assert.equal(nativeHyperDriveKey({ ...valid, kind: 'clearnet' }), '')
+  assert.equal(nativeHyperDriveKey({ ...valid, kind: undefined }), '')
+  assert.equal(nativeHyperDriveKey({ ...valid, url: DRIVE_A }), '')
+  assert.equal(nativeHyperDriveKey({ ...valid, url: `hyper://bad-key/` }), '')
+  assert.equal(nativeHyperDriveKey({ ...valid, displayUrl: `hyper://${DRIVE_B}/` }), '')
+  assert.equal(nativeHyperDriveKey({ ...valid, displayUrl: localA }), '')
 })

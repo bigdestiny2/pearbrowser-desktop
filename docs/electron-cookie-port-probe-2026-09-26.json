@@ -1,0 +1,16 @@
+{
+  "kind": "pearbrowser-electron-cookie-port-probe",
+  "electron": "43.2.0",
+  "firstOrigin": "http://127.0.0.1:49420",
+  "secondOrigin": "http://127.0.0.1:49421",
+  "cookieSharedAcrossPorts": true,
+  "localStorageSharedAcrossPorts": false,
+  "firstState": {
+    "cookie": "pear_origin_port_probe=1790447092246",
+    "localStorage": "1790447092246"
+  },
+  "secondState": {
+    "cookie": "pear_origin_port_probe=1790447092246",
+    "localStorage": null
+  }
+}

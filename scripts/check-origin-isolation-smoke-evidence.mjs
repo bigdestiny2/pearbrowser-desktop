@@ -1,12 +1,16 @@
 #!/usr/bin/env node
 
+import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
+import driveOrigin from '../backend/drive-origin.cjs'
+
+const { driveHostnameForKey, isDriveOriginHostname } = driveOrigin
 
 export const FEATURE_FLAG = 'PEARBROWSER_PER_DRIVE_ORIGINS=1'
 export const PROOF_KEY = 'pear-origin-isolation-proof'
 
-export function analyzeOriginIsolationSmokeEvidence (evidence) {
+export function analyzeOriginIsolationSmokeEvidence (evidence, { browserCapture = null, browserCaptureHash = '' } = {}) {
   const failures = []
   const warnings = []
   const checks = []
@@ -23,23 +27,50 @@ export function analyzeOriginIsolationSmokeEvidence (evidence) {
   add('apps-count', apps.length === 2, 'evidence must include exactly two apps')
 
   const [appA = {}, appB = {}] = apps
-  const driveA = normalizeDriveKey(appA.driveKey || driveKeyFromHyperUrl(appA.url))
-  const driveB = normalizeDriveKey(appB.driveKey || driveKeyFromHyperUrl(appB.url))
-  add('drive-a', !!driveA, 'app A must include a 64-hex drive key or hyper:// URL')
-  add('drive-b', !!driveB, 'app B must include a 64-hex drive key or hyper:// URL')
-  add('distinct-drives', !!driveA && !!driveB && driveA !== driveB, 'app A and app B must use different drive keys')
+  const driveA = driveKeyFromHyperUrl(appA.url)
+  const driveB = driveKeyFromHyperUrl(appB.url)
+  add('drive-a', !!driveA, 'app A URL must be hyper://<64-hex-drive-key>/...')
+  add('drive-b', !!driveB, 'app B URL must be hyper://<64-hex-drive-key>/...')
+  add('drive-a-key-match', !appA.driveKey || normalizeDriveKey(appA.driveKey) === driveA, 'app A declared driveKey must match its hyper:// URL')
+  add('drive-b-key-match', !appB.driveKey || normalizeDriveKey(appB.driveKey) === driveB, 'app B declared driveKey must match its hyper:// URL')
+  add('distinct-drives', !!driveA && !!driveB && driveA !== driveB, 'app A and app B URLs must contain different drive keys')
 
   const originA = normalizeLoopbackOrigin(appA.origin || evidence?.originSplit?.appAOrigin)
   const originB = normalizeLoopbackOrigin(appB.origin || evidence?.originSplit?.appBOrigin)
   add('origin-a', !!originA, 'app A origin must be a loopback http origin')
   add('origin-b', !!originB, 'app B origin must be a loopback http origin')
   add('origin-split', !!originA && !!originB && originA !== originB, 'app A and app B must report different loopback origins')
+  add('drive-host-a', originMatchesDrive(originA, driveA), 'app A origin host must encode its exact drive key')
+  add('drive-host-b', originMatchesDrive(originB, driveB), 'app B origin host must encode its exact drive key')
+  // Native tabs share one dedicated Electron session, so distinct keyed
+  // cookie hosts remain mandatory even though each tab has its own view.
+  add('cookie-host-split', !!originA && !!originB && new URL(originA).hostname !== new URL(originB).hostname, 'different ports on one loopback host share cookies; distinct cookie hosts are required')
+  add('browser-runtime-source', evidence?.automatedVerifier?.mode !== 'local-hyperproxy-httpbridge-fixture', 'local HyperProxy/HttpBridge fixtures cannot certify Chromium storage')
 
   const storage = evidence?.storage || {}
+  const capture = storage.capture || {}
+  add('browser-storage-capture', capture.kind === 'electron-webcontents' && String(capture.artifact || '').trim().length > 0 && browserCapture?.kind === 'pearbrowser-electron-webcontents-storage-capture', 'storage isolation requires a readable Electron WebContents capture JSON; fixture simulations and a path alone are not browser proof')
+  add('browser-storage-capture-hash', /^[0-9a-f]{64}$/.test(String(capture.sha256 || '')) && capture.sha256 === browserCaptureHash, 'storage.capture.sha256 must match the capture file bytes')
+  add('browser-storage-capture-runtime', browserCapture?.runtime?.name === 'Electron' && /^\d+\./.test(String(browserCapture?.runtime?.version || '')) && !!browserCapture?.capturedAt, 'capture must record the Electron runtime version and capture time')
+  // The JSON and digest are operator supplied. Neither proves that Electron produced them.
+  // Keep release acceptance blocked until a trusted runtime capture/review flow exists.
+  add('trusted-electron-capture', false, 'capture provenance cannot be verified by this checker; capture from the exact signed public-trust package and independent reviewer attestation are required')
   const proofKey = String(storage.proofKey || evidence?.proofKey || '').trim()
   const writtenValue = String(storage.writtenValue || '').trim()
   const storageA = storage.appA || appA.storage || {}
   const storageB = storage.appB || appB.storage || {}
+  const capturedApps = Array.isArray(browserCapture?.apps) ? browserCapture.apps : []
+  add('browser-storage-capture-app-a', captureMatchesApp(capturedApps[0], appA, originA, storageA), 'capture app A top-level native page URL, origin, and measured storage must match the evidence')
+  add('browser-storage-capture-app-b', captureMatchesApp(capturedApps[1], appB, originB, storageB), 'capture app B top-level native page URL, origin, and measured storage must match the evidence')
+  add('browser-storage-capture-distinct-native-views', capturedApps.length === 2 &&
+    capturedApps.every((item) => item?.viewKind === 'top-level-native' && Number.isInteger(item.webContentsId) && item.webContentsId > 0 && validFrameId(item.rootFrameId)) &&
+    capturedApps[0].webContentsId !== capturedApps[1].webContentsId && capturedApps[0].rootFrameId !== capturedApps[1].rootFrameId,
+  'the two apps must occupy distinct top-level native WebContents and root frames')
+  add('browser-storage-capture-lax-httponly', capturedApps.length === 2 &&
+    capturedApps[0]?.cookies?.defaultHostOnly === true && capturedApps[0]?.cookies?.sameSiteLax === true &&
+    capturedApps[0]?.cookies?.httpOnlyLax === true && capturedApps[0]?.cookies?.hostOnly === true &&
+    capturedApps[1]?.cookies?.appAProofVisible === false && capturedApps[1]?.cookies?.appADefaultProofVisible === false,
+  'capture must prove default, Lax, and HttpOnly host-only cookie isolation across native views')
 
   add('proof-key', proofKey === PROOF_KEY, `storage.proofKey must be ${PROOF_KEY}`)
   add('written-value', writtenValue.length > 0, 'storage.writtenValue must be present')
@@ -103,12 +134,16 @@ function normalizeLoopbackOrigin (value) {
   try {
     const parsed = new URL(String(value || '').trim())
     if (parsed.protocol !== 'http:') return ''
-    if (parsed.hostname !== '127.0.0.1' && parsed.hostname !== 'localhost') return ''
+    if (parsed.hostname !== '127.0.0.1' && parsed.hostname !== 'localhost' && !isDriveOriginHostname(parsed.hostname)) return ''
     if (!parsed.port) return ''
     return parsed.origin
   } catch {
     return ''
   }
+}
+
+function originMatchesDrive (origin, key) {
+  return !!origin && !!key && new URL(origin).hostname === driveHostnameForKey(key)
 }
 
 function normalizeStatus (value) {
@@ -128,6 +163,32 @@ function cookieContains (cookie, key, value) {
   const haystack = String(cookie || '')
   if (!key || !value) return false
   return haystack.split(/;\s*/).some((part) => part === `${key}=${value}`)
+}
+
+function validFrameId (value) {
+  return typeof value === 'string' && value.trim().length > 0
+}
+
+function pageUrlMatchesApp (pageUrl, app, origin) {
+  const key = driveKeyFromHyperUrl(app?.url)
+  if (!key || !origin) return false
+  try {
+    const parsed = new URL(String(pageUrl || ''))
+    return parsed.origin === origin &&
+      !parsed.username && !parsed.password &&
+      new RegExp(`^/(?:hyper|app)/${key}(?:/|$)`, 'i').test(parsed.pathname)
+  } catch {
+    return false
+  }
+}
+
+function captureMatchesApp (captured, app, origin, storage) {
+  if (!captured || !app || !origin || !storage) return false
+  if (captured.viewKind !== 'top-level-native' || !Number.isInteger(captured.webContentsId) || captured.webContentsId < 1) return false
+  if (!validFrameId(captured.rootFrameId) || !pageUrlMatchesApp(captured.pageUrl, app, origin)) return false
+  if (captured.url !== app.url || normalizeLoopbackOrigin(captured.origin) !== origin) return false
+  if (!captured.storage || !Object.hasOwn(captured.storage, 'localStorage') || !Object.hasOwn(captured.storage, 'indexedDB') || !Object.hasOwn(captured.storage, 'cookie')) return false
+  return ['localStorage', 'indexedDB', 'cookie'].every((key) => captured.storage[key] === storage[key])
 }
 
 function parseArgs (argv) {
@@ -176,10 +237,31 @@ function loadJsonFile (file) {
   return JSON.parse(readFileSync(url, 'utf8'))
 }
 
+function loadBrowserCapture (evidence, evidenceFile) {
+  const artifact = evidence?.storage?.capture?.artifact
+  if (typeof artifact !== 'string' || !artifact.trim()) return {}
+  try {
+    const evidenceUrl = new URL(evidenceFile, pathToFileURL(process.cwd() + '/'))
+    const artifactUrl = new URL(artifact, evidenceUrl)
+    if (artifactUrl.protocol !== 'file:') return {}
+    const bytes = readFileSync(artifactUrl)
+    return {
+      browserCapture: JSON.parse(bytes.toString('utf8')),
+      browserCaptureHash: createHash('sha256').update(bytes).digest('hex')
+    }
+  } catch {
+    return {}
+  }
+}
+
+export function checkOriginIsolationEvidenceFile (file) {
+  const evidence = loadJsonFile(file)
+  return analyzeOriginIsolationSmokeEvidence(evidence, loadBrowserCapture(evidence, file))
+}
+
 async function main () {
   const args = parseArgs(process.argv.slice(2))
-  const evidence = loadJsonFile(args.file)
-  const result = analyzeOriginIsolationSmokeEvidence(evidence)
+  const result = checkOriginIsolationEvidenceFile(args.file)
   if (args.json) console.log(JSON.stringify(result, null, 2))
   else printReport(result, args.file)
   if (!result.ok) process.exit(1)

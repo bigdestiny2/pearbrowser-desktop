@@ -18,6 +18,7 @@ const hypercoreCrypto = require('hypercore-crypto')
 const b4a = require('b4a')
 const { tabKeyForDrive } = require('./wallet/wallet-documents.cjs')
 const { validateWalletManifest } = require('./wallet/wallet-manifest.cjs')
+const { isDriveOriginHostname } = require('./drive-origin.cjs')
 
 // Transport cap for wallet request bodies (spec §4.2 — the wallet request
 // body is capped at 16 KiB).
@@ -48,6 +49,19 @@ const WALLET_RATE_BUCKETS = {
   'sign-app': { max: 10, windowMs: 60000 },
   transaction: { max: 60, windowMs: 60000 },
   default: { max: 30, windowMs: 60000 }
+}
+
+function requestHeader (headers, name) {
+  if (!headers || typeof headers !== 'object') return { present: false, value: null }
+  let found = false
+  let value = null
+  for (const [key, candidate] of Object.entries(headers)) {
+    if (key.toLowerCase() !== name) continue
+    if (found || typeof candidate !== 'string') return { present: true, value: null }
+    found = true
+    value = candidate
+  }
+  return { present: found, value }
 }
 
 function walletFail (code, message) {
@@ -133,7 +147,8 @@ class HttpBridge {
     try {
       const parsed = new URL(origin)
       return parsed.protocol === 'http:' &&
-        (parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost')
+        (parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost' ||
+          isDriveOriginHostname(parsed.hostname))
     } catch {
       return false
     }
@@ -141,10 +156,10 @@ class HttpBridge {
 
   _requestOrigins (req) {
     const origins = []
-    const rawOrigin = Array.isArray(req.headers.origin) ? req.headers.origin[0] : req.headers.origin
+    const rawOrigin = requestHeader(req.headers, 'origin').value
     if (typeof rawOrigin === 'string' && rawOrigin.length > 0) origins.push(rawOrigin)
 
-    const rawHost = Array.isArray(req.headers.host) ? req.headers.host[0] : req.headers.host
+    const rawHost = requestHeader(req.headers, 'host').value
     if (typeof rawHost === 'string' && rawHost.length > 0) origins.push(`http://${rawHost}`)
 
     return [...new Set(origins)]
@@ -164,7 +179,10 @@ class HttpBridge {
   _checkTokenOrigin (req, res, expectedOrigin) {
     if (!expectedOrigin) return true
     const origins = this._requestOrigins(req)
-    if (origins.length === 0) return true
+    if (origins.length === 0) {
+      this._jsonError(res, 'Token origin mismatch', 403)
+      return false
+    }
     for (const origin of origins) {
       if (!this._sameOrigin(origin, expectedOrigin)) {
         this._jsonError(res, 'Token origin mismatch', 403)
@@ -212,8 +230,7 @@ class HttpBridge {
   }
 
   _requireToken (req, res) {
-    const rawToken = req.headers['x-pear-token']
-    const token = Array.isArray(rawToken) ? rawToken[0] : rawToken
+    const token = requestHeader(req.headers, 'x-pear-token').value
     const entry = this._validateToken(token)
     if (!entry) {
       this._jsonError(res, 'Unauthorized', 401)
@@ -286,7 +303,7 @@ class HttpBridge {
     const auth = this._requireToken(req, res)
     if (!auth) return null
     if (req.method === 'POST') {
-      const origin = Array.isArray(req.headers.origin) ? req.headers.origin[0] : req.headers.origin
+      const origin = requestHeader(req.headers, 'origin').value
       if (typeof origin !== 'string' || origin.length === 0) {
         this._walletError(res, walletFail('not-authorized', 'Origin header is required'))
         return null
@@ -298,8 +315,7 @@ class HttpBridge {
       this._walletError(res, walletFail('not-authorized', 'wallet document registry is not available'))
       return null
     }
-    const rawDoc = req.headers['x-pear-wallet-doc']
-    const presented = Array.isArray(rawDoc) ? rawDoc[0] : rawDoc
+    const presented = requestHeader(req.headers, 'x-pear-wallet-doc').value
     const verified = await this._walletDocuments.verify({ tuple, token: presented, method })
     if (verified !== true) {
       this._walletError(res, walletFail('not-authorized', 'document token is not authorized'))
@@ -417,10 +433,12 @@ class HttpBridge {
     }
 
     // Origin validation
-    const origin = req.headers.origin
-    if (origin) {
+    const originHeader = requestHeader(req.headers, 'origin')
+    const origin = originHeader.value
+    if (originHeader.present) {
       const isAllowed = this._isLoopbackOrigin(origin) &&
-        this._allowedOrigins.some(allowed => origin === allowed || origin.startsWith(allowed + ':'))
+        (isDriveOriginHostname(new URL(origin).hostname) ||
+          this._allowedOrigins.some(allowed => origin === allowed || origin.startsWith(allowed + ':')))
       if (!isAllowed) {
         res.statusCode = 403
         res.setHeader('Content-Type', 'application/json')

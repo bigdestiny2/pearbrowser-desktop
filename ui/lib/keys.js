@@ -8,6 +8,9 @@
 //   shortKey                 truncated key for compact labels
 //   normalizeUrl             URL-bar input → canonical hyper://… URL
 
+import driveOrigin from '../../backend/drive-origin.cjs'
+
+const { isDriveOriginHostname } = driveOrigin
 const Z32_ALPHABET = 'ybndrfg8ejkmcpqxot1uwisza345h769'
 const Z32_REVERSE = (() => {
   const map = new Map()
@@ -134,6 +137,10 @@ export function normalizeUrl (raw) {
   if (/^(?:pear|file):\/\//i.test(s)) return null
   if (/^[0-9a-f]{64}$/i.test(s)) return `hyper://${s.toLowerCase()}/`
   if (/^[13-9a-km-uw-z]{52}$/i.test(s)) return `hyper://${s}/`
+  try {
+    const local = new URL(`http://${s}`)
+    if (isDriveOriginHostname(local.hostname) && !s.includes('@')) return local.href
+  } catch {}
   // Public hostname (optionally with path/port) → https clearnet
   if (/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}(?::\d{1,5})?(?:[/?#].*)?$/i.test(s)) {
     return `https://${s.replace(/^\/+/, '')}`
@@ -148,7 +155,8 @@ export function isClearnetUrl (raw) {
     const u = new URL(String(raw || '').trim())
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return false
     const host = (u.hostname || '').toLowerCase()
-    return host !== '127.0.0.1' && host !== 'localhost' && host !== '[::1]'
+    return host !== '127.0.0.1' && host !== 'localhost' && host !== '[::1]' &&
+      !(u.protocol === 'http:' && isDriveOriginHostname(host))
   } catch {
     return false
   }

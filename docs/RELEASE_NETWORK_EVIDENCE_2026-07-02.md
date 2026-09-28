@@ -1,5 +1,7 @@
 # PearBrowser Release And Network Evidence - 2026-07-02
 
+**2026-09-26 correction:** The July origin-isolation storage PASS was based on an in-memory simulation. A real Electron 43.2.0 probe found cookies shared across loopback ports; the current evidence checker now blocks that artifact. See [the origin-isolation correction](ORIGIN_ISOLATION_MIGRATION_2026-07-02.md#2026-09-26-correction-cookie-isolation-remains-open).
+
 ## Decision
 PearBrowser Desktop is source-green in the current checkout, but it is not announcement-ready. The remaining release work is operator evidence: desktop GUI and real-network rows, Peercord human trust approval, mobile real-device and production signing/store rows, and the final announcement decision.
 

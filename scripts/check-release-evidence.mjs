@@ -9,8 +9,11 @@
 
 import { readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
+import { checkOriginIsolationEvidenceFile } from './check-origin-isolation-smoke-evidence.mjs'
 
 const DEFAULT_LOG = new URL('../docs/RELEASE_SMOKE_EVIDENCE_LOG_2026-06-23.md', import.meta.url)
+const DEFAULT_ORIGIN_EVIDENCE = new URL('../docs/origin-isolation-smoke-evidence-peerit-pearfeed-2026-07-04.json', import.meta.url)
+const COOKIE_ISOLATION_GATE = 'Current P2P app cookie isolation'
 const PASS_STATUSES = new Set(['PASS', 'DEFER'])
 const READY_DECISIONS = new Set(['GO', 'GO DESKTOP ONLY'])
 const NEGATIVE_DECISION_RE = /^(NO|FAIL|FAILED|BLOCKED)\b/
@@ -88,12 +91,13 @@ function isDecisionTable (table) {
   return table.section === 'Announcement Decision' && headers.includes('question') && headers.includes('answer')
 }
 
-export function analyzeReleaseEvidence (markdown) {
+export function analyzeReleaseEvidence (markdown, { requireCookieIsolation = false, originIsolationReport = null } = {}) {
   const tables = parseMarkdownTables(markdown)
   const incomplete = []
   const failures = []
   const passed = []
   const deferred = []
+  const cookieRows = []
 
   for (const table of tables) {
     if (isMetadataTable(table)) {
@@ -116,6 +120,7 @@ export function analyzeReleaseEvidence (markdown) {
         const gate = normalize(obj.gate)
         const result = normalizeUpper(obj.result)
         const evidence = normalize(obj.evidence)
+        if (gate === COOKIE_ISOLATION_GATE) cookieRows.push({ section: table.section, result })
         if (!result) {
           incomplete.push({ section: table.section, item: gate, reason: 'result is blank' })
           continue
@@ -126,6 +131,17 @@ export function analyzeReleaseEvidence (markdown) {
         }
         if (!evidence) {
           incomplete.push({ section: table.section, item: gate, reason: `${result} requires evidence` })
+          continue
+        }
+        if (requireCookieIsolation && gate === COOKIE_ISOLATION_GATE) {
+          if (result !== 'PASS') {
+            failures.push({ section: table.section, item: gate, reason: 'current P2P app cookie isolation cannot be deferred for desktop release' })
+          } else if (originIsolationReport?.ok !== true) {
+            const checks = (originIsolationReport?.failures || []).slice(0, 5).map((failure) => failure.id).join(', ')
+            failures.push({ section: table.section, item: gate, reason: `trusted origin-isolation evidence did not pass${checks ? `: ${checks}` : ''}` })
+          } else {
+            passed.push({ section: table.section, item: gate, evidence })
+          }
           continue
         }
         if (result === 'DEFER') deferred.push({ section: table.section, item: gate, evidence })
@@ -186,6 +202,10 @@ export function analyzeReleaseEvidence (markdown) {
     }
   }
 
+  if (requireCookieIsolation && cookieRows.length !== 1) {
+    failures.push({ section: 'Desktop GUI And User Stories', item: COOKIE_ISOLATION_GATE, reason: `exactly one cookie-isolation gate row is required, found ${cookieRows.length}` })
+  }
+
   if (!tables.some(isMetadataTable)) {
     failures.push({ section: 'Run Metadata', item: 'table', reason: 'metadata table missing' })
   }
@@ -212,11 +232,16 @@ export function analyzeReleaseEvidence (markdown) {
   }
 }
 
+function hasCookieIsolationRow (markdown) {
+  return parseMarkdownTables(markdown).some((table) => isGateTable(table) && table.rows.some((row) => normalize(rowObject(table, row).gate) === COOKIE_ISOLATION_GATE))
+}
+
 function parseArgs (argv) {
-  const args = { file: DEFAULT_LOG, json: false }
+  const args = { file: DEFAULT_LOG, originIsolationEvidence: DEFAULT_ORIGIN_EVIDENCE, json: false }
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
     if (arg === '--file') args.file = new URL(argv[++i], pathToFileURL(process.cwd() + '/'))
+    else if (arg === '--origin-isolation-evidence') args.originIsolationEvidence = new URL(argv[++i], pathToFileURL(process.cwd() + '/'))
     else if (arg === '--json') args.json = true
     else if (arg === '-h' || arg === '--help') usage(0)
     else usage(2, `unknown option: ${arg}`)
@@ -226,7 +251,7 @@ function parseArgs (argv) {
 
 function usage (code, message = '') {
   if (message) console.error('error:', message)
-  console.error('usage: node scripts/check-release-evidence.mjs [--file docs/RELEASE_SMOKE_EVIDENCE_LOG_2026-06-23.md] [--json]')
+  console.error('usage: node scripts/check-release-evidence.mjs [--file docs/RELEASE_SMOKE_EVIDENCE_LOG_2026-06-23.md] [--origin-isolation-evidence capture-evidence.json] [--json]')
   process.exit(code)
 }
 
@@ -256,7 +281,20 @@ function printReport (result, file) {
 async function main () {
   const args = parseArgs(process.argv.slice(2))
   const markdown = readFileSync(args.file, 'utf8')
-  const result = analyzeReleaseEvidence(markdown)
+  let originIsolationReport = null
+  if (hasCookieIsolationRow(markdown)) {
+    try {
+      originIsolationReport = checkOriginIsolationEvidenceFile(args.originIsolationEvidence)
+    } catch (error) {
+      originIsolationReport = { ok: false, status: 'blocked', failures: [{ id: 'evidence-load', detail: error.message }] }
+    }
+  }
+  const result = analyzeReleaseEvidence(markdown, { requireCookieIsolation: true, originIsolationReport })
+  result.originIsolation = {
+    evidenceFile: args.originIsolationEvidence.pathname,
+    status: originIsolationReport?.status || 'missing-row',
+    failures: originIsolationReport?.failures || []
+  }
   if (args.json) console.log(JSON.stringify(result, null, 2))
   else printReport(result, args.file.pathname)
   process.exit(result.ok ? 0 : 1)

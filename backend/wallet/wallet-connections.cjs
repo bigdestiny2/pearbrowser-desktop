@@ -7,11 +7,24 @@
 // shutdown or wallet lock. No secrets are ever stored here.
 
 const STABLE_TESTNET = require('./networks/stable-testnet.cjs')
+const { driveKeyFromHostname } = require('../drive-origin.cjs')
 
 const HEX64_RE = /^[0-9a-f]{64}$/
 const SESSION_ID_RE = /^[A-Za-z0-9_-]{8,128}$/
 const TAB_ID_RE = /^[A-Za-z0-9_-]{1,128}$/
 const LOOPBACK_ORIGIN_RE = /^http:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::\d{1,5})?$/
+
+function isWalletTabOrigin (origin, driveKey) {
+  if (LOOPBACK_ORIGIN_RE.test(origin)) return true
+  try {
+    const parsed = new URL(origin)
+    return parsed.protocol === 'http:' &&
+      `${parsed.protocol}//${parsed.host}` === origin &&
+      driveKeyFromHostname(parsed.hostname) === driveKey
+  } catch {
+    return false
+  }
+}
 
 function connectionError (code, message) {
   const err = new Error(message || code)
@@ -80,7 +93,8 @@ class WalletConnections {
   connect (tuple) {
     const key = requireTupleKey(tuple)
     const { walletTabOrigin, manifestSha256, chainId, assetId } = tuple
-    if (typeof walletTabOrigin !== 'string' || walletTabOrigin.length > 128 || !LOOPBACK_ORIGIN_RE.test(walletTabOrigin)) {
+    if (typeof walletTabOrigin !== 'string' || walletTabOrigin.length > 128 ||
+        !isWalletTabOrigin(walletTabOrigin, key.driveKey)) {
       throw connectionError('bad-request', 'walletTabOrigin is invalid')
     }
     if (typeof manifestSha256 !== 'string' || !HEX64_RE.test(manifestSha256)) {

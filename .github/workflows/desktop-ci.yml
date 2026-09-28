@@ -96,6 +96,24 @@ jobs:
         working-directory: pear-ecosystem/01-browser/pearbrowser-desktop
         run: npm test
 
+      - name: Install Linux display and secure Electron sandbox
+        working-directory: pear-ecosystem/01-browser/pearbrowser-desktop
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+          npm run -s install:electron-runtime
+          sandbox=node_modules/electron/dist/chrome-sandbox
+          test -f "$sandbox" && test ! -L "$sandbox"
+          sudo chown root:root "$sandbox"
+          sudo chmod 4755 "$sandbox"
+          test "$(stat -c '%a' "$sandbox")" = 4755
+
+      # Diagnostic synthetic-page coverage; trusted packaged real-app evidence has a separate release gate.
+      - name: Probe first-party Hyper tabs in Electron
+        working-directory: pear-ecosystem/01-browser/pearbrowser-desktop
+        run: xvfb-run -a npm run -s check:electron-native-tabs
+
       - name: Verify generated UI bundle
         working-directory: pear-ecosystem/01-browser/pearbrowser-desktop
         run: |

@@ -4,7 +4,16 @@ import { spawnSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 import { resolve } from 'node:path'
 
-export const REVIEWED_PEAR_CLI_VERSION = '3.3.0'
+export const REVIEWED_PEAR_CLI_VERSION = '3.4.0'
+
+export const REVIEWED_PEAR_3_4_CAPABILITIES = Object.freeze({
+  blindPeer: true,
+  blindRelay: true,
+  relayFallback: true,
+  seedBlindPeer: true,
+  stageWithoutPackageJson: true,
+  enhancedCoreStats: true
+})
 
 export function extractPearCliVersion (output) {
   const matches = Array.from(
@@ -155,7 +164,8 @@ export function checkPearCli ({
     command,
     version,
     versions,
-    reviewed: REVIEWED_PEAR_CLI_VERSION
+    reviewed: REVIEWED_PEAR_CLI_VERSION,
+    capabilities: REVIEWED_PEAR_3_4_CAPABILITIES
   }
 }
 

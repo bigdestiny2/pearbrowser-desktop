@@ -26,6 +26,9 @@ const errors = []
 const verifiedSources = []
 const enabledFuseState = 49
 const disabledFuseState = 48
+const expectedCookieEncryptionFuseState = expectedPlatform === 'darwin' && expectedMode === 'package-proof'
+  ? disabledFuseState
+  : enabledFuseState
 
 if (!args.resourcesDir) fail('--resources-dir is required')
 if (!existsSync(resourcesDir)) fail(`packaged resources directory does not exist: ${resourcesDir}`)
@@ -46,7 +49,7 @@ const provenance = packagedPackage.pearRelease || {}
 check(provenance.tag === expectedTag, `packaged provenance tag must be ${expectedTag}, got ${provenance.tag || '(missing)'}`)
 check(provenance.sourceRef === expectedSourceRef, `packaged provenance sourceRef must be ${expectedSourceRef}, got ${provenance.sourceRef || '(missing)'}`)
 check(provenance.mode === expectedMode, `packaged provenance mode must be ${expectedMode}, got ${provenance.mode || '(missing)'}`)
-check(provenance.pear === '3.3.0', `packaged provenance Pear version must be 3.3.0, got ${provenance.pear || '(missing)'}`)
+check(provenance.pear === '3.4.0', `packaged provenance Pear version must be 3.4.0, got ${provenance.pear || '(missing)'}`)
 
 let runtimeIntegrityReport = null
 const runtimeIntegrity = packagedPackage.pearRuntimeIntegrity || {}
@@ -60,7 +63,7 @@ try {
       tag: expectedTag,
       sourceRef: expectedSourceRef,
       releaseMode: expectedMode,
-      pear: '3.3.0',
+      pear: '3.4.0',
       platform: expectedPlatform,
       arch: expectedArch
     }
@@ -109,7 +112,7 @@ for (const archiveEntry of ['electron/main.cjs', 'electron/preload.cjs', 'index.
 }
 
 const expectedDependencies = {
-  'pear-install': '1.2.2',
+  'pear-install': '1.3.0',
   'pear-runtime': '1.3.1',
   'pear-runtime-updater': '3.4.0'
 }
@@ -165,7 +168,8 @@ if (args.executable) {
       }
       check(fuseReport.version === '1', `Electron fuse wire must be version 1, got ${fuseReport.version}`)
       check(fuseReport.runAsNode === disabledFuseState, 'Electron RunAsNode fuse must be disabled')
-      check(fuseReport.cookieEncryption === enabledFuseState, 'Electron cookie-encryption fuse is not enabled')
+      check(fuseReport.cookieEncryption === expectedCookieEncryptionFuseState,
+        `Electron cookie-encryption fuse must be ${expectedCookieEncryptionFuseState === enabledFuseState ? 'enabled' : 'disabled'} for ${expectedPlatform} ${expectedMode}`)
       check(fuseReport.nodeOptionsEnvironmentVariable === disabledFuseState, 'Electron NODE_OPTIONS environment-variable fuse must be disabled')
       check(fuseReport.nodeCliInspectArguments === disabledFuseState, 'Electron Node CLI inspect fuse must be disabled')
       check(fuseReport.embeddedAsarIntegrity === enabledFuseState, 'Electron embedded ASAR integrity fuse is not enabled')
@@ -199,7 +203,7 @@ else if (report.ok) {
   console.log(`- embedded Pear: ${report.pear}`)
   if (runtimeIntegrityReport) console.log(`- signed physical runtime tree: ${runtimeIntegrityReport.files} files`)
   console.log(`- byte-identical reviewed source files: ${report.verifiedSourceFiles}`)
-  if (fuseReport) console.log('- Electron production hardening and ASAR-integrity fuses: enforced')
+  if (fuseReport) console.log(`- Electron hardening and ASAR-integrity fuses: enforced (${expectedPlatform} ${expectedMode} cookie encryption ${expectedCookieEncryptionFuseState === enabledFuseState ? 'on' : 'off'})`)
   console.log(`- resources: ${report.resourcesDir}`)
 } else {
   console.error('Electron package verification failed:')
