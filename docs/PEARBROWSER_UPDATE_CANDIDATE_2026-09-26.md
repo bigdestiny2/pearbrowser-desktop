@@ -77,7 +77,7 @@ the current gap, not a passing isolation proof.
   is open and draft. The audited source commit
   `cb602520521fd9a2bed9a2dfb20af472f28eed1e` passed its
   [Desktop CI run](https://github.com/bigdestiny2/pearbrowser-desktop/actions/runs/36264816718/job/108467360852)
-  passed on Ubuntu. That job runs `npm ci`, the test suite, a generated UI
+  on Ubuntu. That job runs `npm ci`, the test suite, a generated UI
   bundle check, and a high-severity dependency audit. It does not build or
   exercise native macOS, Windows, or Linux installers. No candidate
   cross-platform packaged-app smoke has been recorded.
