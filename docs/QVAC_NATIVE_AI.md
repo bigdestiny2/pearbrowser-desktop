@@ -140,7 +140,22 @@ still chooses a browser-approved alias and can never submit a path to QVAC.
 Bare-worker smoke. PearBrowser's Electron host owns the embedded Pear OTA
 worker; it never uses a CLI launcher for this check.
 
-## Current proof
+## 2026-09-28 native-addon candidate proof
+
+The desktop candidate updates `@qvac/llm-llamacpp` to 0.54.0 while retaining
+`@qvac/bare-sdk` 0.14.1. A fresh macOS x64 package under Rosetta passed the
+backend RPC smoke, first-window mount, and renderer reload without Intel
+Homebrew OpenSSL. The PR and public native-release workflows now inspect
+packaged QVAC addons with `otool` and reject external absolute dylib links.
+
+On macOS arm64, `npm run smoke:qvac:native` downloaded the public
+386,404,992-byte model, loaded it through the upgraded native addon, generated
+7 tokens on CPU, and unloaded cleanly (`finish=eos`, 26.05 tokens/second in this
+local run). The complete desktop suite passed with 977 tests and 6 skips. The
+browser-page AI journey and a signed public-trust installer have not been
+requalified on 0.54.0; keep those as release evidence gates.
+
+## Earlier 0.36.3 proof
 
 On macOS arm64, Bare 1.30.3 with `@qvac/bare-sdk` 0.14.1 and
 `@qvac/llm-llamacpp` 0.36.3:

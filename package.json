@@ -109,7 +109,7 @@
     "@noble/hashes": "^2.2.0",
     "@noble/secp256k1": "^3.1.0",
     "@qvac/bare-sdk": "0.14.1",
-    "@qvac/llm-llamacpp": "0.36.3",
+    "@qvac/llm-llamacpp": "0.54.0",
     "@tetherto/pear-wrk-wdk": "1.0.0-beta.11",
     "@tetherto/wdk": "1.0.0-beta.16",
     "@tetherto/wdk-wallet-evm": "1.0.0-beta.16",

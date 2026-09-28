@@ -168,6 +168,10 @@ jobs:
         run: |
           node scripts/check-electron-package.mjs --resources-dir "$ELECTRON_RESOURCES_DIR" --executable "$ELECTRON_EXECUTABLE" --source-ref "$SOURCE_REF" --release-mode package-proof --platform "${{ matrix.platform }}" --arch "${{ matrix.arch }}" --json
 
+      - name: Verify macOS QVAC native library links
+        if: runner.os == 'macOS'
+        run: node scripts/check-macos-qvac-links.mjs --resources-dir "$ELECTRON_RESOURCES_DIR" --arch "${{ matrix.arch }}"
+
       - name: Verify macOS ad-hoc signature
         if: runner.os == 'macOS'
         run: codesign --verify --deep --strict --verbose=2 "${ELECTRON_RESOURCES_DIR%/Contents/Resources}"

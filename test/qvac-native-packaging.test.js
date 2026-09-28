@@ -10,12 +10,12 @@ const lock = JSON.parse(readFileSync(new URL('../package-lock.json', import.meta
 
 test('QVAC native runtime dependencies are exact and lockfile-aligned', () => {
   assert.equal(pkg.dependencies['@qvac/bare-sdk'], '0.14.1')
-  assert.equal(pkg.dependencies['@qvac/llm-llamacpp'], '0.36.3')
+  assert.equal(pkg.dependencies['@qvac/llm-llamacpp'], '0.54.0')
   assert.equal(pkg.dependencies['bare-env'], '3.0.0')
   assert.equal(pkg.dependencies['bare-process'], '4.5.0')
   assert.equal(pkg.devDependencies.bare, '1.30.3')
   assert.equal(lock.packages['node_modules/@qvac/bare-sdk'].version, '0.14.1')
-  assert.equal(lock.packages['node_modules/@qvac/llm-llamacpp'].version, '0.36.3')
+  assert.equal(lock.packages['node_modules/@qvac/llm-llamacpp'].version, '0.54.0')
   assert.equal(lock.packages['node_modules/bare-env'].version, '3.0.0')
 })
 

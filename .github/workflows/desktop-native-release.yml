@@ -384,6 +384,10 @@ jobs:
             --arch "${{ matrix.arch }}" \
             --json
 
+      - name: Verify macOS QVAC native library links
+        if: runner.os == 'macOS'
+        run: node scripts/check-macos-qvac-links.mjs --resources-dir "$ELECTRON_RESOURCES_DIR" --arch "${{ matrix.arch }}"
+
       - name: Verify macOS code signature
         if: runner.os == 'macOS'
         run: |

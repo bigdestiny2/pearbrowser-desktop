@@ -4,12 +4,14 @@
 trusted origin-isolation verifier for the P2P cookie row. A textual PASS,
 DEFER, or removed row cannot clear the gate. It still requires frame-bound
 captures from two real apps in the exact signed package and independent
-review. The current result is **53 PASS / 18 DEFER / 1 FAIL**. An Intel macOS
-x64 package failed to boot its first window twice while the backend was
-healthy; diagnostic CI is pending. Apple Silicon, Windows x64, and Linux x64
-passed the previous PR package run, which does not qualify new Intel changes.
-A local Mac build with ad hoc signing is diagnostic only and does not establish
-public trust. Desktop `v0.9.1` remains **HOLD**; mobile remains held
+review. The current result is **53 PASS / 18 DEFER / 1 FAIL**. The
+[package run for head `1f156fc`](https://github.com/bigdestiny2/pearbrowser-desktop/actions/runs/36434749751)
+passed first-window and reload checks on Apple Silicon, Intel macOS x64,
+Windows x64, and Linux x64. A newer QVAC native addon now loads without Intel
+Homebrew OpenSSL and generated a short response from a public model locally;
+its exact-head package matrix is pending. Local ad hoc packages remain
+diagnostic and do not establish public trust. Desktop `v0.9.1` remains
+**HOLD**; mobile remains held
 separately. See [the current candidate follow-up](PEARBROWSER_UPDATE_CANDIDATE_2026-09-26.md#2026-09-28-current-follow-up-origin-gate-and-intel-first-window).
 
 **2026-09-28 follow-up:** The desktop draft PR now adds a disposable real-HyperProxy Electron smoke using synthetic drives; the local macOS run passed. Its PR-only package matrix adds review-only checksummed artifacts and a complete-bundle verifier; [run 36400696929](https://github.com/bigdestiny2/pearbrowser-desktop/actions/runs/36400696929) passed for prior source head `7d68aac`. Check [PR #84's current head](https://github.com/bigdestiny2/pearbrowser-desktop/pull/84/checks) before relying on CI. The separate protected `package-proof` workflow rejected this branch before native build jobs, and its protection was not changed. Current release evidence remains 54 PASS / 17 DEFER / 1 FAIL for trusted packaged real-app cookie isolation. See [the candidate follow-up](PEARBROWSER_UPDATE_CANDIDATE_2026-09-26.md#2026-09-28-follow-up-named-host-integration-and-pr-artifacts).
