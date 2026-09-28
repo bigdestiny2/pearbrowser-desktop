@@ -151,9 +151,12 @@ packaged QVAC addons with `otool` and reject external absolute dylib links.
 On macOS arm64, `npm run smoke:qvac:native` downloaded the public
 386,404,992-byte model, loaded it through the upgraded native addon, generated
 7 tokens on CPU, and unloaded cleanly (`finish=eos`, 26.05 tokens/second in this
-local run). The complete desktop suite passed with 977 tests and 6 skips. The
-browser-page AI journey and a signed public-trust installer have not been
-requalified on 0.54.0; keep those as release evidence gates.
+local run). A real Chromium loopback demo then used `window.pear.ai` to
+stream 8 text events, stats, and completion through authenticated NDJSON; wrong
+tokens returned HTTP 401, and the manifest-denied case remained HTTP 403. The
+complete desktop suite passed with 980 tests and 6 skips after the origin
+rehearsal tests were added. A published Hyperdrive app journey and signed public-trust installer still need separate
+release evidence.
 
 ## Earlier 0.36.3 proof
 

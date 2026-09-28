@@ -1,8 +1,8 @@
 # PearBrowser desktop update candidate — Pear 3.4, Autobee, and origin security
 
-Date: 2026-09-26. Release audit refreshed: 2026-09-28. State: pushed draft PR; local and PR package proof is under review, but no public distribution qualification.
+Date: 2026-09-26. Release audit refreshed: 2026-09-28. State: pushed draft PR; the verified desktop code head passed CI and four-platform review package proof, but public distribution remains on hold.
 
-This branch starts from the already committed Pear 3.4 adoption candidate (`aa2ef51`). The stable Pear CLI 3.4.0 contract and embedded `pear-runtime@1.3.1` are pinned and checked by `check:pear-v3`; the browser still owns its Electron host and Pear worker boundary. The main desktop checkout has separate uncommitted Bitcoin/WDK work and is unchanged by this branch.
+This branch starts from the already committed Pear 3.4 adoption candidate (`aa2ef51`). The stable Pear CLI 3.4.0 contract and embedded `pear-runtime@1.3.1` are pinned and checked by `check:pear-v3`; the browser still owns its Electron host and Pear worker boundary. At branch creation, the main desktop checkout had separate uncommitted Bitcoin/WDK work; that work was outside this branch.
 
 ## Autobee compatibility
 
@@ -33,16 +33,17 @@ it kept two drives' JavaScript, HTTP-only, and localStorage data separate;
 12 hostile Domain-cookie attempts were rejected. Proxy, bridge, navigation,
 and wallet regression tests also cover the named-host rules.
 
-This is a local browser-engine probe and source integration test, not a trusted
-capture of two real P2P apps in a distributed package. Windows and Linux
-Electron behavior, real-app CSP and tab lifecycle, packaged WebContents
-provenance, and clean-install journeys remain to be checked. The origin
+These local browser-engine and source integration tests are not trusted
+captures of two real P2P apps in a distributed package. Later PR package jobs
+also passed synthetic-drive Electron probes on Windows and Linux. Real-app CSP
+and tab lifecycle, packaged WebContents provenance, and clean-install journeys
+remain to be checked. The origin
 release-evidence checker deliberately keeps its provenance check blocked;
 a self-authored JSON file cannot satisfy that gate.
 
-## Validation and remaining gates
+## Earlier validation snapshot and remaining gates
 
-- The complete desktop suite passed 965 tests, with 6 skipped and 0 failed,
+- An earlier desktop suite passed 965 tests, with 6 skipped and 0 failed,
   after the named-host changes. The Pear v3 host contract and installed Pear CLI 3.4.0
   checks passed. The Autobee spike and existing collaborative-catalog focused
   tests passed 11/11. The origin-evidence focused tests passed 9/9 after
@@ -58,14 +59,18 @@ a self-authored JSON file cannot satisfy that gate.
 - The current release evidence checker still returns FAIL for current P2P app
   cookie isolation because trusted packaged-app capture is missing. The source
   fix and local engine probe narrow the gap but do not replace that proof.
-- The main checkout's unfinished Bitcoin/WDK changes are not included here;
-  its Pear worker-entry contract currently fails and requires separate
-  integration review.
-- Current-version native installers, Windows/Linux runtime, real P2P writer
-  replication, Autobee migration, and integrated production cookie isolation
-  have not been qualified.
+- The main checkout's unfinished Bitcoin/WDK changes were not included in
+  this branch snapshot; at that time its Pear worker-entry contract failed and
+  required separate integration review.
+- The later PR matrix checked packaged first windows on Windows and Linux.
+  Clean-installed public-trust native installers, real P2P writer replication,
+  Autobee migration, and integrated production cookie isolation remain
+  unqualified.
 
-## 2026-09-28 release audit
+## 2026-09-28 earlier release audit
+
+The next audit rows record earlier source heads. The final section below records
+the current exact-head result.
 
 - [Desktop PR #84](https://github.com/bigdestiny2/pearbrowser-desktop/pull/84)
   is open and draft. The audited source commit
@@ -74,14 +79,14 @@ a self-authored JSON file cannot satisfy that gate.
   on Ubuntu. That job runs `npm ci`, the test suite, a generated UI
   bundle check, and a high-severity dependency audit. It does not build or
   exercise native macOS, Windows, or Linux installers. No candidate
-  cross-platform packaged-app smoke has been recorded.
-- `npm run -s check:release-evidence` reports 54 PASS, 17 DEFER, and one FAIL:
+  cross-platform packaged-app smoke had been recorded at that point.
+- At that point `npm run -s check:release-evidence` reported 54 PASS, 17 DEFER, and one FAIL:
   **Current P2P app cookie isolation**. Historical release-log decisions and
   deferrals are retained as prior evidence; they do not qualify this candidate.
   The named-host candidate and local Electron probe address the measured
   shared-host leak; a trusted packaged-app capture and review remain
   prerequisites for a new release decision.
-- A read-only `check:public-trust-readiness` run for `v0.9.1` and the exact PR
+- A read-only `check:public-trust-readiness` run for `v0.9.1` and that PR
   head failed. The GitHub repository and protected `production` environment
   exposed no native signing secret names. The missing gates are macOS
   Developer ID and notarization credentials, a Windows PFX certificate, and
@@ -104,11 +109,11 @@ a self-authored JSON file cannot satisfy that gate.
   two HiveRelays, status RPC on port 9876, backend proxy active. This is
   one local macOS package smoke; Windows/Linux packages, clean install,
   human browse journeys, cookie isolation, and public-trust signing remain
-  unqualified.
-- The separate `release/v0.9.1` checkout still contains uncommitted
-  Bitcoin/WDK work. Its current `check:pear-v3` fails because
-  `electron/main.cjs` does not meet the host-owned Pear worker-entry contract.
-  Those changes remain outside PR #84 and need their own integration review.
+  unqualified at that point.
+- At that audit, the separate `release/v0.9.1` checkout contained uncommitted
+  Bitcoin/WDK work. Its `check:pear-v3` failed because `electron/main.cjs` did
+  not meet the host-owned Pear worker-entry contract. Those changes were
+  outside PR #84 and needed separate integration review.
 
 - The draft adds a PR-only, read-only `package-proof` matrix for macOS
   Apple Silicon/Intel, Windows x64, and Linux x64. It checks generated UI,
@@ -131,14 +136,53 @@ The corrected PR package matrix for that head passed all four targets: Apple Sil
 
 A separate manual `desktop-native-release.yml` package-proof dispatch for exact source `658fd70f0afbee9bd1fe892f181ddbe4c1715a01` passed preflight and source tests but GitHub rejected its build jobs because this PR branch is not allowed to enter the protected `package-proof` environment. The protection remains intact. The draft PR workflow now collects checksummed artifacts from its four matrix runners and verifies the complete, exact-source bundle for review only; it uses no protected environment or signing material and cannot create a tag or public release. The [PR-only matrix run](https://github.com/bigdestiny2/pearbrowser-desktop/actions/runs/36400696929) passed for prior source head `7d68aac`. See [PR #84 checks](https://github.com/bigdestiny2/pearbrowser-desktop/pull/84/checks) for the current head; that older run does not qualify later source changes.
 
-`npm run check:release-evidence` remains **54 PASS / 17 DEFER / 1 FAIL**. The failing row is current P2P app cookie isolation, for which trusted packaged real-app capture is still missing. `v0.9.0` remains the published desktop release; `v0.9.1` is a draft candidate.
+At that point `npm run check:release-evidence` reported **54 PASS / 17 DEFER / 1 FAIL**. The failing row was current P2P app cookie isolation, for which trusted packaged real-app capture is still missing. `v0.9.0` remains the published desktop release; `v0.9.1` is a draft candidate.
 
 ## 2026-09-28 main-listener Host correction
 
-A further release review found that the main Clearnet listener accepted a drive-shaped Host header on the main port. Since browser cookies follow the hostname across ports, that allowed Clearnet content to run at a drive's cookie hostname despite the separate drive listener. A disposable local request reproduced the wrong-host Clearnet response before the fix. The proxy now requires the exact generated Host on **every** listener and rejects absolute-form request targets whose origin differs from the listener. Focused origin/Clearnet/shield tests and the Electron HyperProxy integration diagnostic pass after this correction. The four-platform package matrix must run again on this exact commit before its artifacts can be considered current. Trusted packaged real-app capture and public-trust signing remain open; distribution remains **HOLD** until those gates are met.
+A further release review found that the main Clearnet listener accepted a drive-shaped Host header on the main port. Since browser cookies follow the hostname across ports, that allowed Clearnet content to run at a drive's cookie hostname despite the separate drive listener. A disposable local request reproduced the wrong-host Clearnet response before the fix. The proxy now requires the exact generated Host on **every** listener and rejects absolute-form request targets whose origin differs from the listener. Focused origin/Clearnet/shield tests and the Electron HyperProxy integration diagnostic pass after this correction. At that source head, the four-platform package matrix still needed a rerun. Trusted packaged real-app capture and public-trust signing remain open; distribution remains **HOLD** until those gates are met.
 
 ## 2026-09-28 current follow-up: origin gate and Intel first window
 
-The aggregate release checker now invokes the origin-isolation verifier for the current P2P cookie row. It requires a frame-bound capture of two real apps from the exact signed public-trust package, with independent provenance review; editing the log to PASS or DEFER cannot clear it. The current result is **53 PASS / 18 DEFER / 1 FAIL**. The failing row remains trusted real-app cookie isolation.
+The aggregate release checker invokes the origin-isolation verifier for the
+current P2P cookie row. It requires frame-bound capture of two real apps from
+the exact signed public-trust package and independent provenance review;
+editing the log to PASS or DEFER cannot clear it. The current result is
+**53 PASS / 18 DEFER / 1 FAIL**. The failing row remains trusted real-app
+cookie isolation.
 
-The hosted Intel macOS x64 package initially reached a healthy backend but failed to boot its first window twice. Its token-safe diagnostic showed a renderer WebSocket opening 3.25 seconds after the old startup deadline. The bounded retry fix passed the [four-platform package and first-window run at head `1f156fc`](https://github.com/bigdestiny2/pearbrowser-desktop/actions/runs/36434749751), including Intel. A separate clean Intel Mac test exposed a QVAC addon linked to Intel Homebrew OpenSSL; the 0.54.0 candidate removes that dependency and passed local Rosetta package boot plus short native model generation. Its exact-head package matrix is pending. Local Mac builds with ad hoc signing and synthetic-drive tests remain diagnostic evidence. They do not provide public-trust signing, a clean installed user journey, or trusted real-app frame capture. Desktop `v0.9.1` remains **HOLD** for distribution.
+The hosted Intel macOS x64 package initially reached a healthy backend but
+failed to boot its first window twice. Token-safe diagnostics showed a
+renderer WebSocket opening 3.25 seconds after the old startup deadline. The
+renderer now retries within a 60-second overall startup limit, allowing up to
+10 seconds for each port attempt, and avoids logging session-token URLs. The
+bounded retry fix passed the [earlier four-platform first-window run at head
+`1f156fc`](https://github.com/bigdestiny2/pearbrowser-desktop/actions/runs/36434749751),
+including Intel.
+
+A disposable Rosetta x64 package inspection exposed an older QVAC addon
+linked to Intel Homebrew OpenSSL. The candidate updates `@qvac/llm-llamacpp` to 0.54.0 and
+`@qvac/fabric` to 0.17.0. At exact head
+`2503724299a1596ef812fd851b18e9f2e76ee902`, the full desktop suite
+passed **977 tests / 6 skipped / 0 failed** and
+[Desktop CI](https://github.com/bigdestiny2/pearbrowser-desktop/actions/runs/36437255547)
+passed. The [PR package proof](https://github.com/bigdestiny2/pearbrowser-desktop/actions/runs/36437255572)
+passed Apple Silicon macOS, Intel macOS, Windows x64, Linux x64, and complete
+exact-source artifact verification. Both macOS package jobs passed the QVAC
+native dylib link guard. A local arm64 QVAC 0.54 smoke generated seven tokens
+from a public model; a real Chromium loopback demo streamed eight text events
+through `window.pear.ai`, with invalid tokens rejected. This is local
+diagnostic proof, not a published Hyperdrive app journey.
+
+A separate diagnostic-only rehearsal against an older `ec0b97a` ad-hoc
+package passed seven checks using `SameSite=None; Secure` cookies in real app
+frames. Default/Lax cookies did not persist in the Hyper iframe context. This
+rehearsal does not prove the exact-head signed package or clear the trusted
+release gate.
+
+`check:public-trust-readiness` still blocks on absent macOS Developer ID and
+notarization credentials, Windows PFX credentials, unpublished `v0.9.1`
+assets/provenance/downloads, clean-install evidence, and the failed real-app
+cookie row. Local Mac builds with ad-hoc signing and synthetic-drive tests
+remain diagnostic evidence. Desktop `v0.9.1` remains **HOLD** for
+distribution; mobile remains held separately.

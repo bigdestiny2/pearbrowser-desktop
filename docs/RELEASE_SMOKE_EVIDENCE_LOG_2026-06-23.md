@@ -1,24 +1,28 @@
 # Release Smoke Evidence Log - 2026-06-23
 
-**2026-09-28 current desktop status:** The release checker now runs the
-trusted origin-isolation verifier for the P2P cookie row. A textual PASS,
-DEFER, or removed row cannot clear the gate. It still requires frame-bound
-captures from two real apps in the exact signed package and independent
-review. The current result is **53 PASS / 18 DEFER / 1 FAIL**. The
-[package run for head `1f156fc`](https://github.com/bigdestiny2/pearbrowser-desktop/actions/runs/36434749751)
-passed first-window and reload checks on Apple Silicon, Intel macOS x64,
-Windows x64, and Linux x64. A newer QVAC native addon now loads without Intel
-Homebrew OpenSSL and generated a short response from a public model locally;
-its exact-head package matrix is pending. Local ad hoc packages remain
-diagnostic and do not establish public trust. Desktop `v0.9.1` remains
-**HOLD**; mobile remains held
-separately. See [the current candidate follow-up](PEARBROWSER_UPDATE_CANDIDATE_2026-09-26.md#2026-09-28-current-follow-up-origin-gate-and-intel-first-window).
+**2026-09-28 current desktop status:** The release checker runs the trusted
+origin-isolation verifier for the P2P cookie row. A textual PASS, DEFER, or
+removed row cannot clear the gate. It requires frame-bound captures from two
+real apps in the exact signed package and independent review. The result is
+**53 PASS / 18 DEFER / 1 FAIL**. At exact source head
+`2503724299a1596ef812fd851b18e9f2e76ee902`,
+[Desktop CI](https://github.com/bigdestiny2/pearbrowser-desktop/actions/runs/36437255547)
+and the [four-platform PR package proof](https://github.com/bigdestiny2/pearbrowser-desktop/actions/runs/36437255572)
+passed, including Intel first-window/reload and the complete review-bundle
+verifier. Packaged macOS QVAC 0.54.0 addons passed a native link check without
+the older Intel Homebrew OpenSSL dependency. Local native model and Chromium
+loopback `window.pear.ai` streaming diagnostics passed, but no published P2P
+app journey was tested. These ad-hoc/unsigned packages do not establish public
+trust. macOS Developer ID/notarization and Windows PFX credentials,
+clean-install evidence, and trusted real-app cookie capture remain open.
+Desktop `v0.9.1` remains **HOLD**; mobile remains held separately. See the
+[current candidate follow-up](PEARBROWSER_UPDATE_CANDIDATE_2026-09-26.md#2026-09-28-current-follow-up-origin-gate-and-intel-first-window).
 
-**2026-09-28 follow-up:** The desktop draft PR now adds a disposable real-HyperProxy Electron smoke using synthetic drives; the local macOS run passed. Its PR-only package matrix adds review-only checksummed artifacts and a complete-bundle verifier; [run 36400696929](https://github.com/bigdestiny2/pearbrowser-desktop/actions/runs/36400696929) passed for prior source head `7d68aac`. Check [PR #84's current head](https://github.com/bigdestiny2/pearbrowser-desktop/pull/84/checks) before relying on CI. The separate protected `package-proof` workflow rejected this branch before native build jobs, and its protection was not changed. Current release evidence remains 54 PASS / 17 DEFER / 1 FAIL for trusted packaged real-app cookie isolation. See [the candidate follow-up](PEARBROWSER_UPDATE_CANDIDATE_2026-09-26.md#2026-09-28-follow-up-named-host-integration-and-pr-artifacts).
+**2026-09-28 earlier follow-up:** The desktop draft PR added a disposable real-HyperProxy Electron smoke using synthetic drives; the local macOS run passed. Its PR-only package matrix added review-only checksummed artifacts and a complete-bundle verifier; [run 36400696929](https://github.com/bigdestiny2/pearbrowser-desktop/actions/runs/36400696929) passed for prior source head `7d68aac`. Check [PR #84's current head](https://github.com/bigdestiny2/pearbrowser-desktop/pull/84/checks) before relying on CI. The separate protected `package-proof` workflow rejected this branch before native build jobs, and its protection was not changed. At that point, release evidence was 54 PASS / 17 DEFER / 1 FAIL for trusted packaged real-app cookie isolation. See [the candidate follow-up](PEARBROWSER_UPDATE_CANDIDATE_2026-09-26.md#2026-09-28-follow-up-named-host-integration-and-pr-artifacts).
 
 **2026-09-26 correction:** The July origin-isolation storage PASS was based on an in-memory simulation. A real Electron 43.2.0 probe found cookies shared across loopback ports; the current evidence checker now blocks that artifact. See [the origin-isolation correction](ORIGIN_ISOLATION_MIGRATION_2026-07-02.md#2026-09-26-correction-cookie-isolation-remains-open).
 
-**2026-09-28 earlier candidate audit:** Draft desktop PR [#84](https://github.com/bigdestiny2/pearbrowser-desktop/pull/84) passed its Ubuntu test CI and a local arm64 macOS package/integrity/runtime smoke from PR head `4b2f43c`. The packaged app connected to DHT and two HiveRelays with a disposable profile. `check:release-evidence` still reports 54 PASS / 17 DEFER / 1 FAIL because current P2P app cookies are shared across same-host loopback ports. Public-trust signing secret names and `v0.9.1` release assets are absent; Windows/Linux package, clean-install, and human journey proof are pending. [Website PR #7](https://github.com/bigdestiny2/pearbrowser-com/pull/7) made HTTPS and its downloads metadata live at the already published `v0.9.0`, while the Hyperdrive website remains an older edition. The historical rows and announcement decision below document their original scope; they are not a `v0.9.1` GO decision. See [the current desktop candidate report](PEARBROWSER_UPDATE_CANDIDATE_2026-09-26.md#2026-09-28-release-audit).
+**2026-09-28 earlier candidate audit:** Draft desktop PR [#84](https://github.com/bigdestiny2/pearbrowser-desktop/pull/84) passed its Ubuntu test CI and a local arm64 macOS package/integrity/runtime smoke from PR head `4b2f43c`. The packaged app connected to DHT and two HiveRelays with a disposable profile. At that point `check:release-evidence` reported 54 PASS / 17 DEFER / 1 FAIL because the then-published P2P app cookies were shared across same-host loopback ports. Public-trust signing secret names and `v0.9.1` release assets are absent; Windows/Linux package, clean-install, and human journey proof were pending at that point. [Website PR #7](https://github.com/bigdestiny2/pearbrowser-com/pull/7) made HTTPS and its downloads metadata live at the already published `v0.9.0`, while the Hyperdrive website remains an older edition. The historical rows and announcement decision below document their original scope; they are not a `v0.9.1` GO decision. See the [earlier candidate audit](PEARBROWSER_UPDATE_CANDIDATE_2026-09-26.md#2026-09-28-earlier-release-audit).
 
 Purpose: operator-filled proof log for the final PearBrowser community release
 smoke. This file pairs with `docs/MANUAL_RELEASE_SMOKE_2026-06-23.md`.

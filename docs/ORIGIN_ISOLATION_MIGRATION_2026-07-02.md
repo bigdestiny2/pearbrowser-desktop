@@ -332,11 +332,24 @@ Local macOS Electron 43.2.0 checks passed the hostile Domain-cookie probe and
 HyperProxy and HttpBridge with synthetic drives and Node transport substitutes
 in two BrowserWindows sharing one disposable session. Cookies, localStorage,
 IndexedDB, token binding, and wrong-host/cross-drive rejection passed there.
-These are diagnostic checks. A trusted capture and review of real P2P apps in
-the exact packaged candidate, plus the remaining release journeys, are still
-required. `npm run check:release-evidence` therefore remains **54 PASS / 17
-DEFER / 1 FAIL** on current P2P app cookie isolation. Distribution stays
-**HOLD**. See the [current candidate report](PEARBROWSER_UPDATE_CANDIDATE_2026-09-26.md)
+These are diagnostic checks. At exact source head
+`2503724299a1596ef812fd851b18e9f2e76ee902`, the
+[four-platform PR package proof](https://github.com/bigdestiny2/pearbrowser-desktop/actions/runs/36437255572)
+passed synthetic-drive diagnostics, packaged first-window/reload checks, and
+its exact-source review-bundle verifier.
+
+A separate diagnostic-only real-app rehearsal passed seven of seven checks
+against an older `ec0b97a` ad-hoc package when the apps used
+`SameSite=None; Secure` cookies. Default/Lax cookies did not persist in the
+Hyper iframe context. This proves that the rehearsal's explicit cookie
+configuration worked in that older package; it is not an exact-head,
+signed-package trust capture. Run the diagnostic with `node scripts/capture-origin-isolation-package-proof.mjs --app <path-to-packaged-macOS-executable>`; it writes a private temporary artifact that explicitly keeps the release gate blocked. A first-party P2P tab design is still needed for apps that rely on default/Lax cookies.
+
+A trusted frame-bound capture and independent review of two real P2P apps in
+the exact signed public-trust package, plus clean-install journeys and
+signing, are still required.
+`npm run check:release-evidence` remains **53 PASS / 18 DEFER / 1 FAIL** on
+current P2P app cookie isolation. Distribution stays **HOLD**. See the [current candidate report](PEARBROWSER_UPDATE_CANDIDATE_2026-09-26.md)
 and [PR checks](https://github.com/bigdestiny2/pearbrowser-desktop/pull/84/checks)
 for source-specific CI evidence.
 
