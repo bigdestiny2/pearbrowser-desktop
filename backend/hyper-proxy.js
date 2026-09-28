@@ -42,6 +42,27 @@ function getUserFriendlyError(technicalError) {
   return 'Something went wrong. Please try again.'
 }
 
+// Stop listeners promptly when renderer clients retain a fetch or keep-alive
+// socket. Node HTTP exposes closeAllConnections; Bare HTTP exposes the live
+// sockets through bare-tcp's connections Set. This is used only during full
+// proxy shutdown, after the caller has stopped serving tabs.
+function closeListenerForShutdown (server) {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('HyperProxy listener shutdown timed out')), 5000)
+    try {
+      server.close(() => { clearTimeout(timeout); resolve() })
+      if (typeof server.closeAllConnections === 'function') {
+        server.closeAllConnections()
+      } else if (server.connections && typeof server.connections[Symbol.iterator] === 'function') {
+        for (const socket of server.connections) socket.destroy()
+      }
+    } catch (error) {
+      clearTimeout(timeout)
+      reject(error)
+    }
+  })
+}
+
 function requestHeader (headers, name) {
   if (!headers || typeof headers !== 'object') return { present: false, value: null }
   let found = false
@@ -823,11 +844,11 @@ class HyperProxy {
     if (this._server) {
       const server = this._server
       this._server = null
-      closers.push(new Promise(resolve => server.close(() => resolve())))
+      closers.push(closeListenerForShutdown(server))
     }
     for (const entry of this._driveOrigins.values()) {
       if (!entry.server) continue
-      closers.push(new Promise(resolve => entry.server.close(() => resolve())))
+      closers.push(closeListenerForShutdown(entry.server))
     }
     this._driveOrigins.clear()
     this._pageContextTokens.clear()

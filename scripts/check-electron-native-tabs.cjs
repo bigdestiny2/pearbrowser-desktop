@@ -33,6 +33,7 @@ const hostToken = 'integration-host-token-must-stay-in-shell'
 const proofName = 'pear-native-tab-proof'
 const bounds = { x: 0, y: 0, width: 800, height: 600 }
 const postRequests = []
+let phase = 'startup'
 app.setPath('userData', profile)
 app.on('window-all-closed', () => {})
 fs.writeFileSync(shellFile, '<!doctype html><title>PearBrowser test shell</title><body>Shell</body>')
@@ -183,7 +184,9 @@ async function run () {
   let tabs
   let tabSession
   let proxy
+  let checkError
   try {
+    phase = 'assertions'
     await new Promise((resolve, reject) => {
       server.once('error', reject)
       server.listen(0, '127.0.0.1', resolve)
@@ -341,26 +344,46 @@ async function run () {
     assert.equal(pageA.isDestroyed(), true)
     assert.equal(pageB.isDestroyed(), true)
     assert.equal(proxyContents.isDestroyed(), true)
-    process.stdout.write(JSON.stringify({
-      status: 'passed', kind: 'pearbrowser-electron-native-hyper-tab-integration',
-      platform: process.platform, electron: process.versions.electron,
-      shell: 'file', tabViews: 3, oneProfile: true,
-      defaultLaxAndHttpOnlyCookies: 'isolated', localStorage: 'isolated',
-      indexedDB: 'isolated', hostToken: 'unavailable-to-pages',
-      crossOriginNavigation: 'denied', popups: 'denied',
-      hyperProxyLinkShim: 'routed', sameDrivePostAndReplace: 'preserved'
-    }) + '\n')
+  } catch (error) {
+    checkError = error
   } finally {
-    try { tabs?.closeAll() } catch {}
-    try { if (window && !window.isDestroyed()) window.destroy() } catch {}
-    try { await proxy?.stop() } catch {}
-    try { await tabSession?.clearStorageData() } catch {}
-    if (server.listening) await new Promise(resolve => server.close(resolve))
-    fs.rmSync(profile, { recursive: true, force: true })
+    const cleanupErrors = []
+    const cleanup = async (step, action) => {
+      phase = step
+      try { await action() } catch (error) { cleanupErrors.push(new Error(step + ': ' + String(error?.message || error))) }
+    }
+    await cleanup('close native views', () => tabs?.closeAll())
+    await cleanup('destroy shell window', () => { if (window && !window.isDestroyed()) window.destroy() })
+    await cleanup('stop HyperProxy', () => proxy?.stop())
+    await cleanup('clear tab session', () => tabSession?.clearStorageData())
+    await cleanup('close fixture server', async () => {
+      if (!server.listening) return
+      const closed = new Promise(resolve => server.close(resolve))
+      server.closeAllConnections?.()
+      await closed
+    })
+    await cleanup('remove disposable profile', () => {
+      fs.rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
+    })
+    if (cleanupErrors.length) {
+      const failures = checkError ? [checkError, ...cleanupErrors] : cleanupErrors
+      throw new AggregateError(failures, 'Native tab smoke cleanup failed: ' + cleanupErrors.map(error => error.message).join('; '))
+    }
   }
+  if (checkError) throw checkError
+  phase = 'complete'
+  process.stdout.write(JSON.stringify({
+    status: 'passed', kind: 'pearbrowser-electron-native-hyper-tab-integration',
+    platform: process.platform, electron: process.versions.electron,
+    shell: 'file', tabViews: 3, oneProfile: true,
+    defaultLaxAndHttpOnlyCookies: 'isolated', localStorage: 'isolated',
+    indexedDB: 'isolated', hostToken: 'unavailable-to-pages',
+    crossOriginNavigation: 'denied', popups: 'denied',
+    hyperProxyLinkShim: 'routed', sameDrivePostAndReplace: 'preserved'
+  }) + '\n')
 }
 
-const watchdog = setTimeout(() => { process.stderr.write('Electron native Hyper tab smoke timed out\n'); app.exit(1) }, 45000)
+const watchdog = setTimeout(() => { process.stderr.write('Electron native Hyper tab smoke timed out during ' + phase + '\n'); app.exit(1) }, 45000)
 app.whenReady().then(run).then(() => {
   clearTimeout(watchdog)
   app.quit()

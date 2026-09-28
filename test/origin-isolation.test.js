@@ -439,6 +439,69 @@ test('HyperProxy refuses navigation when drive listener allocation fails', async
   assert.match(warnings[0], /bind refused/)
 })
 
+test('HyperProxy stop closes active main and drive HTTP responses', async (t) => {
+  const proxy = new HyperProxy(async () => null, () => {}, null, { perDriveOrigins: true })
+  proxy._handle = (_req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain' })
+    res.write('open response')
+  }
+  const clients = []
+  t.after(async () => {
+    for (const { req, res } of clients) { res.destroy(); req.destroy() }
+    await proxy.stop()
+  })
+  await proxy.start()
+  const driveUrl = await proxy.localUrlForDrive(driveA, 'hyper', '/index.html')
+  const mainUrl = `http://127.0.0.1:${proxy.port}/health`
+  const open = (raw) => new Promise((resolve, reject) => {
+    const url = new URL(raw)
+    const req = nodeHttp.get({
+      hostname: '127.0.0.1', port: Number(url.port), path: url.pathname,
+      headers: { host: url.host }
+    }, (res) => {
+      res.on('error', () => {})
+      resolve({ req, res })
+    })
+    req.on('error', reject)
+  })
+  clients.push(await open(mainUrl), await open(driveUrl))
+  assert.ok(clients.every(({ res }) => !res.complete))
+
+  let timer
+  try {
+    await Promise.race([
+      proxy.stop(),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('active proxy sockets prevented shutdown')), 2000) })
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
+  assert.equal(proxy._driveOrigins.size, 0)
+})
+
+test('HyperProxy stop destroys Bare HTTP connections during shutdown', async () => {
+  const proxy = new HyperProxy(async () => null, () => {})
+  let closed = false
+  let destroyed = false
+  const server = {
+    connections: new Set(),
+    close (onclose) { this.onclose = onclose }
+  }
+  const socket = {
+    destroy () {
+      destroyed = true
+      server.connections.delete(this)
+      closed = true
+      server.onclose()
+    }
+  }
+  server.connections.add(socket)
+  proxy._server = server
+  await proxy.stop()
+  assert.equal(destroyed, true)
+  assert.equal(closed, true)
+})
+
 test('HyperProxy releaseDriveOrigin closes an idle per-drive listener', async (t) => {
   const proxy = new HyperProxy(async () => null, () => {}, null, {
     perDriveOrigins: true
