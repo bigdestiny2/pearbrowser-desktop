@@ -29,6 +29,7 @@ concurrency:
 
 env:
   SOURCE_REF: ${{ github.event.pull_request.head.sha }}
+  RELEASE_TAG: v0.9.1
   RELEASE_MODE: package-proof
   CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
@@ -41,10 +42,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: macOS Apple Silicon, os: macos-15, platform: darwin, arch: arm64 }
-          - { name: macOS Intel, os: macos-15-intel, platform: darwin, arch: x64 }
-          - { name: Windows x64, os: windows-2025, platform: win32, arch: x64 }
-          - { name: Linux x64, os: ubuntu-24.04, platform: linux, arch: x64 }
+          - { name: macOS Apple Silicon, os: macos-15, platform: darwin, release_platform: macos, arch: arm64 }
+          - { name: macOS Intel, os: macos-15-intel, platform: darwin, release_platform: macos, arch: x64 }
+          - { name: Windows x64, os: windows-2025, platform: win32, release_platform: windows, arch: x64 }
+          - { name: Linux x64, os: ubuntu-24.04, platform: linux, release_platform: linux, arch: x64 }
 
     defaults:
       run:
@@ -97,6 +98,14 @@ jobs:
       - name: Prove Electron drive cookie isolation on Linux
         if: runner.os == 'Linux'
         run: xvfb-run -a npm run check:electron-cookie-isolation
+
+      - name: Probe HyperProxy drive and API isolation in Electron
+        if: runner.os != 'Linux'
+        run: npm run check:electron-hyper-proxy-integration
+
+      - name: Probe HyperProxy drive and API isolation in Electron on Linux
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run check:electron-hyper-proxy-integration
 
       - name: Build ad-hoc macOS or unsigned Linux package
         if: runner.os != 'Windows'
@@ -218,3 +227,56 @@ jobs:
             if (Test-Path $stdout) { Get-Content $stdout -Tail 100 }
             if (Test-Path $stderr) { Get-Content $stderr -Tail 100 }
           }
+
+      - name: Collect checksummed package-proof assets
+        run: |
+          node scripts/collect-appling-artifacts.mjs \
+            --tag "$RELEASE_TAG" \
+            --source-ref "$SOURCE_REF" \
+            --release-mode package-proof \
+            --platform "${{ matrix.platform }}" \
+            --arch "${{ matrix.arch }}" \
+            --build-dir dist/electron \
+            --out-dir "dist/native-release/$RELEASE_TAG/${{ matrix.release_platform }}/${{ matrix.arch }}"
+
+      - name: Upload review-only package artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pearbrowser-desktop-pr-${{ github.event.pull_request.number }}-${{ matrix.release_platform }}-${{ matrix.arch }}
+          path: dist/native-release/${{ env.RELEASE_TAG }}/${{ matrix.release_platform }}/${{ matrix.arch }}/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  verify-bundle:
+    name: Verify complete review-only package bundle
+    needs: package-proof
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact PR verifier
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.22.0
+
+      - name: Download all review-only artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: release-assets
+          pattern: pearbrowser-desktop-pr-${{ github.event.pull_request.number }}-*
+          merge-multiple: true
+
+      - name: Verify exact targets, bytes, checksums, and source revision
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_REF"
+          node scripts/check-native-release-bundle.mjs \
+            --dir release-assets \
+            --tag "$RELEASE_TAG" \
+            --source-ref "$SOURCE_REF" \
+            --release-mode package-proof

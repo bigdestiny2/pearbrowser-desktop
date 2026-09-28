@@ -1,6 +1,6 @@
 # PearBrowser desktop update candidate — Pear 3.4, Autobee, and origin security
 
-Date: 2026-09-26. Release audit refreshed: 2026-09-28. State: pushed draft PR; local macOS package proof passed, but no public distribution qualification.
+Date: 2026-09-26. Release audit refreshed: 2026-09-28. State: pushed draft PR; local and PR package proof is under review, but no public distribution qualification.
 
 This branch starts from the already committed Pear 3.4 adoption candidate (`aa2ef51`). The stable Pear CLI 3.4.0 contract and embedded `pear-runtime@1.3.1` are pinned and checked by `check:pear-v3`; the browser still owns its Electron host and Pear worker boundary. The main desktop checkout has separate uncommitted Bitcoin/WDK work and is unchanged by this branch.
 
@@ -120,3 +120,13 @@ a self-authored JSON file cannot satisfy that gate.
 trusted packaged WebContents capture and real-app journeys, refresh current
 operator evidence, qualify native installers and public-trust signing, then
 verify exact public downloads before publishing a new app release.
+
+## 2026-09-28 follow-up: named-host integration and PR artifacts
+
+The latest reviewed code before this follow-up was `658fd70f0afbee9bd1fe892f181ddbe4c1715a01`. Its full desktop suite passed 965 tests with six skips and zero failures. Local Electron 43.2.0 macOS probes passed both the cookie rejection test and `npm run check:electron-hyper-proxy-integration`. The latter drives the actual HyperProxy and HttpBridge through two BrowserWindows in one disposable session, with synthetic drives and Node transport substitutes. It checks separate cookies, localStorage, and IndexedDB, drive-bound API tokens, and denial of shared-origin, wrong-host, cross-drive, and drive-origin Clearnet routes. This is diagnostic integration evidence, not trusted packaged-app capture or live P2P app proof.
+
+The corrected PR package matrix for that head passed all four targets: Apple Silicon macOS, Intel macOS, Windows x64, and Linux x64. A local Apple Silicon build from `451c608c66666876d86944ba5be47c70eaef5a78` also passed package integrity, ad-hoc code-signature verification, and a disposable-profile Pear RPC launch. Its package checker counted 8,395 physical runtime files and 129 reviewed source files. These runs do not prove clean installation, human browsing, trusted real-app cookie capture, or public-trust signing.
+
+A separate manual `desktop-native-release.yml` package-proof dispatch for exact source `658fd70f0afbee9bd1fe892f181ddbe4c1715a01` passed preflight and source tests but GitHub rejected its build jobs because this PR branch is not allowed to enter the protected `package-proof` environment. The protection remains intact. The draft PR workflow now collects checksummed artifacts from its four matrix runners and verifies the complete, exact-source bundle for review only; it uses no protected environment or signing material and cannot create a tag or public release. Its new CI result remains pending until this update is pushed and checked.
+
+`npm run check:release-evidence` remains **54 PASS / 17 DEFER / 1 FAIL**. The failing row is current P2P app cookie isolation, for which trusted packaged real-app capture is still missing. `v0.9.0` remains the published desktop release; `v0.9.1` is a draft candidate.

@@ -56,6 +56,10 @@ DNS records, so their capability rows report a resolution failure even after
 this fix. Hybrid fetch falls back to pure P2P by design; restoring those
 gateway records is a fleet/DNS operation outside this release.
 
+## Browser origin correction
+
+The draft gives each Hyperdrive an exact `d-<full-key-z32>.localhost` host and port. The main proxy listener rejects drive pages, bound drive listeners reject Clearnet routes, and API tokens are bound to the drive origin. Local Electron diagnostics passed cookie, localStorage, IndexedDB, and token isolation with two synthetic drives. The PR package matrix now exercises those diagnostics on its native runners and uploads checksummed review artifacts; this is not real-app packaged capture or a public release gate pass.
+
 ## Verification
 
 - Full suite passes, including the UI-bundle and relay-transport guards.
