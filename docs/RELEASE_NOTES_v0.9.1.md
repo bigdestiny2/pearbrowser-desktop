@@ -122,7 +122,13 @@ NDJSON. These are candidate diagnostics, not a published P2P app journey.
   passed Apple Silicon macOS, Intel macOS, Windows x64, Linux x64, and the
   exact-source review-bundle verifier. Its packages are ad-hoc/unsigned
   review artifacts, not public-trust installers.
-- An earlier local suite with separate diagnostic runner tests passed **980 tests, 6 skipped, 0 failed**. The hosted package proof above remains tied to its recorded source SHA. The first-party candidate at `88d10d75e5e44a50f0a6aaa2195e96b8fc142d36` passed **985 tests, 6 skipped, 0 failed** locally.
+- An earlier local suite with separate diagnostic runner tests passed **980
+  tests, 6 skipped, 0 failed**. The hosted proof above remains tied to its
+  recorded source SHA. The first-party runtime at
+  `88d10d75e5e44a50f0a6aaa2195e96b8fc142d36` passed **985 tests, 6
+  skipped, 0 failed** locally. Its shutdown and post-exit profile-cleanup
+  follow-up passed **987 tests, 6 skipped, 0 failed** locally; see the current
+  PR checks for its hosted result.
 - The package gate compares the reviewed Electron/worker/backend/UI bytes,
   verifies the ASAR/unpacked runtime placement and mode-specific Electron fuses,
   validates the protected-key Ed25519/SHA-256 inventory of every physical
@@ -139,8 +145,9 @@ NDJSON. These are candidate diagnostics, not a published P2P app journey.
 ## Release gate
 
 `npm run check:release-evidence` reports **53 PASS / 18 DEFER / 1 FAIL**. The
-failure is trusted, frame-bound cookie-isolation capture from two real P2P apps
-in the exact signed public-trust package, with independent review. The public
+failure is trusted, native-view target-bound cookie-isolation capture from
+two real P2P apps in the exact signed public-trust package, with independent
+review. The public
 release preflight also blocks on missing macOS Developer ID/notarization and
 Windows PFX credentials, absent v0.9.1 assets and provenance, and clean-install
 evidence. Keep v0.9.1 unpublished and the mobile release on hold.

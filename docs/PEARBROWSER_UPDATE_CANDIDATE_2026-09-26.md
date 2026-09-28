@@ -145,8 +145,9 @@ A further release review found that the main Clearnet listener accepted a drive-
 ## 2026-09-28 current follow-up: origin gate and Intel first window
 
 The aggregate release checker invokes the origin-isolation verifier for the
-current P2P cookie row. It requires frame-bound capture of two real apps from
-the exact signed public-trust package and independent provenance review;
+current P2P cookie row. It requires native-view target-bound capture of two
+real apps from the exact signed public-trust package and independent
+provenance review;
 editing the log to PASS or DEFER cannot clear it. The current result is
 **53 PASS / 18 DEFER / 1 FAIL**. The failing row remains trusted real-app
 cookie isolation.
@@ -208,7 +209,11 @@ Apple Silicon package passed its content/integrity checker: 132 source files
 were byte-identical and the signed physical Pear runtime inventory contained
 8,586 files. The Desktop CI, PR package, and native release matrices now
 include the native-tab diagnostic on macOS arm64/x64, Windows, and Linux.
-Those hosted runs have not yet reported for this source.
+Read the current [PR checks](https://github.com/bigdestiny2/pearbrowser-desktop/pull/84/checks)
+for hosted results at the latest pushed head. This local package receipt
+applies only to its recorded source. The native-tab probe closes active proxy
+sockets and deletes its disposable profile after Electron exits, so Windows
+reports cleanup failures separately from browsing assertions.
 
 A fresh-profile run of that ad-hoc package used Browse to load real Peerit
 and Pearfeed. Its diagnostic passed **11/11** checks: distinct top-level

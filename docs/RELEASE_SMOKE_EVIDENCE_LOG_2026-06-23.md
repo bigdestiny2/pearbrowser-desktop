@@ -15,8 +15,9 @@ forces `trusted-electron-capture` to fail until an exact signed public-trust
 package and independent real-app review exist. Published v0.9.0 page
 storage under shared `127.0.0.1` origins is not automatically carried into
 the dedicated native-view session. The old bytes remain, but users may need
-app sign-in or client-state recovery. No hosted native-tab matrix result or
-signed real-app capture is claimed by this local candidate. Desktop v0.9.1
+app sign-in or client-state recovery. The current [PR checks](https://github.com/bigdestiny2/pearbrowser-desktop/pull/84/checks)
+show hosted native-tab results for the latest pushed head; this local package
+rehearsal is separate. No signed real-app capture is claimed. Desktop v0.9.1
 remains **HOLD**.
 
 **2026-09-28 earlier desktop status:** The release checker runs the trusted
