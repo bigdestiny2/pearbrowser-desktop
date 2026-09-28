@@ -575,7 +575,7 @@ test('desktop CI checks out and guards the HiveRelay 0.20.2 release contract', (
 })
 
 test('native Hyper tab Electron smoke gates desktop CI and every native package matrix', () => {
-  assert.equal(pkg.scripts?.['check:electron-native-tabs'], 'electron scripts/check-electron-native-tabs.cjs')
+  assert.equal(pkg.scripts?.['check:electron-native-tabs'], 'node scripts/check-electron-native-tabs-runner.cjs')
   assert.match(desktopCiWorkflow, /sudo chmod 4755 "\$sandbox"/)
   assert.match(desktopCiWorkflow, /run: xvfb-run -a npm run -s check:electron-native-tabs/)
 

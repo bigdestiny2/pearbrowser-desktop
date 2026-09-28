@@ -21,7 +21,7 @@
     "check:legacy-appling": "node scripts/check-appling-release.mjs",
     "check:electron-package": "node scripts/check-electron-package.mjs",
     "check:electron-cookie-isolation": "electron scripts/check-electron-drive-cookie-isolation.cjs",
-    "check:electron-native-tabs": "electron scripts/check-electron-native-tabs.cjs",
+    "check:electron-native-tabs": "node scripts/check-electron-native-tabs-runner.cjs",
     "check:electron-hyper-proxy-integration": "electron scripts/check-electron-hyper-proxy-integration.cjs",
     "check:native-signing": "node scripts/check-native-signing-credentials.mjs",
     "generate:native-signing-secret-plan": "node scripts/generate-native-signing-secret-plan.mjs",

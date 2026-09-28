@@ -8,7 +8,6 @@ const fs = require('node:fs')
 const crypto = require('node:crypto')
 const http = require('node:http')
 const Module = require('node:module')
-const os = require('node:os')
 const path = require('node:path')
 const { app, BrowserWindow, ipcMain, session } = require('electron')
 const { driveHostnameForKey } = require('../backend/drive-origin.cjs')
@@ -27,7 +26,12 @@ try { HyperProxy = require('../backend/hyper-proxy.js').HyperProxy } finally { M
 
 const driveA = 'a'.repeat(64)
 const driveB = 'b'.repeat(64)
-const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'pear-native-tabs-'))
+// The Node runner owns this disposable directory and removes it only after
+// Electron has exited, when Windows releases Chromium's profile file handles.
+const profile = process.env.PEARBROWSER_NATIVE_TAB_PROFILE
+if (!profile || !path.basename(profile).startsWith('pear-native-tabs-') || !fs.statSync(profile).isDirectory()) {
+  throw new Error('Native tab smoke requires a runner-owned disposable profile')
+}
 const shellFile = path.join(profile, 'shell.html')
 const hostToken = 'integration-host-token-must-stay-in-shell'
 const proofName = 'pear-native-tab-proof'
@@ -361,9 +365,6 @@ async function run () {
       const closed = new Promise(resolve => server.close(resolve))
       server.closeAllConnections?.()
       await closed
-    })
-    await cleanup('remove disposable profile', () => {
-      fs.rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
     })
     if (cleanupErrors.length) {
       const failures = checkError ? [checkError, ...cleanupErrors] : cleanupErrors
