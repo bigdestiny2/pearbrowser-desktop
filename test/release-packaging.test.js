@@ -189,6 +189,7 @@ function writeCompleteReleaseEvidenceFixture (path) {
 | Gate | Expected | Result | Evidence |
 | --- | --- | --- | --- |
 | Public-trust readiness | all machine gates represented | PASS | fixture command output |
+| Current P2P app cookie isolation | real packaged Electron app proof | PASS | synthetic fixture claim; trusted capture is intentionally absent |
 
 ## Announcement Decision
 
@@ -2112,7 +2113,7 @@ test('package-manager manifest generator gates package-proof assets by default',
   }
 })
 
-test('public-trust readiness checker passes when all release gates are represented', () => {
+test('public-trust readiness blocks only unverified cookie capture when other gates pass', () => {
   const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'pear-public-trust-readiness-')))
   try {
     const { releasePath } = writePublicTrustReleaseFixture(fixture)
@@ -2136,14 +2137,15 @@ test('public-trust readiness checker passes when all release gates are represent
       env: publicTrustSigningEnv()
     })
 
-    assert.equal(result.status, 0, result.stderr || result.stdout)
+    assert.equal(result.status, 1, result.stderr || result.stdout)
     const report = JSON.parse(result.stdout)
-    assert.equal(report.ok, true)
+    assert.equal(report.ok, false)
     assert.equal(report.mode, 'public-trust')
     assert.equal(report.sourceRef, immutableSourceRef)
     assert.equal(report.checks.length, 8)
-    assert.deepEqual(report.blockers, [])
-    assert.ok(report.checks.every((check) => check.ok))
+    assert.deepEqual(report.blockers.map((blocker) => blocker.check), ['release-evidence'])
+    assert.match(report.blockers[0].message, /trusted origin-isolation evidence did not pass/)
+    assert.ok(report.checks.filter((check) => check.id !== 'release-evidence').every((check) => check.ok))
     assert.ok(report.checks.find((check) => check.id === 'native-install-smoke-plan').command.includes(`--source-ref ${immutableSourceRef}`))
     assert.equal(report.checks.find((check) => check.id === 'linux-appimage-metadata').status, 'pass')
     assert.match(report.checks.find((check) => check.id === 'published-provenance').summary, new RegExp(`sourceRef=${immutableSourceRef}`))
@@ -2221,9 +2223,12 @@ test('public-trust readiness checker can read signing gate from GitHub Actions s
       env: {}
     })
 
-    assert.equal(result.status, 0, result.stderr || result.stdout)
+    assert.equal(result.status, 1, result.stderr || result.stdout)
     const report = JSON.parse(result.stdout)
-    assert.equal(report.ok, true)
+    assert.equal(report.ok, false)
+    assert.deepEqual(report.blockers.map((blocker) => blocker.check), ['release-evidence'])
+    assert.match(report.blockers[0].message, /trusted origin-isolation evidence did not pass/)
+    assert.ok(report.checks.filter((check) => check.id !== 'release-evidence').every((check) => check.ok))
     const nativeSigning = report.checks.find((check) => check.id === 'native-signing')
     assert.equal(nativeSigning.status, 'warn')
     assert.match(nativeSigning.command, /--secret-source github/)
