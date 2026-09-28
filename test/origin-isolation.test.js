@@ -170,6 +170,26 @@ test('HyperProxy assigns distinct feature-flagged loopback origins per drive', a
   })
 })
 
+test('HyperProxy injects origin-bound shims into valid HTML with implicit or attributed head tags', async () => {
+  const proxy = new HyperProxy(async () => null, () => {})
+  proxy._port = 43210
+  for (const source of [
+    '<!doctype html><HTML lang="en"><HEAD data-app="1"></HEAD><body>page</body></HTML>',
+    '<!doctype html><HTML lang="en"><body>page</body></HTML>',
+    '<!doctype html><body>page</body>'
+  ]) {
+    const html = (await proxy._injectHtmlHead(
+      source,
+      driveA,
+      `/hyper/${driveA}/index.html`
+    )).toString('utf8')
+    assert.match(html, /<base href="http:\/\/127\.0\.0\.1:43210\/hyper\//)
+    assert.match(html, /pear-api-token/)
+    assert.match(html, /__pearBrowserHyperLinkBridge/)
+    assert.match(html, /<body>page<\/body>/)
+  }
+})
+
 test('HyperProxy injects a valid base URL when URL.origin is unavailable in Bare', async () => {
   const NativeURL = globalThis.URL
   class BareLikeURL extends NativeURL {

@@ -66,7 +66,35 @@ DNS repair is a fleet operation outside this release.
 
 The draft gives each Hyperdrive an exact `d-<full-key-z32>.localhost` host and port. Every proxy listener requires its exact Host and request-target origin; the main listener also rejects drive pages, bound drive listeners reject Clearnet routes, and API tokens are bound to the drive origin. The main-listener Host check closes a Clearnet route that could otherwise serve content under a drive's cookie hostname on a different port. Local Electron diagnostics passed cookie, localStorage, IndexedDB, and token isolation with two synthetic drives. The PR package matrix exercises those diagnostics on its native runners, checks each packaged first window and renderer reload, and uploads checksummed review artifacts; this is not real-app packaged capture or a public release gate pass.
 
-A diagnostic real-app rehearsal also found that default and `SameSite=Lax` cookies do not persist inside the current Hyper iframe. A `SameSite=None; Secure` proof cookie remained isolated between two keyed app hosts, but ordinary cookie-based app sessions need a first-party tab design and packaged requalification before distribution.
+An earlier iframe-based diagnostic real-app rehearsal found that default and `SameSite=Lax` cookies did not persist in that frame context. A `SameSite=None; Secure` proof cookie remained isolated between two keyed app hosts. The first-party candidate described below addresses the frame context; its signed packaged real-app requalification is still required before distribution.
+
+## First-party Hyper tabs (current candidate)
+
+Desktop Hyperdrive pages and installed apps now open as top-level Electron
+WebContentsViews inside the browser window. The shell keeps its file origin;
+page views use a dedicated persistent session with sandboxing, context
+isolation, no Node integration or host preload, and only the exact proxy-bound
+drive URL. Ordinary host-only and `SameSite=Lax` cookies can work in this
+first-party context. Each drive keeps its exact keyed hostname, so cookies,
+localStorage, and IndexedDB remain isolated between drives. Hyper links and
+new-window requests are routed through the shell's navigation policy; unsafe
+or cross-drive navigation is denied. Clearnet tabs retain their existing path.
+
+**Existing page data:** Published v0.9.0 stored P2P page cookies and browser
+storage under shared `127.0.0.1` port origins. The keyed hosts and dedicated
+native-view session will not automatically carry those cookies, localStorage,
+or IndexedDB entries forward. The old profile bytes are preserved; no
+cross-drive storage copy is attempted because the old shared host did not
+identify a safe per-drive owner for each entry. An app may ask users to sign
+in again or recreate local client state. For important app data, use that
+app's own export, backup, sync, or account recovery process before upgrading;
+retain the old v0.9.0 profile/package until the app's recovery is confirmed.
+
+Local Electron synthetic-drive checks exercise ordinary Lax and HttpOnly
+cookies, storage and token isolation, blocked popup/navigation escape, and
+production HyperProxy bridge injection. These are candidate diagnostics.
+The exact signed package still requires trusted capture with real Peerit and
+Pearfeed journeys and public-trust review before v0.9.1 distribution.
 
 ## Local AI packaging
 

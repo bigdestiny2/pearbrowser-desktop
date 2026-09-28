@@ -29,6 +29,7 @@ function normalizeDriveKey (raw) {
 const { WorkletRPC } = require('./rpc.js')
 const { HyperProxy } = require('./hyper-proxy.js')
 const { isDriveOriginHostname } = require('./drive-origin.cjs')
+const { publicHyperUrlForBoundLocalUrl } = require('./local-hyper-url.cjs')
 const { TabRuntime } = require('./tab-runtime.js')
 const { RelayClient } = require('./relay-client.js')
 const { CatalogManager } = require('./catalog-manager.js')
@@ -208,6 +209,9 @@ rpc.handle(C.CMD_NAVIGATE, async (data = {}) => {
     }
     if (resolved.kind === 'loopback') {
       const proxyDriveKey = driveKeyFromProxyUrl(resolved.url)
+      const publicHyperUrl = proxyDriveKey
+        ? publicHyperUrlForBoundLocalUrl(resolved.url, proxyDriveKey)
+        : ''
       const contextToken = proxyDriveKey && proxy?.pageContextToken
         ? proxy.pageContextToken(proxyDriveKey)
         : tabRuntime?.contextTokenForUrl?.(resolved.url) || null
@@ -217,8 +221,8 @@ rpc.handle(C.CMD_NAVIGATE, async (data = {}) => {
         path: new URL(resolved.url).pathname || '/',
         apiToken: null,
         contextToken,
-        kind: 'loopback',
-        url: resolved.url
+        kind: publicHyperUrl ? 'hyper' : 'loopback',
+        url: publicHyperUrl || resolved.url
       }
     }
     if (resolved.kind === 'hyper') navUrl = resolved.url
@@ -231,10 +235,13 @@ rpc.handle(C.CMD_NAVIGATE, async (data = {}) => {
       (parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost' ||
         isDriveOriginHostname(parsed.hostname))) {
     const proxyDriveKey = driveKeyFromProxyUrl(navUrl)
+    const publicHyperUrl = proxyDriveKey
+      ? publicHyperUrlForBoundLocalUrl(navUrl, proxyDriveKey)
+      : ''
     const contextToken = proxyDriveKey && proxy?.pageContextToken
       ? proxy.pageContextToken(proxyDriveKey)
       : tabRuntime?.contextTokenForUrl?.(navUrl) || null
-    return { localUrl: navUrl, key: proxyDriveKey || null, path: parsed.pathname || '/', apiToken: null, contextToken, kind: 'loopback' }
+    return { localUrl: navUrl, key: proxyDriveKey || null, path: parsed.pathname || '/', apiToken: null, contextToken, kind: publicHyperUrl ? 'hyper' : 'loopback', url: publicHyperUrl || navUrl }
   }
   // Non-loopback http(s) without session bridge: refuse rather than map host → drive key
   if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {

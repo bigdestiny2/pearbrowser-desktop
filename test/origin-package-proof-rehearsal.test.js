@@ -40,7 +40,7 @@ test('rehearsal artifact cannot be mistaken for trusted release evidence and err
   assert.equal(artifact.releaseGate.status, 'BLOCKED')
   assert.equal(artifact.releaseGate.trustedElectronCapture, false)
   assert.equal(artifact.releaseGate.independentAttestation, false)
-  assert.match(artifact.cookieScope, /default and SameSite=Lax app cookies are outside this rehearsal/)
+  assert.match(artifact.cookieScope, /default and SameSite=Lax host-only cookies/)
   const secret = 'f'.repeat(64)
   const redacted = redactDiagnostic(`ws://127.0.0.1:9876/status-smoke?session=${secret}&token=${secret}`)
   assert.equal(redacted.includes(secret), false)

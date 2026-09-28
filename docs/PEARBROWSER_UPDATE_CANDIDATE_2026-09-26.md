@@ -186,3 +186,45 @@ assets/provenance/downloads, clean-install evidence, and the failed real-app
 cookie row. Local Mac builds with ad-hoc signing and synthetic-drive tests
 remain diagnostic evidence. Desktop `v0.9.1` remains **HOLD** for
 distribution; mobile remains held separately.
+
+## 2026-09-28 first-party Hyper tab follow-up (local candidate)
+
+Desktop Hyperdrive and installed-app pages now use sandboxed top-level
+WebContentsViews with exact drive-keyed localhost origins and a dedicated
+persistent Electron session. The `file://` shell retains the host backend
+credential; publisher pages have no host preload or Node integration. The
+native host keeps same-drive form POST and `location.replace` in Chromium,
+routes external/new-window requests through Browse, and denies unsafe
+navigation. Browse hides the native view for Ask, About, onboarding, and
+address suggestions. Clearnet tabs retain their existing path.
+
+A local Electron 43.2.0 synthetic-drive integration passed ordinary cookies
+with omitted/default SameSite, explicit `SameSite=Lax`, and server-set
+`HttpOnly` cookies, plus localStorage/IndexedDB separation, host-token
+non-exposure, navigation/popup denial, native lifecycle, and the production
+HyperProxy link shim. The full desktop suite passed locally before the final
+packaged real-app run; exact test totals and package receipts must be recorded
+against the committed source. The Desktop CI, PR package, and native release
+matrices now include the native-tab diagnostic on macOS arm64/x64, Windows,
+and Linux. Those hosted runs have not yet reported for this source.
+
+The package-proof diagnostic now looks for two distinct top-level page
+targets instead of Hyper iframes. It probes default/Lax cookies, a CDP-set
+HttpOnly cookie, storage, keyed URLs, and browser bridge presence. The
+synthetic Electron server separately proves an HTTP `Set-Cookie` roundtrip
+for default/Lax/HttpOnly cookies. A successful diagnostic is still unsigned
+local evidence: the release checker retains a hard trusted-capture failure
+until the exact Developer ID signed/notarized and Windows signed candidates
+are reviewed independently with real Peerit and Pearfeed, strict CSP, bridge,
+and lifecycle journeys.
+
+Published v0.9.0 stored P2P page state under shared `127.0.0.1` port origins.
+Keyed hosts and the dedicated view session do not import it automatically.
+The old profile bytes remain; no cross-drive copy is attempted from the old
+shared origin. Users may need to sign in again or recover app-local state
+through each app's own export, backup, sync, or account tools. Retain an old
+profile copy until that recovery is checked.
+
+Desktop `v0.9.1` remains a draft/HOLD. Public `v0.9.0`, Peercord bundle/trust
+work, signing credentials, clean installs, and the Hyperdrive website mirror
+are separate release gates; this local source and diagnostic do not clear them.

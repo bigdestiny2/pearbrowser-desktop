@@ -7,7 +7,7 @@ import {
   makeTab, cleanTabUrl, cleanTabTitle,
   normalizeTabHistory, clampHistoryIndex, pushTabHistory,
   normalizeTabSnapshot, serializeTab, restoreSavedTab, restoreStartupTabs, sortTabsPinnedFirst,
-  tabDriveKey, tabListUsesDriveKey
+  tabDriveKey, tabListUsesDriveKey, nativeHyperDriveKey
 } from './lib/tabs.js'
 import {
   createAskStreamId,
@@ -259,16 +259,10 @@ function catalogLoadPlan (parsed, C) {
 
 // --- Multi-tab Browse ---------------------------------------------------
 //
-// Each tab keeps its own iframe (hidden via display:none when inactive
-// so state persists across switches), its own back/forward history, its
-// own URL input value, and its own status string. A keyboard listener
-// on document handles Cmd-T / Cmd-W / Cmd-L / Cmd-1..9 globally while
-// the Browse component is mounted.
-//
-// Devtools:
-//   Cmd-Shift-I or Cmd-Alt-I opens the per-iframe devtools via Pear's
-//   Window.openDevTools API when available. Falls back gracefully if
-//   the runtime doesn't expose it.
+// Hyper sites use one native WebContentsView per tab; clearnet and local
+// demo pages retain their existing embeds. Every tab keeps its own in-memory
+// history, URL input, and status. Shortcuts from native pages are forwarded
+// by the host because document keydown only sees the shell's own focus.
 
 // --- About-this-site panel -----------------------------------------------
 //
@@ -297,6 +291,17 @@ function parseDriveAddress (urlStr) {
     hex = hexFromZ32(z32Form)
   }
   return { proto, raw, hex, z32: z32Form, path: u.pathname || '/', urlStr }
+}
+
+function sameHyperLocation (left, right) {
+  const leftKey = driveKeyFromHyperRef(left)
+  const rightKey = driveKeyFromHyperRef(right)
+  if (!leftKey || leftKey !== rightKey) return false
+  try {
+    const a = new URL(left)
+    const b = new URL(right)
+    return a.pathname === b.pathname && a.search === b.search && a.hash === b.hash
+  } catch { return false }
 }
 
 function aboutCount (n, singular, plural = singular + 's') {
@@ -1119,7 +1124,7 @@ export function QvacWidget ({ rpc, C }) {
   `
 }
 
-function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActiveId, closedTabs, setClosedTabs, sessionReady, onOpenSettings }) {
+function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActiveId, closedTabs, setClosedTabs, sessionReady, onOpenSettings, nativePageObscured = false }) {
   // tabs[] + activeId are now lifted to App-level state and passed in
   // as props. This survives main-tab switches (Browse→Apps→Browse no
   // longer destroys your open tabs) and lets App persist them to
@@ -1127,7 +1132,13 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
   const inputRef = useRef(null)
   const iframeRefs = useRef({})
   const frameEpochRef = useRef({})
+  const stageRef = useRef(null)
   const activeIdRef = useRef(activeId)
+  const tabsRef = useRef(tabs)
+  const navigateEpochRef = useRef({})
+  const pendingNativeLoadsRef = useRef({})
+  const nativeEventHandlerRef = useRef(null)
+  const nativeTabs = globalThis.pearbrowserRuntime?.tabs
   const autoLoadedRef = useRef(new Set())
   const [editingUrl, setEditingUrl] = useState('')
   const [privateSearchQuery, setPrivateSearchQuery] = useState('')
@@ -1145,10 +1156,21 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
 
   const active = tabs.find((t) => t.id === activeId) || tabs[0]
   activeIdRef.current = activeId
+  tabsRef.current = tabs
 
   const captureActivePageContext = async () => {
     const tab = tabs.find(item => item.id === activeIdRef.current) || active
     if (!tab) return normalizePageContextResponse(null, {})
+    if (nativeHyperDriveKey(tab)) {
+      if (!nativeTabs?.captureContext) return normalizePageContextResponse(null, tab)
+      const urlAtRequest = tab.url
+      const response = await nativeTabs.captureContext({ tabId: tab.id })
+      const current = tabsRef.current.find(item => item.id === tab.id)
+      if (activeIdRef.current !== tab.id || !current || current.url !== urlAtRequest) {
+        throw new Error('The active tab changed while Ask Browser was reading it')
+      }
+      return normalizePageContextResponse(response, tab, { maxTextBytes: 5 * 1024 })
+    }
     const frame = iframeRefs.current[tab.id]
     const frameWindow = frame?.contentWindow
     const epoch = frameEpochRef.current[tab.id] || 0
@@ -1227,6 +1249,7 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
     setTabs((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)))
 
   const setActive = (id) => {
+    activeIdRef.current = id
     setActiveId(id)
     const t = tabs.find((x) => x.id === id)
     if (t) setEditingUrl(t.displayUrl || '')
@@ -1261,6 +1284,8 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
 
   const go = async (url, tabIdOverride, opts = {}) => {
     const id = tabIdOverride || activeId
+    const epoch = (navigateEpochRef.current[id] || 0) + 1
+    navigateEpochRef.current[id] = epoch
     const recordHistory = opts.recordHistory !== false
     // Persistent visit log is opt-in; session back/forward still uses in-memory tab.history.
     const rememberVisit = historyEnabled && (opts.rememberVisit ?? recordHistory)
@@ -1282,13 +1307,14 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
     if (nameQuery) {
       try {
         const { resolved } = await rpc.request(C.CMD_NAME_RESOLVE, { name: nameQuery })
+        if (navigateEpochRef.current[id] !== epoch) return
         if (resolved?.legacyMigrationId) {
           updateTab(id, { status: `migration required for ${resolved.label || nameQuery} · ${resolved.provenance}…` })
           try {
             const result = await rpc.request(C.CMD_LEGACY_APP_MIGRATION, { legacyMigrationId: resolved.legacyMigrationId }, 10000)
-            updateTab(id, { status: result?.message || 'A verified native v3 package is required.' })
+            if (navigateEpochRef.current[id] === epoch) updateTab(id, { status: result?.message || 'A verified native v3 package is required.' })
           } catch (err) {
-            updateTab(id, { status: `error: ${err.message}` })
+            if (navigateEpochRef.current[id] === epoch) updateTab(id, { status: `error: ${err.message}` })
           }
           return
         }
@@ -1301,15 +1327,35 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
       } catch { /* resolver unavailable / disabled — fall through to URL handling */ }
     }
     if (!target) target = normalizeUrl(url)
-    if (!target) return
+    if (!target || navigateEpochRef.current[id] !== epoch) return
+    autoLoadedRef.current.add(`${id}:${raw}`)
+    autoLoadedRef.current.add(`${id}:${target}`)
 
     const nextTitle = prov ? prov.label : tabTitleForUrl(target)
     updateTab(id, { status: `resolving ${nextTitle}…`, displayUrl: target, title: nextTitle })
     try {
-      const previousTab = tabs.find((t) => t.id === id)
+      const previousTab = tabsRef.current.find((t) => t.id === id)
       const previousDriveKey = tabDriveKey(previousTab)
-      const nextDriveKey = driveKeyFromHyperRef(target)
       const res = await rpc.request(C.CMD_NAVIGATE, { url: target })
+      if (navigateEpochRef.current[id] !== epoch) return
+      const kind = res.kind || (isClearnetUrl(res.url || target) ? 'clearnet' : 'hyper')
+      const display = res.url || target
+      const nativeKey = nativeHyperDriveKey({ kind, src: res.localUrl, url: display, displayUrl: display })
+      const nextDriveKey = nativeKey || driveKeyFromHyperRef(target)
+      if (kind === 'hyper' && !nativeKey) throw new Error('This Hyper site has no drive-bound native origin')
+      if (nativeKey) {
+        if (!nativeTabs?.load) throw new Error('Native Hyper tabs are unavailable in this build')
+        pendingNativeLoadsRef.current[id] = { epoch, driveKey: nativeKey, events: [], committed: false }
+        await nativeTabs.load({ tabId: id, url: res.localUrl, driveKey: nativeKey })
+      } else {
+        await nativeTabs?.close?.({ tabId: id })
+      }
+      if (navigateEpochRef.current[id] !== epoch) {
+        if (pendingNativeLoadsRef.current[id]?.epoch === epoch) delete pendingNativeLoadsRef.current[id]
+        if (!tabsRef.current.some(tab => tab.id === id)) await nativeTabs?.close?.({ tabId: id })
+        return
+      }
+      if (pendingNativeLoadsRef.current[id]?.epoch === epoch) pendingNativeLoadsRef.current[id].committed = true
       setTabs((prev) => prev.map((t) => {
         if (t.id !== id) return t
         let history = Array.isArray(t.history) ? t.history : []
@@ -1321,8 +1367,6 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
         } else if (Number.isInteger(opts.historyIndex)) {
           histIdx = clampHistoryIndex(history, opts.historyIndex)
         }
-        const kind = res.kind || (isClearnetUrl(res.url || target) ? 'clearnet' : 'hyper')
-        const display = res.url || target
         return {
           ...t,
           src: res.localUrl,
@@ -1344,7 +1388,8 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
       }
       if (rememberVisit) rpc.request(C.CMD_USERDATA_ADD_HISTORY, { url: target, title: nextTitle }).catch(() => {})
     } catch (err) {
-      updateTab(id, { status: `error: ${err.message}` })
+      if (pendingNativeLoadsRef.current[id]?.epoch === epoch) delete pendingNativeLoadsRef.current[id]
+      if (navigateEpochRef.current[id] === epoch) updateTab(id, { status: `error: ${err.message}` })
     }
   }
 
@@ -1369,6 +1414,31 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
       if (nextTitle && nextTitle !== tab.title) updateTab(tab.id, { title: nextTitle })
       rpc.request(C.CMD_SEARCH_INDEX, { driveKey, path, title: title || u, text }).catch(() => {})
     } catch { /* never break browsing */ }
+  }
+
+  // Native page contents are deliberately read through a bounded main-process
+  // capability. The shell never reaches into a Hyper page DOM.
+  const indexNativePage = async (tabId) => {
+    if (!searchIndexEnabled || !nativeTabs?.captureContext) return
+    const tab = tabsRef.current.find(item => item.id === tabId)
+    if (!tab || !nativeHyperDriveKey(tab) || !/^hyper:\/\//i.test(tab.url || '')) return
+    const urlAtRequest = tab.url
+    try {
+      const response = await nativeTabs.captureContext({ tabId })
+      const current = tabsRef.current.find(item => item.id === tabId)
+      if (!current || current.url !== urlAtRequest || response?.tabId !== tabId) return
+      const parsed = new URL(urlAtRequest)
+      const driveKey = driveKeyFromHyperRef(urlAtRequest)
+      if (!driveKey) return
+      const title = typeof response?.context?.title === 'string' ? response.context.title.slice(0, 512) : ''
+      const text = typeof response?.context?.body === 'string' ? response.context.body.slice(0, 200000) : ''
+      const nextTitle = tabTitleFromPage(title, urlAtRequest)
+      if (nextTitle && nextTitle !== current.title) updateTab(tabId, { title: nextTitle })
+      rpc.request(C.CMD_SEARCH_INDEX, {
+        driveKey, path: `${parsed.pathname || '/'}${parsed.search || ''}`,
+        title: title || urlAtRequest, text
+      }).catch(() => {})
+    } catch { /* indexing is optional and must never interrupt browsing */ }
   }
 
   const bookmark = async () => {
@@ -1398,6 +1468,10 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
     go(url, active.id, { recordHistory: false, rememberVisit: false, historyIndex: i })
   }
   const reload = () => {
+    if (nativeHyperDriveKey(active)) {
+      nativeTabs?.reload?.({ tabId: activeId }).catch(err => updateTab(activeId, { status: `error: ${err.message}` }))
+      return
+    }
     const el = iframeRefs.current[activeId]
     if (el && el.src) el.src = el.src
   }
@@ -1426,7 +1500,18 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
     const idx = tabs.findIndex((t) => t.id === id)
     if (idx === -1) return
     const remaining = tabs.filter((t) => t.id !== id)
-    releaseOriginIfUnused(tabDriveKey(closing), remaining)
+    const closingDriveKey = tabDriveKey(closing)
+    const hadPendingNativeLoad = !!pendingNativeLoadsRef.current[id]
+    navigateEpochRef.current[id] = (navigateEpochRef.current[id] || 0) + 1
+    delete pendingNativeLoadsRef.current[id]
+    if ((nativeHyperDriveKey(closing) || hadPendingNativeLoad) && nativeTabs?.close) {
+      nativeTabs.close({ tabId: id })
+        .then(() => releaseOriginIfUnused(closingDriveKey, remaining))
+        .catch(() => {})
+    } else {
+      nativeTabs?.close?.({ tabId: id }).catch(() => {})
+      releaseOriginIfUnused(closingDriveKey, remaining)
+    }
     // Drop the iframe ref so it can GC.
     delete iframeRefs.current[id]
     delete frameEpochRef.current[id]
@@ -1466,6 +1551,10 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
   // to a concise status message if the host capability is unavailable.
   const openDevtools = () => {
     try {
+      if (nativeHyperDriveKey(active)) {
+        nativeTabs?.openDevTools?.({ tabId: activeId }).catch(err => updateTab(activeId, { status: `error: ${err.message}` }))
+        return
+      }
       const el = iframeRefs.current[activeId]
       const cw = el?.contentWindow
       if (!cw) return
@@ -1509,9 +1598,145 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
     return () => document.removeEventListener('keydown', onKey)
   }, [activeId, tabs, closedTabs])
 
-  // Hyperdrive pages run in a sandboxed iframe. Literal hyper:// anchors inside
-  // those pages must come back through Browse navigation; otherwise Chromium
-  // asks the host OS to open an external protocol handler.
+  // Native Hyper pages report only events authenticated to their own
+  // webContents by the host. Keep the callback current without tearing down
+  // the subscription on every React render.
+  nativeEventHandlerRef.current = (event) => {
+    if (!event || typeof event.tabId !== 'string') return
+    const pendingLoad = pendingNativeLoadsRef.current[event.tabId]
+    if (pendingLoad) {
+      if (['navigation', 'title', 'load', 'error'].includes(event.type) && pendingLoad.events.length < 8 &&
+          (event.type !== 'navigation' || driveKeyFromHyperRef(event.url) === pendingLoad.driveKey)) {
+        pendingLoad.events.push(event)
+      }
+      return
+    }
+    const sourceTab = tabsRef.current.find(tab => tab.id === event.tabId)
+    if (!sourceTab || !nativeHyperDriveKey(sourceTab)) return
+
+    if (event.type === 'navigation') {
+      const url = typeof event.url === 'string' ? event.url.trim() : ''
+      if (!/^hyper:\/\//i.test(url) || driveKeyFromHyperRef(url) !== nativeHyperDriveKey(sourceTab)) return
+      if (sameHyperLocation(url, sourceTab.url)) return
+      setTabs(prev => prev.map(tab => {
+        if (tab.id !== event.tabId || sameHyperLocation(tab.url, url)) return tab
+        const pushed = pushTabHistory(tab.history, tab.histIdx, url)
+        return {
+          ...tab, url, displayUrl: url, history: pushed.history,
+          histIdx: pushed.histIdx, nameProv: null, status: ''
+        }
+      }))
+      if (event.tabId === activeIdRef.current) setEditingUrl(url)
+      if (historyEnabled) rpc.request(C.CMD_USERDATA_ADD_HISTORY, { url, title: tabTitleForUrl(url) }).catch(() => {})
+      return
+    }
+    if (event.type === 'title') {
+      const title = typeof event.title === 'string' ? event.title.slice(0, 512) : ''
+      if (title) updateTab(event.tabId, { title: tabTitleFromPage(title, sourceTab.url) })
+      return
+    }
+    if (event.type === 'open-url') {
+      const url = typeof event.url === 'string' ? event.url.trim() : ''
+      if (!(/^hyper:\/\//i.test(url) && driveKeyFromHyperRef(url)) && !isClearnetUrl(url)) return
+      if (event.openInNewTab) {
+        const next = makeBrowserTab(url)
+        activeIdRef.current = next.id
+        setTabs(prev => [...prev, next])
+        setActiveId(next.id)
+        setEditingUrl(url)
+        go(url, next.id)
+      } else {
+        activeIdRef.current = sourceTab.id
+        setActiveId(sourceTab.id)
+        setEditingUrl(url)
+        go(url, sourceTab.id)
+      }
+      return
+    }
+    if (event.type === 'shortcut') {
+      if (event.tabId !== activeIdRef.current) return
+      switch (event.command) {
+        case 'new-tab': newTab(); break
+        case 'reopen-tab': reopenClosedTab(); break
+        case 'close-tab': closeTab(event.tabId); break
+        case 'focus-address': inputRef.current?.focus(); inputRef.current?.select?.(); break
+        case 'reload': reload(); break
+        case 'devtools': openDevtools(); break
+        case 'switch-tab': {
+          const index = Number(event.index) - 1
+          const target = tabsRef.current[index]
+          if (Number.isInteger(index) && target) setActive(target.id)
+          break
+        }
+      }
+      return
+    }
+    if (event.type === 'load') {
+      updateTab(event.tabId, { status: '' })
+      indexNativePage(event.tabId)
+    } else if (event.type === 'error') {
+      updateTab(event.tabId, { status: `error: ${String(event.reason || 'Page failed to load').slice(0, 160)}` })
+    }
+  }
+
+  useEffect(() => {
+    if (!nativeTabs?.onTabEvent) return
+    return nativeTabs.onTabEvent(event => nativeEventHandlerRef.current?.(event))
+  }, [nativeTabs])
+
+  // A fast native page can finish before React commits the new tab src. Replay
+  // only that tab's bounded events after its committed drive matches the load.
+  useEffect(() => {
+    for (const [tabId, pending] of Object.entries(pendingNativeLoadsRef.current)) {
+      const tab = tabs.find(item => item.id === tabId)
+      if (!pending.committed || nativeHyperDriveKey(tab) !== pending.driveKey) continue
+      delete pendingNativeLoadsRef.current[tabId]
+      for (const event of pending.events) nativeEventHandlerRef.current?.(event)
+    }
+  }, [tabs])
+
+  // BrowserWindow content coordinates are CSS pixels. Recalculate whenever
+  // the Browse stage or window moves; a native view sits above renderer DOM.
+  useEffect(() => {
+    if (!nativeTabs?.select || !nativeTabs?.hide) return
+    const stage = stageRef.current
+    if (!stage) return
+    const syncView = () => {
+      const tab = tabsRef.current.find(item => item.id === activeIdRef.current)
+      if (!tab || !nativeHyperDriveKey(tab) || nativePageObscured || askOpen || aboutOpen || autocompleteOpen) {
+        nativeTabs.hide().catch(() => {})
+        return
+      }
+      const rect = stage.getBoundingClientRect()
+      const bounds = {
+        x: Math.round(rect.left), y: Math.round(rect.top),
+        width: Math.round(rect.width), height: Math.round(rect.height)
+      }
+      if (bounds.width <= 0 || bounds.height <= 0) {
+        nativeTabs.hide().catch(() => {})
+        return
+      }
+      nativeTabs.select({ tabId: tab.id, bounds }).catch(err => {
+        updateTab(tab.id, { status: `error: ${err.message}` })
+      })
+    }
+    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(syncView) : null
+    observer?.observe(stage)
+    window.addEventListener('resize', syncView)
+    window.addEventListener('scroll', syncView, true)
+    const frame = requestAnimationFrame(syncView)
+    return () => {
+      cancelAnimationFrame(frame)
+      observer?.disconnect()
+      window.removeEventListener('resize', syncView)
+      window.removeEventListener('scroll', syncView, true)
+    }
+  }, [nativeTabs, activeId, active?.src, active?.url, askOpen, aboutOpen, autocompleteOpen, nativePageObscured])
+
+  useEffect(() => () => { nativeTabs?.hide?.().catch(() => {}) }, [nativeTabs])
+
+  // The legacy iframe bridge remains for non-native embeds. Native Hyper
+  // pages route links through authenticated host events above.
   useEffect(() => {
     const onFrameMessage = (event) => {
       const data = event.data
@@ -1786,10 +2011,14 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
         </div>
       `}
       <div className="browse-workspace">
-        <div className="browse-stage">
+        <div className="browse-stage" ref=${stageRef}>
           ${tabs.map((t) =>
             t.src
-              ? (t.kind === 'clearnet' && t.clearnetMode === 'direct'
+              ? (nativeHyperDriveKey(t)
+                ? html`<div key=${t.id} className=${'webview' + (t.id === activeId ? '' : ' hidden')} data-testid="hyper-native-view" aria-label=${t.title || 'Hyper page'}></div>`
+                : t.kind === 'hyper'
+                  ? html`<div key=${t.id} className=${'webview' + (t.id === activeId ? '' : ' hidden')} data-testid="hyper-native-unavailable" role="alert">This Hyper page needs a drive-bound native view. Reload it after the proxy is ready.</div>`
+                  : (t.kind === 'clearnet' && t.clearnetMode === 'direct'
                 // Direct clearnet: prefer <webview> when Electron exposes it
                 // (partition isolates cookie jar); fall back to sandboxed iframe.
                 ? (typeof window !== 'undefined' && window.customElements?.get?.('webview')
@@ -1824,7 +2053,7 @@ function Browse ({ rpc, C, navUrl, onNavigated, tabs, setTabs, activeId, setActi
                     indexPage(t, e.target)
                   }}
                   sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-pointer-lock"
-                ></iframe>`)
+                ></iframe>`))
               : t.id === activeId
                 ? (t.url
                   // A tab with an address but no loaded content yet is mid-fetch —
@@ -7444,9 +7673,8 @@ export function App ({ rpc, C, storagePath }) {
         // landing, and reopening later (onboardingDone) lands straight on it.
         setOnboardingState(s?.onboardingDone ? 'done' : 'show')
         // Session restore: rehydrate browse tabs from previous session.
-        // Iframes are recreated on first activation, but tab order,
-        // active tab, pinned state, and per-tab back/forward history
-        // are preserved.
+        // Restore tab order, active tab, pinned state, and per-tab history
+        // before the pages load.
         const savedTabs = Array.isArray(s?.browseTabs) ? s.browseTabs : null
         if (savedTabs && savedTabs.length > 0) {
           const restored = restoreStartupTabs(savedTabs, STARTUP_TABS)
@@ -7600,7 +7828,7 @@ export function App ({ rpc, C, storagePath }) {
       </div>
 
       <div className=${'panel' + (tab === 'browse' ? ' panel-browse' : '')}>
-        ${tab === 'browse' && html`<${Browse} rpc=${rpc} C=${C} navUrl=${navUrl} onNavigated=${() => setNavUrl(null)} tabs=${tabs} setTabs=${setTabs} activeId=${browseActiveId} setActiveId=${setBrowseActiveId} closedTabs=${closedTabs} setClosedTabs=${setClosedTabs} sessionReady=${tabsRestored} onOpenSettings=${() => setTab('settings')} />`}
+        ${tab === 'browse' && html`<${Browse} rpc=${rpc} C=${C} navUrl=${navUrl} onNavigated=${() => setNavUrl(null)} tabs=${tabs} setTabs=${setTabs} activeId=${browseActiveId} setActiveId=${setBrowseActiveId} closedTabs=${closedTabs} setClosedTabs=${setClosedTabs} sessionReady=${tabsRestored} onOpenSettings=${() => setTab('settings')} nativePageObscured=${!!pendingLogin || !!pendingSwarm || !!pendingWallet || onboardingState !== 'done'} />`}
         ${tab === 'apps' && html`<${Apps} rpc=${rpc} C=${C} onLaunch=${launchInBrowse} />`}
         ${tab === 'sites' && html`<${Sites} rpc=${rpc} C=${C} onBrowse=${launchInBrowse} />`}
         ${tab === 'library' && html`<${Library} rpc=${rpc} C=${C} onBrowse=${launchInBrowse} />`}

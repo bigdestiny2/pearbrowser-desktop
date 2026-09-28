@@ -257,6 +257,26 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y xvfb
 
+      - name: Secure Linux development Electron sandbox for native-tab smoke
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          npm run -s install:electron-runtime
+          sandbox=node_modules/electron/dist/chrome-sandbox
+          test -f "$sandbox" && test ! -L "$sandbox"
+          sudo chown root:root "$sandbox"
+          sudo chmod 4755 "$sandbox"
+          test "$(stat -c '%a' "$sandbox")" = 4755
+
+      # Diagnostic synthetic-page coverage; trusted packaged real-app evidence has a separate release gate.
+      - name: Probe first-party Hyper tabs in Electron
+        if: runner.os != 'Linux'
+        run: npm run -s check:electron-native-tabs
+
+      - name: Probe first-party Hyper tabs in Electron on Linux
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run -s check:electron-native-tabs
+
       - name: Validate macOS public-trust credentials
         if: runner.os == 'macOS' && inputs.release_mode == 'public-trust'
         env:

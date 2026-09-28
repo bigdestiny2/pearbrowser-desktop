@@ -16,6 +16,8 @@ import driveOrigin from '../backend/drive-origin.cjs'
 const { driveHostnameForKey } = driveOrigin
 const DEFAULT_PLAN = new URL('../docs/origin-isolation-smoke-plan-peerit-pearfeed-2026-07-02.json', import.meta.url)
 const PROOF_KEY = 'pear-origin-isolation-proof'
+const DEFAULT_PROOF_KEY = 'pear-origin-isolation-proof-default'
+const HTTP_ONLY_PROOF_KEY = 'pear-origin-isolation-proof-http'
 const MAX_TIMEOUT_MS = 300_000
 
 export function normalizeApps (apps) {
@@ -67,7 +69,7 @@ export function makeRehearsalArtifact ({ apps, packageInfo, profileId }) {
     package: packageInfo,
     profileId,
     apps,
-    cookieScope: 'SameSite=None; Secure in embedded Hyper frames; default and SameSite=Lax app cookies are outside this rehearsal.',
+    cookieScope: 'Top-level native Hyper views: default and SameSite=Lax host-only cookies, including a separate HttpOnly jar probe.',
     observations: [],
     checks: [],
     blocker: null
@@ -215,52 +217,23 @@ async function connectCdp (url) {
   }
 }
 
-async function observeBrowser (cdp) {
-  const contexts = new Map()
-  const responses = new Map()
-  const requests = new Map()
-  const targetIds = new Map([['', 'root-window']])
-  const childSetup = []
-
-  cdp.on('Runtime.executionContextCreated', ({ context }, sessionId) => {
-    const frameId = context?.auxData?.frameId
-    if (frameId && context.auxData?.isDefault) contexts.set(frameId, { sessionId, contextId: context.id })
-  })
-  cdp.on('Runtime.executionContextDestroyed', ({ executionContextId }) => {
-    for (const [frameId, context] of contexts) if (context.contextId === executionContextId) contexts.delete(frameId)
-  })
-  cdp.on('Network.responseReceived', ({ frameId, requestId, response, type }) => {
-    if (type !== 'Document' || !frameId || !response) return
-    const url = safeDriveUrl(response.url)
-    if (!url) return
-    const item = { frameId, url, status: response.status, mimeType: String(response.mimeType || '').slice(0, 100), completed: false }
-    responses.set(frameId, item)
-    requests.set(requestId, item)
-  })
-  cdp.on('Network.loadingFinished', ({ requestId }) => {
-    const item = requests.get(requestId)
-    if (item) item.completed = true
-  })
-  cdp.on('Network.loadingFailed', ({ requestId }) => {
-    const item = requests.get(requestId)
-    if (item) item.failed = true
-  })
-  cdp.on('Target.attachedToTarget', ({ sessionId, targetInfo }) => {
-    targetIds.set(sessionId, String(targetInfo?.targetId || ''))
-    childSetup.push(Promise.all([
-      cdp.send('Page.enable', {}, sessionId),
-      cdp.send('Runtime.enable', {}, sessionId),
-      cdp.send('Network.enable', {}, sessionId)
-    ]).catch(() => {}))
-  })
-
-  await cdp.send('Page.enable')
-  await cdp.send('Runtime.enable')
-  await cdp.send('Network.enable')
-  await cdp.send('DOM.enable')
-  await cdp.send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true })
-  await Promise.all(childSetup)
-  return { contexts, responses, targetIds }
+async function findNativePage (port, app, deadline) {
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/json/list`, { redirect: 'error', signal: AbortSignal.timeout(2000) })
+      if (response.ok) {
+        const targets = await response.json()
+        const target = targets.find((item) => item.type === 'page' && driveFrameUrlMatches(item.url, app))
+        if (target?.webSocketDebuggerUrl) {
+          const wsUrl = new URL(target.webSocketDebuggerUrl)
+          if (wsUrl.protocol !== 'ws:' || !['127.0.0.1', 'localhost'].includes(wsUrl.hostname) || Number(wsUrl.port) !== port) throw new Error('native page DevTools target is not loopback-bound')
+          return target
+        }
+      }
+    } catch {}
+    await sleep(350)
+  }
+  throw new Error(`real app ${app.label} did not open a drive-bound top-level page target before the deadline`)
 }
 
 function safeDriveUrl (value) {
@@ -321,33 +294,35 @@ async function navigateThroughUi (cdp, app) {
   if (!submitted) throw new Error('Browse Go button was not available')
 }
 
-async function activeIframe (cdp) {
-  const root = await cdp.send('DOM.getDocument', { depth: 1 })
-  const query = await cdp.send('DOM.querySelector', { nodeId: root.root.nodeId, selector: 'iframe[data-testid="hyper-iframe"]:not(.hidden)' })
-  if (!query.nodeId) return null
-  const description = await cdp.send('DOM.describeNode', { nodeId: query.nodeId })
-  const attributes = description.node?.attributes || []
-  const srcIndex = attributes.indexOf('src')
-  return {
-    frameId: String(description.node?.frameId || ''),
-    frameUrl: srcIndex >= 0 ? String(attributes[srcIndex + 1] || '') : ''
-  }
-}
-
-async function waitForAppFrame (cdp, browser, app, deadline) {
-  while (Date.now() < deadline) {
-    const active = await activeIframe(cdp)
-    if (active && driveFrameUrlMatches(active.frameUrl, app) && active.frameId) {
-      const context = browser.contexts.get(active.frameId)
-      const response = browser.responses.get(active.frameId)
-      if (context && response?.completed && !response.failed && response.status === 200 && driveFrameUrlMatches(response.url, app)) {
-        return { ...active, ...context, targetId: browser.targetIds.get(context.sessionId) || 'root-window', response }
+async function waitForNativePage (port, app, deadline) {
+  const target = await findNativePage(port, app, deadline)
+  const pageCdp = await connectCdp(target.webSocketDebuggerUrl)
+  try {
+    await pageCdp.send('Page.enable')
+    await pageCdp.send('Runtime.enable')
+    await pageCdp.send('Network.enable')
+    while (Date.now() < deadline) {
+      const tree = await pageCdp.send('Page.getFrameTree')
+      const root = tree.frameTree?.frame
+      const state = await evaluate(pageCdp, `(() => ({
+        href: location.href,
+        ready: document.readyState,
+        status: performance.getEntriesByType('navigation')[0]?.responseStatus ?? null,
+        bodyTextLength: document.body?.innerText?.length || 0,
+        bridge: !!window.pear && typeof window.pear === 'object',
+        strictCsp: !!document.querySelector('meta[http-equiv="Content-Security-Policy"]')
+      }))()`)
+      if (root?.id && driveFrameUrlMatches(root.url, app) && driveFrameUrlMatches(state?.href, app) && state?.ready === 'complete') {
+        if (Number(state.status) !== 200) throw new Error(`real app document did not report HTTP 200 (got ${state.status ?? 'unknown'})`)
+        return { cdp: pageCdp, frameId: root.id, frameUrl: state.href, targetId: String(target.id), response: { status: state.status, completed: true, mimeType: root.mimeType || '' }, state }
       }
-      if (response?.failed || (response && response.status >= 400)) throw new Error(`real app document response failed (HTTP ${response?.status || 'network'})`)
+      await sleep(350)
     }
-    await sleep(350)
+    throw new Error(`real app ${app.label} did not complete a top-level document load before the deadline`)
+  } catch (error) {
+    pageCdp.close()
+    throw error
   }
-  throw new Error(`real app ${app.label} did not finish a drive-bound document response before the deadline`)
 }
 
 async function isolatedContext (cdp, frame) {
@@ -356,15 +331,16 @@ async function isolatedContext (cdp, frame) {
   return result.executionContextId
 }
 
-// The file:// shell embeds Hyper pages as cross-site frames. Chromium accepts
-// SameSite=None; Secure on trustworthy keyed localhost, unlike default/Lax.
+// Native WebContentsViews are first-party documents for their keyed hosts.
 function storageExpression (nonce, write) {
   return `(async () => {
     const key = ${JSON.stringify(PROOF_KEY)}
+    const defaultKey = ${JSON.stringify(DEFAULT_PROOF_KEY)}
     const value = ${JSON.stringify(nonce)}
     if (${write}) {
       localStorage.setItem(key, value)
-      document.cookie = key + '=' + value + '; Path=/; SameSite=None; Secure'
+      document.cookie = key + '=' + value + '; Path=/; SameSite=Lax'
+      document.cookie = defaultKey + '=' + value + '; Path=/'
       await new Promise((resolve, reject) => {
         const request = indexedDB.open(key, 1)
         request.onupgradeneeded = () => request.result.createObjectStore('proof')
@@ -392,6 +368,7 @@ function storageExpression (nonce, write) {
       }
     })
     const cookie = document.cookie.split(/;\\s*/).find((item) => item.startsWith(key + '=')) || ''
+    const defaultCookie = document.cookie.split(/;\\s*/).find((item) => item.startsWith(defaultKey + '=')) || ''
     return {
       href: location.href,
       origin: location.origin,
@@ -399,7 +376,8 @@ function storageExpression (nonce, write) {
       bodyTextLength: document.body?.innerText?.length || 0,
       localStorage: localStorage.getItem(key),
       indexedDB: indexedDBValue,
-      cookie: cookie ? cookie.slice(key.length + 1) : null
+      cookie: cookie ? cookie.slice(key.length + 1) : null,
+      defaultCookie: defaultCookie ? defaultCookie.slice(defaultKey.length + 1) : null
     }
   })()`
 }
@@ -413,22 +391,33 @@ async function captureStorage (cdp, frame, nonce, write) {
   const mainWorldCookie = await evaluate(cdp, `(() => {
     const key = ${JSON.stringify(PROOF_KEY)}
     const value = ${JSON.stringify(nonce)}
-    if (${write}) document.cookie = key + '=' + value + '; Path=/; SameSite=None; Secure'
+    if (${write}) document.cookie = key + '=' + value + '; Path=/; SameSite=Lax'
     const match = document.cookie.split(/;\\s*/).find((item) => item.startsWith(key + '=')) || ''
     return match ? match.slice(key.length + 1) : null
   })()`, { contextId: frame.contextId, sessionId: frame.sessionId })
-  // Query Chromium's cookie jar for this exact URL as a third measurement.
-  // Real app cookies are filtered out before any artifact is written.
+  // Query Chromium's cookie jar for this exact page URL. A separate HttpOnly
+  // cookie proves host isolation even when script cannot see its value.
+  if (write) {
+    const written = await cdp.send('Network.setCookie', { url: frame.frameUrl, name: HTTP_ONLY_PROOF_KEY, value: nonce, path: '/', httpOnly: true, sameSite: 'Lax' })
+    if (written.success === false) throw new Error('HttpOnly proof cookie could not be written')
+  }
   const jar = await cdp.send('Network.getCookies', { urls: [frame.frameUrl] })
   const proofCookie = (jar.cookies || []).find((cookie) => cookie.name === PROOF_KEY)
+  const defaultProofCookie = (jar.cookies || []).find((cookie) => cookie.name === DEFAULT_PROOF_KEY)
+  const httpOnlyCookie = (jar.cookies || []).find((cookie) => cookie.name === HTTP_ONLY_PROOF_KEY)
   return {
     ...result,
     cookieIsolatedWorld: result.cookie,
     cookie: mainWorldCookie,
     cookieJar: proofCookie?.value || null,
+    defaultCookieJar: defaultProofCookie?.value || null,
+    defaultCookieHostOnly: defaultProofCookie ? defaultProofCookie.domain === new URL(frame.frameUrl).hostname : null,
     cookieDomainMatchesFrame: proofCookie ? proofCookie.domain === new URL(frame.frameUrl).hostname : null,
     cookieSecure: proofCookie?.secure === true,
-    cookieSameSiteNone: proofCookie?.sameSite === 'None'
+    cookieSameSiteLax: proofCookie?.sameSite === 'Lax',
+    httpOnlyCookie: httpOnlyCookie?.value || null,
+    httpOnlyFlag: httpOnlyCookie?.httpOnly === true,
+    httpOnlySameSiteLax: httpOnlyCookie?.sameSite === 'Lax'
   }
 }
 
@@ -437,35 +426,47 @@ function summarizeApp (app, frame, storage) {
     label: app.label,
     hyperUrl: app.url,
     driveKey: app.driveKey,
-    frameId: frame.frameId,
-    targetId: frame.targetId,
-    frameUrl: safeDriveUrl(frame.frameUrl),
+    rootFrameId: frame.frameId,
+    webContentsTargetId: frame.targetId,
+    pageUrl: safeDriveUrl(frame.frameUrl),
+    topLevel: true,
+    bridgePresent: frame.state.bridge,
+    strictCspPresent: frame.state.strictCsp,
     documentResponse: { ...frame.response },
     storage
   }
 }
 
-async function runCapture (cdp, apps, deadline, appTimeoutMs) {
-  const browser = await observeBrowser(cdp)
-  await waitForShell(cdp, deadline)
-  await dismissOnboarding(cdp)
+async function runCapture (shellCdp, apps, deadline, appTimeoutMs, port) {
+  await waitForShell(shellCdp, deadline)
+  await dismissOnboarding(shellCdp)
   const nonce = randomBytes(24).toString('hex')
   const observations = []
   for (const [index, app] of apps.entries()) {
-    await navigateThroughUi(cdp, app)
-    const frame = await waitForAppFrame(cdp, browser, app, Math.min(deadline, Date.now() + appTimeoutMs))
-    const storage = await captureStorage(cdp, frame, nonce, index === 0)
-    observations.push(summarizeApp(app, frame, storage))
+    await navigateThroughUi(shellCdp, app)
+    const frame = await waitForNativePage(port, app, Math.min(deadline, Date.now() + appTimeoutMs))
+    try {
+      const shellState = await evaluate(shellCdp, `(() => ({
+        nativePlaceholder: !!document.querySelector('[data-testid="hyper-native-view"]:not(.hidden)'),
+        legacyIframe: !!document.querySelector('iframe[data-testid="hyper-iframe"]:not(.hidden)')
+      }))()`)
+      const storage = await captureStorage(frame.cdp, frame, nonce, index === 0)
+      observations.push({ ...summarizeApp(app, frame, storage), shellState })
+    } finally {
+      frame.cdp.close()
+    }
   }
   const [a, b] = observations
   const checks = [
     { id: 'real-document-a', ok: a.documentResponse.status === 200 && a.documentResponse.completed },
     { id: 'real-document-b', ok: b.documentResponse.status === 200 && b.documentResponse.completed },
-    { id: 'distinct-frames', ok: a.frameId !== b.frameId },
-    { id: 'drive-hosts', ok: driveFrameUrlMatches(a.frameUrl, apps[0]) && driveFrameUrlMatches(b.frameUrl, apps[1]) && a.storage.origin !== b.storage.origin },
-    { id: 'app-a-storage', ok: a.storage.localStorage === nonce && a.storage.indexedDB === nonce && a.storage.cookie === nonce && a.storage.cookieJar === nonce && a.storage.cookieDomainMatchesFrame && a.storage.cookieSecure && a.storage.cookieSameSiteNone },
-    { id: 'app-b-storage-isolated', ok: b.storage.localStorage !== nonce && b.storage.indexedDB !== nonce && b.storage.cookie !== nonce && b.storage.cookieJar !== nonce },
-    { id: 'rendered-real-pages', ok: a.storage.bodyTextLength > 0 && b.storage.bodyTextLength > 0 }
+    { id: 'distinct-native-pages', ok: a.webContentsTargetId !== b.webContentsTargetId && a.rootFrameId !== b.rootFrameId },
+    { id: 'top-level-native-views', ok: a.topLevel && b.topLevel && a.shellState.nativePlaceholder && b.shellState.nativePlaceholder && !a.shellState.legacyIframe && !b.shellState.legacyIframe },
+    { id: 'drive-hosts', ok: driveFrameUrlMatches(a.pageUrl, apps[0]) && driveFrameUrlMatches(b.pageUrl, apps[1]) && a.storage.origin !== b.storage.origin },
+    { id: 'app-a-storage', ok: a.storage.localStorage === nonce && a.storage.indexedDB === nonce && a.storage.cookie === nonce && a.storage.cookieJar === nonce && a.storage.cookieDomainMatchesFrame && a.storage.cookieSameSiteLax && a.storage.defaultCookie === nonce && a.storage.defaultCookieJar === nonce && a.storage.defaultCookieHostOnly && a.storage.httpOnlyCookie === nonce && a.storage.httpOnlyFlag && a.storage.httpOnlySameSiteLax },
+    { id: 'app-b-storage-isolated', ok: b.storage.localStorage !== nonce && b.storage.indexedDB !== nonce && b.storage.cookie !== nonce && b.storage.cookieJar !== nonce && b.storage.defaultCookie !== nonce && b.storage.defaultCookieJar !== nonce && b.storage.httpOnlyCookie !== nonce },
+    { id: 'rendered-real-pages', ok: a.storage.bodyTextLength > 0 && b.storage.bodyTextLength > 0 },
+    { id: 'page-bridge-present', ok: a.bridgePresent && b.bridgePresent }
   ]
   return { observations, checks, rehearsalPassed: checks.every((check) => check.ok) }
 }
@@ -502,7 +503,7 @@ async function main () {
     const deadline = Date.now() + args.timeoutMs
     const target = await findWindow(port, child, deadline)
     cdp = await connectCdp(target.webSocketDebuggerUrl)
-    const result = await runCapture(cdp, apps, deadline, args.appTimeoutMs)
+    const result = await runCapture(cdp, apps, deadline, args.appTimeoutMs, port)
     artifact.observations = result.observations
     artifact.checks = result.checks
     artifact.rehearsalPassed = result.rehearsalPassed

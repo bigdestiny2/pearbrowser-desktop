@@ -24,6 +24,7 @@ const { SEED_APPS } = require('../backend/catalogue-seed.js')
 const rootLicense = readFileSync(new URL('../LICENSE', import.meta.url), 'utf8')
 const nativeReleaseWorkflow = readFileSync(new URL('../.github/workflows/desktop-native-release.yml', import.meta.url), 'utf8')
 const desktopCiWorkflow = readFileSync(new URL('../.github/workflows/desktop-ci.yml', import.meta.url), 'utf8')
+const prPackageProofWorkflow = readFileSync(new URL('../.github/workflows/desktop-pr-package-proof.yml', import.meta.url), 'utf8')
 const applingArtifactCollector = readFileSync(new URL('../scripts/collect-appling-artifacts.mjs', import.meta.url), 'utf8')
 const applingArtifactCollectorPath = fileURLToPath(new URL('../scripts/collect-appling-artifacts.mjs', import.meta.url))
 const nativeSigningCheck = readFileSync(new URL('../scripts/check-native-signing-credentials.mjs', import.meta.url), 'utf8')
@@ -571,6 +572,26 @@ test('desktop CI checks out and guards the HiveRelay 0.20.2 release contract', (
   assert.match(desktopCiWorkflow, /npm ci/)
   assert.doesNotMatch(desktopCiWorkflow, /Checkout HiveRelay workspace packages/)
   assert.doesNotMatch(desktopCiWorkflow, /vendor\/hiverelay/)
+})
+
+test('native Hyper tab Electron smoke gates desktop CI and every native package matrix', () => {
+  assert.equal(pkg.scripts?.['check:electron-native-tabs'], 'electron scripts/check-electron-native-tabs.cjs')
+  assert.match(desktopCiWorkflow, /sudo chmod 4755 "\$sandbox"/)
+  assert.match(desktopCiWorkflow, /run: xvfb-run -a npm run -s check:electron-native-tabs/)
+
+  for (const [name, workflow, buildStep] of [
+    ['PR package proof', prPackageProofWorkflow, 'Build ad-hoc macOS or unsigned Linux package'],
+    ['native release', nativeReleaseWorkflow, 'Build macOS Electron directory']
+  ]) {
+    for (const runner of ['macOS Apple Silicon', 'macOS Intel', 'Windows x64', 'Linux x64']) {
+      assert.ok(workflow.includes(runner), name + ' is missing ' + runner)
+    }
+    assert.match(workflow, /if: runner\.os != 'Linux'\n\s+run: npm run -s check:electron-native-tabs/)
+    assert.match(workflow, /if: runner\.os == 'Linux'\n\s+run: xvfb-run -a npm run -s check:electron-native-tabs/)
+    assert.match(workflow, /sudo chmod 4755 "\$sandbox"/)
+    assert.ok(workflow.indexOf('Probe first-party Hyper tabs in Electron') < workflow.indexOf(buildStep), name + ' must run native-tab integration before packaging')
+    assert.doesNotMatch(workflow, /--no-sandbox/)
+  }
 })
 
 test('RelayClient uses scheme-aware transport for public HTTPS gateways', () => {

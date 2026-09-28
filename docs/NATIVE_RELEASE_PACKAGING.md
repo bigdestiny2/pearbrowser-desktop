@@ -63,6 +63,22 @@ present and executable, independently repeats the signed unpacked-tree check,
 checks the exact Electron fuse states, and rejects legacy build content or a
 duplicate Electron runtime.
 
+The release workflow also runs `check:electron-native-tabs` on macOS
+arm64/x64, Windows, and Linux before packaging. It checks synthetic drive
+pages in top-level WebContentsViews, including default/Lax and server-set
+HttpOnly cookie isolation. This diagnostic does not establish real-app
+compatibility or public trust.
+
+For a local macOS package-proof rehearsal with Peerit and Pearfeed, run
+`node scripts/capture-origin-isolation-package-proof.mjs --app
+/path/to/PearBrowser.app/Contents/MacOS/PearBrowser` against an exact-source
+ad-hoc package. The runner uses a disposable profile and Browse UI, observes
+distinct top-level native CDP targets, and writes a private result with its
+release gate fixed to BLOCKED. Its CDP-set HttpOnly probe measures cookie jar
+isolation; the synthetic Electron server smoke proves the HTTP `Set-Cookie`
+roundtrip separately. A signed public-trust real-app capture and independent
+review remain required.
+
 The release workflow repeats content inspection, launch/RPC smoke, and
 first-window renderer mount/reload smoke on hosted platform runners. A
 successful local build is useful proof, but it does not replace the hosted

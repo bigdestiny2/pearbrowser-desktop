@@ -83,13 +83,16 @@ function captureFor (evidence) {
     runtime: { name: 'Electron', version: '43.2.0' },
     capturedAt: '2026-09-26T00:00:00Z',
     apps: evidence.apps.map((app, index) => ({
-      // Hyper tabs are child iframes in the same Electron BrowserWindow.
-      webContentsId: 1,
-      frameId: `app-frame-${index + 1}`,
-      frameUrl: `${app.origin}/hyper/${app.url.match(/^hyper:\/\/([0-9a-f]{64})/)[1]}/`,
+      viewKind: 'top-level-native',
+      webContentsId: index + 2,
+      rootFrameId: `app-root-${index + 1}`,
+      pageUrl: `${app.origin}/hyper/${app.url.match(/^hyper:\/\/([0-9a-f]{64})/)[1]}/`,
       url: app.url,
       origin: app.origin,
-      storage: { ...evidence.storage[index === 0 ? 'appA' : 'appB'] }
+      storage: { ...evidence.storage[index === 0 ? 'appA' : 'appB'] },
+      cookies: index === 0
+        ? { defaultHostOnly: true, sameSiteLax: true, httpOnlyLax: true, hostOnly: true, appAProofVisible: true, appADefaultProofVisible: true }
+        : { defaultHostOnly: true, sameSiteLax: false, httpOnlyLax: false, hostOnly: true, appAProofVisible: false, appADefaultProofVisible: false }
     }))
   }
 }
@@ -118,7 +121,7 @@ test('keyed app origins match the declared drives but still need trusted capture
   assert.ok(result.failures.some((failure) => failure.id === 'trusted-electron-capture'))
 })
 
-test('capture requires two distinct browser frames even when one WebContents hosts both apps', () => {
+test('capture requires distinct top-level native WebContents and root frames', () => {
   const evidence = validEvidence()
   const browserCapture = captureFor(evidence)
   const analyzeCurrentCapture = () => {
@@ -126,18 +129,22 @@ test('capture requires two distinct browser frames even when one WebContents hos
     evidence.storage.capture.sha256 = browserCaptureHash
     return analyzeOriginIsolationSmokeEvidence(evidence, { browserCapture, browserCaptureHash })
   }
-  const sharedWindow = analyzeCurrentCapture()
-  assert.ok(sharedWindow.checks.some((check) => check.id === 'browser-storage-capture-app-a' && check.ok))
-  assert.ok(sharedWindow.checks.some((check) => check.id === 'browser-storage-capture-app-b' && check.ok))
-  assert.ok(sharedWindow.checks.some((check) => check.id === 'browser-storage-capture-distinct-frames' && check.ok))
-  assert.ok(sharedWindow.failures.some((failure) => failure.id === 'trusted-electron-capture'))
+  const nativeViews = analyzeCurrentCapture()
+  assert.ok(nativeViews.checks.some((check) => check.id === 'browser-storage-capture-app-a' && check.ok))
+  assert.ok(nativeViews.checks.some((check) => check.id === 'browser-storage-capture-app-b' && check.ok))
+  assert.ok(nativeViews.checks.some((check) => check.id === 'browser-storage-capture-distinct-native-views' && check.ok))
+  assert.ok(nativeViews.failures.some((failure) => failure.id === 'trusted-electron-capture'))
 
-  browserCapture.apps[1].frameId = browserCapture.apps[0].frameId
+  browserCapture.apps[1].webContentsId = browserCapture.apps[0].webContentsId
   const duplicateFrame = analyzeCurrentCapture()
-  assert.ok(duplicateFrame.failures.some((failure) => failure.id === 'browser-storage-capture-distinct-frames'))
+  assert.ok(duplicateFrame.failures.some((failure) => failure.id === 'browser-storage-capture-distinct-native-views'))
 
-  browserCapture.apps[1].frameId = 'app-frame-2'
-  browserCapture.apps[1].frameUrl = browserCapture.apps[0].frameUrl
+  browserCapture.apps[1].webContentsId = 3
+  browserCapture.apps[0].cookies.httpOnlyLax = false
+  const noHttpOnly = analyzeCurrentCapture()
+  assert.ok(noHttpOnly.failures.some((failure) => failure.id === 'browser-storage-capture-lax-httponly'))
+  browserCapture.apps[0].cookies.httpOnlyLax = true
+  browserCapture.apps[1].pageUrl = browserCapture.apps[0].pageUrl
   const wrongFrameUrl = analyzeCurrentCapture()
   assert.ok(wrongFrameUrl.failures.some((failure) => failure.id === 'browser-storage-capture-app-b'))
 })

@@ -42,8 +42,8 @@ export function analyzeOriginIsolationSmokeEvidence (evidence, { browserCapture 
   add('origin-split', !!originA && !!originB && originA !== originB, 'app A and app B must report different loopback origins')
   add('drive-host-a', originMatchesDrive(originA, driveA), 'app A origin host must encode its exact drive key')
   add('drive-host-b', originMatchesDrive(originB, driveB), 'app B origin host must encode its exact drive key')
-  // In the current single Electron session, ports do not partition cookies.
-  // A future partitioned-session design needs a separately reviewed gate.
+  // Native tabs share one dedicated Electron session, so distinct keyed
+  // cookie hosts remain mandatory even though each tab has its own view.
   add('cookie-host-split', !!originA && !!originB && new URL(originA).hostname !== new URL(originB).hostname, 'different ports on one loopback host share cookies; distinct cookie hosts are required')
   add('browser-runtime-source', evidence?.automatedVerifier?.mode !== 'local-hyperproxy-httpbridge-fixture', 'local HyperProxy/HttpBridge fixtures cannot certify Chromium storage')
 
@@ -60,9 +60,17 @@ export function analyzeOriginIsolationSmokeEvidence (evidence, { browserCapture 
   const storageA = storage.appA || appA.storage || {}
   const storageB = storage.appB || appB.storage || {}
   const capturedApps = Array.isArray(browserCapture?.apps) ? browserCapture.apps : []
-  add('browser-storage-capture-app-a', captureMatchesApp(capturedApps[0], appA, originA, storageA), 'capture app A frame URL, origin, and measured storage must match the evidence')
-  add('browser-storage-capture-app-b', captureMatchesApp(capturedApps[1], appB, originB, storageB), 'capture app B frame URL, origin, and measured storage must match the evidence')
-  add('browser-storage-capture-distinct-frames', capturedApps.length === 2 && validFrameId(capturedApps[0]?.frameId) && validFrameId(capturedApps[1]?.frameId) && capturedApps[0].frameId !== capturedApps[1].frameId, 'the two app pages must be captured from distinct iframe IDs; both may share one Electron WebContents')
+  add('browser-storage-capture-app-a', captureMatchesApp(capturedApps[0], appA, originA, storageA), 'capture app A top-level native page URL, origin, and measured storage must match the evidence')
+  add('browser-storage-capture-app-b', captureMatchesApp(capturedApps[1], appB, originB, storageB), 'capture app B top-level native page URL, origin, and measured storage must match the evidence')
+  add('browser-storage-capture-distinct-native-views', capturedApps.length === 2 &&
+    capturedApps.every((item) => item?.viewKind === 'top-level-native' && Number.isInteger(item.webContentsId) && item.webContentsId > 0 && validFrameId(item.rootFrameId)) &&
+    capturedApps[0].webContentsId !== capturedApps[1].webContentsId && capturedApps[0].rootFrameId !== capturedApps[1].rootFrameId,
+  'the two apps must occupy distinct top-level native WebContents and root frames')
+  add('browser-storage-capture-lax-httponly', capturedApps.length === 2 &&
+    capturedApps[0]?.cookies?.defaultHostOnly === true && capturedApps[0]?.cookies?.sameSiteLax === true &&
+    capturedApps[0]?.cookies?.httpOnlyLax === true && capturedApps[0]?.cookies?.hostOnly === true &&
+    capturedApps[1]?.cookies?.appAProofVisible === false && capturedApps[1]?.cookies?.appADefaultProofVisible === false,
+  'capture must prove default, Lax, and HttpOnly host-only cookie isolation across native views')
 
   add('proof-key', proofKey === PROOF_KEY, `storage.proofKey must be ${PROOF_KEY}`)
   add('written-value', writtenValue.length > 0, 'storage.writtenValue must be present')
@@ -161,11 +169,11 @@ function validFrameId (value) {
   return typeof value === 'string' && value.trim().length > 0
 }
 
-function frameUrlMatchesApp (frameUrl, app, origin) {
+function pageUrlMatchesApp (pageUrl, app, origin) {
   const key = driveKeyFromHyperUrl(app?.url)
   if (!key || !origin) return false
   try {
-    const parsed = new URL(String(frameUrl || ''))
+    const parsed = new URL(String(pageUrl || ''))
     return parsed.origin === origin &&
       !parsed.username && !parsed.password &&
       new RegExp(`^/(?:hyper|app)/${key}(?:/|$)`, 'i').test(parsed.pathname)
@@ -176,8 +184,8 @@ function frameUrlMatchesApp (frameUrl, app, origin) {
 
 function captureMatchesApp (captured, app, origin, storage) {
   if (!captured || !app || !origin || !storage) return false
-  if (!Number.isInteger(captured.webContentsId) || captured.webContentsId < 1) return false
-  if (!validFrameId(captured.frameId) || !frameUrlMatchesApp(captured.frameUrl, app, origin)) return false
+  if (captured.viewKind !== 'top-level-native' || !Number.isInteger(captured.webContentsId) || captured.webContentsId < 1) return false
+  if (!validFrameId(captured.rootFrameId) || !pageUrlMatchesApp(captured.pageUrl, app, origin)) return false
   if (captured.url !== app.url || normalizeLoopbackOrigin(captured.origin) !== origin) return false
   if (!captured.storage || !Object.hasOwn(captured.storage, 'localStorage') || !Object.hasOwn(captured.storage, 'indexedDB') || !Object.hasOwn(captured.storage, 'cookie')) return false
   return ['localStorage', 'indexedDB', 'cookie'].every((key) => captured.storage[key] === storage[key])

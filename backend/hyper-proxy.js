@@ -146,6 +146,10 @@ const HYPER_LINK_BRIDGE_SHIM = `<script>
     if (!anchor) return
     const href = String(anchor.getAttribute('href') || anchor.href || '').trim()
     if (!/^hyper:\\/\\//i.test(href)) return
+    // The file:// shell owns embedded iframes via postMessage. A top-level
+    // WebContentsView has no shell parent, so let Electron's main-process
+    // navigation policy catch and route the link instead.
+    if (window.parent === window) return
     event.preventDefault()
     event.stopPropagation()
     window.parent.postMessage({
@@ -684,9 +688,16 @@ class HyperProxy {
       pluginScriptTags.join('') +
       (shieldCss ? `<style data-pear-shield>${escapeStyleText(shieldCss)}</style>` : '') +
       (pluginCss ? `<style data-pear-plugin-style>${escapeStyleText(pluginCss)}</style>` : '')
-    let injected = html.includes('<head>')
-      ? html.replace('<head>', `<head>${headInjection}`)
-      : html.replace(/<html>/i, `<html><head>${headInjection}</head>`)
+    // HTML permits omitted and attributed head/html tags. Always inject the
+    // origin-bound base, token, and shims before the document's own content.
+    let injected
+    if (/<head\b[^>]*>/i.test(html)) {
+      injected = html.replace(/<head\b[^>]*>/i, (tag) => `${tag}${headInjection}`)
+    } else if (/<html\b[^>]*>/i.test(html)) {
+      injected = html.replace(/<html\b[^>]*>/i, (tag) => `${tag}<head>${headInjection}</head>`)
+    } else {
+      injected = html.replace(/^(\s*<!doctype[^>]*>)?/i, (prefix) => `${prefix}<head>${headInjection}</head>`)
+    }
 
     // Page may carry a strict CSP that forbids inline scripts (anonGPT
     // ships `script-src 'self'` with no 'unsafe-inline' — its own

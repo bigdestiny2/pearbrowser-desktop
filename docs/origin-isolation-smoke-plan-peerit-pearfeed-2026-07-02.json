@@ -187,23 +187,45 @@
     "capturedAt": "<ISO timestamp from the capture>",
     "apps": [
       {
-        "webContentsId": "<positive integer from the actual WebContents>",
+        "webContentsId": "<positive integer for app A native view>",
         "url": "hyper://ec6e2d6d9d22b9d6b40e11a9ca3042be3197e4bdca9e9a7f079be6ee830761b4/",
         "origin": "<actual location.origin>",
         "storage": {
           "localStorage": "<measured value or null>",
           "indexedDB": "<measured value or null>",
           "cookie": "<measured document.cookie>"
+        },
+        "viewKind": "top-level-native",
+        "rootFrameId": "<root frame id of this native WebContents>",
+        "pageUrl": "<exact bound http://d-<key>.localhost:<port>/hyper/<key>/ URL>",
+        "cookies": {
+          "defaultHostOnly": "<true after a cookie with omitted SameSite is present on only this keyed host>",
+          "sameSiteLax": "<true only after measured Lax cookie is present>",
+          "httpOnlyLax": "<true only after measured HttpOnly Lax cookie is present>",
+          "hostOnly": "<true only when cookies are scoped to this exact keyed hostname>",
+          "appAProofVisible": "<true for app A, false for app B>",
+          "appADefaultProofVisible": "<true for app A, false for app B>"
         }
       },
       {
-        "webContentsId": "<positive integer from the actual WebContents>",
+        "webContentsId": "<different positive integer for app B native view>",
         "url": "hyper://5c2807c5ba1383e55d69a2fe5085fdeb563e2e18f175f363f3f18437219c1aec/",
         "origin": "<actual location.origin>",
         "storage": {
           "localStorage": "<measured value or null>",
           "indexedDB": "<measured value or null>",
           "cookie": "<measured document.cookie>"
+        },
+        "viewKind": "top-level-native",
+        "rootFrameId": "<root frame id of this native WebContents>",
+        "pageUrl": "<exact bound http://d-<key>.localhost:<port>/hyper/<key>/ URL>",
+        "cookies": {
+          "defaultHostOnly": "<true after a cookie with omitted SameSite is present on only this keyed host>",
+          "sameSiteLax": "<true only after measured Lax cookie is present>",
+          "httpOnlyLax": "<true only after measured HttpOnly Lax cookie is present>",
+          "hostOnly": "<true only when cookies are scoped to this exact keyed hostname>",
+          "appAProofVisible": "<true for app A, false for app B>",
+          "appADefaultProofVisible": "<true for app A, false for app B>"
         }
       }
     ]
@@ -211,6 +233,7 @@
   "acceptance": [
     "Feature flag is enabled for the launched desktop process.",
     "Two app tabs report different `location.origin` values and different cookie hostnames.",
+    "The two apps are distinct top-level native WebContentsViews with different root frame and WebContents IDs; default, Lax, and HttpOnly cookies stay on their keyed hosts.",
     "A trusted Electron runtime capture/review flow proves, from one browser profile, that App A localStorage, cookie, and IndexedDB values are not visible in App B.",
     "Strict-CSP real app compatibility is recorded.",
     "Tab close/navigation-away does not leave the browser in a broken listener state.",

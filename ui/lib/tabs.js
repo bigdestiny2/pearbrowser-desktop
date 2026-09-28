@@ -184,6 +184,20 @@ export function tabDriveKey (tab) {
     driveKeyFromTabAddress(tab.src)
 }
 
+// Native views are reserved for explicit public hyper:// tabs whose local
+// proxy URL is bound to that same drive. Loopback apps and clearnet tabs keep
+// their existing embed path, even if their URLs resemble a keyed drive route.
+export function nativeHyperDriveKey (tab) {
+  if (!tab || tab.kind !== 'hyper' || !/^hyper:\/\//i.test(tab.url || '')) return ''
+  const publicKey = driveKeyFromHyperRef(tab.url)
+  const srcKey = driveKeyFromTabAddress(tab.src)
+  if (!publicKey || !srcKey || publicKey !== srcKey) return ''
+  if (tab.displayUrl) {
+    if (!/^hyper:\/\//i.test(tab.displayUrl) || driveKeyFromHyperRef(tab.displayUrl) !== publicKey) return ''
+  }
+  return srcKey
+}
+
 export function tabListUsesDriveKey (tabs, driveKeyHex) {
   const key = typeof driveKeyHex === 'string' ? driveKeyHex.toLowerCase() : ''
   if (!/^[0-9a-f]{64}$/.test(key) || !Array.isArray(tabs)) return false

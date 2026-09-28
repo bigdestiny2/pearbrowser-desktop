@@ -1,5 +1,20 @@
 # Release Smoke Evidence Log - 2026-06-23
 
+**2026-09-28 first-party tab candidate update:** Desktop source now places
+Hyperdrive pages in top-level native WebContentsViews with exact keyed hosts.
+A local Electron synthetic-drive smoke passed default/Lax and server-set
+HttpOnly cookie isolation, storage, token boundary, safe navigation, and
+same-drive POST/replacement. The diagnostic package capture and evidence
+schema now target distinct native WebContents and include default/Lax/HttpOnly
+proof; the checker still forces `trusted-electron-capture` to fail until an
+exact signed public-trust package and independent real Peerit/Pearfeed review
+exist. Published v0.9.0 page storage under shared `127.0.0.1` origins is not
+automatically carried into the dedicated native-view session. The old bytes
+remain, but users may need app sign-in or client-state recovery. No hosted
+native-tab matrix result or signed real-app capture is claimed by this local
+candidate. Desktop v0.9.1 remains **HOLD**.
+
+
 **2026-09-28 current desktop status:** The release checker runs the trusted
 origin-isolation verifier for the P2P cookie row. A textual PASS, DEFER, or
 removed row cannot clear the gate. It requires frame-bound captures from two

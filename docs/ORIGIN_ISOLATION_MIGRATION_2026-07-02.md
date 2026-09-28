@@ -353,6 +353,26 @@ current P2P app cookie isolation. Distribution stays **HOLD**. See the [current 
 and [PR checks](https://github.com/bigdestiny2/pearbrowser-desktop/pull/84/checks)
 for source-specific CI evidence.
 
+### 2026-09-28 first-party desktop tab candidate
+
+The next desktop candidate places Hyperdrive documents and installed apps in
+sandboxed top-level WebContentsViews with a dedicated persistent Electron
+session. This gives default and `SameSite=Lax` app cookies a first-party
+context while retaining exact drive-keyed hosts. The shell's file origin and
+host session token stay outside page views. Native views retain the normal
+HyperProxy bridge and strict CSP injection; page navigation and new windows
+pass through the main-process navigation policy.
+
+Published v0.9.0 page storage used shared `127.0.0.1` hosts with port-based
+origins. Those cookies and localStorage/IndexedDB entries do not move
+transparently to keyed hosts or the native-view partition. Existing profile
+bytes remain intact, but a cross-drive import from the shared origin would
+risk assigning one app's data to another. Users may need to sign in again or
+recover app-local state through the app's own backup, sync, or account tools.
+Keep an old profile copy until the app's recovery is verified. This is a
+candidate behavior statement, not a claim that signed real-app capture or
+public release has passed.
+
 ### 2026-09-28 main-listener Host follow-up
 
 The main listener now checks its own exact `127.0.0.1:<port>` Host, in addition to the drive listeners' exact keyed hosts. This prevents a drive-shaped hostname pointed at the Clearnet listener's port from receiving publisher content within that drive's cookie scope. Absolute-form request targets must also match the listener origin. Focused and Electron synthetic-drive diagnostics pass; the trusted packaged real-app capture gate remains open.

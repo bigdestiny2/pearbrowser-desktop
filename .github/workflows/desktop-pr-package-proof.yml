@@ -109,6 +109,15 @@ jobs:
         if: runner.os == 'Linux'
         run: xvfb-run -a npm run check:electron-hyper-proxy-integration
 
+      # Diagnostic synthetic-page coverage; trusted packaged real-app evidence has a separate release gate.
+      - name: Probe first-party Hyper tabs in Electron
+        if: runner.os != 'Linux'
+        run: npm run -s check:electron-native-tabs
+
+      - name: Probe first-party Hyper tabs in Electron on Linux
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run -s check:electron-native-tabs
+
       - name: Build ad-hoc macOS or unsigned Linux package
         if: runner.os != 'Windows'
         env:

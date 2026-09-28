@@ -10,7 +10,7 @@ import {
   normalizeTabHistory, clampHistoryIndex, pushTabHistory,
   normalizeTabSnapshot, serializeTab, restoreSavedTab, sortTabsPinnedFirst,
   normalizeDefaultTab, restoreStartupTabs, makeTab,
-  driveKeyFromTabAddress, tabDriveKey, tabListUsesDriveKey
+  driveKeyFromTabAddress, tabDriveKey, tabListUsesDriveKey, nativeHyperDriveKey
 } from '../ui/lib/tabs.js'
 
 const A = 'hyper://aaa/'
@@ -150,4 +150,25 @@ test('tab origin helpers extract drive keys from hyper and local proxy addresses
   assert.equal(tabDriveKey({ url: '', displayUrl: '', src: namedA }), DRIVE_A)
   assert.equal(tabListUsesDriveKey([{ url: `hyper://${DRIVE_A}/` }], DRIVE_A), true)
   assert.equal(tabListUsesDriveKey([{ url: `hyper://${DRIVE_A}/` }], DRIVE_B), false)
+})
+
+
+test('native Hyper tab routing requires an explicit public key and exact keyed origin', () => {
+  const localA = `http://${driveHostnameForKey(DRIVE_A)}:12345/hyper/${DRIVE_A}/index.html`
+  const appA = `http://${driveHostnameForKey(DRIVE_A)}:12345/app/${DRIVE_A}/index.html`
+  const localB = `http://${driveHostnameForKey(DRIVE_B)}:12345/hyper/${DRIVE_B}/index.html`
+  const publicA = `hyper://${DRIVE_A}/index.html`
+  const valid = { kind: 'hyper', url: publicA, displayUrl: publicA, src: localA }
+  assert.equal(nativeHyperDriveKey(valid), DRIVE_A)
+  assert.equal(nativeHyperDriveKey({ ...valid, src: appA }), DRIVE_A)
+  assert.equal(nativeHyperDriveKey({ ...valid, src: localB }), '')
+  assert.equal(nativeHyperDriveKey({ ...valid, src: `http://127.0.0.1:12345/hyper/${DRIVE_A}/index.html` }), '')
+  assert.equal(nativeHyperDriveKey({ ...valid, src: `http://${driveHostnameForKey(DRIVE_B)}:12345/hyper/${DRIVE_A}/index.html` }), '')
+  assert.equal(nativeHyperDriveKey({ ...valid, kind: 'loopback' }), '')
+  assert.equal(nativeHyperDriveKey({ ...valid, kind: 'clearnet' }), '')
+  assert.equal(nativeHyperDriveKey({ ...valid, kind: undefined }), '')
+  assert.equal(nativeHyperDriveKey({ ...valid, url: DRIVE_A }), '')
+  assert.equal(nativeHyperDriveKey({ ...valid, url: `hyper://bad-key/` }), '')
+  assert.equal(nativeHyperDriveKey({ ...valid, displayUrl: `hyper://${DRIVE_B}/` }), '')
+  assert.equal(nativeHyperDriveKey({ ...valid, displayUrl: localA }), '')
 })
