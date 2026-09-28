@@ -77,11 +77,18 @@ jobs:
           npm run build:ui
           git diff --exit-code -- ui/dist/main.bundle.js
 
-      - name: Install Linux virtual display
+      - name: Install Linux display and secure development Electron sandbox
         if: runner.os == 'Linux'
         run: |
+          set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y xvfb
+          npm run -s install:electron-runtime
+          sandbox=node_modules/electron/dist/chrome-sandbox
+          test -f "$sandbox" && test ! -L "$sandbox"
+          sudo chown root:root "$sandbox"
+          sudo chmod 4755 "$sandbox"
+          test "$(stat -c '%a' "$sandbox")" = 4755
 
       - name: Prove Electron drive cookie isolation
         if: runner.os != 'Linux'
@@ -91,8 +98,12 @@ jobs:
         if: runner.os == 'Linux'
         run: xvfb-run -a npm run check:electron-cookie-isolation
 
-      - name: Build unsigned macOS or Linux package
+      - name: Build ad-hoc macOS or unsigned Linux package
         if: runner.os != 'Windows'
+        env:
+          # This PR workflow has read-only contents, no secrets or protected environment.
+          # Electron Builder otherwise skips even ad-hoc macOS signing on pull_request.
+          CSC_FOR_PULL_REQUEST: "true"
         run: |
           set -euo pipefail
           if [ "${{ matrix.platform }}" = darwin ]; then
