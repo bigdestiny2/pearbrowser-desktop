@@ -2,23 +2,28 @@
 
 **2026-09-28 first-party tab candidate update:** Desktop source now places
 Hyperdrive pages in top-level native WebContentsViews with exact keyed hosts.
-A local Electron synthetic-drive smoke passed default/Lax and server-set
-HttpOnly cookie isolation, storage, token boundary, safe navigation, and
-same-drive POST/replacement. The diagnostic package capture and evidence
-schema now target distinct native WebContents and include default/Lax/HttpOnly
-proof; the checker still forces `trusted-electron-capture` to fail until an
-exact signed public-trust package and independent real Peerit/Pearfeed review
-exist. Published v0.9.0 page storage under shared `127.0.0.1` origins is not
-automatically carried into the dedicated native-view session. The old bytes
-remain, but users may need app sign-in or client-state recovery. No hosted
-native-tab matrix result or signed real-app capture is claimed by this local
-candidate. Desktop v0.9.1 remains **HOLD**.
+At source `88d10d75e5e44a50f0a6aaa2195e96b8fc142d36`, the full
+suite passed 985 tests with six skips. The ad-hoc Apple Silicon package
+passed source, runtime inventory, and fuse checks. A fresh-profile Browse
+diagnostic with real Peerit and Pearfeed passed 11/11 native-target,
+HTTP-200, default/Lax plus CDP-set HttpOnly cookie, storage, bridge-presence,
+Peerit strict-CSP/bridge, and tab-close checks. The synthetic Electron server
+separately passed a real HTTP `Set-Cookie` roundtrip for default/Lax/HttpOnly.
+The private diagnostic artifact is
+`/tmp/pear-native-tabs-peerit-pearfeed-lifecycle.json`. The checker still
+forces `trusted-electron-capture` to fail until an exact signed public-trust
+package and independent real-app review exist. Published v0.9.0 page
+storage under shared `127.0.0.1` origins is not automatically carried into
+the dedicated native-view session. The old bytes remain, but users may need
+app sign-in or client-state recovery. No hosted native-tab matrix result or
+signed real-app capture is claimed by this local candidate. Desktop v0.9.1
+remains **HOLD**.
 
-
-**2026-09-28 current desktop status:** The release checker runs the trusted
+**2026-09-28 earlier desktop status:** The release checker runs the trusted
 origin-isolation verifier for the P2P cookie row. A textual PASS, DEFER, or
-removed row cannot clear the gate. It requires frame-bound captures from two
-real apps in the exact signed package and independent review. The result is
+removed row cannot clear the gate. The current native-view candidate requires
+top-level target captures from two real apps in the exact signed package and
+independent review. The result is
 **53 PASS / 18 DEFER / 1 FAIL**. At exact source head
 `2503724299a1596ef812fd851b18e9f2e76ee902`,
 [Desktop CI](https://github.com/bigdestiny2/pearbrowser-desktop/actions/runs/36437255547)

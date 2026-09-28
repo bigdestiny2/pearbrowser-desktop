@@ -90,11 +90,18 @@ in again or recreate local client state. For important app data, use that
 app's own export, backup, sync, or account recovery process before upgrading;
 retain the old v0.9.0 profile/package until the app's recovery is confirmed.
 
-Local Electron synthetic-drive checks exercise ordinary Lax and HttpOnly
-cookies, storage and token isolation, blocked popup/navigation escape, and
-production HyperProxy bridge injection. These are candidate diagnostics.
-The exact signed package still requires trusted capture with real Peerit and
-Pearfeed journeys and public-trust review before v0.9.1 distribution.
+Local Electron synthetic-drive checks exercise default/Lax and server-set
+HttpOnly cookies, storage and token isolation, blocked popup/navigation
+escape, same-drive POST/replacement, and production HyperProxy bridge
+injection. An ad-hoc Apple Silicon package from source
+`88d10d75e5e44a50f0a6aaa2195e96b8fc142d36` passed package integrity
+checks. A disposable-profile Browse diagnostic with real Peerit and Pearfeed
+passed 11/11 checks for distinct native targets, keyed HTTP 200 pages,
+identity of their cookie/storage origins, bridge presence under Peerit's
+strict CSP, and native tab closure. These are unsigned local diagnostics;
+functional identity/sync/swarm journeys and trusted capture from the exact
+signed public-trust packages still require independent review before v0.9.1
+distribution.
 
 ## Local AI packaging
 
@@ -115,7 +122,7 @@ NDJSON. These are candidate diagnostics, not a published P2P app journey.
   passed Apple Silicon macOS, Intel macOS, Windows x64, Linux x64, and the
   exact-source review-bundle verifier. Its packages are ad-hoc/unsigned
   review artifacts, not public-trust installers.
-- With the separate diagnostic runner tests included, the local suite passed **980 tests, 6 skipped, 0 failed**. The hosted package proof above remains tied to its recorded source SHA.
+- An earlier local suite with separate diagnostic runner tests passed **980 tests, 6 skipped, 0 failed**. The hosted package proof above remains tied to its recorded source SHA. The first-party candidate at `88d10d75e5e44a50f0a6aaa2195e96b8fc142d36` passed **985 tests, 6 skipped, 0 failed** locally.
 - The package gate compares the reviewed Electron/worker/backend/UI bytes,
   verifies the ASAR/unpacked runtime placement and mode-specific Electron fuses,
   validates the protected-key Ed25519/SHA-256 inventory of every physical

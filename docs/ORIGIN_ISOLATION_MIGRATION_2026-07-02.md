@@ -338,16 +338,21 @@ These are diagnostic checks. At exact source head
 passed synthetic-drive diagnostics, packaged first-window/reload checks, and
 its exact-source review-bundle verifier.
 
-A separate diagnostic-only real-app rehearsal passed seven of seven checks
-against an older `ec0b97a` ad-hoc package when the apps used
-`SameSite=None; Secure` cookies. Default/Lax cookies did not persist in the
-Hyper iframe context. This proves that the rehearsal's explicit cookie
-configuration worked in that older package; it is not an exact-head,
-signed-package trust capture. Run the diagnostic with `node scripts/capture-origin-isolation-package-proof.mjs --app <path-to-packaged-macOS-executable>`; it writes a private temporary artifact that explicitly keeps the release gate blocked. A first-party P2P tab design is still needed for apps that rely on default/Lax cookies.
+An earlier diagnostic-only real-app rehearsal passed seven of seven checks
+against an older `ec0b97a` ad-hoc iframe package when the apps used
+`SameSite=None; Secure` cookies. Default/Lax cookies did not persist in that
+Hyper iframe context. This historical result proves only that the explicit
+cookie configuration worked in the older package.
 
-A trusted frame-bound capture and independent review of two real P2P apps in
-the exact signed public-trust package, plus clean-install journeys and
-signing, are still required.
+The current first-party native-view candidate is described below. Run its
+ad-hoc diagnostic with
+`node scripts/capture-origin-isolation-package-proof.mjs --app <path-to-packaged-macOS-executable>`;
+it records distinct top-level page targets and default/Lax/HttpOnly cookie
+probes in a private temporary artifact while keeping the release gate blocked.
+Trusted native-view target capture and independent review of two real P2P
+apps in the exact signed public-trust package, plus clean-install journeys
+and signing, are still required.
+
 `npm run check:release-evidence` remains **53 PASS / 18 DEFER / 1 FAIL** on
 current P2P app cookie isolation. Distribution stays **HOLD**. See the [current candidate report](PEARBROWSER_UPDATE_CANDIDATE_2026-09-26.md)
 and [PR checks](https://github.com/bigdestiny2/pearbrowser-desktop/pull/84/checks)

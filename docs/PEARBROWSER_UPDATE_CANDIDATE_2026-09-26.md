@@ -202,18 +202,25 @@ A local Electron 43.2.0 synthetic-drive integration passed ordinary cookies
 with omitted/default SameSite, explicit `SameSite=Lax`, and server-set
 `HttpOnly` cookies, plus localStorage/IndexedDB separation, host-token
 non-exposure, navigation/popup denial, native lifecycle, and the production
-HyperProxy link shim. The full desktop suite passed locally before the final
-packaged real-app run; exact test totals and package receipts must be recorded
-against the committed source. The Desktop CI, PR package, and native release
-matrices now include the native-tab diagnostic on macOS arm64/x64, Windows,
-and Linux. Those hosted runs have not yet reported for this source.
+HyperProxy link shim. At committed source `88d10d75e5e44a50f0a6aaa2195e96b8fc142d36`,
+the full desktop suite passed **985 tests, 6 skipped, 0 failed**. The ad-hoc
+Apple Silicon package passed its content/integrity checker: 132 source files
+were byte-identical and the signed physical Pear runtime inventory contained
+8,586 files. The Desktop CI, PR package, and native release matrices now
+include the native-tab diagnostic on macOS arm64/x64, Windows, and Linux.
+Those hosted runs have not yet reported for this source.
 
-The package-proof diagnostic now looks for two distinct top-level page
-targets instead of Hyper iframes. It probes default/Lax cookies, a CDP-set
-HttpOnly cookie, storage, keyed URLs, and browser bridge presence. The
-synthetic Electron server separately proves an HTTP `Set-Cookie` roundtrip
-for default/Lax/HttpOnly cookies. A successful diagnostic is still unsigned
-local evidence: the release checker retains a hard trusted-capture failure
+A fresh-profile run of that ad-hoc package used Browse to load real Peerit
+and Pearfeed. Its diagnostic passed **11/11** checks: distinct top-level
+native targets, exact keyed HTTP 200 pages, default/Lax plus CDP-set HttpOnly
+cookie isolation, localStorage/IndexedDB isolation, bridge presence on both,
+bridge presence alongside Peerit's strict CSP, and closing Pearfeed's native
+view while Peerit remained. The private local artifact is
+`/tmp/pear-native-tabs-peerit-pearfeed-lifecycle.json`. The synthetic
+Electron server separately proves an HTTP `Set-Cookie` roundtrip for
+default/Lax/HttpOnly cookies. The diagnostic tests bridge injection/presence;
+identity/sync/swarm route journeys still need independent signed-package
+review. The release checker retains a hard trusted-capture failure
 until the exact Developer ID signed/notarized and Windows signed candidates
 are reviewed independently with real Peerit and Pearfeed, strict CSP, bridge,
 and lifecycle journeys.

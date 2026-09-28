@@ -325,6 +325,20 @@ async function waitForNativePage (port, app, deadline) {
   }
 }
 
+async function waitForNativePageClosed (port, targetId, deadline) {
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/json/list`, { redirect: 'error', signal: AbortSignal.timeout(2000) })
+      if (response.ok) {
+        const targets = await response.json()
+        if (!targets.some((item) => String(item.id) === targetId)) return true
+      }
+    } catch {}
+    await sleep(200)
+  }
+  return false
+}
+
 async function isolatedContext (cdp, frame) {
   const result = await cdp.send('Page.createIsolatedWorld', { frameId: frame.frameId, worldName: 'pearbrowser-origin-rehearsal' }, frame.sessionId)
   if (!Number.isInteger(result.executionContextId)) throw new Error('could not create an isolated frame context')
@@ -457,6 +471,14 @@ async function runCapture (shellCdp, apps, deadline, appTimeoutMs, port) {
     }
   }
   const [a, b] = observations
+  const closeClicked = await evaluate(shellCdp, `(() => {
+    const close = document.querySelector('.browse .tabchip.active .tabchip-close')
+    if (!close) return false
+    close.click()
+    return true
+  })()`)
+  const closedB = closeClicked && await waitForNativePageClosed(port, b.webContentsTargetId, Math.min(deadline, Date.now() + 5000))
+  const remainingA = closedB && !!(await findNativePage(port, apps[0], Math.min(deadline, Date.now() + 5000)).catch(() => null))
   const checks = [
     { id: 'real-document-a', ok: a.documentResponse.status === 200 && a.documentResponse.completed },
     { id: 'real-document-b', ok: b.documentResponse.status === 200 && b.documentResponse.completed },
@@ -466,7 +488,9 @@ async function runCapture (shellCdp, apps, deadline, appTimeoutMs, port) {
     { id: 'app-a-storage', ok: a.storage.localStorage === nonce && a.storage.indexedDB === nonce && a.storage.cookie === nonce && a.storage.cookieJar === nonce && a.storage.cookieDomainMatchesFrame && a.storage.cookieSameSiteLax && a.storage.defaultCookie === nonce && a.storage.defaultCookieJar === nonce && a.storage.defaultCookieHostOnly && a.storage.httpOnlyCookie === nonce && a.storage.httpOnlyFlag && a.storage.httpOnlySameSiteLax },
     { id: 'app-b-storage-isolated', ok: b.storage.localStorage !== nonce && b.storage.indexedDB !== nonce && b.storage.cookie !== nonce && b.storage.cookieJar !== nonce && b.storage.defaultCookie !== nonce && b.storage.defaultCookieJar !== nonce && b.storage.httpOnlyCookie !== nonce },
     { id: 'rendered-real-pages', ok: a.storage.bodyTextLength > 0 && b.storage.bodyTextLength > 0 },
-    { id: 'page-bridge-present', ok: a.bridgePresent && b.bridgePresent }
+    { id: 'page-bridge-present', ok: a.bridgePresent && b.bridgePresent },
+    { id: 'strict-csp-bridge', ok: observations.some((item) => item.strictCspPresent && item.bridgePresent) },
+    { id: 'native-tab-close-lifecycle', ok: !!closedB && remainingA }
   ]
   return { observations, checks, rehearsalPassed: checks.every((check) => check.ok) }
 }
