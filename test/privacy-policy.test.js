@@ -1,8 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
+import driveOrigin from '../backend/drive-origin.cjs'
 
 const require = createRequire(import.meta.url)
+const { driveHostnameForKey } = driveOrigin
 const {
   classifyUrl,
   sanitizeClearnetUrl,
@@ -17,6 +19,9 @@ test('classifyUrl distinguishes hyper, clearnet, loopback', () => {
   assert.equal(classifyUrl('hyper://' + 'a'.repeat(64) + '/'), 'hyper')
   assert.equal(classifyUrl('https://example.com/x'), 'clearnet')
   assert.equal(classifyUrl('http://127.0.0.1:9876/hyper/x'), 'loopback')
+  const host = driveHostnameForKey('a'.repeat(64))
+  assert.equal(classifyUrl(`http://${host}:9876/hyper/x`), 'loopback')
+  assert.equal(normalizeNavigationInput(`${host}:9876/hyper/x`), `http://${host}:9876/hyper/x`)
   assert.equal(classifyUrl('not a url'), null)
 })
 

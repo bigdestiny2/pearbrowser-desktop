@@ -166,7 +166,7 @@ async function runAutomatedVerifier ({ appA, appB, sourcePlan, proofValue }) {
     const storage = new BrowserStorageBuckets(PROOF_KEY)
     const appAStorage = storage.write(originA, proofValue)
     const appBStorage = storage.read(originB)
-    logCheck('storage-split', appAStorage.localStorage === proofValue && appBStorage.localStorage === null && appBStorage.indexedDB === null && !appBStorage.cookie.includes(proofValue), 'simulated cookie storage is host-scoped and leaks across 127.0.0.1 ports; real Electron storage proof is still required', {}, false)
+    logCheck('storage-split', appAStorage.localStorage === proofValue && appBStorage.localStorage === null && appBStorage.indexedDB === null && !appBStorage.cookie.includes(proofValue), 'simulated storage buckets are distinct by drive host; real Electron storage proof is still required', {}, false)
 
     const identity = await requestJson('GET', `${originA}/api/identity`, {
       headers: originHeaders(originA, tokenA)
@@ -448,14 +448,14 @@ function httpRequest (method, url, opts = {}) {
   return new Promise((resolve, reject) => {
     const parsed = new URL(url)
     const body = opts.body === undefined ? null : JSON.stringify(opts.body)
-    const headers = { connection: 'close', ...(opts.headers || {}) }
+    const headers = { connection: 'close', host: parsed.host, ...(opts.headers || {}) }
     if (body !== null) {
       headers['content-type'] = 'application/json'
       headers['content-length'] = Buffer.byteLength(body)
     }
     const req = nodeHttp.request({
       method,
-      hostname: parsed.hostname,
+      hostname: '127.0.0.1',
       port: parsed.port,
       path: `${parsed.pathname}${parsed.search}`,
       headers,

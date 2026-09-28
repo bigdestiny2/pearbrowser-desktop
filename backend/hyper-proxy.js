@@ -2,8 +2,8 @@
  * Hyper Proxy — Local HTTP server bridging WebView to Hyperdrives
  *
  * URL mapping:
- *   localhost:PORT/hyper/KEY/path → fetches from Hyperdrive
- *   localhost:PORT/app/APP_ID/path → fetches from installed app's drive
+ *   d-<z32-key>.localhost:PORT/hyper/KEY/path → fetches from Hyperdrive
+ *   d-<z32-key>.localhost:PORT/app/KEY/path → fetches from an installed drive
  *
  * Injects <base> tags for relative link resolution in HTML.
  */
@@ -14,6 +14,7 @@ const { PAGE_CONTEXT_SHIM, PAGE_CONTEXT_SHIM_HASH, pageContextMeta } = require('
 const { escapeStyleText } = require('./html-raw-text.cjs')
 const { WalletDocuments, tabKeyForDrive } = require('./wallet/wallet-documents.cjs')
 const { validateWalletManifest } = require('./wallet/wallet-manifest.cjs')
+const { driveHostnameForKey } = require('./drive-origin.cjs')
 const WALLET_RELEASE_POSTURE = require('./wallet/networks/stable-testnet.cjs').releasePosture
 
 const USER_FRIENDLY_ERRORS = {
@@ -41,15 +42,17 @@ function getUserFriendlyError(technicalError) {
   return 'Something went wrong. Please try again.'
 }
 
-function isLoopbackOrigin (origin) {
-  if (typeof origin !== 'string') return false
-  try {
-    const parsed = new URL(origin)
-    return parsed.protocol === 'http:' &&
-      (parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost')
-  } catch {
-    return false
+function requestHeader (headers, name) {
+  if (!headers || typeof headers !== 'object') return { present: false, value: null }
+  let found = false
+  let value = null
+  for (const [key, candidate] of Object.entries(headers)) {
+    if (key.toLowerCase() !== name) continue
+    if (found || typeof candidate !== 'string') return { present: true, value: null }
+    found = true
+    value = candidate
   }
+  return { present: found, value }
 }
 
 function normalizeOrigin (origin) {
@@ -61,8 +64,8 @@ function normalizeOrigin (origin) {
   return `${parsed.protocol}//${parsed.host}`
 }
 
-function originForPort (port) {
-  return `http://127.0.0.1:${port}`
+function originForPort (port, driveKeyHex = null) {
+  return `http://${driveKeyHex ? driveHostnameForKey(driveKeyHex) : '127.0.0.1'}:${port}`
 }
 
 function normalizeDriveKeyHex (keyHex) {
@@ -572,14 +575,9 @@ class HyperProxy {
     const html = (Buffer.isBuffer(content) ? content : Buffer.from(content)).toString('utf-8')
     const keyHex = normalizeDriveKeyHex(driveKeyHex)
     const prefix = reqPath.startsWith('/app/') ? '/app/' : '/hyper/'
-    // Host MUST match the document origin the page is navigated to (CMD_NAVIGATE
-    // loads it from http://127.0.0.1:<port>). `localhost` and `127.0.0.1` are
-    // DIFFERENT origins to the browser, so a `localhost` <base> makes every
-    // relative resource (styles.css, js/app.js) resolve cross-origin to the
-    // 127.0.0.1 document — and any page with a `script-src 'self'` / `style-src
-    // 'self'` CSP then refuses its OWN files: index.html renders but nothing
-    // else loads (the "splash but never boots" bug). Keep this in lockstep with
-    // the host used in index.js CMD_NAVIGATE.
+    // Keep the injected base URL on the exact document origin. A different
+    // host or port would make relative resources cross-origin and break pages
+    // with a self-only CSP. CMD_NAVIGATE must use the same generated host.
     const origin = normalizeOrigin(documentOrigin || originForPort(this._port))
     const baseHref = `${origin}${prefix}${keyHex}/`
     const apiToken = this.issueApiToken(keyHex, { origin })
@@ -712,12 +710,30 @@ class HyperProxy {
 
   get perDriveOrigins () { return this._perDriveOrigins }
 
+  driveKeyForLocalUrl (rawUrl) {
+    if (typeof rawUrl !== 'string' || !rawUrl) return ''
+    try {
+      const parsed = new URL(rawUrl)
+      if (parsed.protocol !== 'http:' || parsed.username || parsed.password) return ''
+      const match = parsed.pathname.match(/^\/(?:hyper|app)\/([0-9a-f]{64})(?:\/|$)/i)
+      if (!match) return ''
+      const keyHex = match[1].toLowerCase()
+      if (this._perDriveOrigins) {
+        const entry = this._driveOrigins.get(keyHex)
+        return entry?.port && normalizeOrigin(rawUrl) === originForPort(entry.port, keyHex) ? keyHex : ''
+      }
+      return normalizeOrigin(rawUrl) === originForPort(this._port) ? keyHex : ''
+    } catch {
+      return ''
+    }
+  }
+
   async localOriginForDrive (driveKeyHex) {
     const keyHex = normalizeDriveKeyHex(driveKeyHex)
     if (!this._perDriveOrigins) return originForPort(this._port)
     try {
       const entry = await this._ensureDriveOrigin(keyHex)
-      return originForPort(entry.port)
+      return originForPort(entry.port, keyHex)
     } catch (err) {
       console.warn('[origin-isolation] per-drive origin failed for', keyHex.slice(0, 12) + '…', '-', err && err.message)
       // A shared-origin fallback would expose one drive's browser storage and
@@ -809,33 +825,39 @@ class HyperProxy {
 
   async _handle (req, res, context = {}) {
     const serverPort = context.port || this._port
-    const documentOrigin = originForPort(serverPort)
-    // Validate origin - only allow strict loopback origins
-    const origin = req.headers.origin
-    if (origin && !isLoopbackOrigin(origin)) {
+    const documentOrigin = originForPort(serverPort, context.boundDriveKeyHex)
+    // A bound listener accepts only its own generated Host. It still binds
+    // to 127.0.0.1; arbitrary Host names must not expose page tokens.
+    const hostHeader = requestHeader(req.headers, 'host')
+    if (context.boundDriveKeyHex &&
+        (!hostHeader.value || hostHeader.value.toLowerCase() !== new URL(documentOrigin).host)) {
       res.statusCode = 403
       res.setHeader('Content-Type', 'text/plain')
-      return res.end('Invalid origin: only localhost is allowed')
+      return res.end('Invalid drive host')
     }
 
-    // Set CORS headers for valid origins
-    res.setHeader('Access-Control-Allow-Origin', origin || documentOrigin)
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Pear-Token')
-
-    // CORS preflight handler
-    if (req.method === 'OPTIONS') {
-      if (origin && !isLoopbackOrigin(origin)) {
-        res.statusCode = 403
-        return res.end('Invalid origin')
-      }
-      res.setHeader('Access-Control-Allow-Origin', origin || documentOrigin)
-      res.statusCode = 204
-      return res.end()
+    // Cross-drive CORS fails before HTML or the HTTP bridge can respond.
+    const originHeader = requestHeader(req.headers, 'origin')
+    const origin = originHeader.value
+    if (originHeader.present && origin !== documentOrigin) {
+      res.statusCode = 403
+      res.setHeader('Content-Type', 'text/plain')
+      return res.end('Invalid origin')
     }
 
     const url = new URL(req.url, documentOrigin)
+    if (context.boundDriveKeyHex && normalizeOrigin(url.href) !== documentOrigin) {
+      res.statusCode = 403
+      return res.end('Invalid request target')
+    }
     const path = url.pathname
+
+    // Clearnet HTML must never execute under a drive's browser origin. A
+    // publisher page served here could read that drive's cookies and storage.
+    if (context.boundDriveKeyHex && path.startsWith('/clearnet/')) {
+      res.statusCode = 403
+      return res.end('Clearnet proxy unavailable on drive origin')
+    }
 
     // The main listener has no drive binding. In per-drive mode it must not
     // serve drive documents, including direct loopback URLs entered by a user.
@@ -843,6 +865,14 @@ class HyperProxy {
         (path.startsWith('/hyper/') || path.startsWith('/app/'))) {
       res.statusCode = 403
       return res.end('Drive origin required')
+    }
+
+    res.setHeader('Access-Control-Allow-Origin', origin || documentOrigin)
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Pear-Token')
+    if (req.method === 'OPTIONS') {
+      res.statusCode = 204
+      return res.end()
     }
 
     // HTTP Bridge — direct API for WebView apps (bypasses RN relay)
@@ -874,7 +904,7 @@ class HyperProxy {
     // their upstream origin from a valid proxied-page referer before the
     // generic loopback 404 path runs.
     const clearnet = require('./clearnet-proxy.cjs')
-    const clearnetFallback = clearnet.resolveClearnetFallback(
+    const clearnetFallback = context.boundDriveKeyHex ? null : clearnet.resolveClearnetFallback(
       req.headers.referer,
       req.url,
       documentOrigin
@@ -1319,7 +1349,14 @@ class HyperProxy {
   issueApiToken (driveKeyHex, opts = {}) {
     const keyHex = normalizeDriveKeyHex(driveKeyHex)
     const origin = opts && opts.origin ? normalizeOrigin(opts.origin) : null
-    if (origin && !isLoopbackOrigin(origin)) throw new Error('Invalid token origin')
+    if (this._perDriveOrigins) {
+      const entry = this._driveOrigins.get(keyHex)
+      if (!origin || !entry || origin !== originForPort(entry.port, keyHex)) {
+        throw new Error('Invalid token origin')
+      }
+    } else if (origin && origin !== originForPort(this._port)) {
+      throw new Error('Invalid token origin')
+    }
     this._cleanupExpiredApiTokens()
     const token = crypto.randomBytes(32).toString('hex')
     this._apiTokens.set(token, { driveKeyHex: keyHex, origin, kind: 'drive', issuedAt: Date.now() })

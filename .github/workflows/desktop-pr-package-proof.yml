@@ -1,0 +1,209 @@
+name: Desktop PR native package proof
+
+"on":
+  pull_request:
+    paths:
+      - ".github/workflows/desktop-pr-package-proof.yml"
+      - "appling/assets/**"
+      - "backend/**"
+      - "build/**"
+      - "electron-builder.config.cjs"
+      - "electron/**"
+      - "index.js"
+      - "index.html"
+      - "package.json"
+      - "package-lock.json"
+      - "packaging/**"
+      - "scripts/**"
+      - "test/**"
+      - "styles.css"
+      - "ui/**"
+      - "workers/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-pr-native-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  SOURCE_REF: ${{ github.event.pull_request.head.sha }}
+  RELEASE_MODE: package-proof
+  CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+jobs:
+  package-proof:
+    name: Package and smoke ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: macOS Apple Silicon, os: macos-15, platform: darwin, arch: arm64 }
+          - { name: macOS Intel, os: macos-15-intel, platform: darwin, arch: x64 }
+          - { name: Windows x64, os: windows-2025, platform: win32, arch: x64 }
+          - { name: Linux x64, os: ubuntu-24.04, platform: linux, arch: x64 }
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.22.0
+          cache: npm
+
+      - name: Verify source and runner architecture
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_REF"
+          test "$(node -p 'process.arch')" = "${{ matrix.arch }}"
+          test "$(node -p 'process.platform')" = "${{ matrix.platform }}"
+
+      - name: Install and validate candidate source
+        run: |
+          npm ci
+          npm run check:pear-v3
+          npm run build:ui
+          git diff --exit-code -- ui/dist/main.bundle.js
+
+      - name: Install Linux virtual display
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+
+      - name: Prove Electron drive cookie isolation
+        if: runner.os != 'Linux'
+        run: npm run check:electron-cookie-isolation
+
+      - name: Prove Electron drive cookie isolation on Linux
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run check:electron-cookie-isolation
+
+      - name: Build unsigned macOS or Linux package
+        if: runner.os != 'Windows'
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.platform }}" = darwin ]; then
+            npm run package:electron:macos -- --${{ matrix.arch }}
+          else
+            npm run package:electron:linux -- --${{ matrix.arch }}
+          fi
+
+      - name: Build unsigned Windows package
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Remove-Item Env:WIN_CSC_LINK -ErrorAction SilentlyContinue
+          Remove-Item Env:WIN_CSC_KEY_PASSWORD -ErrorAction SilentlyContinue
+          & npm.cmd run package:electron:windows -- --x64
+          if ($LASTEXITCODE -ne 0) { throw "Windows package build failed: $LASTEXITCODE" }
+
+      - name: Resolve one unpacked app
+        run: |
+          set -euo pipefail
+          archive_list="$RUNNER_TEMP/pearbrowser-pr-asars.txt"
+          find dist/electron -type f -name app.asar ! -path '*/node_modules/*' | sort > "$archive_list"
+          test "$(wc -l < "$archive_list" | tr -d ' ')" = 1
+          archive="$(sed -n '1p' "$archive_list")"
+          resources="$(dirname "$archive")"
+          case "${{ matrix.platform }}" in
+            darwin) executable="${resources%/Contents/Resources}/Contents/MacOS/PearBrowser" ;;
+            win32) executable="$(dirname "$resources")/PearBrowser.exe" ;;
+            linux) executable="$(dirname "$resources")/pearbrowser" ;;
+          esac
+          test -f "$executable"
+          echo "ELECTRON_RESOURCES_DIR=$resources" >> "$GITHUB_ENV"
+          echo "ELECTRON_EXECUTABLE=$executable" >> "$GITHUB_ENV"
+
+      - name: Verify Windows installer exists
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $installers = @(Get-ChildItem -LiteralPath dist/electron -File -Filter '*.exe')
+          if ($installers.Count -ne 1) { throw "Expected one unsigned Windows installer, found $($installers.Count)" }
+
+      - name: Verify Linux AppImage exists
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          image_list="$RUNNER_TEMP/pearbrowser-pr-appimages.txt"
+          find dist/electron -maxdepth 1 -type f -name '*.AppImage' | sort > "$image_list"
+          test "$(wc -l < "$image_list" | tr -d ' ')" = 1
+
+      - name: Inspect package runtime, source, provenance, and fuses
+        run: |
+          node scripts/check-electron-package.mjs --resources-dir "$ELECTRON_RESOURCES_DIR" --executable "$ELECTRON_EXECUTABLE" --source-ref "$SOURCE_REF" --release-mode package-proof --platform "${{ matrix.platform }}" --arch "${{ matrix.arch }}" --json
+
+      - name: Verify macOS ad-hoc signature
+        if: runner.os == 'macOS'
+        run: codesign --verify --deep --strict --verbose=2 "${ELECTRON_RESOURCES_DIR%/Contents/Resources}"
+
+      - name: Secure Linux Chromium sandbox for smoke
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          chrome_sandbox="$(dirname "$ELECTRON_EXECUTABLE")/chrome-sandbox"
+          test -f "$chrome_sandbox"
+          test ! -L "$chrome_sandbox"
+          sudo chown root:root "$chrome_sandbox"
+          sudo chmod 4755 "$chrome_sandbox"
+          test "$(stat -c '%a' "$chrome_sandbox")" = 4755
+
+      - name: Launch packaged app and check Pear RPC
+        if: runner.os != 'Windows'
+        run: |
+          set -euo pipefail
+          profile="$RUNNER_TEMP/pearbrowser-pr-profile"
+          log="$RUNNER_TEMP/pearbrowser-pr-smoke.log"
+          if [ "${{ matrix.platform }}" = linux ]; then
+            command=(xvfb-run -a "$ELECTRON_EXECUTABLE")
+          else
+            command=("$ELECTRON_EXECUTABLE")
+          fi
+          cleanup() {
+            set +e
+            if [ -n "${app_pid:-}" ] && kill -0 "$app_pid" 2>/dev/null; then
+              kill "$app_pid" 2>/dev/null
+              for _ in 1 2 3 4 5; do
+                kill -0 "$app_pid" 2>/dev/null || break
+                sleep 1
+              done
+              kill -9 "$app_pid" 2>/dev/null || true
+              wait "$app_pid" 2>/dev/null || true
+            fi
+            if [ -f "$log" ]; then tail -100 "$log"; fi
+          }
+          trap cleanup EXIT
+          PEARBROWSER_QVAC_OLLAMA=0 "${command[@]}" --user-data-dir="$profile" >"$log" 2>&1 &
+          app_pid=$!
+          node scripts/runtime-rpc-smoke.mjs --port-base 9876 --port-count 5 --timeout 60000 --min-hive-relays 1 --json
+
+      - name: Launch packaged Windows app and check Pear RPC
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $stdout = Join-Path $env:RUNNER_TEMP 'pearbrowser-pr.stdout.log'
+          $stderr = Join-Path $env:RUNNER_TEMP 'pearbrowser-pr.stderr.log'
+          $profile = Join-Path $env:RUNNER_TEMP 'pearbrowser-pr-profile'
+          $env:PEARBROWSER_QVAC_OLLAMA = '0'
+          $appProcess = Start-Process -FilePath $env:ELECTRON_EXECUTABLE -ArgumentList "--user-data-dir=$profile" -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+          try {
+            & node scripts/runtime-rpc-smoke.mjs --port-base 9876 --port-count 5 --timeout 60000 --min-hive-relays 1 --json
+            if ($LASTEXITCODE -ne 0) { throw "Windows runtime smoke failed: $LASTEXITCODE" }
+          } finally {
+            & taskkill.exe /PID $appProcess.Id /T /F 2>$null | Out-Null
+            if (Test-Path $stdout) { Get-Content $stdout -Tail 100 }
+            if (Test-Path $stderr) { Get-Content $stderr -Tail 100 }
+          }

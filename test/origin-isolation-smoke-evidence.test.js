@@ -272,7 +272,7 @@ test('origin isolation automated verifier emits checker-compatible evidence from
     assert.notEqual(evidence.apps[0].origin, evidence.apps[1].origin)
     assert.equal(evidence.storage.appA.localStorage, 'automated-origin-proof')
     assert.equal(evidence.storage.appB.localStorage, null)
-    assert.match(evidence.storage.appB.cookie, /pear-origin-isolation-proof=automated-origin-proof/)
+    assert.equal(evidence.storage.appB.cookie, '')
     assert.equal(evidence.storage.capture.kind, 'fixture-simulation')
     assert.equal(evidence.realAppBridge.routes.swarmEvents, true)
     assert.equal(evidence.automatedVerifier.mode, 'local-hyperproxy-httpbridge-fixture')

@@ -28,6 +28,7 @@ function normalizeDriveKey (raw) {
 }
 const { WorkletRPC } = require('./rpc.js')
 const { HyperProxy } = require('./hyper-proxy.js')
+const { isDriveOriginHostname } = require('./drive-origin.cjs')
 const { TabRuntime } = require('./tab-runtime.js')
 const { RelayClient } = require('./relay-client.js')
 const { CatalogManager } = require('./catalog-manager.js')
@@ -227,7 +228,8 @@ rpc.handle(C.CMD_NAVIGATE, async (data = {}) => {
   // The run-in-tab wrapper is served by tab-runtime on a loopback http(s) port
   // (whitelisted in pear.json links) — load it directly, not via /hyper/<key>.
   if ((parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
-      (parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost')) {
+      (parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost' ||
+        isDriveOriginHostname(parsed.hostname))) {
     const proxyDriveKey = driveKeyFromProxyUrl(navUrl)
     const contextToken = proxyDriveKey && proxy?.pageContextToken
       ? proxy.pageContextToken(proxyDriveKey)
@@ -3066,15 +3068,7 @@ function driveKeyFromUrl (url) {
 }
 
 function driveKeyFromProxyUrl (url) {
-  if (typeof url !== 'string' || !url.trim()) return ''
-  try {
-    const parsed = new URL(url)
-    if (parsed.protocol !== 'http:' || (parsed.hostname !== '127.0.0.1' && parsed.hostname !== 'localhost')) return ''
-    const match = parsed.pathname.match(/^\/(?:hyper|app)\/([0-9a-f]{64})(?:\/|$)/i)
-    return match ? match[1].toLowerCase() : ''
-  } catch {
-    return ''
-  }
+  return proxy?.driveKeyForLocalUrl?.(url) || ''
 }
 
 function registerHiveRelayDrive (keyHex, drive) {

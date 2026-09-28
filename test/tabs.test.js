@@ -4,6 +4,7 @@
 // snapshot normalization/round-tripping.
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import driveOrigin from '../backend/drive-origin.cjs'
 import {
   MAX_TAB_HISTORY,
   normalizeTabHistory, clampHistoryIndex, pushTabHistory,
@@ -18,6 +19,7 @@ const C = 'hyper://ccc/'
 const DEALROOM = 'hyper://0724aabf2ad6394983f91c6b24ebd417cb3d25addcf29c98eb246c512dc77f90/'
 const DRIVE_A = 'a'.repeat(64)
 const DRIVE_B = 'b'.repeat(64)
+const { driveHostnameForKey } = driveOrigin
 
 test('normalizeTabHistory drops empties and collapses consecutive repeats', () => {
   assert.deepEqual(normalizeTabHistory([A, A, B, B, B, C]), [A, B, C])
@@ -135,11 +137,17 @@ test('restoreStartupTabs dedupes default tabs from saved sessions', () => {
 
 test('tab origin helpers extract drive keys from hyper and local proxy addresses', () => {
   assert.equal(driveKeyFromTabAddress(`hyper://${DRIVE_A}/posts/1`), DRIVE_A)
-  assert.equal(driveKeyFromTabAddress(`http://127.0.0.1:12345/hyper/${DRIVE_A}/index.html`), DRIVE_A)
-  assert.equal(driveKeyFromTabAddress(`http://localhost:12345/app/${DRIVE_B}/index.html`), DRIVE_B)
+  assert.equal(driveKeyFromTabAddress(`http://127.0.0.1:12345/hyper/${DRIVE_A}/index.html`), '')
+  assert.equal(driveKeyFromTabAddress(`http://localhost:12345/app/${DRIVE_B}/index.html`), '')
+  const namedA = `http://${driveHostnameForKey(DRIVE_A)}:12345/hyper/${DRIVE_A}/index.html`
+  assert.equal(driveKeyFromTabAddress(namedA), DRIVE_A)
+  assert.equal(driveKeyFromTabAddress(`http://${driveHostnameForKey(DRIVE_B)}:12345/hyper/${DRIVE_A}/index.html`), '')
+  assert.equal(makeTab(namedA).kind, 'hyper')
+  assert.equal(restoreSavedTab({ url: namedA }).kind, 'hyper')
   assert.equal(driveKeyFromTabAddress(`http://example.com/hyper/${DRIVE_A}/`), '')
 
-  assert.equal(tabDriveKey({ url: '', displayUrl: '', src: `http://127.0.0.1:1/app/${DRIVE_A}/index.html` }), DRIVE_A)
+  assert.equal(tabDriveKey({ url: '', displayUrl: '', src: `http://127.0.0.1:1/app/${DRIVE_A}/index.html` }), '')
+  assert.equal(tabDriveKey({ url: '', displayUrl: '', src: namedA }), DRIVE_A)
   assert.equal(tabListUsesDriveKey([{ url: `hyper://${DRIVE_A}/` }], DRIVE_A), true)
   assert.equal(tabListUsesDriveKey([{ url: `hyper://${DRIVE_A}/` }], DRIVE_B), false)
 })

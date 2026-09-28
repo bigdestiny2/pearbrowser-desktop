@@ -9,7 +9,10 @@
 // History is de-duplicated (no consecutive repeats) and capped at
 // MAX_TAB_HISTORY; the closed-tab stack is capped at MAX_CLOSED_TABS.
 
-import { driveKeyFromHyperRef } from './keys.js'
+import { driveKeyFromHyperRef, isClearnetUrl } from './keys.js'
+import driveOrigin from '../../backend/drive-origin.cjs'
+
+const { driveKeyFromHostname } = driveOrigin
 
 export const MAX_TAB_HISTORY = 50
 export const MAX_CLOSED_TABS = 20
@@ -162,9 +165,13 @@ export function driveKeyFromTabAddress (value) {
   if (hyperDrive) return hyperDrive
   try {
     const parsed = new URL(clean)
-    if (parsed.protocol !== 'http:' || (parsed.hostname !== '127.0.0.1' && parsed.hostname !== 'localhost')) return ''
+    if (parsed.protocol !== 'http:') return ''
     const match = parsed.pathname.match(/^\/(?:hyper|app)\/([0-9a-f]{64})(?:\/|$)/i)
-    return match ? match[1].toLowerCase() : ''
+    if (!match) return ''
+    const keyHex = match[1].toLowerCase()
+    const hostKey = driveKeyFromHostname(parsed.hostname)
+    if (hostKey) return hostKey === keyHex ? keyHex : ''
+    return ''
   } catch {
     return ''
   }
@@ -190,9 +197,7 @@ export function makeTab (initialUrl = '', opts = {}) {
   const url = cleanTabUrl(historyUrl || initialUrl)
   const kind = opts.kind === 'clearnet' || opts.kind === 'hyper' || opts.kind === 'loopback'
     ? opts.kind
-    : (url && /^https?:\/\//i.test(url) && !/^https?:\/\/(?:127\.0\.0\.1|localhost)\b/i.test(url)
-      ? 'clearnet'
-      : 'hyper')
+    : (isClearnetUrl(url) ? 'clearnet' : 'hyper')
   return {
     id: makeTabId(),
     url,

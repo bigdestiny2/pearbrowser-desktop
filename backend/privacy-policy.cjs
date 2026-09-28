@@ -1,5 +1,7 @@
 'use strict'
 
+const { isDriveOriginHostname } = require('./drive-origin.cjs')
+
 /**
  * Privacy ladder helpers (BROWSER_PARITY_PLAN.md Phase 5), transport-independent.
  *
@@ -127,7 +129,8 @@ function classifyUrl (url) {
     if (u.protocol === 'hyper:') return 'hyper'
     if (u.protocol === 'http:' || u.protocol === 'https:') {
       const host = (u.hostname || '').toLowerCase()
-      if (host === '127.0.0.1' || host === 'localhost' || host === '[::1]') return 'loopback'
+      if (host === '127.0.0.1' || host === 'localhost' || host === '[::1]' ||
+          (u.protocol === 'http:' && isDriveOriginHostname(host))) return 'loopback'
       return 'clearnet'
     }
     return 'other'
@@ -232,6 +235,10 @@ function normalizeNavigationInput (raw, privacy = DEFAULT_PRIVACY) {
   if (/^https?:\/\//i.test(s)) return s
   if (/^[0-9a-f]{64}$/i.test(s)) return `hyper://${s.toLowerCase()}/`
   if (/^[13-9a-km-uw-z]{52}$/i.test(s)) return `hyper://${s}/`
+  try {
+    const local = new URL(`http://${s}`)
+    if (isDriveOriginHostname(local.hostname) && !s.includes('@')) return local.href
+  } catch {}
   if (looksLikeClearnetHost(s)) {
     return `https://${s.replace(/^\/+/, '')}`
   }

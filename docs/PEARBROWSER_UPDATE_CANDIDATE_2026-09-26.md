@@ -16,42 +16,34 @@ Reference: [upstream Autobee](https://github.com/holepunchto/autobee), which des
 
 ## Browser-origin security correction
 
-The desktop proxy uses a separate `127.0.0.1` port per Hyperdrive. A real
+The published `v0.9.0` proxy gives drives separate `127.0.0.1` ports. A real
 Electron 43.2.0 probe in `electron-cookie-port-probe-2026-09-26.json` showed
-separate localStorage but a `Path=/` cookie shared between those ports.
-`scripts/probe-electron-cookie-ports.cjs` reproduces this with two local HTTP
-listeners and an ephemeral Electron session. The old automated smoke used
-in-memory `BrowserStorageBuckets` and reported cookie separation by origin;
-that simulation did not reflect Chromium. The generator now models host-scoped
-cookies and produces blocked evidence. The historical July artifact is
-blocked by the new gate. The checker also requires drive keys to match their `hyper://` URLs and distinct cookie hosts;
-two ports on `127.0.0.1` cannot pass. Its capture check opens a separate JSON
-file, verifies its SHA-256 digest, and compares both app URLs, origins, and
-measured localStorage/IndexedDB/cookie values to the release evidence. A
-declared file name alone cannot pass. The required capture JSON records
-`kind: pearbrowser-electron-webcontents-storage-capture`, the Electron version
-and capture time, and each app's `webContentsId`, URL, origin, and observed
-storage. The checker keeps a hard provenance blocker even when the file and
-digest match: a pair of self-authored JSON files cannot prove the runtime
-source. A trusted Electron capture and review flow must be implemented before
-any checker result can be called verified.
+that a `Path=/` cookie is shared between those ports. The older in-memory
+`BrowserStorageBuckets` smoke did not reflect Chromium's host-scoped cookies.
+The corrected evidence generator and checker now block that historical fixture.
 
-Per-drive listener allocation now fails closed, and the unbound main proxy
-listener rejects direct `/hyper/` and `/app/` drive pages while per-drive mode
-is enabled. This prevents a failed listener or a typed loopback URL from
-serving a drive on the shared origin. It does not solve Chromium cookie sharing
-between different ports on the same host.
+The `v0.9.1` draft now assigns each drive a deterministic `d-<z32-key>.localhost`
+host as well as a separate port. Bound listeners require their exact Host and
+Origin, main-listener drive routes return 403, bound drive listeners cannot serve
+Clearnet pages under a drive origin, API tokens are tied to the live
+host and port, and direct loopback URLs cannot acquire a drive's tab or wallet
+identity. A repeatable `npm run check:electron-cookie-isolation` probe uses
+normal Electron DNS and a disposable session. On macOS with Electron 43.2.0,
+it kept two drives' JavaScript, HTTP-only, and localStorage data separate;
+12 hostile Domain-cookie attempts were rejected. Proxy, bridge, navigation,
+and wallet regression tests also cover the named-host rules.
 
-Per-drive listener and bridge-token isolation remain valuable, but full
-per-app browser-storage isolation is open. Untrusted P2P apps need a reviewed
-host/scheme/session-partition design and real Electron tests before any
-release claim that cookies are isolated. The probe is diagnostic evidence of
-the current gap, not a passing isolation proof.
+This is a local browser-engine probe and source integration test, not a trusted
+capture of two real P2P apps in a distributed package. Windows and Linux
+Electron behavior, real-app CSP and tab lifecycle, packaged WebContents
+provenance, and clean-install journeys remain to be checked. The origin
+release-evidence checker deliberately keeps its provenance check blocked;
+a self-authored JSON file cannot satisfy that gate.
 
 ## Validation and remaining gates
 
-- The complete desktop suite passed 961 tests, with 6 skipped, after the
-  candidate changes. The Pear v3 host contract and installed Pear CLI 3.4.0
+- The complete desktop suite passed 965 tests, with 6 skipped and 0 failed,
+  after the named-host changes. The Pear v3 host contract and installed Pear CLI 3.4.0
   checks passed. The Autobee spike and existing collaborative-catalog focused
   tests passed 11/11. The origin-evidence focused tests passed 9/9 after
   capture binding, URL-key agreement, and the hard provenance block. The historical July
@@ -63,13 +55,15 @@ the current gap, not a passing isolation proof.
 - The desktop UI bundle built successfully, and the production npm audit found
   zero advisories. An initial source-only runtime RPC smoke had no running
   backend. The later packaged macOS smoke below launched its own backend and passed.
-- The current release evidence checker returns FAIL for the measured cookie
-  leak. This is an intentional distribution block, not a test-suite failure.
+- The current release evidence checker still returns FAIL for current P2P app
+  cookie isolation because trusted packaged-app capture is missing. The source
+  fix and local engine probe narrow the gap but do not replace that proof.
 - The main checkout's unfinished Bitcoin/WDK changes are not included here;
   its Pear worker-entry contract currently fails and requires separate
   integration review.
-- Native installer, Windows/Linux runtime, real P2P writer replication,
-  Autobee migration, and production cookie isolation have not been qualified.
+- Current-version native installers, Windows/Linux runtime, real P2P writer
+  replication, Autobee migration, and integrated production cookie isolation
+  have not been qualified.
 
 ## 2026-09-28 release audit
 
@@ -84,7 +78,8 @@ the current gap, not a passing isolation proof.
 - `npm run -s check:release-evidence` reports 54 PASS, 17 DEFER, and one FAIL:
   **Current P2P app cookie isolation**. Historical release-log decisions and
   deferrals are retained as prior evidence; they do not qualify this candidate.
-  A reviewed per-app cookie boundary and trusted Electron capture remain
+  The named-host candidate and local Electron probe address the measured
+  shared-host leak; a trusted packaged-app capture and review remain
   prerequisites for a new release decision.
 - A read-only `check:public-trust-readiness` run for `v0.9.1` and the exact PR
   head failed. The GitHub repository and protected `production` environment
@@ -115,7 +110,13 @@ the current gap, not a passing isolation proof.
   `electron/main.cjs` does not meet the host-owned Pear worker-entry contract.
   Those changes remain outside PR #84 and need their own integration review.
 
-**Decision:** HOLD for distribution. Resolve cookie isolation and validate it
-in the packaged browser, refresh operator evidence for this version, qualify
-native installers and signing, and verify public downloads before publishing
-GitHub and website release surfaces.
+- The draft adds a PR-only, read-only `package-proof` matrix for macOS
+  Apple Silicon/Intel, Windows x64, and Linux x64. It checks generated UI,
+  real Electron cookie behavior, native package integrity and provenance,
+  installer existence, and a disposable unpacked-app Pear RPC launch. Its cross-platform
+  CI result is pending; it uses no signing secrets and publishes no assets.
+
+**Decision:** HOLD for distribution. Prove the named-host boundary with
+trusted packaged WebContents capture and real-app journeys, refresh current
+operator evidence, qualify native installers and public-trust signing, then
+verify exact public downloads before publishing a new app release.

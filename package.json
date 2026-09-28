@@ -20,6 +20,7 @@
     "generate:origin-isolation-smoke-evidence": "node scripts/generate-origin-isolation-smoke-evidence.mjs",
     "check:legacy-appling": "node scripts/check-appling-release.mjs",
     "check:electron-package": "node scripts/check-electron-package.mjs",
+    "check:electron-cookie-isolation": "electron scripts/check-electron-drive-cookie-isolation.cjs",
     "check:native-signing": "node scripts/check-native-signing-credentials.mjs",
     "generate:native-signing-secret-plan": "node scripts/generate-native-signing-secret-plan.mjs",
     "check:native-release-assets": "node scripts/check-native-release-assets.mjs",

@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
+import driveOrigin from '../backend/drive-origin.cjs'
 
 const require = createRequire(import.meta.url)
 const { WalletConnections } = require('../backend/wallet/wallet-connections.cjs')
@@ -10,6 +11,7 @@ const DRIVE_B = 'bb'.repeat(32)
 const MANIFEST_A = 'cc'.repeat(32)
 const MANIFEST_B = 'dd'.repeat(32)
 const ORIGIN = 'http://127.0.0.1:9341'
+const { driveHostnameForKey } = driveOrigin
 
 function tuple (overrides = {}) {
   return {
@@ -72,6 +74,15 @@ test('connect validates the binding against the frozen manifest', () => {
   assert.equal(codeOf(() => connections.connect(tuple({ driveKey: 'zz' }))), 'bad-request')
   assert.equal(codeOf(() => connections.connect(tuple({ browserSessionId: 'x' }))), 'bad-request')
   assert.equal(codeOf(() => connections.connect(null)), 'bad-request')
+})
+
+test('wallet connections accept only the matching named drive host', () => {
+  const connections = new WalletConnections()
+  const own = 'http://' + driveHostnameForKey(DRIVE_A) + ':9341'
+  const sibling = 'http://' + driveHostnameForKey(DRIVE_B) + ':9341'
+  assert.equal(connections.connect(tuple({ walletTabOrigin: own })).walletTabOrigin, own)
+  assert.equal(codeOf(() => connections.connect(tuple({ walletTabOrigin: sibling }))), 'bad-request')
+  assert.equal(codeOf(() => connections.connect(tuple({ walletTabOrigin: own + '/path' }))), 'bad-request')
 })
 
 test('assertConnected throws not-connected and returns the record when present', () => {
