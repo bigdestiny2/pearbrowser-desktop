@@ -1,6 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import {
   analyzeReleaseEvidence,
@@ -12,6 +16,7 @@ import {
 } from '../scripts/generate-release-evidence-handoff.mjs'
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
+const releaseCheckerPath = fileURLToPath(new URL('../scripts/check-release-evidence.mjs', import.meta.url))
 
 const completeLog = `
 # Release Smoke Evidence Log
@@ -37,6 +42,11 @@ const completeLog = `
 | Are all required desktop automated gates PASS? | yes |
 | Final decision (GO, NO-GO, or GO desktop only) | GO desktop only |
 `
+
+const cookiePassLog = completeLog.replace(
+  '| npm test | green | PASS | log: test-output.txt |',
+  '| Current P2P app cookie isolation | real packaged Electron app proof | PASS | browser capture evidence |'
+)
 
 const incompleteLog = `
 # Release Smoke Evidence Log
@@ -114,6 +124,42 @@ test('complete release evidence accepts PASS and documented DEFER rows', () => {
   assert.equal(result.counts.deferred, 1)
   assert.equal(result.counts.incomplete, 0)
   assert.equal(result.counts.failures, 0)
+})
+
+test('cookie isolation PASS requires the trusted origin checker; DEFER and missing rows stay blocked', () => {
+  const blockedReport = { ok: false, failures: [{ id: 'trusted-electron-capture' }] }
+  const blocked = analyzeReleaseEvidence(cookiePassLog, { requireCookieIsolation: true, originIsolationReport: blockedReport })
+  assert.equal(blocked.ok, false)
+  assert.ok(blocked.failures.some((item) => item.item === 'Current P2P app cookie isolation' && item.reason.includes('trusted-electron-capture')))
+
+  const deferred = analyzeReleaseEvidence(cookiePassLog.replace(' | PASS | browser capture evidence |', ' | DEFER | browser capture evidence |'), {
+    requireCookieIsolation: true,
+    originIsolationReport: { ok: true }
+  })
+  assert.equal(deferred.ok, false)
+  assert.ok(deferred.failures.some((item) => item.reason.includes('cannot be deferred')))
+
+  const missing = analyzeReleaseEvidence(completeLog, { requireCookieIsolation: true, originIsolationReport: { ok: true } })
+  assert.equal(missing.ok, false)
+  assert.ok(missing.failures.some((item) => item.reason.includes('exactly one cookie-isolation gate row')))
+})
+
+test('release evidence CLI invokes the origin checker even when the cookie row says PASS', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'pear-release-evidence-cookie-'))
+  try {
+    const logFile = join(fixture, 'release.md')
+    const evidenceFile = join(fixture, 'origin.json')
+    writeFileSync(logFile, cookiePassLog)
+    writeFileSync(evidenceFile, JSON.stringify({ kind: 'pearbrowser-origin-isolation-smoke-evidence' }))
+    const run = spawnSync(process.execPath, [releaseCheckerPath, '--file', logFile, '--origin-isolation-evidence', evidenceFile, '--json'], { encoding: 'utf8' })
+    assert.equal(run.status, 1, run.stderr || run.stdout)
+    const report = JSON.parse(run.stdout)
+    assert.equal(report.originIsolation.status, 'blocked')
+    assert.ok(report.originIsolation.failures.some((item) => item.id === 'trusted-electron-capture'))
+    assert.ok(report.failures.some((item) => item.item === 'Current P2P app cookie isolation'))
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
 })
 
 test('blank results, missing evidence, and NO-GO decision block release evidence', () => {
@@ -214,7 +260,6 @@ test('release evidence handoff collapses duplicate final-decision blockers', () 
 test('release evidence handoff is exposed as an npm script', () => {
   assert.equal(pkg.scripts['generate:release-evidence-handoff'], 'node scripts/generate-release-evidence-handoff.mjs')
 })
-
 
 test('current release log blocks the known cross-app cookie leak', () => {
   const markdown = readFileSync(new URL('../docs/RELEASE_SMOKE_EVIDENCE_LOG_2026-06-23.md', import.meta.url), 'utf8')

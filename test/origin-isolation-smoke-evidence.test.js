@@ -83,7 +83,10 @@ function captureFor (evidence) {
     runtime: { name: 'Electron', version: '43.2.0' },
     capturedAt: '2026-09-26T00:00:00Z',
     apps: evidence.apps.map((app, index) => ({
-      webContentsId: index + 1,
+      // Hyper tabs are child iframes in the same Electron BrowserWindow.
+      webContentsId: 1,
+      frameId: `app-frame-${index + 1}`,
+      frameUrl: `${app.origin}/hyper/${app.url.match(/^hyper:\/\/([0-9a-f]{64})/)[1]}/`,
       url: app.url,
       origin: app.origin,
       storage: { ...evidence.storage[index === 0 ? 'appA' : 'appB'] }
@@ -113,6 +116,30 @@ test('keyed app origins match the declared drives but still need trusted capture
     assert.ok(result.checks.some((check) => check.id === id && check.ok), id)
   }
   assert.ok(result.failures.some((failure) => failure.id === 'trusted-electron-capture'))
+})
+
+test('capture requires two distinct browser frames even when one WebContents hosts both apps', () => {
+  const evidence = validEvidence()
+  const browserCapture = captureFor(evidence)
+  const analyzeCurrentCapture = () => {
+    const browserCaptureHash = createHash('sha256').update(JSON.stringify(browserCapture)).digest('hex')
+    evidence.storage.capture.sha256 = browserCaptureHash
+    return analyzeOriginIsolationSmokeEvidence(evidence, { browserCapture, browserCaptureHash })
+  }
+  const sharedWindow = analyzeCurrentCapture()
+  assert.ok(sharedWindow.checks.some((check) => check.id === 'browser-storage-capture-app-a' && check.ok))
+  assert.ok(sharedWindow.checks.some((check) => check.id === 'browser-storage-capture-app-b' && check.ok))
+  assert.ok(sharedWindow.checks.some((check) => check.id === 'browser-storage-capture-distinct-frames' && check.ok))
+  assert.ok(sharedWindow.failures.some((failure) => failure.id === 'trusted-electron-capture'))
+
+  browserCapture.apps[1].frameId = browserCapture.apps[0].frameId
+  const duplicateFrame = analyzeCurrentCapture()
+  assert.ok(duplicateFrame.failures.some((failure) => failure.id === 'browser-storage-capture-distinct-frames'))
+
+  browserCapture.apps[1].frameId = 'app-frame-2'
+  browserCapture.apps[1].frameUrl = browserCapture.apps[0].frameUrl
+  const wrongFrameUrl = analyzeCurrentCapture()
+  assert.ok(wrongFrameUrl.failures.some((failure) => failure.id === 'browser-storage-capture-app-b'))
 })
 
 test('an origin keyed to another drive is refused even with distinct cookie hosts', () => {

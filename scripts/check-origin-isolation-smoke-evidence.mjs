@@ -54,14 +54,15 @@ export function analyzeOriginIsolationSmokeEvidence (evidence, { browserCapture 
   add('browser-storage-capture-runtime', browserCapture?.runtime?.name === 'Electron' && /^\d+\./.test(String(browserCapture?.runtime?.version || '')) && !!browserCapture?.capturedAt, 'capture must record the Electron runtime version and capture time')
   // The JSON and digest are operator supplied. Neither proves that Electron produced them.
   // Keep release acceptance blocked until a trusted runtime capture/review flow exists.
-  add('trusted-electron-capture', false, 'capture provenance cannot be verified by this checker; a trusted Electron runtime capture and review flow is required')
+  add('trusted-electron-capture', false, 'capture provenance cannot be verified by this checker; capture from the exact signed public-trust package and independent reviewer attestation are required')
   const proofKey = String(storage.proofKey || evidence?.proofKey || '').trim()
   const writtenValue = String(storage.writtenValue || '').trim()
   const storageA = storage.appA || appA.storage || {}
   const storageB = storage.appB || appB.storage || {}
   const capturedApps = Array.isArray(browserCapture?.apps) ? browserCapture.apps : []
-  add('browser-storage-capture-app-a', captureMatchesApp(capturedApps[0], appA, originA, storageA), 'capture app A URL, origin, and measured storage must match the evidence')
-  add('browser-storage-capture-app-b', captureMatchesApp(capturedApps[1], appB, originB, storageB), 'capture app B URL, origin, and measured storage must match the evidence')
+  add('browser-storage-capture-app-a', captureMatchesApp(capturedApps[0], appA, originA, storageA), 'capture app A frame URL, origin, and measured storage must match the evidence')
+  add('browser-storage-capture-app-b', captureMatchesApp(capturedApps[1], appB, originB, storageB), 'capture app B frame URL, origin, and measured storage must match the evidence')
+  add('browser-storage-capture-distinct-frames', capturedApps.length === 2 && validFrameId(capturedApps[0]?.frameId) && validFrameId(capturedApps[1]?.frameId) && capturedApps[0].frameId !== capturedApps[1].frameId, 'the two app pages must be captured from distinct iframe IDs; both may share one Electron WebContents')
 
   add('proof-key', proofKey === PROOF_KEY, `storage.proofKey must be ${PROOF_KEY}`)
   add('written-value', writtenValue.length > 0, 'storage.writtenValue must be present')
@@ -156,9 +157,27 @@ function cookieContains (cookie, key, value) {
   return haystack.split(/;\s*/).some((part) => part === `${key}=${value}`)
 }
 
+function validFrameId (value) {
+  return typeof value === 'string' && value.trim().length > 0
+}
+
+function frameUrlMatchesApp (frameUrl, app, origin) {
+  const key = driveKeyFromHyperUrl(app?.url)
+  if (!key || !origin) return false
+  try {
+    const parsed = new URL(String(frameUrl || ''))
+    return parsed.origin === origin &&
+      !parsed.username && !parsed.password &&
+      new RegExp(`^/(?:hyper|app)/${key}(?:/|$)`, 'i').test(parsed.pathname)
+  } catch {
+    return false
+  }
+}
+
 function captureMatchesApp (captured, app, origin, storage) {
   if (!captured || !app || !origin || !storage) return false
   if (!Number.isInteger(captured.webContentsId) || captured.webContentsId < 1) return false
+  if (!validFrameId(captured.frameId) || !frameUrlMatchesApp(captured.frameUrl, app, origin)) return false
   if (captured.url !== app.url || normalizeLoopbackOrigin(captured.origin) !== origin) return false
   if (!captured.storage || !Object.hasOwn(captured.storage, 'localStorage') || !Object.hasOwn(captured.storage, 'indexedDB') || !Object.hasOwn(captured.storage, 'cookie')) return false
   return ['localStorage', 'indexedDB', 'cookie'].every((key) => captured.storage[key] === storage[key])
@@ -227,10 +246,14 @@ function loadBrowserCapture (evidence, evidenceFile) {
   }
 }
 
+export function checkOriginIsolationEvidenceFile (file) {
+  const evidence = loadJsonFile(file)
+  return analyzeOriginIsolationSmokeEvidence(evidence, loadBrowserCapture(evidence, file))
+}
+
 async function main () {
   const args = parseArgs(process.argv.slice(2))
-  const evidence = loadJsonFile(args.file)
-  const result = analyzeOriginIsolationSmokeEvidence(evidence, loadBrowserCapture(evidence, args.file))
+  const result = checkOriginIsolationEvidenceFile(args.file)
   if (args.json) console.log(JSON.stringify(result, null, 2))
   else printReport(result, args.file)
   if (!result.ok) process.exit(1)
