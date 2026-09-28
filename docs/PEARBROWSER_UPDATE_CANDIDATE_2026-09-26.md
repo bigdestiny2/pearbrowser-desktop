@@ -1,6 +1,6 @@
 # PearBrowser desktop update candidate — Pear 3.4, Autobee, and origin security
 
-Date: 2026-09-26. Release audit refreshed: 2026-09-28. State: pushed draft PR; no deployment or native distribution qualification.
+Date: 2026-09-26. Release audit refreshed: 2026-09-28. State: pushed draft PR; local macOS package proof passed, but no public distribution qualification.
 
 This branch starts from the already committed Pear 3.4 adoption candidate (`aa2ef51`). The stable Pear CLI 3.4.0 contract and embedded `pear-runtime@1.3.1` are pinned and checked by `check:pear-v3`; the browser still owns its Electron host and Pear worker boundary. The main desktop checkout has separate uncommitted Bitcoin/WDK work and is unchanged by this branch.
 
@@ -61,8 +61,8 @@ the current gap, not a passing isolation proof.
   but changing persistent P2P formats requires cold-reopen, fresh-peer,
   multiwriter, Bare worker, and packaged-app qualification as one cohort.
 - The desktop UI bundle built successfully, and the production npm audit found
-  zero advisories. The runtime RPC smoke requires a running local backend and
-  could not connect at `ws://127.0.0.1:9880/status-smoke` in this isolated test.
+  zero advisories. An initial source-only runtime RPC smoke had no running
+  backend. The later packaged macOS smoke below launched its own backend and passed.
 - The current release evidence checker returns FAIL for the measured cookie
   leak. This is an intentional distribution block, not a test-suite failure.
 - The main checkout's unfinished Bitcoin/WDK changes are not included here;
@@ -94,11 +94,22 @@ the current gap, not a passing isolation proof.
   The latter artifacts have not been created; their absence is not a failed
   download of a published candidate.
 - [GitHub's latest published desktop release](https://github.com/bigdestiny2/pearbrowser-desktop/releases/tag/v0.9.0)
-  was `v0.9.0` at audit time. The live [website](https://www.pearbrowser.com/) and
-  [downloads metadata](https://www.pearbrowser.com/downloads.json) still
-  advertise `v0.8.0`. The website must be reconciled with verified release
-  assets before it can announce a new version; neither surface has this PR
-  live.
+  remains `v0.9.0`. [Website PR #7](https://github.com/bigdestiny2/pearbrowser-com/pull/7)
+  merged on 2026-09-28. Fresh HTTPS reads of the [website](https://www.pearbrowser.com/)
+  and [downloads metadata](https://www.pearbrowser.com/downloads.json) now
+  show its four exact `v0.9.0` assets and SHA-256 values, with this `v0.9.1`
+  PR labeled as an unmerged draft. The advertised Hyperdrive website remains
+  an older edition. No `v0.9.1` app release is live.
+- From PR head `4b2f43cc0c61098484427e70a5c6b6dd23829c0a`, a local
+  arm64 macOS `package-proof` Electron 43.2.0 app built successfully.
+  `check:electron-package` verified the embedded Pear 3.4.0 runtime,
+  integrity-signed physical runtime tree (8,394 files), 128 byte-identical
+  reviewed source files, fuses, and exact source provenance. A disposable
+  profile launch passed `runtime-rpc-smoke`: DHT connected, two peers and
+  two HiveRelays, status RPC on port 9876, backend proxy active. This is
+  one local macOS package smoke; Windows/Linux packages, clean install,
+  human browse journeys, cookie isolation, and public-trust signing remain
+  unqualified.
 - The separate `release/v0.9.1` checkout still contains uncommitted
   Bitcoin/WDK work. Its current `check:pear-v3` fails because
   `electron/main.cjs` does not meet the host-owned Pear worker-entry contract.
