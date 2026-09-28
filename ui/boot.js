@@ -244,8 +244,8 @@ export class WsPipe {
   _connect () {
     if (this._destroyed || this._connecting || this._connected) return
     this._connecting = true
-    console.log('[ws] connecting to', this._url)
-    const socket = new WebSocket(this._url)
+    console.log('[ws] connecting to local backend')
+    const socket = new globalThis.WebSocket(this._url)
     this._ws = socket
     this._failedSocket = null
     socket.binaryType = 'arraybuffer'
@@ -358,7 +358,7 @@ function parseRpcFrames (state, data) {
 function probeBackend (url, timeoutMs) {
   return new Promise((resolve, reject) => {
     const probeUrl = diagnosticUrlFor(url)
-    const ws = new WebSocket(probeUrl)
+    const ws = new globalThis.WebSocket(probeUrl)
     ws.binaryType = 'arraybuffer'
     const state = { buffer: '' }
     let settled = false
@@ -391,8 +391,15 @@ function probeBackend (url, timeoutMs) {
   })
 }
 
-function tryConnect (url, timeoutMs) {
-  return probeBackend(url, timeoutMs).then(() => new Promise((resolve, reject) => {
+async function tryConnect (url, timeoutMs) {
+  // The readiness probe and the authenticated renderer socket share one port
+  // budget. A slow first WebSocket handshake must not get a fresh, unbounded
+  // budget for the second handshake.
+  const deadline = performance.now() + timeoutMs
+  await probeBackend(url, timeoutMs)
+  const remainingMs = deadline - performance.now()
+  if (remainingMs <= 0) throw new Error('renderer handshake timeout')
+  return await new Promise((resolve, reject) => {
     const pipe = new WsPipe(url)
     let settled = false
     const finish = (err = null) => {
@@ -407,28 +414,31 @@ function tryConnect (url, timeoutMs) {
         resolve(pipe)
       }
     }
-    const t = setTimeout(() => finish(new Error('timeout')), timeoutMs)
+    const t = setTimeout(() => finish(new Error('renderer handshake timeout')), remainingMs)
     pipe.on('open', () => finish())
-    pipe.on('error', () => finish(new Error('ws error')))
-    pipe.on('close', () => finish(new Error('ws closed')))
-  }))
+    pipe.on('error', () => finish(new Error('renderer ws error')))
+    pipe.on('close', () => finish(new Error('renderer ws closed')))
+  })
 }
 
-export async function startBackend () {
+export async function startBackend ({ startupTimeoutMs = 60_000, portTimeoutMs = 10_000, retryDelayMs = 500 } = {}) {
+  for (const [name, value] of Object.entries({ startupTimeoutMs, portTimeoutMs, retryDelayMs })) {
+    if (!Number.isInteger(value) || value <= 0) throw new TypeError(`${name} must be a positive integer`)
+  }
   let pipe = null
   let connectedPort = null
   let errors = []
-  // The window can finish loading before the Bare main process binds its WS
-  // server (the embedded host spawns the worker in parallel with window
-  // creation). A single scan pass therefore races boot and reports a dead
-  // backend that is merely still starting. Keep rescanning until the
-  // deadline; each pass costs at most portCount × 1.5s.
-  const deadline = Date.now() + 25_000
-  do {
+  // On a cold macOS launch Chromium can take several seconds to initialize
+  // its network context even after the Bare backend accepts native diagnostics.
+  // Keep retrying, but never spend more than the overall startup budget.
+  const deadline = performance.now() + startupTimeoutMs
+  while (performance.now() < deadline) {
     errors = []
     for (let p = RPC_PORT_BASE; p < RPC_PORT_BASE + RPC_PORT_COUNT; p++) {
+      const remainingMs = deadline - performance.now()
+      if (remainingMs <= 0) break
       try {
-        pipe = await tryConnect(rendererUrlFor(p), 1500)
+        pipe = await tryConnect(rendererUrlFor(p), Math.min(portTimeoutMs, remainingMs))
         connectedPort = p
         console.log('[rpc] connected on :' + p)
         break
@@ -437,26 +447,15 @@ export async function startBackend () {
       }
     }
     if (pipe) break
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-  } while (Date.now() < deadline)
+    const remainingMs = deadline - performance.now()
+    if (remainingMs > 0) await new Promise((resolve) => setTimeout(resolve, Math.min(retryDelayMs, remainingMs)))
+  }
   if (!pipe) {
-    // None of the ports accepted. The Bare main process is either not
-    // running or crashed before binding the WS server. Since v0.4.4
-    // the main process catches synchronous boot failures and still
-    // binds the WS — emitting a `backend-boot-failed` event — so a
-    // pure port-scan failure means the native host itself did not start, not
-    // that the backend reported a structured boot failure.
-    //
-    // ...or the process is alive but no longer serving: a Bare worker whose
-    // stdout pipe has filled blocks in fflush with the WS port still bound, so
-    // connects are accepted by the kernel and then never answered. Both look
-    // identical from here, so name both rather than sending every user to a
-    // reinstall. Do not revive a remote app reference.
     throw new Error(
-      `Could not reach backend on any port ${RPC_PORT_BASE}-${RPC_PORT_BASE + RPC_PORT_COUNT - 1} ` +
-      `(${errors.join('; ')}). The Bare main process is not running, or is running ` +
-      `but unresponsive. Relaunch the app first; if that does not help, reinstall ` +
-      `the verified signed native package.`
+      `Could not establish the local backend connection on ports ${RPC_PORT_BASE}-${RPC_PORT_BASE + RPC_PORT_COUNT - 1} ` +
+      `within ${startupTimeoutMs} ms (last scan: ${errors.join('; ') || 'no response'}). ` +
+      'The backend or the renderer network connection may still be starting. ' +
+      'Fully quit and reopen PearBrowser; if this recurs, include this message in a bug report.'
     )
   }
   const rpc = new RpcClient(pipe)

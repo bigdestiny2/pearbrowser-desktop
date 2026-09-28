@@ -171,10 +171,12 @@ async function diagnoseFailedWindow (cdp) {
     const result = await cdp.send('Runtime.evaluate', {
       expression: `(() => {
         const detail = document.querySelector('.splash-detail')?.textContent || ''
-        const failures = [...detail.matchAll(/:(9876|9877|9878|9879|9880) (probe timeout|probe error|probe closed|timeout|ws error|ws closed)/g)]
+        const failures = [...detail.matchAll(/:(9876|9877|9878|9879|9880) (probe timeout|probe error|probe closed|renderer handshake timeout|renderer ws error|renderer ws closed|timeout|ws error|ws closed)/g)]
           .map((match) => ({ port: Number(match[1]), reason: match[2] }))
         return {
-          kind: detail.includes('Could not reach backend on any port') ? 'backend-unreachable' : 'other',
+          kind: detail.includes('Could not reach backend on any port') || detail.includes('Could not establish the local backend connection')
+            ? 'backend-unreachable'
+            : 'other',
           failures,
           sessionTokenPresent: /^[0-9a-f]{64}$/i.test(String(globalThis.pearbrowserRuntime?.sessionToken || ''))
         }
