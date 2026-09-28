@@ -1,6 +1,6 @@
 # PearBrowser desktop update candidate — Pear 3.4, Autobee, and origin security
 
-Date: 2026-09-26. State: isolated local candidate; no deployment or native distribution qualification.
+Date: 2026-09-26. Release audit refreshed: 2026-09-28. State: pushed draft PR; no deployment or native distribution qualification.
 
 This branch starts from the already committed Pear 3.4 adoption candidate (`aa2ef51`). The stable Pear CLI 3.4.0 contract and embedded `pear-runtime@1.3.1` are pinned and checked by `check:pear-v3`; the browser still owns its Electron host and Pear worker boundary. The main desktop checkout has separate uncommitted Bitcoin/WDK work and is unchanged by this branch.
 
@@ -70,3 +70,41 @@ the current gap, not a passing isolation proof.
   integration review.
 - Native installer, Windows/Linux runtime, real P2P writer replication,
   Autobee migration, and production cookie isolation have not been qualified.
+
+## 2026-09-28 release audit
+
+- [Desktop PR #84](https://github.com/bigdestiny2/pearbrowser-desktop/pull/84)
+  is open and draft. The audited source commit
+  `cb602520521fd9a2bed9a2dfb20af472f28eed1e` passed its
+  [Desktop CI run](https://github.com/bigdestiny2/pearbrowser-desktop/actions/runs/36264816718/job/108467360852)
+  passed on Ubuntu. That job runs `npm ci`, the test suite, a generated UI
+  bundle check, and a high-severity dependency audit. It does not build or
+  exercise native macOS, Windows, or Linux installers. No candidate
+  cross-platform packaged-app smoke has been recorded.
+- `npm run -s check:release-evidence` reports 54 PASS, 17 DEFER, and one FAIL:
+  **Current P2P app cookie isolation**. Historical release-log decisions and
+  deferrals are retained as prior evidence; they do not qualify this candidate.
+  A reviewed per-app cookie boundary and trusted Electron capture remain
+  prerequisites for a new release decision.
+- A read-only `check:public-trust-readiness` run for `v0.9.1` and the exact PR
+  head failed. The GitHub repository and protected `production` environment
+  exposed no native signing secret names. The missing gates are macOS
+  Developer ID and notarization credentials, a Windows PFX certificate, and
+  the `v0.9.1` release assets, provenance, downloads, and clean-install proof.
+  The latter artifacts have not been created; their absence is not a failed
+  download of a published candidate.
+- [GitHub's latest published desktop release](https://github.com/bigdestiny2/pearbrowser-desktop/releases/tag/v0.9.0)
+  was `v0.9.0` at audit time. The live [website](https://www.pearbrowser.com/) and
+  [downloads metadata](https://www.pearbrowser.com/downloads.json) still
+  advertise `v0.8.0`. The website must be reconciled with verified release
+  assets before it can announce a new version; neither surface has this PR
+  live.
+- The separate `release/v0.9.1` checkout still contains uncommitted
+  Bitcoin/WDK work. Its current `check:pear-v3` fails because
+  `electron/main.cjs` does not meet the host-owned Pear worker-entry contract.
+  Those changes remain outside PR #84 and need their own integration review.
+
+**Decision:** HOLD for distribution. Resolve cookie isolation and validate it
+in the packaged browser, refresh operator evidence for this version, qualify
+native installers and signing, and verify public downloads before publishing
+GitHub and website release surfaces.

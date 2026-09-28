@@ -2,6 +2,8 @@
 
 **2026-09-26 correction:** The July origin-isolation storage PASS was based on an in-memory simulation. A real Electron 43.2.0 probe found cookies shared across loopback ports; the current evidence checker now blocks that artifact. See [the origin-isolation correction](ORIGIN_ISOLATION_MIGRATION_2026-07-02.md#2026-09-26-correction-cookie-isolation-remains-open).
 
+**2026-09-28 current candidate audit:** Draft desktop PR [#84](https://github.com/bigdestiny2/pearbrowser-desktop/pull/84) passed its Ubuntu test CI, but `check:release-evidence` reports 54 PASS / 17 DEFER / 1 FAIL because current P2P app cookies are shared across same-host loopback ports. Public-trust signing secret names and `v0.9.1` release assets are absent, and packaged cross-platform smoke is pending. At audit time, the live website advertised `v0.8.0` while GitHub's latest desktop release was `v0.9.0`. The historical rows and announcement decision below document their original scope; they are not a `v0.9.1` GO decision. See [the current desktop candidate report](PEARBROWSER_UPDATE_CANDIDATE_2026-09-26.md#2026-09-28-release-audit).
+
 Purpose: operator-filled proof log for the final PearBrowser community release
 smoke. This file pairs with `docs/MANUAL_RELEASE_SMOKE_2026-06-23.md`.
 
