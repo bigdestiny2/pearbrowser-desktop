@@ -2,6 +2,8 @@
 
 > Historical v2 smoke checklist. Do not execute its legacy app references;
 > current release proof uses verified native packages and the v3 release gates.
+> For the v0.9.1 draft, see the named-host gate below and
+> [PR #84 checks](https://github.com/bigdestiny2/pearbrowser-desktop/pull/84/checks).
 
 Purpose: final human-run smoke checklist for the PearBrowser community release.
 Automated tests and fresh-peer verifiers prove most protocol and catalogue
@@ -115,16 +117,18 @@ announcement.
     HiveRelay-unseeds a temporary test site. This does not launch Peercord,
     approve a third-party trust prompt, or replace any row whose evidence owner
     still requires a human screenshot/window check.
-  - **Origin isolation release gate is BLOCKED for this candidate.** The current
-    per-drive `127.0.0.1:<port>` origins have distinct origins for Web Storage,
-    but cookies are scoped to the host rather than the port. A release claim
-    requires a reviewed, scalable per-drive cookie-host design and a trusted
-    Electron runtime capture/review integration for one browser profile. The
-    current checker blocks even structurally complete hand-authored capture JSON.
+  - **Origin isolation release gate is BLOCKED for the v0.9.1 draft.** The
+    historical `127.0.0.1:<port>` design split Web Storage origins but shared
+    cookies by host. [PR #84](https://github.com/bigdestiny2/pearbrowser-desktop/pull/84)
+    now generates exact `d-<z32-key>.localhost:<drive-port>` app hosts. Local
+    macOS Electron cookie and synthetic-drive HyperProxy integration probes
+    passed. A trusted packaged real-app WebContents capture and independent
+    review for one browser profile still block release; the current checker
+    blocks even structurally complete hand-authored capture JSON.
   - Generate the operator plan with two real app drives:
     `npm run -s generate:origin-isolation-smoke-plan -- --app-a hyper://<app-a-drive>/ --app-b hyper://<app-b-drive>/ --json --out origin-isolation-smoke-plan.json`.
     `ok: true` means the plan was generated; its `releaseGate.status` remains
-    `BLOCKED` until the host design and browser capture are complete.
+    `BLOCKED` until trusted packaged real-app capture and review are complete.
   - Run the local proxy/bridge fixture only as a diagnostic:
     `npm run -s generate:origin-isolation-smoke-evidence -- --plan origin-isolation-smoke-plan.json --out origin-isolation-smoke-evidence.json --json`.
     It uses simulated storage buckets and does not read Chromium cookies,

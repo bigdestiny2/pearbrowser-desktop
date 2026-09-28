@@ -1,6 +1,11 @@
 # PearBrowser Per-App Origin Isolation Migration - 2026-07-02
 
-## Decision
+> Historical July 2026 port-only design record. The current v0.9.1 desktop
+> draft in [PR #84](https://github.com/bigdestiny2/pearbrowser-desktop/pull/84)
+> maps each drive to `http://d-<z32-key>.localhost:<drive-port>/`. Read the
+> 2026-09-28 update below before using this document for release decisions.
+
+## Historical 2026-07-02 decision
 
 Use **per-drive ephemeral loopback ports** as the first browser-level app-origin
 isolation migration.
@@ -38,7 +43,7 @@ semantics while preserving existing CSP, `<base>`, one-time SSE ticketing, and
 - Prefer boring web isolation over invented trust machinery: port separation is
   a native browser boundary.
 
-## Current State
+## July 2026 state (historical)
 
 Desktop now serves each static Hyperdrive or installed app through its own
 loopback origin by default:
@@ -59,7 +64,7 @@ The browser-origin boundary is now enforced in addition to backend tokens:
   localStorage, IndexedDB, DOM access, and injected tokens. Cookies remain
   shared by host across those ports; see the 2026-09-26 correction below.
 
-## Rejected Alternatives
+## Alternatives assessed in July 2026 (historical)
 
 | Option | Decision | Reason |
 |---|---|---|
@@ -183,7 +188,7 @@ route proof. The local fixture generator cannot certify browser storage.
 | Gate | Proof |
 |---|---|
 | Origin split | two drive keys produce different `localUrl` ports and different `base href` origins |
-| Storage split | Electron WebContents smoke must prove localStorage/IndexedDB separation and cookie isolation separately; the current per-port design fails the cookie requirement |
+| Storage split | Electron WebContents smoke must prove localStorage/IndexedDB separation and cookie isolation separately; the historical per-port design fails the cookie requirement |
 | Token origin binding | token minted for drive A origin fails from drive B origin |
 | Bridge compatibility | `/api/sync/*`, `/api/identity`, `/api/swarm/ticket`, and `/api/swarm/events?ticket=` still pass |
 | CSP compatibility | strict `<meta http-equiv="Content-Security-Policy">` apps still load injected shims by hash |
@@ -269,9 +274,9 @@ injected tokens.
 - Do not reintroduce bearer query tokens. EventSource stays ticket-only.
 - Do not require app authors to hardcode ports. Apps keep using relative URLs and
   the injected `<base>`.
-- Keep `localhost` accepted as a compatibility origin in the bridge, but desktop
-  generated URLs should continue using `127.0.0.1` unless a platform test proves
-  a reason to change.
+- Historical July guidance kept `localhost` as a compatibility origin and
+  generated `127.0.0.1` URLs. The September draft instead generates exact
+  drive-keyed `.localhost` hosts; see the update below.
 - Preserve the single-port path only as the explicit
   `PEARBROWSER_PER_DRIVE_ORIGINS=0` emergency rollback.
 
@@ -304,3 +309,33 @@ remain useful for same-origin scripts and localStorage/IndexedDB, but full
 per-app browser-storage isolation is **not qualified**. A separate host, scheme,
 or session-partition design requires implementation and real browser testing
 before making that claim or distributing untrusted P2P pages as isolated apps.
+
+## 2026-09-28 update: exact drive host in the v0.9.1 draft
+
+[Desktop PR #84](https://github.com/bigdestiny2/pearbrowser-desktop/pull/84)
+replaces the July port-only app URL with an exact, drive-keyed host and a
+drive-scoped listener port:
+
+```text
+http://d-<z32-key>.localhost:<drive-port>/hyper/<driveKey>/...
+http://d-<z32-key>.localhost:<drive-port>/app/<driveKey>/...
+```
+
+The full drive key is encoded in z32; the proxy and bridge check the exact
+Host and Origin against the listener and drive identity. The shared main
+loopback host cannot serve a drive document, and a drive host cannot be used
+for the main Clearnet route. Ports still separate listeners; the host split
+also gives each drive a distinct browser cookie scope.
+
+Local macOS Electron 43.2.0 checks passed the hostile Domain-cookie probe and
+`npm run check:electron-hyper-proxy-integration`. The latter uses the actual
+HyperProxy and HttpBridge with synthetic drives and Node transport substitutes
+in two BrowserWindows sharing one disposable session. Cookies, localStorage,
+IndexedDB, token binding, and wrong-host/cross-drive rejection passed there.
+These are diagnostic checks. A trusted capture and review of real P2P apps in
+the exact packaged candidate, plus the remaining release journeys, are still
+required. `npm run check:release-evidence` therefore remains **54 PASS / 17
+DEFER / 1 FAIL** on current P2P app cookie isolation. Distribution stays
+**HOLD**. See the [current candidate report](PEARBROWSER_UPDATE_CANDIDATE_2026-09-26.md)
+and [PR checks](https://github.com/bigdestiny2/pearbrowser-desktop/pull/84/checks)
+for source-specific CI evidence.

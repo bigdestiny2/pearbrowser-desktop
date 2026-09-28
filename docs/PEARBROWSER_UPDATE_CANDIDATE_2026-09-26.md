@@ -113,8 +113,10 @@ a self-authored JSON file cannot satisfy that gate.
 - The draft adds a PR-only, read-only `package-proof` matrix for macOS
   Apple Silicon/Intel, Windows x64, and Linux x64. It checks generated UI,
   real Electron cookie behavior, native package integrity and provenance,
-  installer existence, and a disposable unpacked-app Pear RPC launch. Its cross-platform
-  CI result is pending; it uses no signing secrets and publishes no assets.
+  installer existence, and a disposable unpacked-app Pear RPC launch. The
+  [PR-only matrix run](https://github.com/bigdestiny2/pearbrowser-desktop/actions/runs/36400696929)
+  passed for prior source head `7d68aac`; see [PR #84 checks](https://github.com/bigdestiny2/pearbrowser-desktop/pull/84/checks)
+  for the current head. It uses no signing secrets and publishes no assets.
 
 **Decision:** HOLD for distribution. Prove the named-host boundary with
 trusted packaged WebContents capture and real-app journeys, refresh current
@@ -127,6 +129,6 @@ The latest reviewed code before this follow-up was `658fd70f0afbee9bd1fe892f181d
 
 The corrected PR package matrix for that head passed all four targets: Apple Silicon macOS, Intel macOS, Windows x64, and Linux x64. A local Apple Silicon build from `451c608c66666876d86944ba5be47c70eaef5a78` also passed package integrity, ad-hoc code-signature verification, and a disposable-profile Pear RPC launch. Its package checker counted 8,395 physical runtime files and 129 reviewed source files. These runs do not prove clean installation, human browsing, trusted real-app cookie capture, or public-trust signing.
 
-A separate manual `desktop-native-release.yml` package-proof dispatch for exact source `658fd70f0afbee9bd1fe892f181ddbe4c1715a01` passed preflight and source tests but GitHub rejected its build jobs because this PR branch is not allowed to enter the protected `package-proof` environment. The protection remains intact. The draft PR workflow now collects checksummed artifacts from its four matrix runners and verifies the complete, exact-source bundle for review only; it uses no protected environment or signing material and cannot create a tag or public release. Its new CI result remains pending until this update is pushed and checked.
+A separate manual `desktop-native-release.yml` package-proof dispatch for exact source `658fd70f0afbee9bd1fe892f181ddbe4c1715a01` passed preflight and source tests but GitHub rejected its build jobs because this PR branch is not allowed to enter the protected `package-proof` environment. The protection remains intact. The draft PR workflow now collects checksummed artifacts from its four matrix runners and verifies the complete, exact-source bundle for review only; it uses no protected environment or signing material and cannot create a tag or public release. The [PR-only matrix run](https://github.com/bigdestiny2/pearbrowser-desktop/actions/runs/36400696929) passed for prior source head `7d68aac`. See [PR #84 checks](https://github.com/bigdestiny2/pearbrowser-desktop/pull/84/checks) for the current head; that older run does not qualify later source changes.
 
 `npm run check:release-evidence` remains **54 PASS / 17 DEFER / 1 FAIL**. The failing row is current P2P app cookie isolation, for which trusted packaged real-app capture is still missing. `v0.9.0` remains the published desktop release; `v0.9.1` is a draft candidate.

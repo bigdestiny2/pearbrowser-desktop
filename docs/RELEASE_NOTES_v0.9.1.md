@@ -72,6 +72,6 @@ The draft gives each Hyperdrive an exact `d-<full-key-z32>.localhost` host and p
   (`[rpc] connected on :9876`); runtime smoke passes against the running app.
 - Live capability round-trip against `relay-us.p2phiverelay.xyz` returns the
   signed capability document.
-- All v0.9.0 verification (wallet ceremony/isolate/EVM smokes, QVAC native
-  smoke, WDK cohort/network gates, release story smoke with 10 evidence rows)
-  applies unchanged to this code line.
+- The v0.9.0 wallet, QVAC, WDK, and release-story receipts remain historical
+  evidence. Their production and human-journey claims require current-head
+  requalification before v0.9.1 distribution.
