@@ -209,6 +209,11 @@ async function run () {
     assert.equal((await request(originA + clearnetPath)).status, 403)
     assert.equal((await request(originA + clearnetPath, { method: 'OPTIONS', headers: { origin: originA } })).status, 403)
     assert.equal((await request(originA + '/publisher.js', { headers: { referer: originA + clearnetPath } })).status, 404)
+    const spoofedMainHost = await request(mainOrigin + clearnetPath, {
+      headers: { host: `${new URL(urlA).hostname}:${proxy.port}` }
+    })
+    assert.equal(spoofedMainHost.status, 403)
+    assert.equal(spoofedMainHost.body, 'Invalid proxy host')
     assert.equal(clearnetCalls, 0)
     assert.equal((await request(mainOrigin + clearnetPath)).status, 200)
     assert.equal(clearnetCalls, 1)

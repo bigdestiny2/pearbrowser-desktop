@@ -339,3 +339,7 @@ DEFER / 1 FAIL** on current P2P app cookie isolation. Distribution stays
 **HOLD**. See the [current candidate report](PEARBROWSER_UPDATE_CANDIDATE_2026-09-26.md)
 and [PR checks](https://github.com/bigdestiny2/pearbrowser-desktop/pull/84/checks)
 for source-specific CI evidence.
+
+### 2026-09-28 main-listener Host follow-up
+
+The main listener now checks its own exact `127.0.0.1:<port>` Host, in addition to the drive listeners' exact keyed hosts. This prevents a drive-shaped hostname pointed at the Clearnet listener's port from receiving publisher content within that drive's cookie scope. Absolute-form request targets must also match the listener origin. Focused and Electron synthetic-drive diagnostics pass; the trusted packaged real-app capture gate remains open.

@@ -58,7 +58,7 @@ gateway records is a fleet/DNS operation outside this release.
 
 ## Browser origin correction
 
-The draft gives each Hyperdrive an exact `d-<full-key-z32>.localhost` host and port. The main proxy listener rejects drive pages, bound drive listeners reject Clearnet routes, and API tokens are bound to the drive origin. Local Electron diagnostics passed cookie, localStorage, IndexedDB, and token isolation with two synthetic drives. The PR package matrix now exercises those diagnostics on its native runners and uploads checksummed review artifacts; this is not real-app packaged capture or a public release gate pass.
+The draft gives each Hyperdrive an exact `d-<full-key-z32>.localhost` host and port. Every proxy listener requires its exact Host and request-target origin; the main listener also rejects drive pages, bound drive listeners reject Clearnet routes, and API tokens are bound to the drive origin. The main-listener Host check closes a Clearnet route that could otherwise serve content under a drive's cookie hostname on a different port. Local Electron diagnostics passed cookie, localStorage, IndexedDB, and token isolation with two synthetic drives. The PR package matrix exercises those diagnostics on its native runners and uploads checksummed review artifacts; this is not real-app packaged capture or a public release gate pass.
 
 ## Verification
 

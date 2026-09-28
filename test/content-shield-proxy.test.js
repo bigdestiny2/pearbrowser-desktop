@@ -38,7 +38,7 @@ function makeReq (method, path) {
   const req = new EventEmitter()
   req.method = method
   req.url = path
-  req.headers = {}
+  req.headers = { host: '127.0.0.1:9876' }
   req.socket = { remoteAddress: '127.0.0.1' }
   return req
 }

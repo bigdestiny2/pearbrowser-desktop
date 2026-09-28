@@ -3,6 +3,9 @@
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
+import driveOrigin from '../backend/drive-origin.cjs'
+
+const { driveHostnameForKey, isDriveOriginHostname } = driveOrigin
 
 export const FEATURE_FLAG = 'PEARBROWSER_PER_DRIVE_ORIGINS=1'
 export const PROOF_KEY = 'pear-origin-isolation-proof'
@@ -37,6 +40,8 @@ export function analyzeOriginIsolationSmokeEvidence (evidence, { browserCapture 
   add('origin-a', !!originA, 'app A origin must be a loopback http origin')
   add('origin-b', !!originB, 'app B origin must be a loopback http origin')
   add('origin-split', !!originA && !!originB && originA !== originB, 'app A and app B must report different loopback origins')
+  add('drive-host-a', originMatchesDrive(originA, driveA), 'app A origin host must encode its exact drive key')
+  add('drive-host-b', originMatchesDrive(originB, driveB), 'app B origin host must encode its exact drive key')
   // In the current single Electron session, ports do not partition cookies.
   // A future partitioned-session design needs a separately reviewed gate.
   add('cookie-host-split', !!originA && !!originB && new URL(originA).hostname !== new URL(originB).hostname, 'different ports on one loopback host share cookies; distinct cookie hosts are required')
@@ -120,12 +125,16 @@ function normalizeLoopbackOrigin (value) {
   try {
     const parsed = new URL(String(value || '').trim())
     if (parsed.protocol !== 'http:') return ''
-    if (parsed.hostname !== '127.0.0.1' && parsed.hostname !== 'localhost') return ''
+    if (parsed.hostname !== '127.0.0.1' && parsed.hostname !== 'localhost' && !isDriveOriginHostname(parsed.hostname)) return ''
     if (!parsed.port) return ''
     return parsed.origin
   } catch {
     return ''
   }
+}
+
+function originMatchesDrive (origin, key) {
+  return !!origin && !!key && new URL(origin).hostname === driveHostnameForKey(key)
 }
 
 function normalizeStatus (value) {

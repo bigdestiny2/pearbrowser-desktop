@@ -6,6 +6,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import driveOrigin from '../backend/drive-origin.cjs'
 
 import {
   analyzeOriginIsolationSmokeEvidence,
@@ -16,6 +17,7 @@ import {
 const checkerPath = fileURLToPath(new URL('../scripts/check-origin-isolation-smoke-evidence.mjs', import.meta.url))
 const generatorPath = fileURLToPath(new URL('../scripts/generate-origin-isolation-smoke-evidence.mjs', import.meta.url))
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
+const { driveHostnameForKey } = driveOrigin
 
 function validEvidence () {
   return {
@@ -27,12 +29,12 @@ function validEvidence () {
       {
         label: 'Peerit',
         url: `hyper://${'a'.repeat(64)}/`,
-        origin: 'http://127.0.0.1:61001'
+        origin: `http://${driveHostnameForKey('a'.repeat(64))}:61001`
       },
       {
         label: 'Poked',
         url: `hyper://${'b'.repeat(64)}/`,
-        origin: 'http://localhost:61002'
+        origin: `http://${driveHostnameForKey('b'.repeat(64))}:61002`
       }
     ],
     storage: {
@@ -103,6 +105,22 @@ test('operator artifact format remains blocked without trusted Electron provenan
   assert.ok(result.failures.some((failure) => failure.id === 'trusted-electron-capture'))
   assert.ok(result.checks.some((check) => check.id === 'browser-storage-capture-hash' && check.ok))
   assert.ok(result.checks.some((check) => check.id === 'app-b-indexeddb-isolated' && check.ok))
+})
+
+test('keyed app origins match the declared drives but still need trusted capture', () => {
+  const result = analyzeWithCapture(validEvidence())
+  for (const id of ['origin-a', 'origin-b', 'origin-split', 'drive-host-a', 'drive-host-b', 'cookie-host-split']) {
+    assert.ok(result.checks.some((check) => check.id === id && check.ok), id)
+  }
+  assert.ok(result.failures.some((failure) => failure.id === 'trusted-electron-capture'))
+})
+
+test('an origin keyed to another drive is refused even with distinct cookie hosts', () => {
+  const evidence = validEvidence()
+  evidence.apps[0].origin = `http://${driveHostnameForKey('c'.repeat(64))}:61001`
+  const result = analyzeWithCapture(evidence)
+  assert.ok(result.failures.some((failure) => failure.id === 'drive-host-a'))
+  assert.ok(result.checks.some((check) => check.id === 'cookie-host-split' && check.ok))
 })
 
 test('historical fixture cannot be relabeled into passing Electron proof', () => {

@@ -69,7 +69,7 @@ async function request (bridge, method, path, opts = {}) {
   return { handled, req, res }
 }
 
-function httpGet (url, { method = 'GET', headers = {} } = {}) {
+function httpGet (url, { method = 'GET', headers = {}, requestTarget } = {}) {
   return new Promise((resolve, reject) => {
     const target = new URL(url)
     // Connect to the actual bound socket while preserving the browser Host.
@@ -77,7 +77,7 @@ function httpGet (url, { method = 'GET', headers = {} } = {}) {
     const req = nodeHttp.request({
       hostname: '127.0.0.1',
       port: target.port,
-      path: target.pathname + target.search,
+      path: requestTarget || target.pathname + target.search,
       method,
       headers: { host: target.host, ...headers }
     }, (res) => {
@@ -218,7 +218,6 @@ test('HyperProxy per-drive listeners serve only their bound drive key', async (t
   assert.equal(proxy._driveOrigins.size, 0)
 })
 
-
 test('per-drive listeners reject hostile hosts, cross-drive CORS and token reuse', async (t) => {
   const proxy = new HyperProxy(async () => null, () => {}, null, {
     perDriveOrigins: true
@@ -358,6 +357,39 @@ test('bound drive listeners never serve clearnet publisher content', async (t) =
     headers: { referer: driveOrigin + clearnetPath }
   })
   assert.equal(fallback.statusCode, 404)
+  assert.equal(clearnetCalls, 0)
+
+  // A drive-shaped Host on the main port would inherit that drive's cookies:
+  // browser cookies follow the hostname, even when the listener port changes.
+  for (const hostileHost of [
+    `${new URL(driveUrl).hostname}:${proxy.port}`,
+    `localhost:${proxy.port}`,
+    `evil.localhost:${proxy.port}`
+  ]) {
+    const denied = await httpGet(mainOrigin + clearnetPath, {
+      headers: { host: hostileHost }
+    })
+    assert.equal(denied.statusCode, 403)
+    assert.equal(denied.body, 'Invalid proxy host')
+    assert.equal(denied.headers['access-control-allow-origin'], undefined)
+  }
+  const absoluteTarget = makeRes()
+  await proxy._handle(makeReq('GET', driveOrigin + clearnetPath, {
+    headers: { host: new URL(mainOrigin).host }
+  }), absoluteTarget)
+  assert.equal(absoluteTarget.statusCode, 403)
+  assert.equal(absoluteTarget.body, 'Invalid request target')
+  const absoluteWireTarget = await httpGet(mainOrigin + clearnetPath, {
+    requestTarget: driveOrigin + clearnetPath
+  })
+  assert.equal(absoluteWireTarget.statusCode, 403)
+  assert.equal(absoluteWireTarget.body, 'Invalid request target')
+  const malformedTarget = makeRes()
+  await proxy._handle(makeReq('GET', 'http://[invalid', {
+    headers: { host: new URL(mainOrigin).host }
+  }), malformedTarget)
+  assert.equal(malformedTarget.statusCode, 400)
+  assert.equal(malformedTarget.body, 'Invalid request target')
   assert.equal(clearnetCalls, 0)
 
   const mainClearnet = await httpGet(mainOrigin + clearnetPath)

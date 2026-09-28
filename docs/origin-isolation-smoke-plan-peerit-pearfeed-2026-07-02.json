@@ -23,9 +23,9 @@
   ],
   "releaseGate": {
     "status": "BLOCKED",
-    "reason": "Current per-drive loopback ports share one cookie host. Fixture evidence and hand-authored capture JSON cannot establish browser provenance, so the current release checker must remain blocked.",
+    "reason": "The draft maps each drive to a distinct keyed .localhost cookie host. Fixture evidence and hand-authored capture JSON cannot establish packaged real-app browser provenance, so the release checker remains blocked.",
     "requires": [
-      "A reviewed, scalable per-drive cookie-isolating host design with distinct cookie hosts.",
+      "Review the draft keyed .localhost host mapping and exact Host checks in the packaged build, including restart and listener lifecycle behavior.",
       "A real Electron WebContents capture JSON showing both app URLs, WebContents IDs, origins, localStorage, cookies, and IndexedDB in one browser profile, with its matching SHA-256 digest.",
       "A trusted Electron runtime capture/review integration must bind measured WebContents output to the tested build and profile; a human reviewer must confirm its provenance.",
       "After that integration is implemented and independently reviewed, a passing origin-isolation evidence check must include cookie-host, storage, strict-CSP, lifecycle, and bridge proof."
@@ -59,7 +59,7 @@
     "notes": [
       "Runs a local HyperProxy/HttpBridge harness with per-drive origins enabled.",
       "Uses the plan apps as fixture drive identities and exercises proxy, CSP injection, listener release, and bridge routes.",
-      "Fixture storage buckets are simulated. The release checker must block this output until a separate real Electron WebContents capture and distinct cookie hosts exist."
+      "Fixture storage buckets are simulated. The release checker must block this output until trusted packaged-app Electron capture and independent review exist."
     ]
   },
   "manualSteps": [
@@ -71,11 +71,11 @@
     {
       "id": "origin-split",
       "action": "In each tab, record `location.origin` from DevTools.",
-      "evidence": "Record both exact origins and hostnames. Different ports on 127.0.0.1 do not isolate cookies; this release gate requires distinct cookie hosts."
+      "evidence": "Record both exact origins and keyed .localhost hostnames. Confirm they differ for the two real apps in one Electron profile."
     },
     {
       "id": "cookie-host-design",
-      "action": "Review the per-drive loopback host design and verify App A and App B use distinct cookie hostnames in one Electron profile. Do not substitute separate ports on 127.0.0.1.",
+      "action": "Review the draft per-drive keyed .localhost host design and verify App A and App B use distinct cookie hostnames in one Electron profile.",
       "evidence": "Design review and Electron navigation capture show a scalable mapping from each drive key to its own cookie host, including restart and listener lifecycle behavior."
     },
     {

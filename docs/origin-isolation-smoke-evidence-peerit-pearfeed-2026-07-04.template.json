@@ -82,7 +82,7 @@
       {
         "id": "origin-split",
         "action": "In each tab, record `location.origin` from DevTools.",
-        "evidence": "The two origins are different loopback origins, normally different `127.0.0.1:<port>` values."
+        "evidence": "Record two distinct drive-keyed `d-<full-key-z32>.localhost:<port>` origins from the exact packaged desktop candidate; different ports on 127.0.0.1 do not isolate cookies."
       },
       {
         "id": "storage-write-a",

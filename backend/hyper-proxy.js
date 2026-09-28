@@ -826,14 +826,14 @@ class HyperProxy {
   async _handle (req, res, context = {}) {
     const serverPort = context.port || this._port
     const documentOrigin = originForPort(serverPort, context.boundDriveKeyHex)
-    // A bound listener accepts only its own generated Host. It still binds
-    // to 127.0.0.1; arbitrary Host names must not expose page tokens.
+    // Every listener accepts only its generated Host. Cookies are scoped to
+    // host, not port: accepting a drive hostname on the main Clearnet port
+    // would serve unrelated content with that drive's cookies attached.
     const hostHeader = requestHeader(req.headers, 'host')
-    if (context.boundDriveKeyHex &&
-        (!hostHeader.value || hostHeader.value.toLowerCase() !== new URL(documentOrigin).host)) {
+    if (!hostHeader.value || hostHeader.value.toLowerCase() !== new URL(documentOrigin).host) {
       res.statusCode = 403
       res.setHeader('Content-Type', 'text/plain')
-      return res.end('Invalid drive host')
+      return res.end(context.boundDriveKeyHex ? 'Invalid drive host' : 'Invalid proxy host')
     }
 
     // Cross-drive CORS fails before HTML or the HTTP bridge can respond.
@@ -845,8 +845,15 @@ class HyperProxy {
       return res.end('Invalid origin')
     }
 
-    const url = new URL(req.url, documentOrigin)
-    if (context.boundDriveKeyHex && normalizeOrigin(url.href) !== documentOrigin) {
+    let url
+    try {
+      url = new URL(req.url, documentOrigin)
+    } catch {
+      res.statusCode = 400
+      res.setHeader('Content-Type', 'text/plain')
+      return res.end('Invalid request target')
+    }
+    if (normalizeOrigin(url.href) !== documentOrigin) {
       res.statusCode = 403
       return res.end('Invalid request target')
     }
