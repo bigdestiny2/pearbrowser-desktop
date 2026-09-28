@@ -32,7 +32,8 @@ test('Electron builder uses the pinned runtime, hybrid ASAR, fuses, and current 
   assert.equal(typeof config.afterSign, 'function')
   assert.ok(config.asarUnpack.includes('node_modules/**/*'))
   assert.equal(config.electronFuses.runAsNode, false)
-  assert.equal(config.electronFuses.enableCookieEncryption, true)
+  const packageProof = (process.env.RELEASE_MODE || 'package-proof') === 'package-proof'
+  assert.equal(config.electronFuses.enableCookieEncryption, !(packageProof && process.platform === 'darwin'))
   assert.equal(config.electronFuses.enableNodeOptionsEnvironmentVariable, false)
   assert.equal(config.electronFuses.enableNodeCliInspectArguments, false)
   assert.equal(config.electronFuses.enableEmbeddedAsarIntegrityValidation, true)
@@ -40,10 +41,36 @@ test('Electron builder uses the pinned runtime, hybrid ASAR, fuses, and current 
   assert.deepEqual(config.mac.target, ['dir'])
   assert.deepEqual(config.win.target, ['nsis'])
   assert.deepEqual(config.linux.target, ['AppImage'])
-  assert.equal(config.mac.identity, '-')
-  assert.equal(config.forceCodeSigning, false)
+  assert.equal(config.mac.identity, packageProof ? '-' : (process.env.PEARBROWSER_MACOS_SIGNING_IDENTITY || undefined))
+  assert.equal(config.forceCodeSigning, !packageProof)
   assert.match(config.extraResources[0].to, /app\.asar\.unpacked\/package\.json/)
   assert.doesNotMatch(configSource, /azureSignOptions|Install-Module|MakeAppx|CMake/)
+})
+
+test('Electron builder keeps cookie encryption for public-trust and non-Mac package-proof targets', () => {
+  const run = (mode, targetFlag = '') => spawnSync(process.execPath, ['-e', `
+    if (${JSON.stringify(targetFlag)}) process.argv.push(${JSON.stringify(targetFlag)})
+    console.log(require('./electron-builder.config.cjs').electronFuses.enableCookieEncryption)
+  `], {
+    cwd: root,
+    env: {
+      ...process.env,
+      RELEASE_MODE: mode,
+      WIN_CSC_LINK: 'test-certificate-fixture',
+      WIN_CSC_KEY_PASSWORD: 'test-password-fixture'
+    },
+    encoding: 'utf8'
+  })
+
+  const publicTrust = run('public-trust')
+  assert.equal(publicTrust.status, 0, publicTrust.stderr)
+  assert.equal(publicTrust.stdout.trim(), 'true')
+
+  for (const targetFlag of ['--win', '--windows', '--linux', '-w', '-l']) {
+    const packageProof = run('package-proof', targetFlag)
+    assert.equal(packageProof.status, 0, packageProof.stderr)
+    assert.equal(packageProof.stdout.trim(), 'true')
+  }
 })
 
 test('Electron builder rejects prerelease tags and mutable CI source refs', () => {

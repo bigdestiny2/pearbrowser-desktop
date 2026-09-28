@@ -67,7 +67,7 @@ test('Electron package gate verifies reviewed ASAR and physical Pear runtime byt
     assert.ok(report.runtimeIntegrity.files > 3)
     assert.ok(report.verifiedSourceFiles > 100)
     assert.equal(report.fuses.runAsNode, fuseDisabled)
-    assert.equal(report.fuses.cookieEncryption, fuseEnabled)
+    assert.equal(report.fuses.cookieEncryption, process.platform === 'darwin' ? fuseDisabled : fuseEnabled)
     assert.equal(report.fuses.nodeOptionsEnvironmentVariable, fuseDisabled)
     assert.equal(report.fuses.nodeCliInspectArguments, fuseDisabled)
 
@@ -81,6 +81,14 @@ test('Electron package gate verifies reviewed ASAR and physical Pear runtime byt
     assert.notEqual(weakFuses.status, 0)
     assert.match(weakFuses.stdout, /RunAsNode fuse must be disabled/)
 
+    const wrongCookieExecutable = join(fixture, 'wrong-cookie-electron')
+    writeFuseFixture(wrongCookieExecutable, {
+      cookieEncryption: process.platform === 'darwin' ? fuseEnabled : fuseDisabled
+    })
+    const wrongCookieFuses = runGate(resourcesDir, sourceRef, wrongCookieExecutable)
+    assert.notEqual(wrongCookieFuses.status, 0)
+    assert.match(wrongCookieFuses.stdout, /cookie-encryption fuse must be/)
+
     writeFileSync(join(resourcesDir, 'app.asar.unpacked', 'workers', 'main.js'), 'tampered worker\n')
     const tampered = runGate(resourcesDir, sourceRef, executable)
     assert.notEqual(tampered.status, 0)
@@ -91,7 +99,24 @@ test('Electron package gate verifies reviewed ASAR and physical Pear runtime byt
   }
 })
 
-async function createPackageFixture (fixture) {
+test('Electron package gate requires cookie encryption for public-trust on every platform', async () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'pear-electron-public-trust-gate-'))
+  try {
+    const { resourcesDir, executable } = await createPackageFixture(fixture, 'public-trust')
+    const pass = runGate(resourcesDir, sourceRef, executable, 'public-trust')
+    assert.equal(pass.status, 0, pass.stderr || pass.stdout)
+    assert.equal(JSON.parse(pass.stdout).fuses.cookieEncryption, fuseEnabled)
+
+    writeFuseFixture(executable, { cookieEncryption: fuseDisabled })
+    const weak = runGate(resourcesDir, sourceRef, executable, 'public-trust')
+    assert.notEqual(weak.status, 0)
+    assert.match(weak.stdout, /cookie-encryption fuse must be enabled for/)
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
+})
+
+async function createPackageFixture (fixture, releaseMode = 'package-proof') {
   const archiveInput = join(fixture, 'archive-input')
   const resourcesDir = join(fixture, 'resources')
   const unpacked = join(resourcesDir, 'app.asar.unpacked')
@@ -107,7 +132,7 @@ async function createPackageFixture (fixture) {
     pearRelease: {
       tag: releaseTag,
       sourceRef,
-      mode: 'package-proof',
+      mode: releaseMode,
       pear: '3.4.0'
     },
     pearRuntimeIntegrity: {
@@ -144,7 +169,7 @@ async function createPackageFixture (fixture) {
     provenance: {
       tag: releaseTag,
       sourceRef,
-      mode: 'package-proof',
+      mode: releaseMode,
       pear: '3.4.0'
     },
     platform: process.platform,
@@ -153,7 +178,9 @@ async function createPackageFixture (fixture) {
   const envelope = createRuntimeIntegrityEnvelope({ payload, privateKey })
   writeFileSync(join(unpacked, MANIFEST_NAME), JSON.stringify(envelope))
   const executable = join(fixture, 'hardened-electron')
-  writeFuseFixture(executable)
+  writeFuseFixture(executable, {
+    cookieEncryption: releaseMode === 'package-proof' && process.platform === 'darwin' ? fuseDisabled : fuseEnabled
+  })
   return { resourcesDir, executable }
 }
 
@@ -174,13 +201,13 @@ function writeFuseFixture (path, overrides = {}) {
   ]))
 }
 
-function runGate (resourcesDir, expectedSourceRef = sourceRef, executable = '') {
+function runGate (resourcesDir, expectedSourceRef = sourceRef, executable = '', releaseMode = 'package-proof') {
   const command = [
     checker,
     '--resources-dir', resourcesDir,
     '--tag', releaseTag,
     '--source-ref', expectedSourceRef,
-    '--release-mode', 'package-proof',
+    '--release-mode', releaseMode,
     '--platform', process.platform,
     '--arch', process.arch,
     '--json'

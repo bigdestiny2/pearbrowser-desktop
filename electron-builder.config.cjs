@@ -19,6 +19,10 @@ if (process.env.CI && sourceRef === 'local-working-tree') {
 }
 
 const publicTrust = releaseMode === 'public-trust'
+// macOS ad-hoc package-proof builds cannot unlock Chromium's cookie store on
+// fresh machines. Keep encryption on for public-trust and all non-Mac targets.
+const adHocMacPackageProof = !publicTrust && process.platform === 'darwin' &&
+  !process.argv.some((arg) => /^(?:--(?:win|windows|linux)|-[wl])(?:=|$)/.test(arg))
 const artifactName = '${productName}-${version}-${os}-${arch}.${ext}' // eslint-disable-line no-template-curly-in-string
 if (publicTrust && process.platform === 'win32') {
   const certificate = process.env.WIN_CSC_LINK || process.env.CSC_LINK || ''
@@ -52,7 +56,7 @@ module.exports = {
   ],
   electronFuses: {
     runAsNode: false,
-    enableCookieEncryption: true,
+    enableCookieEncryption: !adHocMacPackageProof,
     enableNodeOptionsEnvironmentVariable: false,
     enableNodeCliInspectArguments: false,
     enableEmbeddedAsarIntegrityValidation: true,

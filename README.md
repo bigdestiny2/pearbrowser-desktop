@@ -269,7 +269,9 @@ The packaged host verifies a build-unique Ed25519-signed SHA-256 inventory of
 the complete physical Pear runtime before loading any unpacked worker or
 dependency. The verification key and release identity live in integrity-sealed
 `app.asar`; hardened Electron fuses also disable RunAsNode, `NODE_OPTIONS`, and
-CLI inspector entry points and enable encrypted cookies.
+CLI inspector entry points. Cookie encryption remains enabled for public-trust
+and Windows/Linux package-proof builds; ad-hoc macOS package-proof builds leave
+that fuse disabled so fresh-profile first launch can complete.
 
 The two release modes have deliberately different authority:
 

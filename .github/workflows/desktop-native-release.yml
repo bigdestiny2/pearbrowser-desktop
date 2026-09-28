@@ -152,7 +152,10 @@ jobs:
             throw new Error('signed physical runtime integrity hooks must be configured')
           }
           if (config.electronFuses?.runAsNode !== false) throw new Error('RunAsNode fuse must be disabled')
-          if (config.electronFuses?.enableCookieEncryption !== true) throw new Error('cookie-encryption fuse must be enabled')
+          const macPackageProof = process.platform === 'darwin' && process.env.RELEASE_MODE === 'package-proof'
+          if (config.electronFuses?.enableCookieEncryption !== !macPackageProof) {
+            throw new Error(`cookie-encryption fuse must be ${macPackageProof ? 'disabled' : 'enabled'} for ${process.platform} ${process.env.RELEASE_MODE}`)
+          }
           if (config.electronFuses?.enableNodeOptionsEnvironmentVariable !== false) throw new Error('NODE_OPTIONS fuse must be disabled')
           if (config.electronFuses?.enableNodeCliInspectArguments !== false) throw new Error('Node CLI inspect fuse must be disabled')
           if (config.electronFuses?.enableEmbeddedAsarIntegrityValidation !== true) throw new Error('embedded ASAR integrity fuse must be enabled')
@@ -477,7 +480,8 @@ jobs:
           }
           trap cleanup EXIT
 
-          PEARBROWSER_QVAC_OLLAMA=0 "${command[@]}" --user-data-dir="$profile" >"$log" 2>&1 &
+          inspector=(--remote-debugging-address=127.0.0.1 --remote-debugging-port=19222)
+          PEARBROWSER_QVAC_OLLAMA=0 "${command[@]}" --user-data-dir="$profile" "${inspector[@]}" >"$log" 2>&1 &
           app_pid=$!
           node scripts/runtime-rpc-smoke.mjs \
             --port-base 9876 \
@@ -485,6 +489,7 @@ jobs:
             --timeout 60000 \
             --min-hive-relays 1 \
             --json
+          node scripts/electron-first-window-smoke.mjs --port 19222 --timeout 90000
           cleanup
           trap - EXIT
 
@@ -497,13 +502,15 @@ jobs:
           $profile = Join-Path $env:RUNNER_TEMP 'pearbrowser-profile-x64'
           $env:PEARBROWSER_QVAC_OLLAMA = '0'
           $appProcess = Start-Process -FilePath $env:ELECTRON_EXECUTABLE `
-            -ArgumentList "--user-data-dir=$profile" `
+            -ArgumentList @("--user-data-dir=$profile", '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=19222') `
             -RedirectStandardOutput $stdout `
             -RedirectStandardError $stderr `
             -PassThru
           try {
             & node scripts/runtime-rpc-smoke.mjs --port-base 9876 --port-count 5 --timeout 60000 --min-hive-relays 1 --json
             if ($LASTEXITCODE -ne 0) { throw "runtime RPC smoke exited with status $LASTEXITCODE" }
+            & node scripts/electron-first-window-smoke.mjs --port 19222 --timeout 90000
+            if ($LASTEXITCODE -ne 0) { throw "first-window smoke exited with status $LASTEXITCODE" }
           } finally {
             & taskkill.exe /PID $appProcess.Id /T /F 2>$null | Out-Null
             if (Test-Path $stdout) { Get-Content $stdout -Tail 200 }
