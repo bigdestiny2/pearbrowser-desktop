@@ -12,11 +12,11 @@ try {
   try {
     const cdp = createCdp(socket)
     await cdp.send('Page.enable')
-    const initial = await waitForShell(cdp, 'first window')
+    const initial = await waitForShellOrDiagnose(cdp, 'first window')
     const loaded = cdp.waitFor('Page.loadEventFired', 15000)
     await cdp.send('Page.reload', { ignoreCache: true })
     await loaded
-    const reloaded = await waitForShell(cdp, 'reloaded window')
+    const reloaded = await waitForShellOrDiagnose(cdp, 'reloaded window')
     console.log(JSON.stringify({ ok: true, port, initial, reloaded }))
   } finally {
     socket.close()
@@ -151,4 +151,75 @@ async function waitForShell (cdp, label) {
     await sleep(500)
   }
   throw new Error(`${label} did not mount the browser shell: ${JSON.stringify(last)}`)
+}
+
+// Do not print the raw splash detail or WebSocket URL. The renderer session
+// token appears in RPC query strings, and CI logs must never contain it.
+async function waitForShellOrDiagnose (cdp, label) {
+  try {
+    return await waitForShell(cdp, label)
+  } catch (error) {
+    if (!error.message.startsWith(`${label} failed:`)) throw error
+    const diagnostics = await diagnoseFailedWindow(cdp)
+    throw new Error(`${error.message}; diagnostics=${JSON.stringify(diagnostics)}`)
+  }
+}
+
+async function diagnoseFailedWindow (cdp) {
+  let splash = { kind: 'unavailable' }
+  try {
+    const result = await cdp.send('Runtime.evaluate', {
+      expression: `(() => {
+        const detail = document.querySelector('.splash-detail')?.textContent || ''
+        const failures = [...detail.matchAll(/:(9876|9877|9878|9879|9880) (probe timeout|probe error|probe closed|timeout|ws error|ws closed)/g)]
+          .map((match) => ({ port: Number(match[1]), reason: match[2] }))
+        return {
+          kind: detail.includes('Could not reach backend on any port') ? 'backend-unreachable' : 'other',
+          failures,
+          sessionTokenPresent: /^[0-9a-f]{64}$/i.test(String(globalThis.pearbrowserRuntime?.sessionToken || ''))
+        }
+      })()`,
+      returnByValue: true
+    })
+    if (!result.exceptionDetails) splash = result.result?.value || splash
+  } catch {}
+
+  // Repeat only a loopback diagnostic handshake after the failed boot. This
+  // distinguishes a cold Chromium network-context delay from a persistent
+  // renderer-to-backend failure without exposing the token to the Node side.
+  let rendererProbe = { status: 'unavailable' }
+  try {
+    const result = await cdp.send('Runtime.evaluate', {
+      expression: `new Promise((resolve) => {
+        const token = globalThis.pearbrowserRuntime?.sessionToken
+        if (typeof token !== 'string' || !/^[0-9a-f]{64}$/i.test(token)) {
+          resolve({ status: 'missing-session-token' })
+          return
+        }
+        const started = performance.now()
+        let socket
+        let settled = false
+        const timer = setTimeout(() => finish('timeout'), 7000)
+        function finish (status) {
+          if (settled) return
+          settled = true
+          clearTimeout(timer)
+          try { socket?.close() } catch {}
+          resolve({ status, elapsedMs: Math.round(performance.now() - started) })
+        }
+        try {
+          socket = new WebSocket('ws://127.0.0.1:9876/status-smoke?session=' + encodeURIComponent(token))
+          socket.addEventListener('open', () => finish('open'), { once: true })
+          socket.addEventListener('error', () => finish('error'), { once: true })
+          socket.addEventListener('close', () => finish('closed'), { once: true })
+        } catch {
+          finish('constructor-error')
+        }
+      })`,
+      awaitPromise: true,
+      returnByValue: true
+    })
+    if (!result.exceptionDetails) rendererProbe = result.result?.value || rendererProbe
+  } catch {}
+  return { splash, rendererProbe }
 }
