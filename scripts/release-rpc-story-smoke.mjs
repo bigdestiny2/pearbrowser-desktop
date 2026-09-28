@@ -30,10 +30,12 @@ import { readFile } from 'node:fs/promises'
 import http from 'node:http'
 import net from 'node:net'
 import { randomBytes } from 'node:crypto'
+import { pathToFileURL } from 'node:url'
 
 const require = createRequire(import.meta.url)
 const C = require('../backend/constants.js')
 const { catalogAppSearchText } = require('../backend/catalog-safety.cjs')
+const { driveHostnameForKey } = require('../backend/drive-origin.cjs')
 
 const DEFAULT_HOST = '127.0.0.1'
 const DEFAULT_PORT_BASE = 9876
@@ -403,18 +405,24 @@ function sleep (ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-async function fetchLocalUrl (localUrl, timeout) {
+async function fetchLocalUrl (localUrl, timeout, expectedKey) {
   const u = new URL(localUrl)
-  if (!['127.0.0.1', 'localhost'].includes(u.hostname)) {
+  const key = String(expectedKey || '').toLowerCase()
+  const route = u.pathname.match(/^\/(?:hyper|app)\/([0-9a-f]{64})(?:\/|$)/i)
+  const allowedHost = ['127.0.0.1', 'localhost', isHyperDriveKey(key) ? driveHostnameForKey(key) : '']
+  if (u.protocol !== 'http:' || !u.port || u.username || u.password || u.hash ||
+      !allowedHost.includes(u.hostname) || !route || route[1].toLowerCase() !== key) {
     throw new Error(`refusing to fetch non-local proxy URL: ${localUrl}`)
   }
 
   return await new Promise((resolve, reject) => {
     let settled = false
     const req = http.get({
-      hostname: u.hostname,
+      // Reach only the loopback listener; preserve the validated browser Host.
+      hostname: '127.0.0.1',
       port: u.port,
       path: `${u.pathname}${u.search || ''}`,
+      headers: { host: u.host },
       timeout
     }, (res) => {
       const chunks = []
@@ -712,7 +720,7 @@ async function runSiteStory (ws, args) {
     if (!row || row.published !== true) throw new Error('site story published site was not listed as published')
 
     const nav = await requestRpc(ws, C.CMD_NAVIGATE, { url: publish.url + '/' }, args.requestTimeout)
-    const fetched = await fetchLocalUrl(nav.localUrl, args.fetchTimeout)
+    const fetched = await fetchLocalUrl(nav.localUrl, args.fetchTimeout, new URL(publish.url).hostname)
     if (!Number.isInteger(fetched.statusCode) || fetched.statusCode < 200 || fetched.statusCode >= 300) {
       throw new Error(`site story fetch returned HTTP ${fetched.statusCode}`)
     }
@@ -778,7 +786,7 @@ async function runBrowseStory (ws, args, homepage) {
   const nav = homepage?.nav
   const fetched = homepage?.fetched
   assertHomepage(nav, fetched, args.homepageUrl)
-  const reloaded = await fetchLocalUrl(nav.localUrl, args.fetchTimeout)
+  const reloaded = await fetchLocalUrl(nav.localUrl, args.fetchTimeout, new URL(args.homepageUrl).hostname)
   assertHomepage(nav, reloaded, args.homepageUrl)
 
   const info = await requestRpc(ws, C.CMD_GET_DRIVE_INFO, { url: args.homepageUrl }, args.requestTimeout)
@@ -867,7 +875,7 @@ async function runSafeCatalogueAppOpenStory (ws, args, catalogResult) {
 
   const url = hyperUrlForApp(app)
   const nav = await requestRpc(ws, C.CMD_NAVIGATE, { url }, args.requestTimeout)
-  const fetched = await fetchLocalUrl(nav.localUrl, args.fetchTimeout)
+  const fetched = await fetchLocalUrl(nav.localUrl, args.fetchTimeout, app.driveKey)
   assertFetchedPage(`${app.name || app.id} catalogue row`, fetched)
   const info = await requestRpc(ws, C.CMD_GET_DRIVE_INFO, { url }, args.requestTimeout)
   if (info?.keyHex !== app.driveKey.toLowerCase()) throw new Error('latest app story drive-info key mismatch')
@@ -1190,7 +1198,7 @@ async function run (args) {
   const ws = conn.ws
   try {
     const nav = await requestRpc(ws, C.CMD_NAVIGATE, { url: args.homepageUrl }, args.requestTimeout)
-    const fetched = await fetchLocalUrl(nav.localUrl, args.fetchTimeout)
+    const fetched = await fetchLocalUrl(nav.localUrl, args.fetchTimeout, new URL(args.homepageUrl).hostname)
     assertHomepage(nav, fetched, args.homepageUrl)
 
     const loaded = []
@@ -1278,7 +1286,11 @@ async function main () {
   }
 }
 
-main().catch((err) => {
-  console.error(err.stack || err.message)
-  process.exit(1)
-})
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((err) => {
+    console.error(err.stack || err.message)
+    process.exit(1)
+  })
+}
+
+export { fetchLocalUrl }
